@@ -1,0 +1,64 @@
+{
+  "episode_index": 0,
+  "dataset_id": "TEAM/bimanual-pick-place-v1",
+  "recorded_at": "2026-08-25T14:32:10+09:00",
+  "operator": "op_a",
+  "task": {
+    "name": "pick_place_stage1",
+    "instruction": "빨간 블록을 오른팔로 집어 파란 트레이에 놓으세요",
+    "stage": 1
+  },
+  "arms": {
+    "mode": "single",
+    "used": ["right"],
+    "teleop_device": "leader_arm",
+    "calibration_files": {
+      "right": "calib/right_20260825.json#sha1:0000000000000000000000000000000000000000"
+    }
+  },
+  "object": {
+    "name": "red_cube_40mm",
+    "size_mm": [40, 40, 40],
+    "mass_g": 22,
+    "surface": "matte",
+    "start_zone": "grid_B2",
+    "start_pose": [0.28, -0.05, 0.02, 0.0],
+    "goal_zone": "tray_left"
+  },
+  "scene": {
+    "lighting": "indoor_fluorescent",
+    "background": "white_table",
+    "distractors": 0,
+    "location": "lab_bench_1"
+  },
+  "robot": {
+    "type": "bimanual_so101_like",
+    "fps": 30,
+    "cameras": [
+      {
+        "key": "observation.images.top",
+        "kind": "rgb",
+        "resolution": "640x480",
+        "fps": 30,
+        "usb_bus": "bus1"
+      },
+      {
+        "key": "observation.images.depth",
+        "kind": "depth",
+        "resolution": "640x480",
+        "fps": 30,
+        "usb_bus": "bus2"
+      }
+    ],
+    "firmware_or_commit": "control@0000000"
+  },
+  "outcome": {
+    "success": true,
+    "verified_by": "ground_truth_measure",
+    "duration_s": 11.4,
+    "anomalies": [],
+    "notes": "규약 검증용 예시. 실제 수집 데이터가 아님"
+  },
+  "split": "train",
+  "include": true
+}

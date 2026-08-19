@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/bimanual-robot/episode_metadata.schema.json",
+  "title": "양팔 텔레옵 에피소드 수집 조건 메타데이터",
+  "description": "LeRobot v3.0 표준 메타에 없는 수집 시점 조건을 남기는 사이드카 스키마. episode_index로 데이터셋과 조인한다. 사후 복원이 불가능한 항목만 필수로 둔다.",
+  "type": "object",
+  "required": [
+    "episode_index",
+    "dataset_id",
+    "recorded_at",
+    "operator",
+    "task",
+    "arms",
+    "object",
+    "scene",
+    "robot",
+    "outcome"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "episode_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "LeRobot 데이터셋의 episode_index와 동일한 값"
+    },
+    "dataset_id": {
+      "type": "string",
+      "description": "HF repo id (예: <org>/bimanual-pick-place-v1)"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "수집 시각 (ISO 8601, 타임존 포함). 시각대별 조명 변화 추적에 쓰인다"
+    },
+    "operator": {
+      "type": "string",
+      "description": "텔레옵 조작자 식별자. 조작자별 시연 스타일 차이가 성능에 나타나므로 필수"
+    },
+    "task": {
+      "type": "object",
+      "required": ["name", "instruction"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "태스크 식별자 (예: pick_place_stage1)" },
+        "instruction": { "type": "string", "description": "자연어 인스트럭션. tasks.parquet와 일치시킬 것" },
+        "stage": { "type": "integer", "minimum": 1, "description": "난이도 단계" }
+      }
+    },
+    "arms": {
+      "type": "object",
+      "required": ["mode", "used"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["simultaneous", "sequential", "single"],
+          "description": "simultaneous=두 팔 동시 조작, sequential=한 팔씩 순차 녹화, single=한 팔만 사용. 협응 태스크 학습 가능 여부가 여기서 갈린다"
+        },
+        "used": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["left", "right"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "teleop_device": {
+          "type": "string",
+          "description": "리더암 / VR 컨트롤러 / 키보드 조그 등 조작 수단"
+        },
+        "calibration_files": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "팔별 캘리브레이션 파일 경로와 해시. 캘리브가 바뀌면 관절값의 의미가 바뀌므로 반드시 기록"
+        }
+      }
+    },
+    "object": {
+      "type": "object",
+      "required": ["name", "start_zone"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "size_mm": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "가로/세로/높이"
+        },
+        "mass_g": { "type": "number", "minimum": 0 },
+        "surface": {
+          "type": "string",
+          "enum": ["matte", "glossy", "transparent", "deformable"],
+          "description": "transparent는 depth 카메라가 못 읽으므로 실패 분석 시 1순위 용의자"
+        },
+        "start_zone": {
+          "type": "string",
+          "description": "시작 배치 구역 식별자 (격자 셀 이름 등). 조건별 성공률 집계의 축"
+        },
+        "start_pose": {
+          "type": "array",
+          "items": { "type": "number" },
+          "description": "측정한 경우의 실좌표 [x, y, z, yaw]. 단위 m/rad"
+        },
+        "goal_zone": { "type": "string" }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "required": ["lighting"],
+      "additionalProperties": false,
+      "properties": {
+        "lighting": {
+          "type": "string",
+          "enum": ["daylight", "indoor_fluorescent", "indoor_dim", "mixed"],
+          "description": "조명 조건. 비전 성능 저하의 주요 축"
+        },
+        "background": { "type": "string", "description": "배경·테이블 표면" },
+        "distractors": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "장면 내 방해 물체 개수"
+        },
+        "location": { "type": "string", "description": "수집 장소" }
+      }
+    },
+    "robot": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "description": "로봇 모델명" },
+        "fps": { "type": "integer", "minimum": 1 },
+        "cameras": {
+          "type": "array",
+          "description": "카메라 구성. 해상도·fps 고정값을 남긴다 — 같은 USB 버스에 여러 대를 물리면 프레임 정지가 발생하므로 버스 정보도 함께",
+          "items": {
+            "type": "object",
+            "required": ["key", "resolution", "fps"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "description": "video_key (예: observation.images.wrist_left)" },
+              "kind": { "type": "string", "enum": ["rgb", "depth", "rgbd"] },
+              "resolution": { "type": "string", "description": "예: 640x480" },
+              "fps": { "type": "integer", "minimum": 1 },
+              "usb_bus": { "type": "string" }
+            }
+          }
+        },
+        "firmware_or_commit": {
+          "type": "string",
+          "description": "제어 스택의 커밋 해시. 제어 코드가 바뀌면 같은 명령이 다른 움직임이 된다"
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["success", "verified_by"],
+      "additionalProperties": false,
+      "properties": {
+        "success": { "type": "boolean", "description": "시연이 태스크를 완수했는지" },
+        "verified_by": {
+          "type": "string",
+          "enum": ["ground_truth_measure", "human_observation", "log_string"],
+          "description": "판정 근거. log_string은 신뢰하지 않는다 — 집계 시 제외 대상"
+        },
+        "duration_s": { "type": "number", "minimum": 0 },
+        "anomalies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "servo_stall",
+              "frame_drop",
+              "depth_hole",
+              "teleop_desync",
+              "collision",
+              "object_slip",
+              "operator_error",
+              "other"
+            ]
+          },
+          "description": "관측된 이상. 포함/제외 판정의 입력"
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "split": {
+      "type": "string",
+      "enum": ["train", "holdout_eval"],
+      "description": "수집 전에 정한 홀드아웃 축에 따라 수집 시점에 부여한다. 사후 부여 금지"
+    },
+    "include": {
+      "type": "boolean",
+      "description": "학습 포함 여부. 기준은 schema/에피소드_포함제외_기준.md"
+    },
+    "exclude_reason": {
+      "type": "string",
+      "description": "include=false일 때 필수. 기준 문서의 항목 번호를 적는다"
+    }
+  }
+}

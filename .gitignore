@@ -1,0 +1,49 @@
+# --- 데이터셋 (HuggingFace Hub private에 보관, 여기엔 인덱스만) ---
+data/raw/
+data/episodes/
+data/processed/
+data/eval/
+*.parquet
+*.mp4
+*.avi
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# --- 모델 가중치 ---
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+outputs/
+checkpoints/
+wandb/
+
+# --- ROS / 빌드 ---
+*.bag
+*.mcap
+build/
+install/
+log/
+logs/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+*.egg-info/
+
+# --- 자격 증명 ---
+.env
+*.secret.json
+credentials/
+
+# --- 편집기·OS ---
+.vscode/
+.idea/
+.DS_Store
+.omc/
