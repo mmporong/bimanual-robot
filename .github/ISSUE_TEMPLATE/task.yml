@@ -1,0 +1,65 @@
+name: 프로젝트 작업
+description: HOLD THE FLOW의 구현·실험·리서치 작업을 등록합니다.
+title: "[G?][area] "
+body:
+  - type: dropdown
+    id: gate
+    attributes:
+      label: 게이트
+      options:
+        - G0 파지
+        - G1 기울이기
+        - G2 붓기
+        - G3 통합
+        - G4 복구
+        - 공통 기반
+        - 후속 후보
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 영역
+      options:
+        - SLAM / Nav2
+        - Depth / 로컬 정렬
+        - IK / ACT
+        - 그리퍼 / 센서
+        - 데이터 / 평가
+        - 감독 에이전트
+        - 문서 / 리서치
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: 목표와 범위
+      description: 끝났을 때 달라지는 점과 이번 작업에서 하지 않을 일을 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 통과 조건
+      description: 눈으로 확인하거나 측정할 수 있는 완료 기준을 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 남길 증거
+      description: 코드, 로그, 표, 사진, 영상의 저장 위치를 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 의존성과 막힘
+      description: 필요한 부품, 장비, 선행 Issue를 적습니다.
+  - type: checkboxes
+    id: truth
+    attributes:
+      label: 상태 확인
+      options:
+        - label: 아직 실행하지 않은 계획을 완료 결과로 쓰지 않았습니다.
+          required: true
