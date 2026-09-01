@@ -1,0 +1,255 @@
+{
+  "schema_version": "0.1",
+  "generator": "design/cad/generate_hold_flow_cad.py",
+  "source_spec": "design/mechanical/hold_flow_mechanical_v0_2.yaml",
+  "units": {
+    "length": "mm",
+    "volume": "cm3",
+    "mass": "g"
+  },
+  "printer": "Creality K1 Max 300×300×300 mm",
+  "material_assumption": "PETG 1.27 g/cm3, 100% solid CAD volume",
+  "estimated_total_petg_mass_g": 2243.6,
+  "all_breps_valid": true,
+  "all_parts_fit_k1_max": true,
+  "parts": [
+    {
+      "name": "chassis_bottom",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        250.015,
+        250.017,
+        48.01
+      ],
+      "volume_cm3_each": 256.506,
+      "estimated_petg_mass_g_each": 325.8,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/chassis_bottom.step",
+      "stl": "design/cad/exports/stl/chassis_bottom.stl",
+      "note": "바퀴측 모터 지지벽이 통합된 하판",
+      "measurement_gate": null
+    },
+    {
+      "name": "chassis_middle",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        250.017,
+        250.017,
+        6.028
+      ],
+      "volume_cm3_each": 208.984,
+      "estimated_petg_mass_g_each": 265.4,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/chassis_middle.step",
+      "stl": "design/cad/exports/stl/chassis_middle.stl",
+      "note": "배터리·제어기 층의 경량 중판",
+      "measurement_gate": null
+    },
+    {
+      "name": "chassis_top",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        250.017,
+        250.017,
+        8.017
+      ],
+      "volume_cm3_each": 485.79,
+      "estimated_petg_mass_g_each": 617.0,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/chassis_top.step",
+      "stl": "design/cad/exports/stl/chassis_top.stl",
+      "note": "양팔·마스트·라이다가 체결되는 8 mm 상판",
+      "measurement_gate": null
+    },
+    {
+      "name": "arm_adapter",
+      "quantity": 2,
+      "valid_brep": true,
+      "bounds_mm": [
+        130.011,
+        90.011,
+        6.011
+      ],
+      "volume_cm3_each": 60.866,
+      "estimated_petg_mass_g_each": 77.3,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/arm_adapter.step",
+      "stl": "design/cad/exports/stl/arm_adapter.stl",
+      "note": "SO-101 베이스와 상판 사이의 교체형 보강 어댑터",
+      "measurement_gate": "SO-101 실물 베이스 체결공 중심거리 측정 후 장공을 원형공으로 확정"
+    },
+    {
+      "name": "camera_backing",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        75.01,
+        75.01,
+        8.01
+      ],
+      "volume_cm3_each": 44.155,
+      "estimated_petg_mass_g_each": 56.1,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/camera_backing.step",
+      "stl": "design/cad/exports/stl/camera_backing.stl",
+      "note": "마스트 하단 보강판",
+      "measurement_gate": null
+    },
+    {
+      "name": "camera_mast_segment",
+      "quantity": 3,
+      "valid_brep": true,
+      "bounds_mm": [
+        45.003,
+        35.003,
+        267.003
+      ],
+      "volume_cm3_each": 117.86,
+      "estimated_petg_mass_g_each": 149.7,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/camera_mast_segment.step",
+      "stl": "design/cad/exports/stl/camera_mast_segment.stl",
+      "note": "45×35×3 mm 중공 마스트",
+      "measurement_gate": null
+    },
+    {
+      "name": "camera_mast_coupler",
+      "quantity": 2,
+      "valid_brep": true,
+      "bounds_mm": [
+        38.202,
+        28.202,
+        60.002
+      ],
+      "volume_cm3_each": 21.703,
+      "estimated_petg_mass_g_each": 27.6,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/camera_mast_coupler.step",
+      "stl": "design/cad/exports/stl/camera_mast_coupler.stl",
+      "note": "마스트 60 mm 내부 이음관",
+      "measurement_gate": null
+    },
+    {
+      "name": "astra_cradle",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        65.008,
+        182.008,
+        30.01
+      ],
+      "volume_cm3_each": 67.182,
+      "estimated_petg_mass_g_each": 85.3,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/astra_cradle.step",
+      "stl": "design/cad/exports/stl/astra_cradle.stl",
+      "note": "Astra S 170×55×45 mm 설계 포락선용 거치대",
+      "measurement_gate": "보유 Astra의 하단 M6 위치와 실제 외곽 치수 측정 후 측면 유격 확정"
+    },
+    {
+      "name": "lidar_riser",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        65.008,
+        50.008,
+        29.011
+      ],
+      "volume_cm3_each": 78.114,
+      "estimated_petg_mass_g_each": 99.2,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/lidar_riser.step",
+      "stl": "design/cad/exports/stl/lidar_riser.stl",
+      "note": "LDS-03 중심 x=90 mm, 스캔면 z≈165 mm용 29 mm 저상 받침대",
+      "measurement_gate": "LDS-03 실물 광학 스캔면 높이와 하부 체결공 측정 후 상단 장공 확정"
+    },
+    {
+      "name": "drive_side_carrier",
+      "quantity": 2,
+      "valid_brep": true,
+      "bounds_mm": [
+        82.008,
+        58.008,
+        8.011
+      ],
+      "volume_cm3_each": 34.671,
+      "estimated_petg_mass_g_each": 44.0,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/drive_side_carrier.step",
+      "stl": "design/cad/exports/stl/drive_side_carrier.stl",
+      "note": "625급 외부 베어링과 C018 장공을 가진 측면 캐리어",
+      "measurement_gate": "JD-AMR 휠 허브·C018 혼·625 베어링 축 조합 실측 후 중심공 공차 확정"
+    },
+    {
+      "name": "rear_caster_adapter",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        70.008,
+        52.008,
+        8.021
+      ],
+      "volume_cm3_each": 21.559,
+      "estimated_petg_mass_g_each": 27.4,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/rear_caster_adapter.step",
+      "stl": "design/cad/exports/stl/rear_caster_adapter.stl",
+      "note": "JD-AMR 볼 캐스터용 높이 조절 어댑터",
+      "measurement_gate": "캐스터 볼 지름·플랜지 홀 패턴·접촉 높이 실측 후 최종 홀 확정"
+    },
+    {
+      "name": "rear_caster_shim_1mm",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        70.008,
+        52.008,
+        1.021
+      ],
+      "volume_cm3_each": 2.695,
+      "estimated_petg_mass_g_each": 3.4,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/rear_caster_shim_1mm.step",
+      "stl": "design/cad/exports/stl/rear_caster_shim_1mm.stl",
+      "note": "캐스터 높이 1 mm 보정판",
+      "measurement_gate": null
+    },
+    {
+      "name": "rear_caster_shim_2mm",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        70.008,
+        52.008,
+        2.021
+      ],
+      "volume_cm3_each": 5.39,
+      "estimated_petg_mass_g_each": 6.8,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/rear_caster_shim_2mm.step",
+      "stl": "design/cad/exports/stl/rear_caster_shim_2mm.stl",
+      "note": "캐스터 높이 2 mm 보정판",
+      "measurement_gate": null
+    },
+    {
+      "name": "rear_caster_shim_3mm",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        70.008,
+        52.008,
+        3.021
+      ],
+      "volume_cm3_each": 8.085,
+      "estimated_petg_mass_g_each": 10.3,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/rear_caster_shim_3mm.step",
+      "stl": "design/cad/exports/stl/rear_caster_shim_3mm.stl",
+      "note": "캐스터 높이 3 mm 보정판",
+      "measurement_gate": null
+    }
+  ]
+}

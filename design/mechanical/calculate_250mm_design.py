@@ -29,12 +29,12 @@ class Component:
 
 COMMON_COMPONENTS = (
     Component("plates_backings_spacers", 1.150, (0.000, 0.000, 0.070)),
-    Component("camera_mast", 0.500, (-0.080, 0.000, 0.450)),
+    Component("camera_mast", 0.5043, (-0.080, 0.000, 0.450)),
     Component("astra_and_bracket", 0.400, (-0.080, 0.000, 0.800)),
     Component("drive_wheels_mounts_caster", 0.450, (0.060, 0.000, 0.045)),
     Component("battery", 0.550, (-0.045, 0.000, 0.040)),
     Component("electronics", 0.350, (0.000, 0.000, 0.080)),
-    Component("lidar", 0.042, (0.100, 0.000, 0.136)),
+    Component("lidar", 0.042, (0.090, 0.000, 0.165)),
     Component("wiring_fasteners", 0.250, (0.000, 0.000, 0.080)),
 )
 
@@ -132,7 +132,7 @@ def rectangular_tube_deflection_mm(
     length_m: float = 0.681,
     outer_width_m: float = 0.045,
     outer_height_m: float = 0.035,
-    wall_m: float = 0.004,
+    wall_m: float = 0.003,
     elastic_modulus_pa: float = 2.0e9,
     lateral_force_n: float = 1.0,
 ) -> float:
@@ -257,7 +257,7 @@ def main() -> None:
         "structure": {
             "top_plate_8mm_deflection_at_1_6Nm_mm": round(plate_deflection_mm(0.008), 3),
             "top_plus_backing_14mm_ideal_deflection_mm": round(plate_deflection_mm(0.014), 3),
-            "mast_45x35x4_1N_ideal_deflection_mm": round(rectangular_tube_deflection_mm(), 3),
+            "mast_45x35x3_1N_ideal_deflection_mm": round(rectangular_tube_deflection_mm(), 3),
             "gripper_force_each_jaw_for_140g_n": round(gripper_force_each_jaw_n(), 3),
         },
         "arm_gravity_torque_max_nm_at_140g": {

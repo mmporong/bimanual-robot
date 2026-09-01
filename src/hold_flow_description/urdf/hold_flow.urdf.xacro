@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot name="hold_flow" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find hold_flow_description)/urdf/materials.xacro"/>
+  <xacro:include filename="$(find hold_flow_description)/urdf/mobile_base.xacro"/>
+  <xacro:include filename="$(find hold_flow_description)/urdf/sensors.xacro"/>
+  <xacro:include filename="$(find hold_flow_description)/urdf/so101_parallel_arm.generated.xacro"/>
+
+  <xacro:hold_flow_mobile_base/>
+  <xacro:hold_flow_sensors/>
+
+  <!-- 팔 베이스는 모두 250 mm 상판 경계 안에 있다. 좌우 이름은 MoveIt 그룹과 일치시킨다. -->
+  <xacro:so101_parallel_arm prefix="left_" parent="base_link" xyz="-0.065 0.070 0.0861" rpy="0 0 0"/>
+  <xacro:so101_parallel_arm prefix="right_" parent="base_link" xyz="-0.065 -0.070 0.0861" rpy="0 0 0"/>
+</robot>
