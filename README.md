@@ -25,6 +25,7 @@
 - 250 mm 차체 계산: [docs/20260901_250mm_차체_계산검증_v0.2.md](docs/20260901_250mm_차체_계산검증_v0.2.md)
 - 기구설계 명세: [docs/20260901_기구설계_제작명세_v0.2.md](docs/20260901_기구설계_제작명세_v0.2.md)
 - 기구 검증표: [docs/20260901_기구설계_검증체크리스트_v0.2.md](docs/20260901_기구설계_검증체크리스트_v0.2.md)
+- JD-AMR 구동계·K1 Max·평행그리퍼 반영: [docs/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md](docs/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md)
 - CAD·URDF 파라미터: [design/mechanical/hold_flow_mechanical_v0_2.yaml](design/mechanical/hold_flow_mechanical_v0_2.yaml)
 - 논문 적용 설계: [research/R31_1안_이동형_양팔_붓기_논문적용.md](research/R31_1안_이동형_양팔_붓기_논문적용.md)
 - 팀 작업 방식: [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md)
@@ -96,9 +97,10 @@ bimanual-robot/
 - [x] ROS 2·C++·Python·Nav2·MoveIt 2·ACT·Isaac Sim 구현 경계 문서화
 - [x] 250 mm 정사각 차체·SO-101×2·단일 Astra S 기둥의 기구 명세와 검증표 작성
 - [x] 5.26 kg 보수 질량·3점 접지·C018 12 V 주행·출력 구조 계산
+- [x] JD-AMR 65 mm 바퀴·볼 캐스터 재사용, K1 Max 한 장 판, Robonine 평행그리퍼 P0 기준 확정
 - [x] 팀 공용 구현 아키텍처 HTML 사이트 제작·ChatGPT Sites 배포
-- [ ] M0 부품 실측: SO-101 체결홀·Astra S·평행그리퍼·구동부 외피와 질량
-- [ ] M1 출력 공차 시험편과 4분할 정사각 판 이음 검증
+- [ ] M0 부품 실측: SO-101 체결홀·Astra S·평행그리퍼·JD-AMR 바퀴/캐스터·구동부 외피와 질량
+- [ ] M1 K1 Max 출력 공차·6 mm 로드 시험편과 250 mm 한 장 판 평탄도 검증
 - [ ] M2~M4 차체 건식조립·정적하중·3점 지지 안정성 검증
 - [ ] Isaac Sim 6.0 실행 장비 Compatibility Checker와 ROS 2 Bridge smoke test
 - [ ] 물병 총중량·파지·미끄럼 POC
