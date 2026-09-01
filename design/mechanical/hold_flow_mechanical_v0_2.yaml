@@ -1,6 +1,6 @@
-schema_version: "0.1"
-design_id: hold_flow_mechanical_v0_1
-status: pre_cad_spec
+schema_version: "0.2"
+design_id: hold_flow_mechanical_v0_2
+status: calculated_pre_cad_spec
 units:
   length: mm
   mass: kg
@@ -13,7 +13,7 @@ frames:
     convention: "+X forward, +Y left, +Z up; origin at square chassis center on floor"
   base_footprint:
     parent: chassis_frame
-    xyz: [60.0, 0.0, 0.0]
+    xyz: [90.0, 0.0, 0.0]
     rpy: [0.0, 0.0, 0.0]
   base_link:
     parent: base_footprint
@@ -25,7 +25,10 @@ chassis:
   corner_radius: 12.0
   material_primary: PETG
   material_alternative: ASA
-  target_total_mass_range: [4.0, 5.0]
+  target_robot_mass_range: [4.8, 5.3]
+  calculated_robot_mass: 5.018
+  calculated_operating_mass_with_120g_bottle_and_cup: 5.258
+  printed_structure_mass_range: [1.55, 1.70]
   plates:
     bottom:
       z_bottom: 15.0
@@ -85,9 +88,9 @@ camera:
   model: Orbbec_Astra_S
   design_envelope: [170.0, 55.0, 45.0]
   design_mass_with_bracket_max: 0.40
-  optical_center_xyz: [-80.0, 0.0, 480.0]
-  nominal_pitch_down: 47.0
-  pitch_adjustment_range: [40.0, 55.0]
+  optical_center_xyz: [-80.0, 0.0, 800.0]
+  nominal_pitch_down: 40.0
+  pitch_adjustment_range: [35.0, 45.0]
   depth_range: [400.0, 2000.0]
   depth_fov_hv: [58.4, 45.5]
   interface: USB_2_0
@@ -100,7 +103,10 @@ camera_mast:
   wall: 4.0
   base_flange_xyz: [75.0, 75.0, 8.0]
   keyed_overlap: 60.0
-  segment_count_for_220_bed: 2
+  effective_length_from_top_plate: 681.0
+  calculated_wall_mass: 0.50
+  segment_count_for_220_bed: 4
+  segment_nominal_length_with_60mm_overlap: 215.25
   m4_cross_bolts: 4
   cable_channel_min: 12.0
   lateral_deflection_at_1N_max: 1.0
@@ -110,18 +116,41 @@ camera_mast:
 navigation:
   drive_type: differential_two_wheel_rear_ball_caster
   wheel_radius_target: 33.0
-  wheel_axis_x: 60.0
+  wheel_axis_x: 90.0
   wheel_contact_y: [-135.0, 135.0]
   rear_caster_contact_xyz: [-105.0, 0.0, 0.0]
   support_polygon_xy:
-    - [60.0, 135.0]
-    - [60.0, -135.0]
+    - [90.0, 135.0]
+    - [90.0, -135.0]
     - [-105.0, 0.0]
   motor_minimum_each:
     continuous_torque: 0.30
     peak_torque: 0.60
-    output_rpm_range: [60.0, 100.0]
+    output_rpm_range: [35.0, 60.0]
     wheel_encoder_counts_per_rev_min: 300
+  selected_drive_candidate:
+    model: Feetech_STS3215_C018
+    quantity: 2
+    operating_mode: closed_loop_velocity_mode_1
+    nominal_voltage: 12.0
+    rated_torque_each: 0.981
+    stall_torque_each: 2.942
+    no_load_speed_rpm: 45.0
+    no_load_linear_speed_with_33mm_radius: 0.1555
+    calculated_torque_each_with_safety_factor_2: 0.234
+    rated_torque_usage_percent: 23.9
+    max_nav_linear_speed: 0.12
+    max_nav_angular_speed: 0.60
+    max_nav_acceleration: 0.20
+    max_nav_deceleration: 0.25
+    external_radial_load_bearing: required
+    dedicated_ttl_bus: required
+    usage_scope: indoor_smooth_floor_low_speed_poc
+  nav2_footprint:
+    frame: base_footprint
+    chassis_circumscribed_radius: 0.249
+    loaded_transport_radius_min: 0.270
+    padding: 0.015
   lidar_candidate:
     model: ROBOTIS_LDS_03
     center_xyz: [100.0, 0.0, 136.0]
@@ -136,11 +165,12 @@ power:
   battery_candidate:
     chemistry: 3S_pack_TBD
     capacity_Ah_min: 5.0
-    bms_continuous_current_A_min: 30.0
+    bms_continuous_current_A_min: 40.0
+    bms_peak_current_A_min: 60.0
     center_xyz: [-45.0, 0.0, 40.0]
   dc_dc_5v_current_A_min: 8.0
   fuse_candidates_A:
-    master: 30.0
+    master: 35.0
     left_arm: 10.0
     right_arm: 10.0
     drive: 10.0
@@ -149,22 +179,50 @@ power:
     keeps_alive: [sbc_logging]
 
 workspace:
-  nominal_pour_center_xyz: [230.0, 0.0, 150.0]
-  nominal_camera_range: 452.9
-  nominal_camera_pitch_down: 46.8
-  held_object_horizontal_reach_max: 200.0
-  initial_payload_max: 0.200
-  gated_payload_next: 0.250
-  payload_0_300_status: requires_current_temperature_and_stability_pass
+  task_mode: carry_bottle_and_empty_cup_stop_pour_place_on_low_pad
+  dining_table_required: false
+  cup_gripper_xyz: [301.7, 47.3, 444.6]
+  bottle_gripper_pour_xyz: [271.7, 114.9, 539.5]
+  bottle_cap_pour_xyz: [301.8, 47.2, 509.1]
+  bottle_tilt_from_upright: 112.3
+  cup_rim_estimated_xyz: [301.7, 47.3, 484.6]
+  bottle_cap_clearance_above_cup_rim: 24.5
+  gripper_center_separation_pour: 120.0
+  nominal_camera_range_to_cup: 523.7
+  nominal_camera_range_to_bottle: 452.5
+  nominal_camera_pitch_range_to_task: [36.5, 43.0]
+  fixed_horizontal_reach_limit_status: replaced_by_pose_specific_gravity_torque_gate
+  selected_pose_gripper_offset_from_arm_base_max: 280.0
+  initial_payload_max_each: 0.120
+  gated_payload_next_each: 0.140
+  payload_0_200_status: requires_current_temperature_and_stability_pass
+  payload_0_300_status: rejected_for_current_pour_geometry
+  transport_joint_degrees:
+    left: [-34.0, -78.9, 3.1, 73.2, -3.4]
+    right: [38.7, -79.8, 0.1, 74.0, -1.4]
+  pour_joint_degrees:
+    left_bottle: [-10.3, -30.0, -22.7, 22.9, -113.1]
+    right_cup: [-26.3, -29.0, -7.0, 28.3, 1.6]
 
 safety:
   arm_link_min_distance: 25.0
   gripper_to_other_arm_min_distance: 40.0
   com_limits_nominal_pour:
     x_min: -70.0
-    x_max: 35.0
+    x_max: 50.0
     abs_y_max: 60.0
     support_polygon_edge_margin_min: 20.0
+  calculated_nominal_pour:
+    total_mass: 5.258
+    com_xyz: [33.1, 10.4, 243.1]
+    contact_load_percent_left_right_caster: [39.3, 31.6, 29.2]
+    static_front_margin: 56.9
+    dynamic_front_margin_5deg_0_3m_s2: 28.2
+  calculated_transport:
+    com_xyz: [10.4, 0.5, 231.4]
+    contact_load_percent_left_right_caster: [29.8, 29.4, 40.8]
+    static_front_margin: 79.6
+    dynamic_front_margin_5deg_0_3m_s2: 52.2
   servo_warning_temperature_C: 55.0
   servo_stop_temperature_C: 60.0
   base_motion_during_manipulation: prohibited
@@ -174,6 +232,7 @@ urdf:
   right_prefix: right_
   wheel_separation_target: 270.0
   wheel_radius_target: 33.0
+  base_footprint_offset_from_chassis_center_x: 90.0
   gripper_secondary_jaw: mimic_joint
   camera_optical_frame: camera_depth_optical_frame
   inertia_status: replace_with_final_cad_mass_properties
@@ -181,6 +240,8 @@ urdf:
 sources:
   so101: https://github.com/TheRobotStudio/SO-ARM100
   feetech_sts3215_c018: https://www.feetechrc.com/525603.html
+  feetech_sts3215_c018_specification: https://www.feetechrc.com/Data/feetechrc/upload/file/20240507/6385067068652648096680943.pdf
+  feetech_official_wheel_mode_sdk: https://github.com/ftservo/FTServo_Arduino/blob/main/src/SMS_STS.h
   orbbec_astra_series: https://www.orbbec.com/products/structured-light-camera/astra-series/
   parallel_gripper_reference: https://github.com/roboninecom/SO-ARM100-101-Parallel-Gripper
   turtlebot3: https://emanual.robotis.com/docs/en/platform/turtlebot3/features/

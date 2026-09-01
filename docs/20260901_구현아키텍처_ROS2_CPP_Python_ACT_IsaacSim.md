@@ -4,7 +4,7 @@
 >
 > 범위: 이동형 양팔 붓기 1안만 다룬다. 실물 검증 전 항목은 계획이며, 달성 결과처럼 쓰지 않는다.
 
-기구 치수, 좌표, 체결, 질량 예산과 URDF 시작값은 [기구설계·제작 명세 v0.1](20260901_기구설계_제작명세_v0.1.md)과 [`hold_flow_mechanical_v0_1.yaml`](../design/mechanical/hold_flow_mechanical_v0_1.yaml)을 단일 원본으로 사용한다.
+기구 치수, 좌표, 체결, 질량 예산과 URDF 시작값은 [기구설계·제작 명세 v0.2](20260901_기구설계_제작명세_v0.2.md)과 [`hold_flow_mechanical_v0_2.yaml`](../design/mechanical/hold_flow_mechanical_v0_2.yaml)을 단일 원본으로 사용한다.
 
 ![HOLD THE FLOW 시스템 아키텍처](20260901_HOLD_THE_FLOW_구현아키텍처.svg)
 
@@ -12,7 +12,7 @@
 
 **ROS 2 Jazzy가 이동·인지·조작을 Action으로 연결하고, C++이 시간 제약이 있는 궤적 실행과 안전을 맡으며, Python이 RGB-D 인지·실험 자동화·LeRobot ACT 학습을 맡는다. 시뮬레이터는 Isaac Sim 6.0과 ROS 2 Bridge를 사용한다.**
 
-Nav2와 ACT를 한 모델로 합치지 않는다. 로봇은 작업대 근처까지 Nav2로 이동하고, 마지막 정렬은 RGB-D와 AprilTag로 보정한다. 양팔 조작은 먼저 IK와 상태기계로 통과시킨 뒤 같은 조작 구간에만 ACT를 적용한다. 모든 IK·ACT·텔레옵 명령은 하나의 명령 중재기와 안전 게이트를 지나야 한다.
+Nav2와 ACT를 한 모델로 합치지 않는다. 로봇은 병과 빈 컵을 운반 자세로 들고 지정 위치까지 Nav2로 이동하고, 마지막 정렬은 RGB-D와 AprilTag로 보정한다. 양팔 조작은 먼저 IK와 상태기계로 통과시킨 뒤 같은 조작 구간에만 ACT를 적용한다. 모든 IK·ACT·텔레옵 명령은 하나의 명령 중재기와 안전 게이트를 지나야 한다.
 
 ## 2. 개발 기준선
 
@@ -141,7 +141,7 @@ src/
 
 ### SLAM이 맡는 것
 
-SLAM은 로봇이 처음 보는 공간에서 2D 점유 지도를 만들면서 자신의 위치를 추정하는 과정이다. 이 프로젝트에서는 작업대까지 가는 **거친 전역 좌표**를 만든다. 팔이 잡을 수 있는 수 mm 정렬을 SLAM에 요구하지 않는다.
+SLAM은 로봇이 처음 보는 공간에서 2D 점유 지도를 만들면서 자신의 위치를 추정하는 과정이다. 이 프로젝트에서는 지정 붓기 위치까지 가는 **거친 전역 좌표**를 만든다. 팔이 요구하는 수 mm 정렬을 SLAM에 맡기지 않는다.
 
 ### 선택한 구성
 
@@ -152,16 +152,18 @@ IMU ───────┘
 
 저장 지도 + 2D LiDAR ─> AMCL(localization) ─> map → odom
 wheel odom ────────────────────────────────> odom → base_link
-Nav2 ─> 작업대 staging pose
+Nav2 ─> 지정 붓기 위치 staging pose
 ```
 
 1. 지도 작성 때만 `slam_toolbox` mapping 모드를 실행한다.
 2. 데모 반복 실행에서는 `map_server + AMCL + Nav2`를 사용한다.
 3. SLAM과 AMCL을 동시에 띄워 `map→odom`을 두 노드가 발행하게 하지 않는다.
 4. 목표는 토픽이 아니라 `NavigateToPose` Action으로 전달해 성공·취소·실패와 복구 횟수를 기록한다.
-5. 작업대 앞 staging pose에 도착하면 base를 정지하고 로컬 정렬 단계로 넘긴다.
+5. staging pose에 도착하면 base를 정지하고 낮은 지정 패드의 표식에 대한 로컬 정렬 단계로 넘긴다.
 
-베이스 속도 명령은 `Nav2 controller → velocity_smoother → collision_monitor → base driver` 한 경로로만 흐르게 한다. 모바일 베이스의 실제 driver와 토픽 이름은 장비 확인 뒤 확정하되, mission node가 바퀴 PWM이나 개별 속도를 직접 만들지 않는다. 조작 상태에 들어갈 때 Nav2 goal을 종료하고 zero velocity 확인 뒤 팔 명령 lease를 연다.
+베이스 속도 명령은 `Nav2 controller → velocity_smoother → collision_monitor → C018 base driver` 한 경로로만 흐르게 한다. 1차 후보는 STS3215-C018 2대의 속도 폐루프 모터 모드다. C++ `ros2_control` hardware interface가 `/cmd_vel`에서 변환된 좌우 속도, 위치 래핑을 해제한 wheel odom, 전류·온도·부하를 관리한다. mission node가 개별 속도를 직접 만들지 않는다. 최대 선속도는 0.12 m/s, 가속 0.20 m/s², 감속 0.25 m/s²다. 조작 상태에 들어갈 때 Nav2 goal을 종료하고 zero velocity 확인 뒤 팔 명령 lease를 연다.
+
+차체 판 footprint와 병·컵을 든 footprint는 다르다. `base_footprint`가 바퀴축에 있으므로 후방 차체 모서리까지의 정적 회전반경은 약 0.249 m다. 계산 운반 자세는 병·컵 외피와 padding을 포함해 최소 0.27 m다. Nav2 costmap은 적재 상태 footprint를 사용한다.
 
 ### SLAM/Nav2 초기 통과 기준
 
@@ -251,7 +253,7 @@ GRASP_BOTH → PRETILT_SLOW → POUR → RETURN_UPRIGHT → PLACE_BOTH
 학습하지 않는 것:
 
 - SLAM과 Nav2
-- 작업대 전역 탐색
+- 지정 패드의 전역 탐색
 - 하드웨어 비상 정지
 - 실패의 최종 성공 판정
 - LLM의 자유 형식 모터 명령
@@ -333,7 +335,7 @@ Isaac Sim의 목적은 화려한 장면이 아니라 **실물과 같은 ROS 2 �
 SO-101 URDF + 모바일 베이스 URDF
   → Isaac Sim URDF Importer
   → USD robot asset
-  → 작업대·병·컵·도킹 패드 USD scene
+  → 지정 위치 표식·병·컵·낮은 도킹 패드 USD scene
   → RTX camera / depth / 2D LiDAR / joint state
   → ROS 2 Bridge
   → 실제와 동일한 Nav2·MoveIt·mission_manager
@@ -477,7 +479,7 @@ GitHub 권한 상태와 실제 역할은 다르다. 아래는 현재 회의에�
 
 - Isaac Sim 6.0을 실행할 16GB 이상 GPU 장비와 설치 경로
 - SO-101 URDF를 Isaac Sim으로 가져왔을 때 관절 축·관성·collider 정합성
-- 모바일 베이스의 실제 ROS 2 driver와 odom·LiDAR topic 이름
+- C018 base driver의 20분 연속주행 온도·wheel odom 래핑·실제 topic 이름
 - LeRobot bridge에서 유지 가능한 양팔 achieved fps
 - C++ trajectory adapter와 Python hardware bridge 사이의 end-to-end 지연
 - 실제 병·컵에 맞는 FSR 임계값과 로드셀 안정 시간
