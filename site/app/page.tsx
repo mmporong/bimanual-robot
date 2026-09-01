@@ -170,8 +170,8 @@ export default function Home() {
         <h2>개인 기록이 아니라, 팀이 이어서 실행할 수 있는 기록.</h2>
         <p>
           설계·코드·실험 규격·회의 결정·검증 증거를 하나의 저장소에서
-          관리한다. 모든 변경은 Issue와 작업 브랜치, Pull Request, 팀원
-          리뷰를 거쳐 main에 반영한다.
+          관리한다. 모든 변경은 Issue와 작업 브랜치, Pull Request, 로컬
+          검증 기록을 거쳐 main에 반영한다. 팀원 승인은 필수가 아니다.
         </p>
       </section>
 
@@ -302,7 +302,7 @@ export default function Home() {
           ))}
         </div>
         <div className="workflow-rail" aria-label="팀 작업 순서">
-          {['ISSUE', 'BRANCH', 'PULL REQUEST', 'TEAM REVIEW', 'MAIN'].map((item, index) => (
+          {['ISSUE', 'BRANCH', 'PULL REQUEST', 'LOCAL CHECK', 'MAIN'].map((item, index) => (
             <span key={item}><b>{String(index + 1).padStart(2, '0')}</b>{item}</span>
           ))}
         </div>

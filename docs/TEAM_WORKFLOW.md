@@ -2,7 +2,7 @@
 
 대상 저장소: `mmporong/bimanual-robot`
 
-권장 운영: 작업자 1명, 리뷰어 1명, 강사·멘토는 게이트 검토
+권장 운영: 작업자 1명, 필요할 때 리뷰어 1명, 강사·멘토는 실물 게이트 검토
 
 2026-09-01 기준 협업 권한은 다음과 같다.
 
@@ -30,7 +30,7 @@
 6. `Add ... to this repository`를 누른다.
 7. 팀원이 이메일이나 GitHub 알림에서 초대를 수락한다.
 
-이 저장소는 GitHub 개인 계정이 소유하지만 운영 목적은 팀 공용이다. Collaborator는 코드를 읽고 쓸 수 있으므로 `main` 직접 푸시를 막고 Pull Request와 팀원 리뷰를 거쳐 합친다.
+이 저장소는 GitHub 개인 계정이 소유하지만 운영 목적은 팀 공용이다. Collaborator는 코드를 읽고 쓸 수 있으므로 `main` 직접 푸시는 막고 Pull Request와 로컬 검증을 거쳐 합친다. 팀원 승인은 필수 조건으로 두지 않는다.
 
 GitHub CLI로 초대하려면 저장소 소유자가 다음 명령을 실행한다.
 
@@ -129,7 +129,7 @@ Backlog → Ready → In progress → Review → Blocked → Done
 - `In progress`: 실제로 손대는 작업. 한 사람당 하나를 원칙으로 한다.
 - `Review`: 코드·문서·실물 증거를 다른 사람이 확인하는 작업
 - `Blocked`: 부품, 장비, 선행 Issue 때문에 멈춘 작업
-- `Done`: 증거와 리뷰가 모두 남은 작업
+- `Done`: 요청한 증거와 로컬 검증 결과가 모두 남은 작업
 
 마일스톤은 `S0 Isaac Sim`, `G0 파지`, `G1 기울이기`, `G2 붓기`, `A0 ACT`, `G3 통합`, `G4 복구`, `S5 Sim/Real Gap`으로 나눈다. 현재 보드에는 이동형 양팔 붓기 1안의 작업만 등록한다.
 
@@ -144,15 +144,14 @@ GitHub Projects는 Issue와 Pull Request 상태를 연결하고 Board·Table·Ro
 1. 작업 시작 전에 Issue를 자신에게 할당한다.
 2. Issue 번호를 브랜치와 Pull Request에 연결한다.
 3. 변경 내용, 검증 결과, 실물 증거 경로를 Pull Request 본문에 적는다.
-4. 작성자가 아닌 팀원 한 명이 리뷰한다.
-5. 대화가 해결되고 로컬 검증이 통과하면 `main`에 합친다.
+4. 공용 인터페이스·실기체 안전·데이터 규격 변경은 필요할 때 팀원 리뷰를 요청한다.
+5. 팀원 승인 여부와 관계없이 대화가 해결되고 로컬 검증이 통과하면 작업자가 `main`에 합칠 수 있다.
 6. 기여자 기록을 보존하려면 기본은 `Rebase and merge`를 사용한다.
 
 `main` 브랜치 보호 권장값:
 
 - Require a pull request before merging
-- Require 1 approval
-- Dismiss stale approvals when new commits are pushed
+- Required approvals: 0
 - Require conversation resolution before merging
 - Block force pushes
 - Block branch deletion
