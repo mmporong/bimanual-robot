@@ -30,7 +30,7 @@
 6. `Add ... to this repository`를 누른다.
 7. 팀원이 이메일이나 GitHub 알림에서 초대를 수락한다.
 
-이 저장소는 개인 계정 소유 저장소다. 개인 저장소의 Collaborator는 코드를 읽고 쓸 수 있으므로 초대 뒤에는 `main` 직접 푸시를 막고 Pull Request로만 합치는 편이 안전하다.
+이 저장소는 GitHub 개인 계정이 소유하지만 운영 목적은 팀 공용이다. Collaborator는 코드를 읽고 쓸 수 있으므로 `main` 직접 푸시를 막고 Pull Request와 팀원 리뷰를 거쳐 합친다.
 
 GitHub CLI로 초대하려면 저장소 소유자가 다음 명령을 실행한다.
 

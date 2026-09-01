@@ -1,6 +1,6 @@
 # HOLD THE FLOW · 이동형 양팔 로봇 프로젝트
 
-동국대 DAPIER 부트캠프 최종 팀 프로젝트의 설계·구현·검증 기록이다. 한 팔이 경량 병을 기울이고 다른 팔이 컵을 안정화하는 동안, 이동·인지·양팔 조작·계측 검증·실패 복구를 하나의 ROS 2 시스템으로 연결한다.
+동국대 DAPIER 부트캠프 최종 팀 프로젝트의 **팀 공용 저장소**다. 팀원이 설계·코드·실험 데이터 규격·회의 결정·검증 증거를 이곳에서 함께 관리한다. 한 팔이 경량 병을 기울이고 다른 팔이 컵을 안정화하는 동안, 이동·인지·양팔 조작·계측 검증·실패 복구를 하나의 ROS 2 시스템으로 연결한다.
 
 ![HOLD THE FLOW 구현 아키텍처](docs/20260901_HOLD_THE_FLOW_구현아키텍처.svg)
 
@@ -8,7 +8,8 @@
 - 기간: 약 3개월
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
-- 단일 원본: 이 저장소의 `docs/`, `research/`, `data/`, `src/`
+- 운영 방식: Issue → 작업 브랜치 → Pull Request → 팀원 리뷰 → `main`
+- 단일 원본: 팀 프로젝트의 최신 결정과 산출물은 이 저장소의 `docs/`, `research/`, `data/`, `src/`에서 관리
 
 ## 프로젝트 한 줄 정의
 
@@ -42,10 +43,19 @@
 
 Isaac Sim 6.0의 공식 최소 VRAM은 16GB이며 현재 확인한 개발 노트북은 8GB다. ROS 2 코드와 자산은 이 장비에서 준비하되, Isaac Sim 실행은 Compatibility Checker를 통과한 GPU 워크스테이션이나 원격 장비에서 검증한다.
 
+## 팀 저장소 운영
+
+- 이 저장소는 특정 팀원의 개인 작업 기록이 아니라 **팀 공용 단일 원본**이다.
+- 담당 작업은 GitHub Issue에 목표·범위·통과 조건·증거를 적고 기능별 브랜치에서 진행한다.
+- `main`에는 직접 푸시하지 않는다. 작업자가 Pull Request를 열고 다른 팀원 한 명이 검토한 뒤 병합한다.
+- 개인 실험도 재현 가능한 코드·설정·결과 요약을 남겨 팀원이 이어서 실행할 수 있게 한다.
+- 데이터셋·모델·rosbag 같은 대용량 파일은 저장소에 직접 올리지 않고 `data/README.md`의 인덱스로 위치와 버전을 기록한다.
+- 세부 절차는 [팀 협업과 작업 관리](docs/TEAM_WORKFLOW.md)를 따른다.
+
 ## 현재 역할
 
 - 강사/멘토: 로컬 LLM·감독 에이전트, 교육·리뷰
-- 사용자: **SLAM/Nav2 우선**, 모바일 베이스·작업대 접근, 통합 참여
+- [@mmporong](https://github.com/mmporong): **SLAM/Nav2 우선**, 모바일 베이스·작업대 접근, 전체 통합
 - 협업자 [@Minsuk-ji](https://github.com/Minsuk-ji): write 권한 수락, 세부 담당 확정 대기
 - 팀원 [@jangjunseo05](https://github.com/jangjunseo05): write 초대 수락 대기, 세부 담당 확정 대기
 - 공통: ACT, IK, Depth, 그리퍼·접촉 센서, 실물 데이터 수집·평가
@@ -63,7 +73,7 @@ bimanual-robot/
 ├── src/           ROS 2·MoveIt·ACT·Isaac Sim 구현 코드
 ├── tools/         수집·검증·변환 스크립트
 ├── PROGRESS.md    세션별 진행 로그 (최상단 append)
-└── CLAUDE.md      이 리포의 작업 규칙
+└── CLAUDE.md      팀 저장소 작업 규칙
 ```
 
 ## 현재 상태
