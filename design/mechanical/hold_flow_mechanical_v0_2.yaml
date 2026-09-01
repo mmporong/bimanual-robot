@@ -1,6 +1,7 @@
 schema_version: "0.2"
 design_id: hold_flow_mechanical_v0_2
 status: calculated_pre_cad_spec
+revision: 2026-09-01_jdamr_drive_k1max_robonine_gripper_review
 units:
   length: mm
   mass: kg
@@ -28,6 +29,8 @@ chassis:
   target_robot_mass_range: [4.8, 5.3]
   calculated_robot_mass: 5.018
   calculated_operating_mass_with_120g_bottle_and_cup: 5.258
+  calculated_robot_mass_with_robonine_170g_grippers: 5.098
+  calculated_operating_mass_with_robonine_170g_grippers_and_120g_objects: 5.338
   printed_structure_mass_range: [1.55, 1.70]
   plates:
     bottom:
@@ -40,12 +43,19 @@ chassis:
       z_bottom: 111.0
       thickness: 8.0
   split_print_220_bed:
-    enabled: true
+    enabled: false
+    retained_as_fallback_only: true
     quadrant_xy: [124.5, 124.5]
     assembly_gap: 1.0
     arm_backing_plate_each_xyz: [130.0, 90.0, 6.0]
     arm_backing_plate_quantity: 2
     camera_backing_plate_xyz: [85.0, 85.0, 6.0]
+  k1_max_one_piece_plate:
+    enabled: true
+    plate_xy: [250.0, 250.0]
+    nominal_build_volume: [300.0, 300.0, 300.0]
+    edge_clearance_each_side: 25.0
+    brim_max_width: 8.0
 
 arm_mounts:
   source_base_envelope: [110.93, 72.0, 87.0]
@@ -83,6 +93,32 @@ parallel_grippers:
   repeatability_target: 1.0
   pad_material: TPU_95A
   fsr_channels_total: 4
+  selected_reference:
+    name: Robonine_SO_ARM100_101_Parallel_Gripper
+    use: P0_print_and_fit_reference_then_lightweight_derivative
+    mechanism: rack_and_pinion_with_6mm_rods_and_MF106ZZ_bearings
+    stroke: 84.0
+    assembly_envelope: [128.0, 130.5, 109.0]
+    published_mass_each: 0.170
+    published_repeatability: 0.5
+    published_max_gripping_force_N: 120.0
+    print_plate_stl_envelope: [154.14, 154.0, 52.0]
+    k1_max_fit: pass
+    final_mass_gate: fail_requires_lightweight_derivative
+    initial_object_mass_limit_with_unmodified_reference: 0.120
+    object_mass_0_140_status: blocked_by_conservative_cup_hold_torque
+    cad_source: STEP_available
+    urdf_source: visual_and_collision_meshes_plus_prismatic_mimic_reference_available
+    hardware_license: CERN_OHL_P_2_0
+  print_analysis_45deg:
+    tool: /home/lim/.codex/skills/3d/scripts/analyze_stl.py
+    main_frame_support: required
+    clamp_support: required
+    holder_support: required
+    gear_rack_support_after_Y_minus_90: not_required
+    pinion_support_after_Y_minus_90: not_required
+    rotations_applied: false
+    gcode_generated: false
 
 camera:
   model: Orbbec_Astra_S
@@ -105,8 +141,10 @@ camera_mast:
   keyed_overlap: 60.0
   effective_length_from_top_plate: 681.0
   calculated_wall_mass: 0.50
-  segment_count_for_220_bed: 4
-  segment_nominal_length_with_60mm_overlap: 215.25
+  segment_count_for_k1_max: 3
+  segment_nominal_length_with_60mm_overlap: 267.0
+  fallback_segment_count_for_220_bed: 4
+  fallback_segment_nominal_length_with_60mm_overlap: 215.25
   m4_cross_bolts: 4
   cable_channel_min: 12.0
   lateral_deflection_at_1N_max: 1.0
@@ -115,10 +153,20 @@ camera_mast:
 
 navigation:
   drive_type: differential_two_wheel_rear_ball_caster
-  wheel_radius_target: 33.0
+  drive_hardware_reference: JD_AMR_Cube_same_physical_wheels_and_ball_caster
+  wheel_measured_diameter: 65.0
+  wheel_calibrated_effective_radius: 32.9
+  wheel_radius_target: 32.9
   wheel_axis_x: 90.0
   wheel_contact_y: [-135.0, 135.0]
+  geometric_wheel_center_separation: 270.0
+  effective_wheel_separation_status: calibrate_on_new_chassis_do_not_copy_jdamr_183_6
   rear_caster_contact_xyz: [-105.0, 0.0, 0.0]
+  rear_ball_caster:
+    hardware: reuse_same_part_as_JD_AMR_Cube
+    exact_ball_and_hole_dimensions: physical_measurement_required
+    mount_height_strategy: shim_or_slot_adjustment_to_match_32_9mm_wheel_contact_plane
+    vertical_adjustment_range: [-3.0, 3.0]
   support_polygon_xy:
     - [90.0, 135.0]
     - [90.0, -135.0]
@@ -136,9 +184,9 @@ navigation:
     rated_torque_each: 0.981
     stall_torque_each: 2.942
     no_load_speed_rpm: 45.0
-    no_load_linear_speed_with_33mm_radius: 0.1555
+    no_load_linear_speed_with_32_9mm_radius: 0.1550
     calculated_torque_each_with_safety_factor_2: 0.234
-    rated_torque_usage_percent: 23.9
+    rated_torque_usage_percent: 23.8
     max_nav_linear_speed: 0.12
     max_nav_angular_speed: 0.60
     max_nav_acceleration: 0.20
@@ -218,6 +266,15 @@ safety:
     contact_load_percent_left_right_caster: [39.3, 31.6, 29.2]
     static_front_margin: 56.9
     dynamic_front_margin_5deg_0_3m_s2: 28.2
+  calculated_robonine_reference_grippers_with_120g_objects:
+    total_mass: 5.338
+    pour_com_xyz: [36.9, 11.5, 246.8]
+    pour_contact_load_percent_left_right_caster: [40.6, 32.1, 27.2]
+    pour_dynamic_front_margin_5deg_0_3m_s2: 23.9
+    transport_dynamic_front_margin_5deg_0_3m_s2: 49.8
+    drive_torque_each_with_safety_factor_2: 0.237
+    cup_hold_gravity_torque_with_120g_object_conservative: 0.948
+    cup_hold_gravity_torque_with_140g_object_conservative: 1.003
   calculated_transport:
     com_xyz: [10.4, 0.5, 231.4]
     contact_load_percent_left_right_caster: [29.8, 29.4, 40.8]
@@ -231,7 +288,9 @@ urdf:
   left_prefix: left_
   right_prefix: right_
   wheel_separation_target: 270.0
-  wheel_radius_target: 33.0
+  wheel_radius_target: 32.9
+  wheel_separation_calibration_seed: 270.0
+  wheel_separation_jdamr_183_6_reuse: prohibited_due_to_different_chassis_geometry
   base_footprint_offset_from_chassis_center_x: 90.0
   gripper_secondary_jaw: mimic_joint
   camera_optical_frame: camera_depth_optical_frame
@@ -244,5 +303,7 @@ sources:
   feetech_official_wheel_mode_sdk: https://github.com/ftservo/FTServo_Arduino/blob/main/src/SMS_STS.h
   orbbec_astra_series: https://www.orbbec.com/products/structured-light-camera/astra-series/
   parallel_gripper_reference: https://github.com/roboninecom/SO-ARM100-101-Parallel-Gripper
+  jdamr_physical_calibration: /home/lim/jdamr_cube_ws/src/jdamr_cube_ros/README_JDAMR.md
+  creality_k1_max: https://www.creality.com/products/creality-k1-max-3d-printer
   turtlebot3: https://emanual.robotis.com/docs/en/platform/turtlebot3/features/
   lds_03: https://emanual.robotis.com/docs/en/platform/turtlebot3/appendix_lds_03/
