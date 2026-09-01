@@ -1,7 +1,7 @@
 schema_version: "0.2"
 design_id: hold_flow_mechanical_v0_2
-status: calculated_pre_cad_spec
-revision: 2026-09-01_jdamr_drive_k1max_robonine_gripper_review
+status: p0_cad_urdf_generated_measurement_pending
+revision: 2026-09-01_p0_cad_urdf_lidar_mount
 units:
   length: mm
   mass: kg
@@ -18,7 +18,7 @@ frames:
     rpy: [0.0, 0.0, 0.0]
   base_link:
     parent: base_footprint
-    xyz: [0.0, 0.0, 33.0]
+    xyz: [0.0, 0.0, 32.9]
     rpy: [0.0, 0.0, 0.0]
 
 chassis:
@@ -27,14 +27,14 @@ chassis:
   material_primary: PETG
   material_alternative: ASA
   target_robot_mass_range: [4.8, 5.3]
-  calculated_robot_mass: 5.018
-  calculated_operating_mass_with_120g_bottle_and_cup: 5.258
-  calculated_robot_mass_with_robonine_170g_grippers: 5.098
-  calculated_operating_mass_with_robonine_170g_grippers_and_120g_objects: 5.338
+  calculated_robot_mass: 5.022
+  calculated_operating_mass_with_120g_bottle_and_cup: 5.262
+  calculated_robot_mass_with_robonine_170g_grippers: 5.102
+  calculated_operating_mass_with_robonine_170g_grippers_and_120g_objects: 5.342
   printed_structure_mass_range: [1.55, 1.70]
   plates:
     bottom:
-      z_bottom: 15.0
+      z_bottom: 6.0
       thickness: 6.0
     middle:
       z_bottom: 62.0
@@ -49,7 +49,7 @@ chassis:
     assembly_gap: 1.0
     arm_backing_plate_each_xyz: [130.0, 90.0, 6.0]
     arm_backing_plate_quantity: 2
-    camera_backing_plate_xyz: [85.0, 85.0, 6.0]
+    camera_backing_plate_xyz: [75.0, 75.0, 8.0]
   k1_max_one_piece_plate:
     enabled: true
     plate_xy: [250.0, 250.0]
@@ -131,16 +131,23 @@ camera:
   depth_fov_hv: [58.4, 45.5]
   interface: USB_2_0
   mount: bottom_M6_plus_anti_rotation_cradle
+  bracket_calculated_solid_mass: 0.0853
+  calculated_camera_plus_bracket_mass: 0.3953
+  p0_mass_gate: pass
 
 camera_mast:
   type: single_rear_center_box_column
   center_xy: [-80.0, 0.0]
-  outer_section_xy: [35.0, 45.0]
-  wall: 4.0
+  outer_section_xy: [45.0, 35.0]
+  wall: 3.0
   base_flange_xyz: [75.0, 75.0, 8.0]
-  keyed_overlap: 60.0
+  internal_sleeve_overlap: 60.0
+  internal_sleeve_outer_section_xy: [38.2, 28.2]
+  internal_sleeve_clearance_each_side: 0.4
   effective_length_from_top_plate: 681.0
-  calculated_wall_mass: 0.50
+  calculated_segments_plus_couplers_mass: 0.5043
+  calculated_segment_solid_mass_each: 0.1497
+  calculated_coupler_solid_mass_each: 0.0276
   segment_count_for_k1_max: 3
   segment_nominal_length_with_60mm_overlap: 267.0
   fallback_segment_count_for_220_bed: 4
@@ -201,10 +208,13 @@ navigation:
     padding: 0.015
   lidar_candidate:
     model: ROBOTIS_LDS_03
-    center_xyz: [100.0, 0.0, 136.0]
+    center_xyz: [90.0, 0.0, 165.0]
     envelope: [54.7, 39.7, 34.0]
     mass: 0.042
-    status: candidate_requires_occlusion_test
+    body_orientation: 54_7mm_along_x_39_7mm_along_y
+    mount: independent_29mm_low_riser_on_top_plate
+    scan_plane_status: physical_measurement_required
+    status: selected_p0_requires_transport_pose_occlusion_test
 
 power:
   arm_bus_voltage_status: select_after_all_servo_labels_are_verified
@@ -261,25 +271,25 @@ safety:
     abs_y_max: 60.0
     support_polygon_edge_margin_min: 20.0
   calculated_nominal_pour:
-    total_mass: 5.258
-    com_xyz: [33.1, 10.4, 243.1]
-    contact_load_percent_left_right_caster: [39.3, 31.6, 29.2]
-    static_front_margin: 56.9
-    dynamic_front_margin_5deg_0_3m_s2: 28.2
+    total_mass: 5.262
+    com_xyz: [32.9, 10.4, 243.5]
+    contact_load_percent_left_right_caster: [39.2, 31.5, 29.3]
+    static_front_margin: 57.1
+    dynamic_front_margin_5deg_0_3m_s2: 28.3
   calculated_robonine_reference_grippers_with_120g_objects:
-    total_mass: 5.338
-    pour_com_xyz: [36.9, 11.5, 246.8]
-    pour_contact_load_percent_left_right_caster: [40.6, 32.1, 27.2]
-    pour_dynamic_front_margin_5deg_0_3m_s2: 23.9
-    transport_dynamic_front_margin_5deg_0_3m_s2: 49.8
+    total_mass: 5.342
+    pour_com_xyz: [36.7, 11.5, 247.2]
+    pour_contact_load_percent_left_right_caster: [40.6, 32.1, 27.3]
+    pour_dynamic_front_margin_5deg_0_3m_s2: 24.1
+    transport_dynamic_front_margin_5deg_0_3m_s2: 49.9
     drive_torque_each_with_safety_factor_2: 0.237
     cup_hold_gravity_torque_with_120g_object_conservative: 0.948
     cup_hold_gravity_torque_with_140g_object_conservative: 1.003
   calculated_transport:
-    com_xyz: [10.4, 0.5, 231.4]
-    contact_load_percent_left_right_caster: [29.8, 29.4, 40.8]
-    static_front_margin: 79.6
-    dynamic_front_margin_5deg_0_3m_s2: 52.2
+    com_xyz: [10.3, 0.5, 231.8]
+    contact_load_percent_left_right_caster: [29.8, 29.4, 40.9]
+    static_front_margin: 79.7
+    dynamic_front_margin_5deg_0_3m_s2: 52.3
   servo_warning_temperature_C: 55.0
   servo_stop_temperature_C: 60.0
   base_motion_during_manipulation: prohibited

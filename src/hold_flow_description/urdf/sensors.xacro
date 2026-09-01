@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="hold_flow_sensors">
+    <!-- 마스트 중심: 차체 (-80, 0), base_footprint 기준 (-170, 0). -->
+    <link name="camera_mast_lower_link">
+      <xacro:box_inertial mass="0.1773" x="0.045" y="0.035" z="0.267"/>
+      <visual><geometry><mesh filename="package://hold_flow_description/meshes/cad/camera_mast_segment.stl" scale="0.001 0.001 0.001"/></geometry><material name="hold_flow_dark"/></visual>
+      <collision><geometry><box size="0.045 0.035 0.267"/></geometry><origin xyz="0 0 0.1335"/></collision>
+    </link>
+    <joint name="camera_mast_lower_joint" type="fixed">
+      <parent link="base_link"/><child link="camera_mast_lower_link"/>
+      <origin xyz="-0.170 0 0.0941" rpy="0 0 0"/>
+    </joint>
+
+    <link name="camera_mast_middle_link">
+      <xacro:box_inertial mass="0.1773" x="0.045" y="0.035" z="0.267"/>
+      <visual><geometry><mesh filename="package://hold_flow_description/meshes/cad/camera_mast_segment.stl" scale="0.001 0.001 0.001"/></geometry><material name="hold_flow_dark"/></visual>
+      <collision><geometry><box size="0.045 0.035 0.267"/></geometry><origin xyz="0 0 0.1335"/></collision>
+    </link>
+    <joint name="camera_mast_middle_joint" type="fixed">
+      <parent link="camera_mast_lower_link"/><child link="camera_mast_middle_link"/>
+      <origin xyz="0 0 0.207" rpy="0 0 0"/>
+    </joint>
+
+    <link name="camera_mast_upper_link">
+      <xacro:box_inertial mass="0.1497" x="0.045" y="0.035" z="0.267"/>
+      <visual><geometry><mesh filename="package://hold_flow_description/meshes/cad/camera_mast_segment.stl" scale="0.001 0.001 0.001"/></geometry><material name="hold_flow_dark"/></visual>
+      <collision><geometry><box size="0.045 0.035 0.267"/></geometry><origin xyz="0 0 0.1335"/></collision>
+    </link>
+    <joint name="camera_mast_upper_joint" type="fixed">
+      <parent link="camera_mast_middle_link"/><child link="camera_mast_upper_link"/>
+      <origin xyz="0 0 0.207" rpy="0 0 0"/>
+    </joint>
+
+    <link name="camera_link">
+      <inertial>
+        <mass value="0.310"/>
+        <inertia ixx="0.00076283" ixy="0" ixz="0" iyy="0.00010085" iyz="0" izz="0.00074465"/>
+      </inertial>
+      <!-- Astra S 실제 외곽 165(W)×48(H)×40(D) mm: +X 깊이, +Y 폭, +Z 높이. -->
+      <visual><geometry><box size="0.040 0.165 0.048"/></geometry><material name="hold_flow_blue"/></visual>
+      <collision><geometry><box size="0.040 0.165 0.048"/></geometry></collision>
+    </link>
+    <joint name="camera_mount_joint" type="fixed">
+      <parent link="camera_mast_upper_link"/><child link="camera_link"/>
+      <!-- 광학 중심이 차체 (-80, 0, 800) mm가 되도록 55 mm 전면 오프셋을 역산. -->
+      <origin xyz="-0.042132 0 0.294353" rpy="0 0.698132 0"/>
+    </joint>
+
+    <link name="camera_cradle_link">
+      <xacro:box_inertial mass="0.0853" x="0.065" y="0.182" z="0.030"/>
+      <visual><geometry><mesh filename="package://hold_flow_description/meshes/cad/astra_cradle.stl" scale="0.001 0.001 0.001"/></geometry><material name="hold_flow_dark"/></visual>
+      <collision><geometry><mesh filename="package://hold_flow_description/meshes/cad/astra_cradle.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+    </link>
+    <joint name="camera_cradle_joint" type="fixed">
+      <parent link="camera_link"/><child link="camera_cradle_link"/>
+      <!-- 거치대 바닥 상면 z=6 mm에 카메라 하단이 닿도록 본체 중심에서 30 mm 하향. -->
+      <origin xyz="0 0 -0.030" rpy="0 0 0"/>
+    </joint>
+
+    <link name="camera_depth_optical_frame"/>
+    <joint name="camera_depth_optical_joint" type="fixed">
+      <parent link="camera_link"/><child link="camera_depth_optical_frame"/>
+      <origin xyz="0.055 0 0" rpy="-1.570796 0 -1.570796"/>
+    </joint>
+
+    <link name="laser_link">
+      <inertial>
+        <mass value="0.042"/>
+        <inertia ixx="9e-6" ixy="0" ixz="0" iyy="9e-6" iyz="0" izz="1.6e-5"/>
+      </inertial>
+      <visual><geometry><cylinder radius="0.02735" length="0.034"/></geometry><material name="hold_flow_blue"/></visual>
+      <collision><geometry><cylinder radius="0.02735" length="0.034"/></geometry></collision>
+    </link>
+    <joint name="laser_joint" type="fixed">
+      <parent link="base_link"/><child link="laser_link"/>
+      <!-- 차체 x=90 mm는 바퀴축 기준 x=0, 바닥 z=165 mm는 base_link 기준 132.1 mm. -->
+      <origin xyz="0 0 0.1321" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+</robot>
