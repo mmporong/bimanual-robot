@@ -22,6 +22,9 @@
 
 - 기준 문서: [docs/20260828_1안_확정_이동형_양팔_붓기.md](docs/20260828_1안_확정_이동형_양팔_붓기.md)
 - 구현 아키텍처: [docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md)
+- 기구설계 명세: [docs/20260901_기구설계_제작명세_v0.1.md](docs/20260901_기구설계_제작명세_v0.1.md)
+- 기구 검증표: [docs/20260901_기구설계_검증체크리스트_v0.1.md](docs/20260901_기구설계_검증체크리스트_v0.1.md)
+- CAD·URDF 파라미터: [design/mechanical/hold_flow_mechanical_v0_1.yaml](design/mechanical/hold_flow_mechanical_v0_1.yaml)
 - 논문 적용 설계: [research/R31_1안_이동형_양팔_붓기_논문적용.md](research/R31_1안_이동형_양팔_붓기_논문적용.md)
 - 팀 작업 방식: [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md)
 - 회의 기록: [docs/20260828_회의결과_주제후보_역할분담.md](docs/20260828_회의결과_주제후보_역할분담.md)
@@ -68,6 +71,7 @@ Isaac Sim 6.0의 공식 최소 VRAM은 16GB이며 현재 확인한 개발 노트
 
 ```
 bimanual-robot/
+├── design/        CAD·URDF가 함께 읽는 기구 파라미터와 설계 원본
 ├── docs/          회의록·결정사항·담당 파트·설계 문서 (파일명 YYYYMMDD_ 접두)
 ├── research/      리서치 산출물 (양팔 텔레옵 선례, 적용 사례, GPU 비용 등)
 ├── data/          데이터셋 규격·인덱스·스키마 (실데이터는 커밋하지 않음)
@@ -89,7 +93,11 @@ bimanual-robot/
 - [x] 물 따르기를 Plan A와 메인 시나리오로 확정
 - [x] 물 따르기 전용 5쪽 발표자료와 디자인 리포트 제작
 - [x] ROS 2·C++·Python·Nav2·MoveIt 2·ACT·Isaac Sim 구현 경계 문서화
+- [x] 250 mm 정사각 차체·SO-101×2·단일 Astra S 기둥의 기구 명세와 검증표 작성
 - [x] 팀 공용 구현 아키텍처 HTML 사이트 제작·ChatGPT Sites 배포
+- [ ] M0 부품 실측: SO-101 체결홀·Astra S·평행그리퍼·구동부 외피와 질량
+- [ ] M1 출력 공차 시험편과 4분할 정사각 판 이음 검증
+- [ ] M2~M4 차체 건식조립·정적하중·3점 지지 안정성 검증
 - [ ] Isaac Sim 6.0 실행 장비 Compatibility Checker와 ROS 2 Bridge smoke test
 - [ ] 물병 총중량·파지·미끄럼 POC
 - [ ] 컵 파지·건식 내용물 붓기·병/컵 도킹 저울 사후 판정 POC
