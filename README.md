@@ -1,47 +1,56 @@
-# bimanual-robot: 양팔 로봇 팀 프로젝트 개인 기록
+# HOLD THE FLOW · 이동형 양팔 로봇 프로젝트
 
-동국대 DAPIER 부트캠프 최종 팀 프로젝트(양팔 휴머노이드)의 **개인 작업·기록 리포**. 팀 공용 리포와는 별개이며, 여기에는 내가 맡은 파트의 설계·코드·리서치·데이터 규격과 팀 회의 기록을 축적한다.
+동국대 DAPIER 부트캠프 최종 팀 프로젝트의 설계·구현·검증 기록이다. 한 팔이 경량 병을 기울이고 다른 팔이 컵을 안정화하는 동안, 이동·인지·양팔 조작·계측 검증·실패 복구를 하나의 ROS 2 시스템으로 연결한다.
+
+![HOLD THE FLOW 구현 아키텍처](docs/20260901_HOLD_THE_FLOW_구현아키텍처.svg)
 
 - 시작: 2026-08-19 (킥오프 회의)
 - 기간: 약 3개월
-- 상위 맥락: `~/physical-ai-lab` (부트캠프 학습 축적 · 포트폴리오)
-- 재사용 자산: `~/so101_tools` (IK·hand-eye·Astra depth 파지 스크립트), `~/lerobot`, `~/so101_imitation_learning`
+- 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
+- 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
+- 단일 원본: 이 저장소의 `docs/`, `research/`, `data/`, `src/`
 
 ## 프로젝트 한 줄 정의
 
-### HOLD THE FLOW: 이동형 양팔 붓기·실패 복구 시스템
+### 이동은 넓게, 조작은 정밀하게, 결과는 계측한다
 
 **SLAM/Nav2로 작업대까지 이동한 뒤, 한 팔은 경량 병을 기울이고 다른 팔은 받는 컵을 든다. 접촉 센서로 파지를 판정하고 붓기 뒤 병·컵 도킹 저울로 실제 유입량과 흘림을 검증하며, 실패하면 검증된 복구 스킬을 실행한다.**
 
-2026-08-28 후속 결정으로 **이동형 비정형 용기 붓기를 Plan A이자 메인 시나리오로 확정**했다. 현재 개발과 실물 검증은 이 시나리오에 집중한다.
+현재 개발과 실물 검증은 이동형 비정형 용기 붓기 1안에 집중한다. Nav2는 작업대 근처까지 이동시키고, RGB-D/AprilTag는 마지막 정렬을 맡는다. MoveIt 2/IK가 결정론적 기준선을 만들고, ACT는 기준선 통과 뒤 양팔 조작 구간에만 적용한다.
 
 - 기준 문서: [docs/20260828_1안_확정_이동형_양팔_붓기.md](docs/20260828_1안_확정_이동형_양팔_붓기.md)
+- 구현 아키텍처: [docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md)
 - 논문 적용 설계: [research/R31_1안_이동형_양팔_붓기_논문적용.md](research/R31_1안_이동형_양팔_붓기_논문적용.md)
 - 팀 작업 방식: [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md)
 - 회의 기록: [docs/20260828_회의결과_주제후보_역할분담.md](docs/20260828_회의결과_주제후보_역할분담.md)
 - 5쪽 발표자료: [docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx](docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx)
 - 발표자료 디자인 리포트: [docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx](docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx)
 
-## 확정된 결정 (2026-08-19 킥오프)
+## 현재 구현 스택
 
-| 항목 | 결정 |
-|---|---|
-| 메인 태스크 | 양팔 픽앤플레이스 1단계 → 단계적 난이도 상승 |
-| 데이터 수집 | 시뮬레이션 배제, **텔레오퍼레이션 실물 수집** |
-| 구현 베이스 | LeRobot 먼저 검증 → 커스텀 코드로 차별화 |
-| 설계 범위 | 설계는 전체를 먼저 잡고, 구현만 단계별로 |
-| 다음 논의 | 금요일(2026-08-21) 16:00, 태스크 1차·2차 확정 |
+| 파트 | 채택 기술 | 직접 구현할 부분 |
+|---|---|---|
+| 시뮬레이션 | Isaac Sim 6.0, USD, ROS 2 Bridge | SO-101·모바일 베이스 자산, 센서, TF, sim/real gap |
+| 지도·이동 | SLAM Toolbox, AMCL, Nav2 | 작업대 staging pose, Action 결과, 반복 접근 평가 |
+| 로컬 정렬 | RGB-D, AprilTag, OpenCV, tf2 | `base_link→workcell` pose와 시간축 검증 |
+| 양팔 조작 | MoveIt 2, IK, Planning Scene | 파지·기울임·복귀 궤적과 양팔 충돌 검사 |
+| 실행·안전 | C++17, FollowJointTrajectory, command mux | 관절 한계, 타임아웃, 팔 간 거리, 안전 정지 |
+| 실물 연결 | LeRobot `bi_so_follower` Python bridge | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 |
+| 모방학습 | LeRobot ACT, PyTorch | 실물 양팔 시연 수집, 학습, rollout, IK 대조 |
+| 계측 | FSR 4채널, 병·컵 로드셀 도킹 패드 | 파지 안전, 유입량, 흘림 추정 |
+| 실패 복구 | Python 상태기계, 선택형 로컬 LLM | 허용된 복구 스킬만 선택, 직접 모터 제어 금지 |
 
-시뮬레이션을 버린 이유는 URDF 부재로 인한 공수와 Sim2Real 갭이다. 자세한 논의는 [docs/20260819_킥오프회의_원본.md](docs/20260819_킥오프회의_원본.md), 결정의 정리본은 [docs/20260819_결정사항_액션아이템.md](docs/20260819_결정사항_액션아이템.md)에 있다.
+Isaac Sim 6.0의 공식 최소 VRAM은 16GB이며 현재 확인한 개발 노트북은 8GB다. ROS 2 코드와 자산은 이 장비에서 준비하되, Isaac Sim 실행은 Compatibility Checker를 통과한 GPU 워크스테이션이나 원격 장비에서 검증한다.
 
 ## 현재 역할
 
 - 강사/멘토: 로컬 LLM·감독 에이전트, 교육·리뷰
 - 사용자: **SLAM/Nav2 우선**, 모바일 베이스·작업대 접근, 통합 참여
-- 팀원 [@jangjunseo05](https://github.com/jangjunseo05): 세부 전담은 다음 회의에서 확정
+- 협업자 [@Minsuk-ji](https://github.com/Minsuk-ji): write 권한 수락, 세부 담당 확정 대기
+- 팀원 [@jangjunseo05](https://github.com/jangjunseo05): write 초대 수락 대기, 세부 담당 확정 대기
 - 공통: ACT, IK, Depth, 그리퍼·접촉 센서, 실물 데이터 수집·평가
 
-상세 계획과 산출물 목록: [docs/20260819_담당파트_초안.md](docs/20260819_담당파트_초안.md)
+파트별 언어·ROS 인터페이스·구현 순서는 [구현 아키텍처](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md)를 기준으로 한다.
 
 ## 폴더 구조
 
@@ -51,7 +60,7 @@ bimanual-robot/
 ├── research/      리서치 산출물 (양팔 텔레옵 선례, 적용 사례, GPU 비용 등)
 ├── data/          데이터셋 규격·인덱스·스키마 (실데이터는 커밋하지 않음)
 │   └── schema/    에피소드 메타데이터 스키마, dataset card 템플릿
-├── src/           양팔 제어·학습 코드
+├── src/           ROS 2·MoveIt·ACT·Isaac Sim 구현 코드
 ├── tools/         수집·검증·변환 스크립트
 ├── PROGRESS.md    세션별 진행 로그 (최상단 append)
 └── CLAUDE.md      이 리포의 작업 규칙
@@ -66,11 +75,14 @@ bimanual-robot/
 - [x] 논문 근거를 제어 상태기계·센서 책임·평가표·실패 데이터 규격으로 변환
 - [x] 물 따르기를 Plan A와 메인 시나리오로 확정
 - [x] 물 따르기 전용 5쪽 발표자료와 디자인 리포트 제작
+- [x] ROS 2·C++·Python·Nav2·MoveIt 2·ACT·Isaac Sim 구현 경계 문서화
+- [ ] Isaac Sim 6.0 실행 장비 Compatibility Checker와 ROS 2 Bridge smoke test
 - [ ] 물병 총중량·파지·미끄럼 POC
 - [ ] 컵 파지·건식 내용물 붓기·병/컵 도킹 저울 사후 판정 POC
 - [ ] 선택 확장: 로드셀 수신 모듈의 실시간 질량 판정 POC
 - [ ] SLAM/Nav2 작업대 반복 접근 기준선
 - [ ] Depth/표식 기반 작업 셀 로컬 정렬 기준선
 - [ ] 이동 → 정렬 → 양팔 파지 → 붓기 → 검증 상태기계 통합
-- [ ] 픽앤플레이스 기준선(성공 판정 기준) 정의
-- [ ] LeRobot 파일럿 실행
+- [ ] MoveIt 2 양팔 URDF/SRDF·Planning Scene·무수 기울임 기준선
+- [ ] LeRobot 양팔 5 episode smoke dataset
+- [ ] ACT 20 episode 과적합 기준선과 IK 대조 평가
