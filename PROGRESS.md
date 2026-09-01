@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-09-01 | 구현 아키텍처 확정 — ROS 2·C++·Python·ACT·Isaac Sim
+
+**결론**: 이동형 양팔 붓기 1안의 구현 경계를 코드 수준으로 정했다. ROS 2 Jazzy가 전체 Action과 TF를 연결하고, Nav2/SLAM Toolbox는 작업대 접근, RGB-D/AprilTag는 로컬 정렬, MoveIt 2/IK는 결정론적 양팔 기준선, LeRobot ACT는 조작 구간 학습을 맡는다. C++ 안전 게이트는 IK·ACT·텔레옵의 모든 명령을 공통 검사한다.
+
+**시뮬레이터 결정**: Isaac Sim 6.0과 ROS 2 Bridge를 사용한다. Ubuntu 24.04·ROS 2 Jazzy는 공식 권장 조합이지만, 현재 확인한 RTX 5050 Laptop 8GB는 Isaac Sim 6.0 공식 최소 VRAM 16GB에 미달한다. S0에서 16GB 이상 GPU 장비와 Compatibility Checker를 먼저 통과시킨다.
+
+**언어 경계**
+- C++: command mux, safety guard, FollowJointTrajectory, IK·Planning Scene, TF·센서 필터 검증
+- Python: mission manager, RGB-D/AprilTag, LeRobot hardware bridge, ACT 학습·추론, 로깅·평가, 제한형 복구 감독
+- Isaac Sim Python/USD: URDF→USD, 센서, ROS 2 Bridge, Replicator, sim/real gap
+
+**핵심 안전 결정**
+- 좌우 SO-101 시리얼 포트는 LeRobot hardware bridge 한 프로세스만 연다.
+- MoveIt 2·ACT·텔레옵 중 한 시점에는 하나의 command lease만 허용한다.
+- ACT는 내비게이션·비상정지·성공 판정을 학습하지 않는다.
+- Isaac Sim 합성 데이터는 실물 데이터와 분리하고 real-only 기준선을 이길 때만 혼합한다.
+
+**반영 파일**
+- `docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md`
+- `docs/20260901_HOLD_THE_FLOW_구현아키텍처.svg`
+- `src/README.md`
+- `README.md`
+- `docs/TEAM_WORKFLOW.md`
+- `docs/20260828_1안_확정_이동형_양팔_붓기.md`
+
+**협업 상태**: `@Minsuk-ji`는 write 초대를 수락했다. `@jangjunseo05`는 수락 대기다. 세부 역할은 GitHub 접근 권한과 분리해 다음 회의에서 확정한다.
+
+**미검증**: Isaac Sim 실행 장비, SO-101 USD 정합성, 모바일 베이스 topic, 양팔 achieved fps, MoveIt→bridge 지연, ACT 데이터량과 실물 성공률은 S0·G0~G4·D0·A0에서 실측한다.
+
+---
+
 ## 2026-08-31 | 1안 논문 적용 설계 — 센서 책임·제어·평가 확정
 
 **결론**: 이동형 양팔 붓기만 대상으로 선행 연구를 다시 검증하고, 논문 결과를 G0~G4 구현 규격으로 바꿨다. 접촉 센서는 유입량 추정이 아니라 파지 안전에만 쓴다. 물체를 든 동안 작업대 저울을 읽을 수 없으므로 1차는 병과 컵을 로드셀 도킹 패드에 반환해 유입량과 흘림을 검증하고, 실시간 폐루프는 로드셀 수신 모듈이 준비된 뒤 연다.

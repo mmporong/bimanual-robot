@@ -4,7 +4,12 @@
 
 권장 운영: 작업자 1명, 리뷰어 1명, 강사·멘토는 게이트 검토
 
-2026-08-28에 [@jangjunseo05](https://github.com/jangjunseo05)에게 write 권한 초대를 발송했다. 초대를 수락하면 아래 첫 설정과 Pull Request 절차를 따른다.
+2026-09-01 기준 협업 권한은 다음과 같다.
+
+| 계정 | 권한 상태 | 다음 행동 |
+|---|---|---|
+| [@Minsuk-ji](https://github.com/Minsuk-ji) | write 수락 완료 | 브랜치·Issue·Pull Request 절차 적용 |
+| [@jangjunseo05](https://github.com/jangjunseo05) | write 초대 수락 대기 | 저장소 초대 페이지에서 수락 |
 
 ## 협업자와 기여자의 차이
 
@@ -106,6 +111,7 @@ Issue 제목에는 게이트와 영역을 함께 적는다.
 권장 라벨:
 
 - 영역: `area:slam`, `area:manipulation`, `area:hardware`, `area:data`, `area:agent`
+- 시뮬레이션: `area:simulation`
 - 성격: `type:research`, `type:experiment`, `type:implementation`, `type:docs`
 - 우선순위: `priority:p0`, `priority:p1`, `priority:p2`
 - 상태 보조: `blocked`, `needs-review`
@@ -125,7 +131,7 @@ Backlog → Ready → In progress → Review → Blocked → Done
 - `Blocked`: 부품, 장비, 선행 Issue 때문에 멈춘 작업
 - `Done`: 증거와 리뷰가 모두 남은 작업
 
-마일스톤은 `G0 파지`, `G1 기울이기`, `G2 붓기`, `G3 통합`, `G4 복구`로 나눈다. 봉지 실험은 현재 보드의 `Backlog`에만 둔다.
+마일스톤은 `S0 Isaac Sim`, `G0 파지`, `G1 기울이기`, `G2 붓기`, `A0 ACT`, `G3 통합`, `G4 복구`, `S5 Sim/Real Gap`으로 나눈다. 현재 보드에는 이동형 양팔 붓기 1안의 작업만 등록한다.
 
 GitHub Projects는 Issue와 Pull Request 상태를 연결하고 Board·Table·Roadmap 보기를 제공한다.
 
