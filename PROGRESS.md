@@ -14,7 +14,11 @@
 - 개인 메모·자격증명·팀과 무관한 학습 기록은 저장소에 올리지 않는다.
 - 대용량 데이터·모델·rosbag은 외부 저장소에 두고 `data/README.md`에서 버전과 위치만 추적한다.
 
-**반영 파일**: `README.md`, `CLAUDE.md`, `docs/TEAM_WORKFLOW.md`
+**프로젝트 사이트**: [HOLD THE FLOW · Team Project](https://hold-the-flow-bimanual.mmporong.chatgpt.site)를 새로 만들었다. 구현 아키텍처, ROS 2 인터페이스, C++/Python 경계, Isaac Sim 조건, 게이트, 역할과 팀 작업 순서를 한 페이지에 정리했다. 현재 접근 범위는 ChatGPT Sites 소유자 전용이다.
+
+**검증**: Sites 빌드·ESLint·런타임 의존성 감사 통과, 로컬 HTTP 200, 배포 상태 `succeeded`, 인증된 배포 주소 HTTP 200을 확인했다.
+
+**반영 파일**: `README.md`, `CLAUDE.md`, `docs/TEAM_WORKFLOW.md`, `site/`
 
 ---
 
