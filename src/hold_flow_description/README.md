@@ -21,9 +21,13 @@
 
 ```bash
 cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
 colcon build --packages-select hold_flow_description --symlink-install
 source install/setup.bash
 python3 src/hold_flow_description/scripts/validate_description.py
+python3 src/hold_flow_description/scripts/audit_urdf_quality.py --strict
+python3 src/hold_flow_description/scripts/audit_task_pose.py
+"$HOME/.cache/bimanual-cad-venv/bin/python" design/cad/audit_urdf_clearance.py
 ```
 
 이 호스트처럼 사용자 Python이 ROS의 Python보다 먼저 잡히면 다음처럼 실행한다.
@@ -33,8 +37,19 @@ colcon build --packages-select hold_flow_description --symlink-install \
   --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 ```
 
-검증은 Xacro 확장, `check_urdf`, 링크/조인트 존재, 모든 `package://` 메시의 실제 파일 존재, 바퀴 중심거리 270 mm, 좌우 평행 그리퍼 mimic joint를 확인한다.
+검증은 Xacro 확장, `check_urdf`, 링크/조인트 존재, 모든 `package://` 메시의 실제 파일 존재, 바퀴 중심거리 270 mm, 좌우 평행 그리퍼 mimic joint를 확인한다. `audit_urdf_quality.py`는 양의 질량, positive-definite 관성, 관성 주축 삼각부등식, 정규화된 관절축, hard/soft limit, effort/velocity, visual/collision 짝과 메시 스케일을 별도로 검사한다.
 또한 커밋된 `hold_flow.urdf`가 Xacro의 현재 확장 결과와 같은지, 카메라 광학 중심·LDS-03·좌우 팔 베이스가 설계 좌표에 놓이는지도 수치로 검사한다.
+
+`validate_description.py`가 통과한다는 것은 구조와 fixed TF가 일관된다는 뜻이다. 물 따르기 task pose까지 가능한지는 `audit_task_pose.py`에서 별도로 확인한다. 2026-09-01 P0 재검증에서는 다음 이유로 `task_ready=false`다.
+
+- 좌우 `tool0`, `bottle_tcp`, `cup_tcp` frame이 없다.
+- 계산 문서의 task 좌표가 현재 URDF FK가 아니라 상수로 저장되어 있다.
+- 붓기 후보의 좌우 `link2_to_link3` 값이 현재 Robonine URDF hard limit 밖이다.
+- JD-AMR에서 검증한 SO-101 관절 규약과 Robonine 전체 팔 Xacro의 관절 규약이 섞였다.
+- zero joint pose는 좌우 팔 collision mesh가 교차하며 시작 자세로 사용할 수 없다.
+- 운반 후보도 링크 간 최소 `18.78 mm`, 마스트 중심 반경 `31.36 mm`로 프로젝트 안전여유를 만족하지 않는다.
+
+이 상태에서는 YAML의 `pour_joint_degrees`를 실기체에 전송하지 않는다. 권고 수정은 검증된 SO-101 팔 체인을 유지하고 Robonine의 평행 죠 기구만 엔드이펙터로 부착한 뒤, 명시적 TCP와 FK/IK 회귀시험을 추가하는 것이다.
 
 ## 아직 확정하지 않은 값
 
