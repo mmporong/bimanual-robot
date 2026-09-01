@@ -4,6 +4,7 @@
 
 ![HOLD THE FLOW 구현 아키텍처](docs/20260901_HOLD_THE_FLOW_구현아키텍처.svg)
 
+- 프로젝트 사이트: [HOLD THE FLOW · Team Project](https://hold-the-flow-bimanual.mmporong.chatgpt.site) — ChatGPT Sites 소유자 전용 배포
 - 시작: 2026-08-19 (킥오프 회의)
 - 기간: 약 3개월
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
@@ -71,6 +72,7 @@ bimanual-robot/
 ├── data/          데이터셋 규격·인덱스·스키마 (실데이터는 커밋하지 않음)
 │   └── schema/    에피소드 메타데이터 스키마, dataset card 템플릿
 ├── src/           ROS 2·MoveIt·ACT·Isaac Sim 구현 코드
+├── site/          팀 프로젝트 HTML 사이트 소스·배포 설정
 ├── tools/         수집·검증·변환 스크립트
 ├── PROGRESS.md    세션별 진행 로그 (최상단 append)
 └── CLAUDE.md      팀 저장소 작업 규칙
@@ -86,6 +88,7 @@ bimanual-robot/
 - [x] 물 따르기를 Plan A와 메인 시나리오로 확정
 - [x] 물 따르기 전용 5쪽 발표자료와 디자인 리포트 제작
 - [x] ROS 2·C++·Python·Nav2·MoveIt 2·ACT·Isaac Sim 구현 경계 문서화
+- [x] 팀 공용 구현 아키텍처 HTML 사이트 제작·ChatGPT Sites 배포
 - [ ] Isaac Sim 6.0 실행 장비 Compatibility Checker와 ROS 2 Bridge smoke test
 - [ ] 물병 총중량·파지·미끄럼 POC
 - [ ] 컵 파지·건식 내용물 붓기·병/컵 도킹 저울 사후 판정 POC
