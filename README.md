@@ -16,15 +16,16 @@
 
 ### 이동은 넓게, 조작은 정밀하게, 결과는 계측한다
 
-**SLAM/Nav2로 작업대까지 이동한 뒤, 한 팔은 경량 병을 기울이고 다른 팔은 받는 컵을 든다. 접촉 센서로 파지를 판정하고 붓기 뒤 병·컵 도킹 저울로 실제 유입량과 흘림을 검증하며, 실패하면 검증된 복구 스킬을 실행한다.**
+**SLAM/Nav2로 지정 위치까지 이동한 뒤 베이스를 정지하고, 한 팔은 경량 병을 기울이고 다른 팔은 받는 컵을 든다. 접촉 센서로 파지를 판정하고 붓기 뒤 낮은 도킹 패드에서 실제 유입량과 흘림을 검증하며, 실패하면 검증된 복구 스킬을 실행한다.**
 
-현재 개발과 실물 검증은 이동형 비정형 용기 붓기 1안에 집중한다. Nav2는 작업대 근처까지 이동시키고, RGB-D/AprilTag는 마지막 정렬을 맡는다. MoveIt 2/IK가 결정론적 기준선을 만들고, ACT는 기준선 통과 뒤 양팔 조작 구간에만 적용한다.
+현재 개발과 실물 검증은 이동형 비정형 용기 붓기 1안에 집중한다. 일반 식탁은 사용하지 않는다. 로봇이 병과 빈 컵을 운반 자세로 들고 지정 위치까지 간 뒤, RGB-D/AprilTag로 마지막 정렬하고 정지 상태에서 물을 따른다. MoveIt 2/IK가 결정론적 기준선을 만들고, ACT는 기준선 통과 뒤 양팔 조작 구간에만 적용한다.
 
 - 기준 문서: [docs/20260828_1안_확정_이동형_양팔_붓기.md](docs/20260828_1안_확정_이동형_양팔_붓기.md)
 - 구현 아키텍처: [docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md)
-- 기구설계 명세: [docs/20260901_기구설계_제작명세_v0.1.md](docs/20260901_기구설계_제작명세_v0.1.md)
-- 기구 검증표: [docs/20260901_기구설계_검증체크리스트_v0.1.md](docs/20260901_기구설계_검증체크리스트_v0.1.md)
-- CAD·URDF 파라미터: [design/mechanical/hold_flow_mechanical_v0_1.yaml](design/mechanical/hold_flow_mechanical_v0_1.yaml)
+- 250 mm 차체 계산: [docs/20260901_250mm_차체_계산검증_v0.2.md](docs/20260901_250mm_차체_계산검증_v0.2.md)
+- 기구설계 명세: [docs/20260901_기구설계_제작명세_v0.2.md](docs/20260901_기구설계_제작명세_v0.2.md)
+- 기구 검증표: [docs/20260901_기구설계_검증체크리스트_v0.2.md](docs/20260901_기구설계_검증체크리스트_v0.2.md)
+- CAD·URDF 파라미터: [design/mechanical/hold_flow_mechanical_v0_2.yaml](design/mechanical/hold_flow_mechanical_v0_2.yaml)
 - 논문 적용 설계: [research/R31_1안_이동형_양팔_붓기_논문적용.md](research/R31_1안_이동형_양팔_붓기_논문적용.md)
 - 팀 작업 방식: [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md)
 - 회의 기록: [docs/20260828_회의결과_주제후보_역할분담.md](docs/20260828_회의결과_주제후보_역할분담.md)
@@ -36,7 +37,7 @@
 | 파트 | 채택 기술 | 직접 구현할 부분 |
 |---|---|---|
 | 시뮬레이션 | Isaac Sim 6.0, USD, ROS 2 Bridge | SO-101·모바일 베이스 자산, 센서, TF, sim/real gap |
-| 지도·이동 | SLAM Toolbox, AMCL, Nav2 | 작업대 staging pose, Action 결과, 반복 접근 평가 |
+| 지도·이동 | SLAM Toolbox, AMCL, Nav2 | 지정 붓기 위치 staging pose, Action 결과, 반복 접근 평가 |
 | 로컬 정렬 | RGB-D, AprilTag, OpenCV, tf2 | `base_link→workcell` pose와 시간축 검증 |
 | 양팔 조작 | MoveIt 2, IK, Planning Scene | 파지·기울임·복귀 궤적과 양팔 충돌 검사 |
 | 실행·안전 | C++17, FollowJointTrajectory, command mux | 관절 한계, 타임아웃, 팔 간 거리, 안전 정지 |
@@ -60,7 +61,7 @@ Isaac Sim 6.0의 공식 최소 VRAM은 16GB이며 현재 확인한 개발 노트
 ## 현재 역할
 
 - 강사/멘토: 로컬 LLM·감독 에이전트, 교육·리뷰
-- [@mmporong](https://github.com/mmporong): **SLAM/Nav2 우선**, 모바일 베이스·작업대 접근, 전체 통합
+- [@mmporong](https://github.com/mmporong): **SLAM/Nav2 우선**, 250 mm 모바일 베이스·지정 위치 접근, 전체 통합
 - 협업자 [@Minsuk-ji](https://github.com/Minsuk-ji): write 권한 수락, 세부 담당 확정 대기
 - 팀원 [@jangjunseo05](https://github.com/jangjunseo05): write 초대 수락 대기, 세부 담당 확정 대기
 - 공통: ACT, IK, Depth, 그리퍼·접촉 센서, 실물 데이터 수집·평가
@@ -94,6 +95,7 @@ bimanual-robot/
 - [x] 물 따르기 전용 5쪽 발표자료와 디자인 리포트 제작
 - [x] ROS 2·C++·Python·Nav2·MoveIt 2·ACT·Isaac Sim 구현 경계 문서화
 - [x] 250 mm 정사각 차체·SO-101×2·단일 Astra S 기둥의 기구 명세와 검증표 작성
+- [x] 5.26 kg 보수 질량·3점 접지·C018 12 V 주행·출력 구조 계산
 - [x] 팀 공용 구현 아키텍처 HTML 사이트 제작·ChatGPT Sites 배포
 - [ ] M0 부품 실측: SO-101 체결홀·Astra S·평행그리퍼·구동부 외피와 질량
 - [ ] M1 출력 공차 시험편과 4분할 정사각 판 이음 검증
@@ -102,7 +104,7 @@ bimanual-robot/
 - [ ] 물병 총중량·파지·미끄럼 POC
 - [ ] 컵 파지·건식 내용물 붓기·병/컵 도킹 저울 사후 판정 POC
 - [ ] 선택 확장: 로드셀 수신 모듈의 실시간 질량 판정 POC
-- [ ] SLAM/Nav2 작업대 반복 접근 기준선
+- [ ] SLAM/Nav2 지정 붓기 위치 반복 접근 기준선
 - [ ] Depth/표식 기반 작업 셀 로컬 정렬 기준선
 - [ ] 이동 → 정렬 → 양팔 파지 → 붓기 → 검증 상태기계 통합
 - [ ] MoveIt 2 양팔 URDF/SRDF·Planning Scene·무수 기울임 기준선
