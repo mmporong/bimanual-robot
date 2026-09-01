@@ -1,0 +1,187 @@
+schema_version: "0.1"
+design_id: hold_flow_mechanical_v0_1
+status: pre_cad_spec
+units:
+  length: mm
+  mass: kg
+  angle: deg
+  torque: N_m
+
+frames:
+  chassis_frame:
+    origin: [0.0, 0.0, 0.0]
+    convention: "+X forward, +Y left, +Z up; origin at square chassis center on floor"
+  base_footprint:
+    parent: chassis_frame
+    xyz: [60.0, 0.0, 0.0]
+    rpy: [0.0, 0.0, 0.0]
+  base_link:
+    parent: base_footprint
+    xyz: [0.0, 0.0, 33.0]
+    rpy: [0.0, 0.0, 0.0]
+
+chassis:
+  footprint: [250.0, 250.0]
+  corner_radius: 12.0
+  material_primary: PETG
+  material_alternative: ASA
+  target_total_mass_range: [4.0, 5.0]
+  plates:
+    bottom:
+      z_bottom: 15.0
+      thickness: 6.0
+    middle:
+      z_bottom: 62.0
+      thickness: 6.0
+    top:
+      z_bottom: 111.0
+      thickness: 8.0
+  split_print_220_bed:
+    enabled: true
+    quadrant_xy: [124.5, 124.5]
+    assembly_gap: 1.0
+    arm_backing_plate_each_xyz: [130.0, 90.0, 6.0]
+    arm_backing_plate_quantity: 2
+    camera_backing_plate_xyz: [85.0, 85.0, 6.0]
+
+arm_mounts:
+  source_base_envelope: [110.93, 72.0, 87.0]
+  long_axis: x
+  left:
+    xyz: [25.0, 70.0, 119.0]
+    rpy: [0.0, 0.0, 0.0]
+  right:
+    xyz: [25.0, -70.0, 119.0]
+    rpy: [0.0, 0.0, 0.0]
+  center_spacing: 140.0
+  side_margin: 19.0
+  center_gap: 68.0
+  mount_hole_pattern_status: physical_measurement_required
+  servo_variant_status: physical_label_check_required
+  allowed_servo_variants:
+    STS3215_C001:
+      bus_voltage_max: 7.4
+      rated_torque: 0.490
+      stall_torque: 1.912
+    STS3215_C018:
+      nominal_bus_voltage: 12.0
+      voltage_range: [4.0, 14.0]
+      rated_torque: 0.981
+      stall_torque: 2.942
+
+parallel_grippers:
+  type: synchronized_horizontal_parallel_jaw
+  quantity: 2
+  opening_range: [20.0, 85.0]
+  target_mass_max_each: 0.130
+  redesign_threshold_mass_each: 0.150
+  max_com_offset_from_wrist: 65.0
+  jaw_parallel_error_max: 0.5
+  repeatability_target: 1.0
+  pad_material: TPU_95A
+  fsr_channels_total: 4
+
+camera:
+  model: Orbbec_Astra_S
+  design_envelope: [170.0, 55.0, 45.0]
+  design_mass_with_bracket_max: 0.40
+  optical_center_xyz: [-80.0, 0.0, 480.0]
+  nominal_pitch_down: 47.0
+  pitch_adjustment_range: [40.0, 55.0]
+  depth_range: [400.0, 2000.0]
+  depth_fov_hv: [58.4, 45.5]
+  interface: USB_2_0
+  mount: bottom_M6_plus_anti_rotation_cradle
+
+camera_mast:
+  type: single_rear_center_box_column
+  center_xy: [-80.0, 0.0]
+  outer_section_xy: [35.0, 45.0]
+  wall: 4.0
+  base_flange_xyz: [75.0, 75.0, 8.0]
+  keyed_overlap: 60.0
+  segment_count_for_220_bed: 2
+  m4_cross_bolts: 4
+  cable_channel_min: 12.0
+  lateral_deflection_at_1N_max: 1.0
+  settling_time_max_s: 0.5
+  collision_keepout_radius: 55.0
+
+navigation:
+  drive_type: differential_two_wheel_rear_ball_caster
+  wheel_radius_target: 33.0
+  wheel_axis_x: 60.0
+  wheel_contact_y: [-135.0, 135.0]
+  rear_caster_contact_xyz: [-105.0, 0.0, 0.0]
+  support_polygon_xy:
+    - [60.0, 135.0]
+    - [60.0, -135.0]
+    - [-105.0, 0.0]
+  motor_minimum_each:
+    continuous_torque: 0.30
+    peak_torque: 0.60
+    output_rpm_range: [60.0, 100.0]
+    wheel_encoder_counts_per_rev_min: 300
+  lidar_candidate:
+    model: ROBOTIS_LDS_03
+    center_xyz: [100.0, 0.0, 136.0]
+    envelope: [54.7, 39.7, 34.0]
+    mass: 0.042
+    status: candidate_requires_occlusion_test
+
+power:
+  arm_bus_voltage_status: select_after_all_servo_labels_are_verified
+  direct_3s_to_arm_bus_condition: all_follower_servos_are_STS3215_C018
+  prohibit_12v_arm_bus_if_any_servo_is: STS3215_C001
+  battery_candidate:
+    chemistry: 3S_pack_TBD
+    capacity_Ah_min: 5.0
+    bms_continuous_current_A_min: 30.0
+    center_xyz: [-45.0, 0.0, 40.0]
+  dc_dc_5v_current_A_min: 8.0
+  fuse_candidates_A:
+    master: 30.0
+    left_arm: 10.0
+    right_arm: 10.0
+    drive: 10.0
+  emergency_stop:
+    cuts: [left_arm_power, right_arm_power, drive_power]
+    keeps_alive: [sbc_logging]
+
+workspace:
+  nominal_pour_center_xyz: [230.0, 0.0, 150.0]
+  nominal_camera_range: 452.9
+  nominal_camera_pitch_down: 46.8
+  held_object_horizontal_reach_max: 200.0
+  initial_payload_max: 0.200
+  gated_payload_next: 0.250
+  payload_0_300_status: requires_current_temperature_and_stability_pass
+
+safety:
+  arm_link_min_distance: 25.0
+  gripper_to_other_arm_min_distance: 40.0
+  com_limits_nominal_pour:
+    x_min: -70.0
+    x_max: 35.0
+    abs_y_max: 60.0
+    support_polygon_edge_margin_min: 20.0
+  servo_warning_temperature_C: 55.0
+  servo_stop_temperature_C: 60.0
+  base_motion_during_manipulation: prohibited
+
+urdf:
+  left_prefix: left_
+  right_prefix: right_
+  wheel_separation_target: 270.0
+  wheel_radius_target: 33.0
+  gripper_secondary_jaw: mimic_joint
+  camera_optical_frame: camera_depth_optical_frame
+  inertia_status: replace_with_final_cad_mass_properties
+
+sources:
+  so101: https://github.com/TheRobotStudio/SO-ARM100
+  feetech_sts3215_c018: https://www.feetechrc.com/525603.html
+  orbbec_astra_series: https://www.orbbec.com/products/structured-light-camera/astra-series/
+  parallel_gripper_reference: https://github.com/roboninecom/SO-ARM100-101-Parallel-Gripper
+  turtlebot3: https://emanual.robotis.com/docs/en/platform/turtlebot3/features/
+  lds_03: https://emanual.robotis.com/docs/en/platform/turtlebot3/appendix_lds_03/

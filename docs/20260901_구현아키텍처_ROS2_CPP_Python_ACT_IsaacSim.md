@@ -4,6 +4,8 @@
 >
 > 범위: 이동형 양팔 붓기 1안만 다룬다. 실물 검증 전 항목은 계획이며, 달성 결과처럼 쓰지 않는다.
 
+기구 치수, 좌표, 체결, 질량 예산과 URDF 시작값은 [기구설계·제작 명세 v0.1](20260901_기구설계_제작명세_v0.1.md)과 [`hold_flow_mechanical_v0_1.yaml`](../design/mechanical/hold_flow_mechanical_v0_1.yaml)을 단일 원본으로 사용한다.
+
 ![HOLD THE FLOW 시스템 아키텍처](20260901_HOLD_THE_FLOW_구현아키텍처.svg)
 
 ## 1. 한 문장으로 정한 구조
