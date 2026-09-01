@@ -1,0 +1,46 @@
+schema_version: "0.1"
+status: pre_measurement
+
+frames:
+  base_footprint_definition: drive_wheel_axis_projection_on_floor
+  chassis_center_from_base_footprint_m: [-0.090, 0.000, 0.000]
+  base_link_from_base_footprint_m: [0.000, 0.000, 0.0329]
+
+drive:
+  wheel_radius_m: 0.0329
+  geometric_wheel_center_separation_m: 0.270
+  effective_wheel_separation_m: null
+  effective_wheel_separation_gate: calibrate_with_straight_and_rotation_trials
+  prohibit_reusing_jdamr_effective_separation_0_1836: true
+
+arm_mounts:
+  left_from_base_link_m: [-0.065, 0.070, 0.0861]
+  right_from_base_link_m: [-0.065, -0.070, 0.0861]
+  base_hole_pattern_mm: null
+  base_hole_pattern_gate: measure_physical_so101_before_final_adapter
+
+camera:
+  model: Orbbec Astra S
+  optical_target_from_chassis_frame_m: [-0.080, 0.000, 0.800]
+  nominal_pitch_down_rad: 0.698132
+  physical_mount_gate: measure_actual_camera_body_and_m6_location
+
+lidar:
+  model: ROBOTIS LDS-03
+  center_from_chassis_frame_m: [0.090, 0.000, 0.165]
+  center_from_base_link_m: [0.000, 0.000, 0.1321]
+  body_orientation: 0_0547m_along_x_0_0397m_along_y
+  mount: independent_0_029m_low_riser
+  scan_plane_gate: measure_physical_optical_plane_then_update_z
+  nav_gate: verify_occlusion_with_both_arms_locked_in_transport_pose
+
+rear_caster:
+  target_contact_from_chassis_frame_m: [-0.105, 0.000, 0.000]
+  ball_radius_m: null
+  mounting_pattern_mm: null
+  gate: measure_jdamr_caster_then_select_0_to_3mm_shim
+
+inertia:
+  cad_printed_parts: conservative_solid_volume_until_sliced_and_weighed
+  so101_parallel_arms: scaled_from_robonine_inertia_to_0_703kg_each
+  gate: replace_with_measured_link_masses_before_dynamics_control

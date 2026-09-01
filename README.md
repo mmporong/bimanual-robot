@@ -27,11 +27,22 @@
 - 기구 검증표: [docs/20260901_기구설계_검증체크리스트_v0.2.md](docs/20260901_기구설계_검증체크리스트_v0.2.md)
 - JD-AMR 구동계·K1 Max·평행그리퍼 반영: [docs/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md](docs/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md)
 - CAD·URDF 파라미터: [design/mechanical/hold_flow_mechanical_v0_2.yaml](design/mechanical/hold_flow_mechanical_v0_2.yaml)
+- 출력용 CAD 원본·STEP·STL: [design/cad/README.md](design/cad/README.md)
+- 양팔 ROS 2 모델: [src/hold_flow_description/README.md](src/hold_flow_description/README.md)
+- 확장된 단일 URDF: [src/hold_flow_description/urdf/hold_flow.urdf](src/hold_flow_description/urdf/hold_flow.urdf)
 - 논문 적용 설계: [research/R31_1안_이동형_양팔_붓기_논문적용.md](research/R31_1안_이동형_양팔_붓기_논문적용.md)
 - 팀 작업 방식: [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md)
 - 회의 기록: [docs/20260828_회의결과_주제후보_역할분담.md](docs/20260828_회의결과_주제후보_역할분담.md)
 - 5쪽 발표자료: [docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx](docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx)
 - 발표자료 디자인 리포트: [docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx](docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx)
+
+## CAD와 URDF
+
+차체는 문서상의 치수표에 머물러 있지 않다. CadQuery 원본에서 K1 Max용 STEP·STL 14종을 다시 만들 수 있고, 하판·중판·상판과 팔 보강판, 카메라 마스트, Astra 거치대, LDS-03 받침대, 주행·캐스터 어댑터가 포함돼 있다. 상·중·하판과 상판 어댑터의 기준 위치는 [`hold_flow_printed_structure.step`](design/cad/exports/step/hold_flow_printed_structure.step)에서 확인한다.
+
+ROS 2 모델은 250 mm 이동 베이스와 SO-101 두 대, Robonine 평행 그리퍼 두 대, Astra S, LDS-03을 하나의 TF 트리로 묶었다. 좌우 팔은 같은 원본에서 `left_`와 `right_` prefix를 붙여 생성하며, 평행 죠는 prismatic·mimic joint로 움직인다. Xacro 확장본과 커밋된 URDF가 같은지, 메시 참조 51개가 실제로 존재하는지, 바퀴 간격과 센서·팔 좌표가 설계값과 일치하는지는 검증 스크립트가 확인한다.
+
+다만 장공을 원형공으로 바꾸는 일은 아직 남았다. SO-101 베이스, C018 혼과 JD-AMR 휠 허브, 볼 캐스터, Astra와 LDS-03 체결부를 실측한 뒤 어댑터를 확정해야 한다. 현재 출력물은 조립 검토용 P0이며 실측을 건너뛴 양산판이 아니다.
 
 ## 현재 구현 스택
 
@@ -73,7 +84,7 @@ Isaac Sim 6.0의 공식 최소 VRAM은 16GB이며 현재 확인한 개발 노트
 
 ```
 bimanual-robot/
-├── design/        CAD·URDF가 함께 읽는 기구 파라미터와 설계 원본
+├── design/        기구 파라미터, CadQuery 원본, STEP·STL 출력물
 ├── docs/          회의록·결정사항·담당 파트·설계 문서 (파일명 YYYYMMDD_ 접두)
 ├── research/      리서치 산출물 (양팔 텔레옵 선례, 적용 사례, GPU 비용 등)
 ├── data/          데이터셋 규격·인덱스·스키마 (실데이터는 커밋하지 않음)
@@ -98,6 +109,8 @@ bimanual-robot/
 - [x] 250 mm 정사각 차체·SO-101×2·단일 Astra S 기둥의 기구 명세와 검증표 작성
 - [x] 5.26 kg 보수 질량·3점 접지·C018 12 V 주행·출력 구조 계산
 - [x] JD-AMR 65 mm 바퀴·볼 캐스터 재사용, K1 Max 한 장 판, Robonine 평행그리퍼 P0 기준 확정
+- [x] K1 Max용 파라메트릭 CAD와 STEP·STL 14종 생성, B-Rep·빌드 볼륨·서포트 검사 통과
+- [x] 모바일 베이스·SO-101×2·평행그리퍼×2·Astra·LDS-03 Xacro/URDF 생성과 TF 검사 통과
 - [x] 팀 공용 구현 아키텍처 HTML 사이트 제작·ChatGPT Sites 배포
 - [ ] M0 부품 실측: SO-101 체결홀·Astra S·평행그리퍼·JD-AMR 바퀴/캐스터·구동부 외피와 질량
 - [ ] M1 K1 Max 출력 공차·6 mm 로드 시험편과 250 mm 한 장 판 평탄도 검증
@@ -109,6 +122,6 @@ bimanual-robot/
 - [ ] SLAM/Nav2 지정 붓기 위치 반복 접근 기준선
 - [ ] Depth/표식 기반 작업 셀 로컬 정렬 기준선
 - [ ] 이동 → 정렬 → 양팔 파지 → 붓기 → 검증 상태기계 통합
-- [ ] MoveIt 2 양팔 URDF/SRDF·Planning Scene·무수 기울임 기준선
+- [ ] MoveIt 2 양팔 SRDF·Planning Scene·무수 기울임 기준선
 - [ ] LeRobot 양팔 5 episode smoke dataset
 - [ ] ACT 20 episode 과적합 기준선과 IK 대조 평가

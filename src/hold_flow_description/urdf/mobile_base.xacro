@@ -1,0 +1,150 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="box_inertial" params="mass x y z">
+    <inertial>
+      <origin xyz="0 0 ${z / 2.0}" rpy="0 0 0"/>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="${mass * (y * y + z * z) / 12.0}" ixy="0" ixz="0"
+        iyy="${mass * (x * x + z * z) / 12.0}" iyz="0"
+        izz="${mass * (x * x + y * y) / 12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="wheel_inertial" params="mass radius width">
+    <inertial>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="${mass * (3.0 * radius * radius + width * width) / 12.0}" ixy="0" ixz="0"
+        iyy="${mass * radius * radius / 2.0}" iyz="0"
+        izz="${mass * (3.0 * radius * radius + width * width) / 12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="cad_mesh_link" params="name parent xyz mesh mass sx sy sz material">
+    <link name="${name}">
+      <xacro:box_inertial mass="${mass}" x="${sx}" y="${sy}" z="${sz}"/>
+      <visual>
+        <geometry>
+          <mesh filename="package://hold_flow_description/meshes/cad/${mesh}" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="${material}"/>
+      </visual>
+      <collision>
+        <geometry>
+          <mesh filename="package://hold_flow_description/meshes/cad/${mesh}" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="${name}_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${name}"/>
+      <origin xyz="${xyz}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="hold_flow_mobile_base">
+    <!-- base_footprint는 차체 중심이 아니라 구동 바퀴축의 바닥 투영점이다. -->
+    <link name="base_footprint"/>
+    <link name="base_link">
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+      </inertial>
+    </link>
+    <joint name="base_footprint_joint" type="fixed">
+      <parent link="base_footprint"/>
+      <child link="base_link"/>
+      <origin xyz="0 0 0.0329" rpy="0 0 0"/>
+    </joint>
+
+    <!-- 차체 중심은 바퀴축보다 90 mm 뒤에 있다. 메시 원점은 각 부품 바닥면이다. -->
+    <xacro:cad_mesh_link
+      name="chassis_bottom_link" parent="base_link" xyz="-0.090 0 -0.0269"
+      mesh="chassis_bottom.stl" mass="0.3258" sx="0.250" sy="0.250" sz="0.048"
+      material="hold_flow_dark"/>
+    <xacro:cad_mesh_link
+      name="chassis_middle_link" parent="base_link" xyz="-0.090 0 0.0291"
+      mesh="chassis_middle.stl" mass="0.2654" sx="0.250" sy="0.250" sz="0.006"
+      material="hold_flow_white"/>
+    <xacro:cad_mesh_link
+      name="chassis_top_link" parent="base_link" xyz="-0.090 0 0.0781"
+      mesh="chassis_top.stl" mass="0.6170" sx="0.250" sy="0.250" sz="0.008"
+      material="hold_flow_white"/>
+
+    <xacro:cad_mesh_link
+      name="left_arm_backing_link" parent="base_link" xyz="-0.065 0.070 0.0721"
+      mesh="arm_adapter.stl" mass="0.0773" sx="0.130" sy="0.090" sz="0.006"
+      material="hold_flow_dark"/>
+    <xacro:cad_mesh_link
+      name="right_arm_backing_link" parent="base_link" xyz="-0.065 -0.070 0.0721"
+      mesh="arm_adapter.stl" mass="0.0773" sx="0.130" sy="0.090" sz="0.006"
+      material="hold_flow_dark"/>
+
+    <xacro:cad_mesh_link
+      name="camera_backing_link" parent="base_link" xyz="-0.170 0 0.0861"
+      mesh="camera_backing.stl" mass="0.0561" sx="0.075" sy="0.075" sz="0.008"
+      material="hold_flow_dark"/>
+
+    <xacro:cad_mesh_link
+      name="lidar_riser_link" parent="base_link" xyz="0 0 0.0861"
+      mesh="lidar_riser.stl" mass="0.0992" sx="0.065" sy="0.050" sz="0.029"
+      material="hold_flow_dark"/>
+
+    <link name="left_wheel_link">
+      <xacro:wheel_inertial mass="0.110" radius="0.0329" width="0.020"/>
+      <visual>
+        <origin rpy="1.570796 0 0"/>
+        <geometry><cylinder radius="0.0329" length="0.020"/></geometry>
+        <material name="hold_flow_dark"/>
+      </visual>
+      <collision>
+        <origin rpy="1.570796 0 0"/>
+        <geometry><cylinder radius="0.0329" length="0.020"/></geometry>
+      </collision>
+    </link>
+    <joint name="left_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="left_wheel_link"/>
+      <origin xyz="0 0.135 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="0.981" velocity="4.72"/>
+      <dynamics damping="0.02" friction="0.02"/>
+    </joint>
+
+    <link name="right_wheel_link">
+      <xacro:wheel_inertial mass="0.110" radius="0.0329" width="0.020"/>
+      <visual>
+        <origin rpy="1.570796 0 0"/>
+        <geometry><cylinder radius="0.0329" length="0.020"/></geometry>
+        <material name="hold_flow_dark"/>
+      </visual>
+      <collision>
+        <origin rpy="1.570796 0 0"/>
+        <geometry><cylinder radius="0.0329" length="0.020"/></geometry>
+      </collision>
+    </link>
+    <joint name="right_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="right_wheel_link"/>
+      <origin xyz="0 -0.135 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="0.981" velocity="4.72"/>
+      <dynamics damping="0.02" friction="0.02"/>
+    </joint>
+
+    <link name="rear_caster_link">
+      <inertial>
+        <mass value="0.060"/>
+        <inertia ixx="3.75e-6" ixy="0" ixz="0" iyy="3.75e-6" iyz="0" izz="3.75e-6"/>
+      </inertial>
+      <visual><geometry><sphere radius="0.0125"/></geometry><material name="silver"/></visual>
+      <collision><geometry><sphere radius="0.0125"/></geometry></collision>
+    </link>
+    <joint name="rear_caster_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="rear_caster_link"/>
+      <origin xyz="-0.195 0 -0.0204" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+</robot>
