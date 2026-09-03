@@ -1,6 +1,6 @@
 # hold_flow_description
 
-250×250 mm 이동 베이스, SO-101 두 대, Robonine 수평 평행 그리퍼, Astra S와 LDS-03 후보를 하나의 TF 트리로 묶는 ROS 2 Jazzy 설명 패키지다.
+250×250 mm 이동 베이스, SO-101 두 대, ggao50 수평 평행 그리퍼, Astra S와 LDS-03 후보를 하나의 TF 트리로 묶는 ROS 2 Jazzy 설명 패키지다.
 
 ## 모델의 좌표 기준
 
@@ -15,7 +15,9 @@
 
 ## 공개 형상 사용
 
-`third_party/robonine`과 `meshes/robonine`은 Robonine의 SO-ARM100/101 Parallel Gripper 저장소 `305ad0f6e8f19e4e739616160cbdc7cae1ab153f` 커밋에서 가져왔다. 형상과 관절축은 원본을 유지하고, 공개 URDF의 과도한 질량은 원래 SO-101 링크 질량과 170 g 평행 그리퍼 총질량에 맞춰 합계 0.703 kg/arm으로 스케일했다. 이 관성은 제어용 최종값이 아니라 충돌·가동범위 검토용 P0 값이다.
+`third_party/so_arm_101`과 `meshes/so101`은 상류 TheRobotStudio SO-ARM100/101(Apache-2.0) 형상이며, 관절 오리진과 한계는 로컬 JD-AMR 실기에서 검증된 값을 그대로 쓴다. `scripts/generate_so101_arm_xacro.py`가 생성한다.
+
+그리퍼는 [ggao50 SO101-Parallel-Gripper](https://github.com/ggao50/SO101-Parallel-Gripper)를 쓴다. 그 저장소에 라이선스 표기가 없어 원본 메시를 벤더링하지 않고, 배포된 STL을 실측한 치수로 만든 단순 형상 프록시를 `urdf/ggao50_gripper.xacro`에 둔다. 실제 출력은 상류 STL을 그대로 쓴다. 관성은 제어용 최종값이 아니라 충돌·가동범위 검토용 P0 값이다.
 
 ## 빌드와 검증
 
@@ -44,12 +46,14 @@ colcon build --packages-select hold_flow_description --symlink-install \
 
 - 좌우 `tool0`, `bottle_tcp`, `cup_tcp` frame이 없다.
 - 계산 문서의 task 좌표가 현재 URDF FK가 아니라 상수로 저장되어 있다.
-- 붓기 후보의 좌우 `link2_to_link3` 값이 현재 Robonine URDF hard limit 밖이다.
-- JD-AMR에서 검증한 SO-101 관절 규약과 Robonine 전체 팔 Xacro의 관절 규약이 섞였다.
+- 2026-09-03 해소: Robonine 팔 체인을 걷어내고 검증된 SO-101 체인으로 되돌렸다. 붓기·운반 관절값이 모두 hard limit 안에 든다.
+- 2026-09-03 해소: `left_tool0`/`right_tool0`와 `bottle_tcp`/`cup_tcp` 프레임을 추가했다.
 - zero joint pose는 좌우 팔 collision mesh가 교차하며 시작 자세로 사용할 수 없다.
 - 운반 후보도 링크 간 최소 `18.78 mm`, 마스트 중심 반경 `31.36 mm`로 프로젝트 안전여유를 만족하지 않는다.
 
-이 상태에서는 YAML의 `pour_joint_degrees`를 실기체에 전송하지 않는다. 권고 수정은 검증된 SO-101 팔 체인을 유지하고 Robonine의 평행 죠 기구만 엔드이펙터로 부착한 뒤, 명시적 TCP와 FK/IK 회귀시험을 추가하는 것이다.
+이 상태에서도 YAML의 `transport_joint_degrees`는 실기체에 전송하지 않는다. 그 각도는 Robonine 체인용으로 푼 legacy 값이라 SO-101 체인에서는 양팔이 서로 닿는다(교차 여유 0.0 mm, 삼각형 충돌 1쌍). 남은 작업은 새 체인과 tool0 기준으로 IK를 다시 풀고, 문서의 목표 좌표를 상수가 아니라 FK 산출값으로 대체하는 것이다.
+
+zero 자세는 통과한다 — 교차 여유 75.60 mm, 그리퍼-반대팔 67.70 mm, 팔↔LiDAR 28.83 mm, 마스트 반경 91.66 mm, 충돌 0쌍.
 
 ## 아직 확정하지 않은 값
 

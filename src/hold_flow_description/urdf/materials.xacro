@@ -12,4 +12,16 @@
   <material name="silver">
     <color rgba="0.63 0.66 0.70 1.0"/>
   </material>
+  <material name="so101_3d_printed">
+    <color rgba="0.16 0.17 0.19 1.0"/>
+  </material>
+  <material name="so101_sts3215">
+    <color rgba="0.10 0.10 0.12 1.0"/>
+  </material>
+  <material name="ggao50_printed">
+    <color rgba="0.75 0.77 0.80 1.0"/>
+  </material>
+  <material name="gripper_insert">
+    <color rgba="0.90 0.45 0.10 1.0"/>
+  </material>
 </robot>

@@ -138,17 +138,17 @@ def pose_values(spec: dict, state: str) -> dict[str, float]:
         right = spec["workspace"]["pour_joint_degrees"]["right_cup"]
     output: dict[str, float] = {}
     suffixes = [
-        "base_link_to_link1",
-        "link1_to_link2",
-        "link2_to_link3",
-        "link3_to_link4",
-        "link4_to_link5",
+        "shoulder_pan",
+        "shoulder_lift",
+        "elbow_flex",
+        "wrist_flex",
+        "wrist_roll",
     ]
     for prefix, degrees in (("left", left), ("right", right)):
         output.update(
             {f"{prefix}_{suffix}": math.radians(value) for suffix, value in zip(suffixes, degrees)}
         )
-        output[f"{prefix}_right_clamp"] = 0.0185
+        output[f"{prefix}_finger1_joint"] = 0.0325
     return output
 
 
@@ -254,9 +254,13 @@ def main() -> None:
         limit_results = joint_limit_audit(root, positions)
         proxy = {}
         for side in ("left", "right"):
-            first = jaw_visual_center(root, transforms, f"{side}_clamp_1")
-            second = jaw_visual_center(root, transforms, f"{side}_clamp_2")
-            proxy[side] = midpoint(first, second)
+            tool0 = f"{side}_tool0"
+            if tool0 in transforms:
+                proxy[side] = [transforms[tool0][axis][3] for axis in range(3)]
+            else:
+                first = jaw_visual_center(root, transforms, f"{side}_finger1_link")
+                second = jaw_visual_center(root, transforms, f"{side}_finger2_link")
+                proxy[side] = midpoint(first, second)
         if state == "transport":
             targets = {
                 "left": chassis_target_to_base_footprint_m([157.236, 133.610, 415.848]),
@@ -272,13 +276,13 @@ def main() -> None:
             "joint_limit_violations": [
                 item for item in limit_results if not item.get("within_limit", False)
             ],
-            "jaw_visual_bbox_midpoint_proxy_from_base_footprint_m": {
+            "tool0_from_base_footprint_m": {
                 side: [round(value, 4) for value in proxy[side]] for side in proxy
             },
             "documented_target_from_base_footprint_m": {
                 side: [round(value, 4) for value in targets[side]] for side in targets
             },
-            "proxy_to_target_gap_mm": {
+            "tool0_to_target_gap_mm": {
                 side: round(distance(proxy[side], targets[side]) * 1000.0, 1) for side in proxy
             },
         }
@@ -291,9 +295,9 @@ def main() -> None:
     if any(
         gap > 50.0
         for state in states.values()
-        for gap in state["proxy_to_target_gap_mm"].values()
+        for gap in state["tool0_to_target_gap_mm"].values()
     ):
-        blockers.append("현재 joint state의 jaw visual 중심 proxy가 문서 목표와 크게 다르다")
+        blockers.append("현재 joint state의 tool0 가 문서 목표와 크게 다르다")
     if any(not state["joint_limits_pass"] for state in states.values()):
         blockers.append("문서의 붓기 후보 관절값 일부가 현재 URDF hard limit 밖이다")
 
@@ -304,7 +308,7 @@ def main() -> None:
         "required_task_frames": sorted(REQUIRED_TASK_FRAMES),
         "missing_task_frames": missing_frames,
         "states": states,
-        "proxy_warning": "jaw visual bounding-box 중심은 진단용이며 공식 TCP가 아니다",
+        "tcp_note": "tool0 는 두 죠 사이 파지 기준이다. 손목 장착 오프셋은 실물 확정 전 명목값이다",
         "task_ready": not blockers,
         "blocking_findings": blockers,
     }
