@@ -1,0 +1,63 @@
+{
+  "schema_version": "0.1",
+  "generator": "design/gripper/generate_jaw_inserts.py",
+  "target_gripper": "ggao50/SO101-Parallel-Gripper",
+  "jaw_face_measured_mm": {
+    "length": 72.5,
+    "height": 57.5
+  },
+  "groove_width_mm": 30.0,
+  "v_angle_deg": 135.0,
+  "fastening": {
+    "bolt": "M3",
+    "quantity_per_insert": 2,
+    "spacing_mm": 34.0,
+    "clearance_hole_mm": 3.4,
+    "counterbore": {
+      "diameter_mm": 6.5,
+      "depth_mm": 1.6
+    },
+    "note": "죠 쪽에서 너트, 파지면 쪽에 머리를 묻는다. 죠에 Ø3.4 관통 2개 필요"
+  },
+  "parts": [
+    {
+      "name": "insert_A_flat_pad",
+      "quantity": 4,
+      "valid_brep": true,
+      "bounds_mm": [
+        7.0,
+        60.0,
+        50.0
+      ],
+      "volume_cm3_each": 20.742,
+      "estimated_mass_g_each": 25.1,
+      "note": "평면 패드. TPU 95A 권장"
+    },
+    {
+      "name": "insert_B_v_groove",
+      "quantity": 4,
+      "valid_brep": true,
+      "bounds_mm": [
+        12.22,
+        60.0,
+        50.0
+      ],
+      "volume_cm3_each": 32.416,
+      "estimated_mass_g_each": 39.2,
+      "note": "V홈 135도. 지름 무관 자기중심"
+    },
+    {
+      "name": "insert_C_trapezoid",
+      "quantity": 4,
+      "valid_brep": true,
+      "bounds_mm": [
+        9.32,
+        60.0,
+        50.0
+      ],
+      "volume_cm3_each": 24.422,
+      "estimated_mass_g_each": 29.6,
+      "note": "사다리꼴 홈 135도. 원통과 평면 겸용"
+    }
+  ]
+}
