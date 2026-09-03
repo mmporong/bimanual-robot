@@ -31,8 +31,8 @@ ANALYZER = Path.home() / ".claude/skills/3d/scripts/analyze_stl.py"
 # 실측 서포트 판정 결과. 회전으로 없앨 수 있는 것만 회전한다.
 PARTS = {
     "backplate": {"rotate": "Y+90", "support": "tree", "note": "레일. 회전해도 서포트 필요"},
-    "leftgripper": {"rotate": None, "support": "tree", "note": "죠. 파지면이 수직이라 원본 유지"},
-    "rightgripper": {"rotate": "X180", "support": "tree", "note": "죠 대칭"},
+    "leftgripper": {"rotate": None, "support": "tree", "note": "죠. 인서트 구멍을 뚫어 쓴다"},
+    "rightgripper": {"rotate": "X180", "support": "tree", "note": "죠 대칭. 인서트 구멍 포함"},
     "connectorplate": {"rotate": None, "support": "tree", "note": "손목 연결판"},
     "cameraplate": {"rotate": None, "support": "tree", "note": "손목캠 마운트. 안 쓰면 생략"},
     "pinion": {"rotate": "X+90", "support": "off", "note": "구동 기어. 회전하면 서포트 불필요"},
@@ -40,8 +40,15 @@ PARTS = {
 INFILL = "25%"
 
 
-def fetch(name: str, target: Path) -> None:
-    path = urllib.parse.quote(f"STL/Parallel Jaw Gripper - {name}.stl")
+# 죠는 STEP 을 받아 인서트 구멍을 뚫은 뒤 STL 로 내보낸다.
+DRILLED = ("leftgripper", "rightgripper")
+DRILLER = REPO_ROOT / "design/gripper/drill_jaw_insert_holes.py"
+CAD_PYTHON = Path.home() / ".cache/bimanual-cad-venv/bin/python"
+
+
+def fetch(name: str, target: Path, kind: str = "STL") -> None:
+    suffix = "stl" if kind == "STL" else "step"
+    path = urllib.parse.quote(f"{kind}/Parallel Jaw Gripper - {name}.{suffix}")
     url = f"https://api.github.com/repos/{SOURCE_REPO}/contents/{path}"
     with urllib.request.urlopen(url, timeout=60) as response:
         payload = json.load(response)
@@ -67,6 +74,21 @@ def main() -> None:
         if not target.exists():
             print(f"받는 중 {name}")
             fetch(name, target)
+        if name in DRILLED:
+            step = raw / f"{name}.step"
+            if not step.exists():
+                print(f"받는 중 {name}.step")
+                fetch(name, step, kind="STEP")
+
+    # 죠에 인서트 볼트 구멍을 뚫는다. 결과는 raw 에 *_drilled.stl 로 둔다.
+    if any(name in DRILLED for name in names):
+        if not CAD_PYTHON.exists():
+            raise SystemExit(f"CAD 전용 python 을 찾지 못했습니다: {CAD_PYTHON}")
+        subprocess.run([str(CAD_PYTHON), str(DRILLER), "--raw", str(raw), "--out", str(raw)],
+                       check=True)
+        for name in DRILLED:
+            if name in names:
+                (raw / f"{name}.stl").write_bytes((raw / f"{name}_drilled.stl").read_bytes())
 
     rotate_names = [name for name in names if PARTS[name]["rotate"]]
     if rotate_names:
