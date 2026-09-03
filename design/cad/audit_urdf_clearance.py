@@ -209,15 +209,21 @@ def main() -> None:
     transport = {}
     transport.update(pose_positions("left", spec["workspace"]["transport_joint_degrees"]["left"]))
     transport.update(pose_positions("right", spec["workspace"]["transport_joint_degrees"]["right"]))
+    pour = {}
+    pour.update(pose_positions("left", spec["workspace"]["pour_joint_degrees"]["left_bottle"]))
+    pour.update(pose_positions("right", spec["workspace"]["pour_joint_degrees"]["right_cup"]))
     report = {
         "urdf": str(URDF_PATH.relative_to(REPO_ROOT)),
         "method": "VTK triangle collision + bidirectional vertex-to-surface distance",
         "states": {
             "zero": audit_state(scene, {}),
             "transport_candidate": audit_state(scene, transport),
+            "pour_candidate": audit_state(scene, pour),
         },
     }
-    report["task_clearance_ready"] = report["states"]["transport_candidate"]["passes"]
+    report["task_clearance_ready"] = all(
+        state["passes"] for state in report["states"].values()
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.strict and not report["task_clearance_ready"]:
         raise SystemExit(2)
