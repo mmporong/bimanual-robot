@@ -1,0 +1,152 @@
+<?xml version="1.0"?>
+<!--
+  ggao50 SO101 평행 그리퍼의 단순 형상 프록시.
+
+  상류 저장소(https://github.com/ggao50/SO101-Parallel-Gripper)에 라이선스
+  표기가 없어 원본 메시를 벤더링하지 않는다. 여기 형상은 배포된 STL 을 실측한
+  치수로 우리가 직접 만든 대체 프록시이며 충돌·작업공간 검사용이다. 실제 출력은
+  상류 STL 을 그대로 쓴다.
+
+  좌표 규약은 상류 조립 좌표계와 같다.
+    X = 개폐 방향, Y = 손목(+) 에서 손끝(-), Z = 병 축
+
+  실측 근거 (STL 직접 측정)
+    파지면 평면        X = ±49.4 mm (STL 자세 기준, 개폐 98.8 mm)
+    최대 개폐          105 mm
+    손가락 방향 범위   Y -84.9 ~ -4.8 mm
+    병 축 방향 범위    Z -31.4 ~ 28.2 mm
+    레일(backplate)    128.8 x 15.5 x 72.5 mm
+    손목 인터페이스면  Y = +55.3 mm (connectorplate)
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- 손목 출력에서 그리퍼 기준면까지. 실물 장착 전 확정 필요. -->
+  <xacro:property name="ggao50_mount_xyz" value="-0.0079 -0.000218 0.0"/>
+  <xacro:property name="ggao50_mount_rpy" value="1.5707963 0 0"/>
+
+  <!-- 죠 중앙과 파지 높이. tool0 는 두 죠 사이 중앙에 둔다. -->
+  <xacro:property name="ggao50_tcp_y" value="-0.040"/>
+
+  <!-- 물체 기준점. tool0 에서 병 축(+Z) 을 따라 올라간다.
+       값은 source_container 규격(200~330 mL, 지름 50~72 mm)의 명목치이며
+       용기를 확정하면 실측으로 대체한다. -->
+  <xacro:property name="bottle_cap_offset_z" value="0.090"/>
+  <xacro:property name="cup_rim_offset_z" value="0.040"/>
+
+  <!-- 인서트를 붙인 뒤의 유효 개폐. 135도 V홈 기준 86.6 mm -->
+  <xacro:property name="ggao50_jaw_min" value="0.010"/>
+  <xacro:property name="ggao50_jaw_max" value="0.0433"/>
+
+  <xacro:macro name="ggao50_gripper" params="prefix parent">
+
+    <joint name="${prefix}gripper_mount_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}gripper_base_link"/>
+      <origin xyz="${ggao50_mount_xyz}" rpy="${ggao50_mount_rpy}"/>
+    </joint>
+
+    <!-- 레일 + 손목 연결판 -->
+    <link name="${prefix}gripper_base_link">
+      <inertial>
+        <origin xyz="0 0.020 0" rpy="0 0 0"/>
+        <mass value="0.105"/>
+        <inertia ixx="7.5e-05" ixy="0" ixz="0" iyy="1.5e-04" iyz="0" izz="9.5e-05"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 -0.004 0" rpy="0 0 0"/>
+        <geometry><box size="0.1288 0.0155 0.0725"/></geometry>
+        <material name="ggao50_printed"/>
+      </visual>
+      <visual>
+        <origin xyz="0.011 0.048 0" rpy="0 0 0"/>
+        <geometry><box size="0.060 0.015 0.032"/></geometry>
+        <material name="ggao50_printed"/>
+      </visual>
+      <collision>
+        <origin xyz="0.005 0.022 0" rpy="0 0 0"/>
+        <geometry><box size="0.1288 0.068 0.0725"/></geometry>
+      </collision>
+    </link>
+
+    <!-- 좌우 죠. X 를 따라 서로 반대로 움직인다. -->
+    <xacro:ggao50_jaw prefix="${prefix}" side="finger1" sign="-1"/>
+    <xacro:ggao50_jaw prefix="${prefix}" side="finger2" sign="1"/>
+
+    <joint name="${prefix}tool0_joint" type="fixed">
+      <parent link="${prefix}gripper_base_link"/>
+      <child link="${prefix}tool0"/>
+      <origin xyz="0 ${ggao50_tcp_y} 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- 두 죠 사이 중앙의 파지 기준. IK 목표와 FK 대조는 이 프레임을 쓴다. -->
+    <link name="${prefix}tool0">
+      <inertial>
+        <mass value="1e-9"/>
+        <inertia ixx="1e-12" ixy="0" ixz="0" iyy="1e-12" iyz="0" izz="1e-12"/>
+      </inertial>
+    </link>
+
+    <xacro:object_tcp prefix="${prefix}" name="bottle_tcp" offset="${bottle_cap_offset_z}"/>
+    <xacro:object_tcp prefix="${prefix}" name="cup_tcp" offset="${cup_rim_offset_z}"/>
+
+  </xacro:macro>
+
+  <!-- 잡은 용기의 기준점. 병은 주둥이, 컵은 림이다. 붓기 목표는 이 프레임으로 대조한다. -->
+  <xacro:macro name="object_tcp" params="prefix name offset">
+    <joint name="${prefix}${name}_joint" type="fixed">
+      <parent link="${prefix}tool0"/>
+      <child link="${prefix}${name}"/>
+      <origin xyz="0 0 ${offset}" rpy="0 0 0"/>
+    </joint>
+    <link name="${prefix}${name}">
+      <inertial>
+        <mass value="1e-9"/>
+        <inertia ixx="1e-12" ixy="0" ixz="0" iyy="1e-12" iyz="0" izz="1e-12"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="ggao50_jaw" params="prefix side sign">
+    <joint name="${prefix}${side}_joint" type="prismatic">
+      <parent link="${prefix}gripper_base_link"/>
+      <child link="${prefix}${side}_link"/>
+      <origin xyz="0 -0.010 0" rpy="0 0 0"/>
+      <axis xyz="${sign} 0 0"/>
+      <limit lower="${ggao50_jaw_min}" upper="${ggao50_jaw_max}" effort="40" velocity="0.05"/>
+      <xacro:if value="${side == 'finger2'}">
+        <mimic joint="${prefix}finger1_joint" multiplier="1.0" offset="0.0"/>
+      </xacro:if>
+    </joint>
+
+    <link name="${prefix}${side}_link">
+      <inertial>
+        <origin xyz="${sign * 0.006} -0.030 0" rpy="0 0 0"/>
+        <mass value="0.027"/>
+        <inertia ixx="1.6e-05" ixy="0" ixz="0" iyy="6.0e-06" iyz="0" izz="1.5e-05"/>
+      </inertial>
+      <!-- 랙 -->
+      <visual>
+        <origin xyz="${sign * -0.028} 0.004 0" rpy="0 0 0"/>
+        <geometry><box size="0.058 0.010 0.026"/></geometry>
+        <material name="ggao50_printed"/>
+      </visual>
+      <!-- 손가락 블레이드. 끝으로 갈수록 접촉 높이가 57.5 에서 8.8 mm 로 줄어든다. -->
+      <visual>
+        <origin xyz="${sign * 0.006} -0.030 0" rpy="0 0 0"/>
+        <geometry><box size="0.012 0.060 0.050"/></geometry>
+        <material name="ggao50_printed"/>
+      </visual>
+      <!-- 교체형 인서트. 135도 V홈 기준 두께 12.2 mm -->
+      <visual>
+        <origin xyz="${sign * -0.0061} -0.030 0" rpy="0 0 0"/>
+        <geometry><box size="0.0122 0.060 0.050"/></geometry>
+        <material name="gripper_insert"/>
+      </visual>
+      <collision>
+        <origin xyz="${sign * -0.002} -0.024 0" rpy="0 0 0"/>
+        <geometry><box size="0.031 0.072 0.050"/></geometry>
+      </collision>
+    </link>
+  </xacro:macro>
+
+</robot>

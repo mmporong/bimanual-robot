@@ -277,14 +277,16 @@ class UrdfScene:
 
 def pose_positions(prefix: str, values_deg: list[float]) -> dict[str, float]:
     joints = [
-        f"{prefix}_base_link_to_link1",
-        f"{prefix}_link1_to_link2",
-        f"{prefix}_link2_to_link3",
-        f"{prefix}_link3_to_link4",
-        f"{prefix}_link4_to_link5",
+        f"{prefix}_shoulder_pan",
+        f"{prefix}_shoulder_lift",
+        f"{prefix}_elbow_flex",
+        f"{prefix}_wrist_flex",
+        f"{prefix}_wrist_roll",
     ]
     output = {name: math.radians(value) for name, value in zip(joints, values_deg)}
-    output[f"{prefix}_right_clamp"] = 0.0185
+    # 죠는 65 mm 병을 문 상태로 둔다. 인서트 포함 유효 개폐의 중간값이다.
+    output[f"{prefix}_finger1_joint"] = 0.0325
+    output[f"{prefix}_finger2_joint"] = 0.0325
     return output
 
 

@@ -1,7 +1,7 @@
 schema_version: "0.2"
 design_id: hold_flow_mechanical_v0_2
 status: p0_cad_urdf_generated_measurement_pending
-revision: 2026-09-03_gripper_ggao50_payload_60g
+revision: 2026-09-03_so101_chain_restored_ggao50_gripper
 units:
   length: mm
   mass: kg
@@ -256,34 +256,39 @@ workspace:
   task_mode: carry_bottle_and_empty_cup_stop_pour_place_on_low_pad
   dining_table_required: false
   task_pose_validation:
-    status: blocked_do_not_execute_on_hardware
+    status: partially_cleared_ik_recompute_pending
     structural_quality_audited_with: src/hold_flow_description/scripts/audit_urdf_quality.py
     structural_quality_status: pass_for_p0_numeric_consistency_only
     audited_with: src/hold_flow_description/scripts/audit_task_pose.py
     collision_audited_with: design/cad/audit_urdf_clearance.py
     transport_joint_limits: pass
-    transport_tcp_target_match: fail_missing_explicit_tcp_and_large_proxy_gap
-    transport_clearance: fail
+    transport_tcp_target_match: fail_targets_stored_as_constants_not_fk
+    transport_clearance: fail_legacy_angles_from_robonine_chain
     transport_clearance_findings_mm:
-      cross_arm_link_minimum: 18.78
-      gripper_to_other_arm_minimum: 61.67
-      mast_centerline_radius_minimum: 31.36
-      arm_to_lidar_surface_minimum: 4.33
-    pour_joint_limits: fail
-    pour_limit_violations:
-      - joint: left_link2_to_link3
-        value_rad: -0.396190
-        allowed_rad: [0.0, 3.316126]
-      - joint: right_link2_to_link3
-        value_rad: -0.122173
-        allowed_rad: [0.0, 3.316126]
-    pour_tcp_target_match: fail_missing_explicit_tcp_and_large_proxy_gap
-    required_before_replanning:
+      cross_arm_link_minimum: 0.0
+      gripper_to_other_arm_minimum: 33.56
+      mast_centerline_radius_minimum: 65.52
+      arm_to_lidar_surface_minimum: 28.83
+      triangle_collision_pairs: 1
+    zero_pose_clearance: pass
+    zero_pose_clearance_findings_mm:
+      cross_arm_link_minimum: 75.60
+      gripper_to_other_arm_minimum: 67.70
+      mast_centerline_radius_minimum: 91.66
+      arm_to_lidar_surface_minimum: 28.83
+      triangle_collision_pairs: 0
+    pour_joint_limits: pass
+    pour_limit_violations: []
+    pour_tcp_target_match: fail_targets_stored_as_constants_not_fk
+    tool0_to_documented_target_gap_mm: 58.1
+    resolved_2026_09_03:
       - add_left_and_right_tool0_frames
       - add_bottle_and_cup_tcp_frames
       - resolve_servo_zero_to_urdf_joint_convention
+    required_before_replanning:
       - recompute_ik_with_current_urdf_limits
       - verify_fk_collision_and_physical_zero_pose
+      - replace_documented_task_targets_with_fk_derived_values
   cup_gripper_xyz: [301.7, 47.3, 444.6]
   bottle_gripper_pour_xyz: [271.7, 114.9, 539.5]
   bottle_cap_pour_xyz: [301.8, 47.2, 509.1]
@@ -312,11 +317,11 @@ workspace:
       양이라도 작은 병이 충전율이 높아 붓기 제어가 쉽다. 지름 상한 72 mm 는
       V홈 인서트 135도·홈 폭 30 mm 의 커버 범위다.
   transport_joint_degrees:
-    status: legacy_candidate_do_not_execute_until_task_pose_validation_passes
+    status: invalid_for_so101_chain_recompute_required
     left: [-34.0, -78.9, 3.1, 73.2, -3.4]
     right: [38.7, -79.8, 0.1, 74.0, -1.4]
   pour_joint_degrees:
-    status: invalid_for_current_urdf_limits_do_not_execute
+    status: within_so101_limits_but_targets_not_fk_verified
     left_bottle: [-10.3, -30.0, -22.7, 22.9, -113.1]
     right_cup: [-26.3, -29.0, -7.0, 28.3, 1.6]
 
@@ -361,6 +366,12 @@ safety:
   base_motion_during_manipulation: prohibited
 
 urdf:
+  arm_chain_source: so_arm_101_verified_on_jdamr_hardware
+  arm_joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]
+  gripper_model: ggao50_proxy_authored_for_this_project
+  gripper_joint_names: [finger1_joint, finger2_joint]
+  tool_frames: [tool0, bottle_tcp, cup_tcp]
+  gripper_mount_offset_status: physical_measurement_required
   left_prefix: left_
   right_prefix: right_
   wheel_separation_target: 270.0
@@ -368,7 +379,7 @@ urdf:
   wheel_separation_calibration_seed: 270.0
   wheel_separation_jdamr_183_6_reuse: prohibited_due_to_different_chassis_geometry
   base_footprint_offset_from_chassis_center_x: 90.0
-  gripper_secondary_jaw: mimic_joint
+  gripper_secondary_jaw: mimic_joint  # finger2_joint mimics finger1_joint
   camera_optical_frame: camera_depth_optical_frame
   inertia_status: replace_with_final_cad_mass_properties
 

@@ -144,7 +144,10 @@ def audit_state(scene: UrdfScene, positions: dict[str, float]) -> dict[str, obje
         name for name in scene.links
         if name.startswith("right_") and name not in {"right_arm_backing_link", "right_wheel_link"}
     ]
-    grippers = ["left_clamp_1", "left_clamp_2", "right_clamp_1", "right_clamp_2"]
+    grippers = [
+        "left_finger1_link", "left_finger2_link", "left_gripper_base_link",
+        "right_finger1_link", "right_finger2_link", "right_gripper_base_link",
+    ]
     arm_links = left + right
     extra = ["camera_mast_lower_link", "laser_link"]
     polys = {
@@ -152,6 +155,10 @@ def audit_state(scene: UrdfScene, positions: dict[str, float]) -> dict[str, obje
         for name in arm_links + extra
     }
     polys = {name: poly for name, poly in polys.items() if poly is not None}
+    # tool0 나 물체 TCP 처럼 형상이 없는 프레임은 간섭 대상이 아니다.
+    left = [name for name in left if name in polys]
+    right = [name for name in right if name in polys]
+    arm_links = [name for name in arm_links if name in polys]
 
     cross_pairs = [(first, second) for first in left for second in right]
     triangle_hits = [pair for pair in cross_pairs if aabb_gap(polys[pair[0]], polys[pair[1]]) == 0 and intersects(polys[pair[0]], polys[pair[1]])]

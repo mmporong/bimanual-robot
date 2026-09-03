@@ -3,12 +3,21 @@
   <xacro:include filename="$(find hold_flow_description)/urdf/materials.xacro"/>
   <xacro:include filename="$(find hold_flow_description)/urdf/mobile_base.xacro"/>
   <xacro:include filename="$(find hold_flow_description)/urdf/sensors.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/so101_parallel_arm.generated.xacro"/>
+  <xacro:include filename="$(find hold_flow_description)/third_party/so_arm_101/so101_arm.urdf.xacro"/>
+  <xacro:include filename="$(find hold_flow_description)/urdf/ggao50_gripper.xacro"/>
 
   <xacro:hold_flow_mobile_base/>
   <xacro:hold_flow_sensors/>
 
   <!-- 팔 베이스는 모두 250 mm 상판 경계 안에 있다. 좌우 이름은 MoveIt 그룹과 일치시킨다. -->
-  <xacro:so101_parallel_arm prefix="left_" parent="base_link" xyz="-0.065 0.070 0.0861" rpy="0 0 0"/>
-  <xacro:so101_parallel_arm prefix="right_" parent="base_link" xyz="-0.065 -0.070 0.0861" rpy="0 0 0"/>
+  <xacro:so101_arm prefix="left_" parent="base_link">
+    <origin xyz="-0.065 0.070 0.0861" rpy="0 0 0"/>
+  </xacro:so101_arm>
+  <xacro:so101_arm prefix="right_" parent="base_link">
+    <origin xyz="-0.065 -0.070 0.0861" rpy="0 0 0"/>
+  </xacro:so101_arm>
+
+  <!-- 상류 회전식 죠 대신 ggao50 평행 그리퍼를 손목 출력에 붙인다. -->
+  <xacro:ggao50_gripper prefix="left_" parent="left_gripper_link"/>
+  <xacro:ggao50_gripper prefix="right_" parent="right_gripper_link"/>
 </robot>

@@ -133,10 +133,14 @@ def main() -> None:
         "base_link",
         "left_base_link",
         "right_base_link",
-        "left_clamp_1",
-        "left_clamp_2",
-        "right_clamp_1",
-        "right_clamp_2",
+        "left_gripper_base_link",
+        "right_gripper_base_link",
+        "left_finger1_link",
+        "left_finger2_link",
+        "right_finger1_link",
+        "right_finger2_link",
+        "left_tool0",
+        "right_tool0",
         "camera_backing_link",
         "camera_cradle_link",
         "camera_depth_optical_frame",
@@ -145,10 +149,22 @@ def main() -> None:
     required_joints = {
         "left_wheel_joint",
         "right_wheel_joint",
-        "left_right_clamp",
-        "left_left_clamp",
-        "right_right_clamp",
-        "right_left_clamp",
+        "left_shoulder_pan",
+        "left_shoulder_lift",
+        "left_elbow_flex",
+        "left_wrist_flex",
+        "left_wrist_roll",
+        "right_shoulder_pan",
+        "right_shoulder_lift",
+        "right_elbow_flex",
+        "right_wrist_flex",
+        "right_wrist_roll",
+        "left_finger1_joint",
+        "left_finger2_joint",
+        "right_finger1_joint",
+        "right_finger2_joint",
+        "left_tool0_joint",
+        "right_tool0_joint",
     }
     assert required_links <= link_names, sorted(required_links - link_names)
     assert required_joints <= joint_names, sorted(required_joints - joint_names)
@@ -191,7 +207,7 @@ def main() -> None:
         ],
     }
     assert report["check_urdf_root"]
-    assert report["mimic_joints"] == ["left_left_clamp", "right_left_clamp"]
+    assert report["mimic_joints"] == ["left_finger2_joint", "right_finger2_joint"]
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
