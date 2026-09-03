@@ -310,12 +310,14 @@ workspace:
     capacity_range_mL: [200, 330]
     fill_fraction_min: 0.40
     fill_volume_max_mL: 50
-    diameter_range_mm: [50, 72]
+    diameter_range_mm: [50, 62]
     rationale: |
       허용 하중은 500 mL 병에 물 95 mL 로도 만족하지만, 그 경우 충전율이 19%라
       임계각 근처에서 급격히 쏟아져 각도-유량 관계가 비선형이 된다. 같은 물
       양이라도 작은 병이 충전율이 높아 붓기 제어가 쉽다. 지름 상한 72 mm 는
-      V홈 인서트 135도·홈 폭 30 mm 의 커버 범위다.
+      V홈 인서트 135도·홈 폭 24 mm 가 면으로 받는 범위다. ggao50 죠는 손끝으로
+      갈수록 좁아져(높이 = 0.682 x Y + 67.5) 인서트를 뿌리 쪽 28 mm 창에만
+      붙일 수 있고, 그 폭이 홈 폭을 제한한다.
   transport_joint_degrees:
     status: fk_solved_2026_09_03_clearance_pass
     solver: src/hold_flow_description/scripts/solve_task_poses.py
