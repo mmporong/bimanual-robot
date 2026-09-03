@@ -14,10 +14,21 @@ from dataclasses import dataclass
 
 
 G = 9.81
-TARGET_GRIPPER_MASS_KG = 0.130
-ROBONINE_GRIPPER_MASS_KG = 0.170
+# 2026-09-03 개정: 로드 조달 불가로 선정 그리퍼를 ggao50(완전 출력형)로 바꾸고,
+# 붓기 물체를 물 50 mL 기준 60 g으로 낮춘다. 물체를 낮추면 컵 유지 토크가 내려가
+# 165 g 그리퍼가 정격 안에 들어온다.
+SELECTED_GRIPPER_MASS_KG = 0.165      # ggao50 SO101-Parallel-Gripper
+ROBONINE_GRIPPER_MASS_KG = 0.170      # 비교용 대안 (Ø6 로드 2 + 베어링 2 필요)
+LIGHTWEIGHT_TARGET_MASS_KG = 0.130    # 경량 파생형 목표. 현재 필수 조건 아님
+OBJECT_MASS_KG = 0.060                # 병: 빈 500 mL 페트 25 g + 물 35 mL 상당
+GATED_OBJECT_MASS_KG = 0.120          # 전류·온도 통과 뒤 허용
 WHEEL_RADIUS_M = 0.0329
 TOOL_HORIZONTAL_REACH_GATE_M = 0.280
+
+# 컵 유지 중력토크 기준점: 그리퍼 130 g + 물체 140 g 조합에서 0.893 N·m.
+# 여기서 벗어난 조합은 공구측 질량 증감을 280 mm 수평 레버암으로 환산해 더한다.
+CUP_HOLD_TORQUE_BASE_NM = 0.893
+CUP_HOLD_BASE_TOOL_MASS_KG = LIGHTWEIGHT_TARGET_MASS_KG + 0.140
 
 
 @dataclass(frozen=True)
@@ -42,21 +53,27 @@ COMMON_COMPONENTS = (
 POUR_COMPONENTS = (
     Component("left_arm_without_gripper", 0.533006, (0.087497, 0.077050, 0.296208)),
     Component("right_arm_without_gripper", 0.533006, (0.093235, -0.050408, 0.286602)),
-    Component("left_parallel_gripper", TARGET_GRIPPER_MASS_KG, (0.271683, 0.114913, 0.539505)),
-    Component("right_parallel_gripper", TARGET_GRIPPER_MASS_KG, (0.301724, 0.047315, 0.444633)),
-    Component("bottle_total", 0.120, (0.271683, 0.114913, 0.539505)),
-    Component("cup_total", 0.120, (0.301724, 0.047315, 0.444633)),
+    Component("left_parallel_gripper", SELECTED_GRIPPER_MASS_KG, (0.271683, 0.114913, 0.539505)),
+    Component("right_parallel_gripper", SELECTED_GRIPPER_MASS_KG, (0.301724, 0.047315, 0.444633)),
+    Component("bottle_total", OBJECT_MASS_KG, (0.271683, 0.114913, 0.539505)),
+    Component("cup_total", OBJECT_MASS_KG, (0.301724, 0.047315, 0.444633)),
 )
 
 
 TRANSPORT_COMPONENTS = (
     Component("left_arm_without_gripper", 0.533006, (0.042240, 0.061869, 0.267619)),
     Component("right_arm_without_gripper", 0.533006, (0.042413, -0.056518, 0.267544)),
-    Component("left_parallel_gripper", TARGET_GRIPPER_MASS_KG, (0.157236, 0.133610, 0.415848)),
-    Component("right_parallel_gripper", TARGET_GRIPPER_MASS_KG, (0.144204, -0.134074, 0.424740)),
-    Component("bottle_total", 0.120, (0.157236, 0.133610, 0.415848)),
-    Component("cup_total", 0.120, (0.144204, -0.134074, 0.424740)),
+    Component("left_parallel_gripper", SELECTED_GRIPPER_MASS_KG, (0.157236, 0.133610, 0.415848)),
+    Component("right_parallel_gripper", SELECTED_GRIPPER_MASS_KG, (0.144204, -0.134074, 0.424740)),
+    Component("bottle_total", OBJECT_MASS_KG, (0.157236, 0.133610, 0.415848)),
+    Component("cup_total", OBJECT_MASS_KG, (0.144204, -0.134074, 0.424740)),
 )
+
+
+def cup_hold_gravity_torque_nm(gripper_mass_kg: float, object_mass_kg: float) -> float:
+    """컵을 든 팔의 보수적 중력토크. 기준 조합에서 공구측 질량 증감만 반영한다."""
+    delta = (gripper_mass_kg + object_mass_kg) - CUP_HOLD_BASE_TOOL_MASS_KG
+    return CUP_HOLD_TORQUE_BASE_NM + delta * G * TOOL_HORIZONTAL_REACH_GATE_M
 
 
 def mass_and_com(components: tuple[Component, ...]) -> tuple[float, tuple[float, float, float]]:
@@ -181,20 +198,28 @@ def main() -> None:
     traction_n, drive_torque_nm = drive_requirement(transport_mass)
     robonine_traction_n, robonine_drive_torque_nm = drive_requirement(robonine_transport_mass)
 
-    # 기존 최대값은 130 g 그리퍼+140 g 물체 기준이다. 공개 기준기 170 g과
-    # 초기 물체 120 g 조합은 공구측 질량이 20 g 늘고, 140 g 물체 조합은
-    # 40 g 늘어난다. 280 mm 수평 레버암으로 증가분을 보수 계산한다.
-    reference_torque_120g = 0.893 + (
-        ROBONINE_GRIPPER_MASS_KG + 0.120 - TARGET_GRIPPER_MASS_KG - 0.140
-    ) * G * TOOL_HORIZONTAL_REACH_GATE_M
-    reference_torque_140g = 0.893 + (
-        ROBONINE_GRIPPER_MASS_KG - TARGET_GRIPPER_MASS_KG
-    ) * G * TOOL_HORIZONTAL_REACH_GATE_M
+    cup_hold = {
+        "selected_ggao50_165g_with_60g_object": cup_hold_gravity_torque_nm(
+            SELECTED_GRIPPER_MASS_KG, OBJECT_MASS_KG
+        ),
+        "selected_ggao50_165g_with_120g_object": cup_hold_gravity_torque_nm(
+            SELECTED_GRIPPER_MASS_KG, GATED_OBJECT_MASS_KG
+        ),
+        "robonine_170g_with_60g_object": cup_hold_gravity_torque_nm(
+            ROBONINE_GRIPPER_MASS_KG, OBJECT_MASS_KG
+        ),
+        "robonine_170g_with_120g_object": cup_hold_gravity_torque_nm(
+            ROBONINE_GRIPPER_MASS_KG, GATED_OBJECT_MASS_KG
+        ),
+        "lightweight_130g_with_120g_object": cup_hold_gravity_torque_nm(
+            LIGHTWEIGHT_TARGET_MASS_KG, GATED_OBJECT_MASS_KG
+        ),
+    }
 
     usable_battery_wh = 11.1 * 5.0 * 0.8
     report = {
         "mass": {
-            "robot_without_objects_kg": round(pour_mass - 0.240, 3),
+            "robot_without_objects_kg": round(pour_mass - 2.0 * OBJECT_MASS_KG, 3),
             "pour_with_objects_kg": round(pour_mass, 3),
             "transport_with_objects_kg": round(transport_mass, 3),
         },
@@ -213,7 +238,7 @@ def main() -> None:
             "dynamic_front_margin_5deg_0_3m_s2_mm": round(dynamic_front_margin_m(transport_com) * 1000.0, 1),
         },
         "robonine_reference_gripper_170g_with_120g_objects": {
-            "robot_without_objects_kg": round(robonine_pour_mass - 0.240, 3),
+            "robot_without_objects_kg": round(robonine_pour_mass - 2.0 * OBJECT_MASS_KG, 3),
             "pour_with_objects_kg": round(robonine_pour_mass, 3),
             "transport_with_objects_kg": round(robonine_transport_mass, 3),
             "pour_com_mm": [round(value * 1000.0, 1) for value in robonine_pour_com],
@@ -234,11 +259,11 @@ def main() -> None:
             ),
             "drive_traction_required_n": round(robonine_traction_n, 3),
             "drive_torque_each_with_sf2_nm": round(robonine_drive_torque_nm, 3),
-            "cup_hold_gravity_torque_120g_object_conservative_nm": round(
-                reference_torque_120g, 3
+            "cup_hold_gravity_torque_60g_object_nm": round(
+                cup_hold["robonine_170g_with_60g_object"], 3
             ),
-            "cup_hold_gravity_torque_140g_object_conservative_nm": round(
-                reference_torque_140g, 3
+            "cup_hold_gravity_torque_120g_object_nm": round(
+                cup_hold["robonine_170g_with_120g_object"], 3
             ),
         },
         "drive": {
@@ -260,11 +285,16 @@ def main() -> None:
             "mast_45x35x3_1N_ideal_deflection_mm": round(rectangular_tube_deflection_mm(), 3),
             "gripper_force_each_jaw_for_140g_n": round(gripper_force_each_jaw_n(), 3),
         },
-        "arm_gravity_torque_max_nm_at_140g": {
-            "bottle_ready": 0.723,
-            "bottle_pour": 0.711,
-            "cup_hold": 0.893,
-            "sts3215_c018_rated": 0.981,
+        "cup_hold_gravity_torque_nm": {
+            key: round(value, 3) for key, value in cup_hold.items()
+        },
+        "cup_hold_rated_usage_percent": {
+            key: round(value / 0.981 * 100.0, 1) for key, value in cup_hold.items()
+        },
+        "payload_policy_kg": {
+            "initial_each": OBJECT_MASS_KG,
+            "gated_next_each": GATED_OBJECT_MASS_KG,
+            "selected_gripper_each": SELECTED_GRIPPER_MASS_KG,
         },
     }
 
@@ -275,11 +305,11 @@ def main() -> None:
     assert dynamic_front_margin_m(transport_com) >= 0.020
     assert drive_torque_nm <= 0.300
     assert wheel_speed_m_s() >= 0.150
-    assert report["arm_gravity_torque_max_nm_at_140g"]["cup_hold"] < 0.981
+    assert cup_hold["selected_ggao50_165g_with_60g_object"] < 0.981
     assert dynamic_front_margin_m(robonine_pour_com) >= 0.020
     assert robonine_drive_torque_nm <= 0.300
-    assert reference_torque_120g < 0.981
-    assert reference_torque_140g > 0.981
+    assert cup_hold["selected_ggao50_165g_with_120g_object"] < 0.981
+    assert cup_hold["robonine_170g_with_120g_object"] < 0.981
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

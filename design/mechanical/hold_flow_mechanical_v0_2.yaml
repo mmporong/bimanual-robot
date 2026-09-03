@@ -1,7 +1,7 @@
 schema_version: "0.2"
 design_id: hold_flow_mechanical_v0_2
 status: p0_cad_urdf_generated_measurement_pending
-revision: 2026-09-01_p0_cad_urdf_lidar_mount
+revision: 2026-09-03_gripper_ggao50_payload_60g
 units:
   length: mm
   mass: kg
@@ -27,10 +27,10 @@ chassis:
   material_primary: PETG
   material_alternative: ASA
   target_robot_mass_range: [4.8, 5.3]
-  calculated_robot_mass: 5.022
-  calculated_operating_mass_with_120g_bottle_and_cup: 5.262
+  calculated_robot_mass: 5.092
+  calculated_operating_mass_with_60g_bottle_and_cup: 5.212
   calculated_robot_mass_with_robonine_170g_grippers: 5.102
-  calculated_operating_mass_with_robonine_170g_grippers_and_120g_objects: 5.342
+  calculated_operating_mass_with_robonine_170g_grippers_and_60g_objects: 5.222
   printed_structure_mass_range: [1.55, 1.70]
   plates:
     bottom:
@@ -86,14 +86,30 @@ parallel_grippers:
   type: synchronized_horizontal_parallel_jaw
   quantity: 2
   opening_range: [20.0, 85.0]
-  target_mass_max_each: 0.130
-  redesign_threshold_mass_each: 0.150
+  target_mass_max_each: 0.170
+  redesign_threshold_mass_each: 0.190
+  mass_gate_rationale: relaxed_2026_09_03_because_object_mass_lowered_to_60g
   max_com_offset_from_wrist: 65.0
   jaw_parallel_error_max: 0.5
   repeatability_target: 1.0
   pad_material: TPU_95A
   fsr_channels_total: 4
   selected_reference:
+    name: ggao50_SO101_Parallel_Gripper
+    source: https://github.com/ggao50/SO101-Parallel-Gripper
+    selection_reason: fully_printed_no_rods_no_bearings
+    published_mass_each: 0.165
+    opening_width: 105.0
+    published_repeatability: unpublished_verify_on_hardware
+    printed_parts: 6
+    non_printed_parts: servo_kit_only
+    grip_face_measured: flat_plane_axis_aligned_area_ratio_0_69
+    grip_face_plane_x: -49.4
+    grip_face_span_finger_mm: 72.5
+    grip_face_span_bottle_axis_mm: 57.5
+    requires_contact_insert: true
+    insert_generator: design/gripper/generate_jaw_inserts.py
+  alternative_reference:
     name: Robonine_SO_ARM100_101_Parallel_Gripper
     use: P0_print_and_fit_reference_then_lightweight_derivative
     mechanism: rack_and_pinion_with_6mm_rods_and_MF106ZZ_bearings
@@ -192,8 +208,8 @@ navigation:
     stall_torque_each: 2.942
     no_load_speed_rpm: 45.0
     no_load_linear_speed_with_32_9mm_radius: 0.1550
-    calculated_torque_each_with_safety_factor_2: 0.234
-    rated_torque_usage_percent: 23.8
+    calculated_torque_each_with_safety_factor_2: 0.232
+    rated_torque_usage_percent: 23.6
     max_nav_linear_speed: 0.12
     max_nav_angular_speed: 0.60
     max_nav_acceleration: 0.20
@@ -280,10 +296,21 @@ workspace:
   nominal_camera_pitch_range_to_task: [36.5, 43.0]
   fixed_horizontal_reach_limit_status: replaced_by_pose_specific_gravity_torque_gate
   selected_pose_gripper_offset_from_arm_base_max: 280.0
-  initial_payload_max_each: 0.120
-  gated_payload_next_each: 0.140
-  payload_0_200_status: requires_current_temperature_and_stability_pass
+  initial_payload_max_each: 0.060
+  gated_payload_next_each: 0.120
+  payload_0_140_status: requires_current_temperature_and_stability_pass
+  payload_0_200_status: rejected_for_current_pour_geometry
   payload_0_300_status: rejected_for_current_pour_geometry
+  source_container:
+    capacity_range_mL: [200, 330]
+    fill_fraction_min: 0.40
+    fill_volume_max_mL: 50
+    diameter_range_mm: [50, 72]
+    rationale: |
+      허용 하중은 500 mL 병에 물 95 mL 로도 만족하지만, 그 경우 충전율이 19%라
+      임계각 근처에서 급격히 쏟아져 각도-유량 관계가 비선형이 된다. 같은 물
+      양이라도 작은 병이 충전율이 높아 붓기 제어가 쉽다. 지름 상한 72 mm 는
+      V홈 인서트 135도·홈 폭 30 mm 의 커버 범위다.
   transport_joint_degrees:
     status: legacy_candidate_do_not_execute_until_task_pose_validation_passes
     left: [-34.0, -78.9, 3.1, 73.2, -3.4]
@@ -302,25 +329,33 @@ safety:
     abs_y_max: 60.0
     support_polygon_edge_margin_min: 20.0
   calculated_nominal_pour:
-    total_mass: 5.262
-    com_xyz: [32.9, 10.4, 243.5]
-    contact_load_percent_left_right_caster: [39.2, 31.5, 29.3]
-    static_front_margin: 57.1
-    dynamic_front_margin_5deg_0_3m_s2: 28.3
-  calculated_robonine_reference_grippers_with_120g_objects:
-    total_mass: 5.342
-    pour_com_xyz: [36.7, 11.5, 247.2]
-    pour_contact_load_percent_left_right_caster: [40.6, 32.1, 27.3]
-    pour_dynamic_front_margin_5deg_0_3m_s2: 24.1
-    transport_dynamic_front_margin_5deg_0_3m_s2: 49.9
-    drive_torque_each_with_safety_factor_2: 0.237
-    cup_hold_gravity_torque_with_120g_object_conservative: 0.948
-    cup_hold_gravity_torque_with_140g_object_conservative: 1.003
+    total_mass: 5.212
+    com_xyz: [30.5, 9.7, 241.1]
+    contact_load_percent_left_right_caster: [38.3, 31.1, 30.5]
+    static_front_margin: 59.5
+    dynamic_front_margin_5deg_0_3m_s2: 31.0
+  calculated_robonine_alternative_grippers_with_60g_objects:
+    total_mass: 5.222
+    pour_com_xyz: [31.0, 9.9, 241.6]
+    pour_contact_load_percent_left_right_caster: [38.5, 31.2, 30.3]
+    pour_dynamic_front_margin_5deg_0_3m_s2: 30.5
+    transport_dynamic_front_margin_5deg_0_3m_s2: 53.6
+    drive_torque_each_with_safety_factor_2: 0.232
+  cup_hold_gravity_torque_conservative:
+    rated_torque: 0.981
+    selected_ggao50_165g_with_60g_object: 0.769
+    selected_ggao50_165g_with_120g_object: 0.934
+    robonine_170g_with_60g_object: 0.783
+    robonine_170g_with_120g_object: 0.948
+    lightweight_130g_with_120g_object: 0.838
+  cup_hold_rated_usage_percent:
+    selected_ggao50_165g_with_60g_object: 78.4
+    selected_ggao50_165g_with_120g_object: 95.2
   calculated_transport:
-    com_xyz: [10.3, 0.5, 231.8]
-    contact_load_percent_left_right_caster: [29.8, 29.4, 40.9]
-    static_front_margin: 79.7
-    dynamic_front_margin_5deg_0_3m_s2: 52.3
+    com_xyz: [8.9, 0.5, 230.0]
+    contact_load_percent_left_right_caster: [29.4, 29.0, 41.6]
+    static_front_margin: 81.1
+    dynamic_front_margin_5deg_0_3m_s2: 53.9
   servo_warning_temperature_C: 55.0
   servo_stop_temperature_C: 60.0
   base_motion_during_manipulation: prohibited
