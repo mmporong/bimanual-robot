@@ -1,0 +1,107 @@
+{
+  "schema_version": "0.1",
+  "generator": "design/cad/generate_m1_coupons.py",
+  "source_doc": "docs/20260901_설계팀_제작인계패키지_P0.md",
+  "units": {
+    "length": "mm",
+    "volume": "cm3",
+    "mass": "g"
+  },
+  "printer": "Creality K1 Max 300×300×300 mm",
+  "material_assumption": "PETG 1.27 g/cm3, 100% solid CAD volume",
+  "estimated_total_petg_mass_g": 222.6,
+  "all_breps_valid": true,
+  "all_parts_fit_k1_max": true,
+  "build_volume_mm": [
+    300.0,
+    300.0,
+    300.0
+  ],
+  "parts": [
+    {
+      "name": "coupon_m1_holes",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        140.006,
+        95.006,
+        8.07
+      ],
+      "volume_cm3_each": 104.511,
+      "estimated_petg_mass_g_each": 132.7,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/coupon_m1_holes.step",
+      "stl": "design/cad/exports/stl/coupon_m1_holes.stl",
+      "note": "M3 3.2/3.4/3.6, M4 4.2/4.4/4.6 여유홀, 6 mm 로드 6.0~6.3, M3 인서트 3.8/4.0/4.2 블라인드홀",
+      "measurement_gate": "관통볼트가 층을 깨지 않고 흔들림이 최소인 조합을 골라 차체 CAD의 홀 지름을 확정"
+    },
+    {
+      "name": "coupon_m1_fit_socket",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        100.004,
+        34.004,
+        12.069
+      ],
+      "volume_cm3_each": 33.129,
+      "estimated_petg_mass_g_each": 42.1,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/coupon_m1_fit_socket.step",
+      "stl": "design/cad/exports/stl/coupon_m1_fit_socket.stl",
+      "note": "면당 유격 0.20, 0.25, 0.30, 0.35 mm 관통 포켓 4종",
+      "measurement_gate": "손 조립이 가능하고 횡유격 0.5 mm 이하인 유격을 골라 이음·끼움부에 적용"
+    },
+    {
+      "name": "coupon_m1_fit_plug",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        34.004,
+        26.004,
+        23.002
+      ],
+      "volume_cm3_each": 5.509,
+      "estimated_petg_mass_g_each": 7.0,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/coupon_m1_fit_plug.step",
+      "stl": "design/cad/exports/stl/coupon_m1_fit_plug.stl",
+      "note": "소켓 시험용 12 mm 기준 각기둥",
+      "measurement_gate": null
+    },
+    {
+      "name": "coupon_m1_mast_stub",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        45.003,
+        35.003,
+        40.003
+      ],
+      "volume_cm3_each": 17.657,
+      "estimated_petg_mass_g_each": 22.4,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/coupon_m1_mast_stub.step",
+      "stl": "design/cad/exports/stl/coupon_m1_mast_stub.stl",
+      "note": "45×35×3 mm 마스트 단면 40 mm 시험편",
+      "measurement_gate": "이음관을 30 mm 삽입해 비틀림과 미끄럼을 확인"
+    },
+    {
+      "name": "coupon_m1_coupler_stub",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        38.202,
+        28.202,
+        40.002
+      ],
+      "volume_cm3_each": 14.469,
+      "estimated_petg_mass_g_each": 18.4,
+      "k1_max_fit": true,
+      "step": "design/cad/exports/step/coupon_m1_coupler_stub.step",
+      "stl": "design/cad/exports/stl/coupon_m1_coupler_stub.stl",
+      "note": "면당 0.4 mm 유격 이음관 40 mm 시험편",
+      "measurement_gate": "삽입이 뻑뻑하거나 헐거우면 이음관 외곽을 0.1 mm 단위로 재생성"
+    }
+  ]
+}
