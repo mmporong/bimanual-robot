@@ -28,6 +28,26 @@ uv pip install --python "$HOME/.cache/bimanual-cad-venv/bin/python" \
 
 출력은 `exports/step`, `exports/stl`, `exports/manifest.json`에 생긴다. URDF가 참조하는 8종은 `../../src/hold_flow_description/meshes/cad` 복사본도 같이 갱신한다. `hold_flow_printed_structure.step`은 판과 어댑터의 조립 위치를 확인하는 간이 조립체다.
 
+M1 공차 쿠폰은 같은 환경에서 따로 생성한다. 출력 순서 1번이라 차체보다 먼저 뽑는다.
+
+```bash
+"$HOME/.cache/bimanual-cad-venv/bin/python" design/cad/generate_m1_coupons.py
+```
+
+결과는 `exports/step`, `exports/stl`과 `exports/manifest_m1_coupons.json`에 생긴다.
+
+## 슬라이싱
+
+`slice_k1max_petg.py`가 인계 문서 5.2절 시작 프로파일을 OrcaSlicer 시스템 프리셋 위에 얹어 K1 Max용 G-code를 만든다. 이쪽은 전용 venv가 아니라 시스템 python3로 실행한다.
+
+```bash
+python3 design/cad/slice_k1max_petg.py --out "$HOME/gcode" --all
+python3 design/cad/slice_k1max_petg.py --out "$HOME/gcode" --infill 20% design/cad/exports/stl/coupon_m1_*.stl
+python3 design/cad/slice_k1max_petg.py --emit-presets
+```
+
+`--emit-presets`는 `slicer/`에 OrcaSlicer GUI로 가져갈 수 있는 프로세스·필라멘트 프리셋을 남긴다. OrcaSlicer CLI가 필라멘트 상속을 풀지 못해 PETG를 PLA `200 °C`로 내보내는 문제가 있어, 스크립트가 상속을 미리 해석해 값을 명시한다.
+
 ## P0 검증 결과
 
 - 출력 부품 14종 모두 B-Rep 유효
