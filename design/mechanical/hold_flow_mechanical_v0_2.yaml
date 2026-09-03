@@ -317,13 +317,28 @@ workspace:
       양이라도 작은 병이 충전율이 높아 붓기 제어가 쉽다. 지름 상한 72 mm 는
       V홈 인서트 135도·홈 폭 30 mm 의 커버 범위다.
   transport_joint_degrees:
-    status: invalid_for_so101_chain_recompute_required
-    left: [-34.0, -78.9, 3.1, 73.2, -3.4]
-    right: [38.7, -79.8, 0.1, 74.0, -1.4]
+    status: fk_solved_2026_09_03_clearance_pass
+    solver: src/hold_flow_description/scripts/solve_task_poses.py
+    tool0_target_m: [0.06, 0.10, 0.26]
+    left: [-19.0, -95.1, 60.1, 78.4, -1.0]
+    right: [19.0, -95.1, 60.1, 78.4, 1.2]
   pour_joint_degrees:
-    status: within_so101_limits_but_targets_not_fk_verified
-    left_bottle: [-10.3, -30.0, -22.7, 22.9, -113.1]
-    right_cup: [-26.3, -29.0, -7.0, 28.3, 1.6]
+    status: infeasible_workcell_too_far_do_not_execute
+    finding: |
+      문서의 붓기 좌표는 팔 베이스 기준 443~492 mm 로, 랜덤 샘플로 측정한 최대
+      도달(tool0 486.9, cup_tcp 490.7, bottle_tcp 513.9 mm)의 96~97% 지점이다.
+      기하학적으로는 닿지만 팔이 거의 펴진 특이자세라 IK 해가 사실상 없고,
+      중력토크도 정격의 96.6% 로 같은 지점에서 최대가 된다. 위치만 맞춘 해는
+      한계 안에 들지만 양팔이 6쌍 충돌한다.
+      작업 셀을 로봇 쪽으로 당기거나 Nav2 정지 위치를 앞으로 옮겨야 한다.
+    reach_budget_mm:
+      tool0_max: 486.9
+      cup_tcp_max: 490.7
+      bottle_tcp_max: 513.9
+      documented_cup_rim: 473.3
+      documented_bottle_cap_pour: 492.5
+    left_bottle: [-23.1, -41.3, -4.0, 6.7, 2.4]
+    right_cup: [-44.8, -26.7, -1.1, -4.9, 12.5]
 
 safety:
   arm_link_min_distance: 25.0
