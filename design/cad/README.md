@@ -12,7 +12,7 @@
 - JD-AMR 휠과 Feetech C018을 연결하기 위한 측면 캐리어
 - JD-AMR 볼 캐스터 어댑터와 1/2/3 mm 높이 보정판
 
-SO-101 팔과 Robonine 평행 그리퍼 자체는 검증된 공개 형상을 다시 그리지 않는다. ROS 모델은 `../../src/hold_flow_description`에 벤더링한 공개 메시를 사용한다.
+SO-101 팔과 ggao50 평행 그리퍼 자체는 검증된 공개 형상을 다시 그리지 않는다. ROS 모델은 `../../src/hold_flow_description`에 벤더링한 공개 메시를 사용한다.
 
 ## 재생성
 

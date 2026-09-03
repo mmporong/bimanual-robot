@@ -46,12 +46,12 @@ colcon build --packages-select hold_flow_description --symlink-install \
 
 - 좌우 `tool0`, `bottle_tcp`, `cup_tcp` frame이 없다.
 - 계산 문서의 task 좌표가 현재 URDF FK가 아니라 상수로 저장되어 있다.
-- 2026-09-03 해소: Robonine 팔 체인을 걷어내고 검증된 SO-101 체인으로 되돌렸다. 붓기·운반 관절값이 모두 hard limit 안에 든다.
+- 2026-09-03 해소: 이전 그리퍼 후보의 팔 체인을 걷어내고 검증된 SO-101 체인으로 되돌렸다. 붓기·운반 관절값이 모두 hard limit 안에 든다.
 - 2026-09-03 해소: `left_tool0`/`right_tool0`와 `bottle_tcp`/`cup_tcp` 프레임을 추가했다.
 - zero joint pose는 좌우 팔 collision mesh가 교차하며 시작 자세로 사용할 수 없다.
 - 운반 후보도 링크 간 최소 `18.78 mm`, 마스트 중심 반경 `31.36 mm`로 프로젝트 안전여유를 만족하지 않는다.
 
-이 상태에서도 YAML의 `transport_joint_degrees`는 실기체에 전송하지 않는다. 그 각도는 Robonine 체인용으로 푼 legacy 값이라 SO-101 체인에서는 양팔이 서로 닿는다(교차 여유 0.0 mm, 삼각형 충돌 1쌍). 남은 작업은 새 체인과 tool0 기준으로 IK를 다시 풀고, 문서의 목표 좌표를 상수가 아니라 FK 산출값으로 대체하는 것이다.
+이 상태에서도 YAML의 `transport_joint_degrees`는 실기체에 전송하지 않는다. 2026-09-03 에 `solve_task_poses.py` 로 다시 풀어 간섭을 통과했다(교차 여유 27.35 mm, 충돌 0쌍). 남은 작업은 문서의 목표 좌표를 상수가 아니라 FK 산출값으로 대체하는 것이다.
 
 zero 자세는 통과한다 — 교차 여유 75.60 mm, 그리퍼-반대팔 67.70 mm, 팔↔LiDAR 28.83 mm, 마스트 반경 91.66 mm, 충돌 0쌍.
 

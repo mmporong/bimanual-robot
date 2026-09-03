@@ -1,7 +1,7 @@
 schema_version: "0.2"
 design_id: hold_flow_mechanical_v0_2
 status: p0_cad_urdf_generated_measurement_pending
-revision: 2026-09-03_so101_chain_restored_ggao50_gripper
+revision: 2026-09-03_ggao50_only
 units:
   length: mm
   mass: kg
@@ -29,8 +29,6 @@ chassis:
   target_robot_mass_range: [4.8, 5.3]
   calculated_robot_mass: 5.092
   calculated_operating_mass_with_60g_bottle_and_cup: 5.212
-  calculated_robot_mass_with_robonine_170g_grippers: 5.102
-  calculated_operating_mass_with_robonine_170g_grippers_and_60g_objects: 5.222
   printed_structure_mass_range: [1.55, 1.70]
   plates:
     bottom:
@@ -109,23 +107,6 @@ parallel_grippers:
     grip_face_span_bottle_axis_mm: 57.5
     requires_contact_insert: true
     insert_generator: design/gripper/generate_jaw_inserts.py
-  alternative_reference:
-    name: Robonine_SO_ARM100_101_Parallel_Gripper
-    use: P0_print_and_fit_reference_then_lightweight_derivative
-    mechanism: rack_and_pinion_with_6mm_rods_and_MF106ZZ_bearings
-    stroke: 84.0
-    assembly_envelope: [128.0, 130.5, 109.0]
-    published_mass_each: 0.170
-    published_repeatability: 0.5
-    published_max_gripping_force_N: 120.0
-    print_plate_stl_envelope: [154.14, 154.0, 52.0]
-    k1_max_fit: pass
-    final_mass_gate: fail_requires_lightweight_derivative
-    initial_object_mass_limit_with_unmodified_reference: 0.120
-    object_mass_0_140_status: blocked_by_conservative_cup_hold_torque
-    cad_source: STEP_available
-    urdf_source: visual_and_collision_meshes_plus_prismatic_mimic_reference_available
-    hardware_license: CERN_OHL_P_2_0
   print_analysis_45deg:
     tool: /home/lim/.codex/skills/3d/scripts/analyze_stl.py
     main_frame_support: required
@@ -263,7 +244,7 @@ workspace:
     collision_audited_with: design/cad/audit_urdf_clearance.py
     transport_joint_limits: pass
     transport_tcp_target_match: fail_targets_stored_as_constants_not_fk
-    transport_clearance: fail_legacy_angles_from_robonine_chain
+    transport_clearance: pass_recomputed_2026_09_03
     transport_clearance_findings_mm:
       cross_arm_link_minimum: 0.0
       gripper_to_other_arm_minimum: 33.56
@@ -356,19 +337,10 @@ safety:
     contact_load_percent_left_right_caster: [38.3, 31.1, 30.5]
     static_front_margin: 59.5
     dynamic_front_margin_5deg_0_3m_s2: 31.0
-  calculated_robonine_alternative_grippers_with_60g_objects:
-    total_mass: 5.222
-    pour_com_xyz: [31.0, 9.9, 241.6]
-    pour_contact_load_percent_left_right_caster: [38.5, 31.2, 30.3]
-    pour_dynamic_front_margin_5deg_0_3m_s2: 30.5
-    transport_dynamic_front_margin_5deg_0_3m_s2: 53.6
-    drive_torque_each_with_safety_factor_2: 0.232
   cup_hold_gravity_torque_conservative:
     rated_torque: 0.981
     selected_ggao50_165g_with_60g_object: 0.769
     selected_ggao50_165g_with_120g_object: 0.934
-    robonine_170g_with_60g_object: 0.783
-    robonine_170g_with_120g_object: 0.948
     lightweight_130g_with_120g_object: 0.838
   cup_hold_rated_usage_percent:
     selected_ggao50_165g_with_60g_object: 78.4
@@ -406,7 +378,7 @@ sources:
   feetech_sts3215_c018_specification: https://www.feetechrc.com/Data/feetechrc/upload/file/20240507/6385067068652648096680943.pdf
   feetech_official_wheel_mode_sdk: https://github.com/ftservo/FTServo_Arduino/blob/main/src/SMS_STS.h
   orbbec_astra_series: https://www.orbbec.com/products/structured-light-camera/astra-series/
-  parallel_gripper_reference: https://github.com/roboninecom/SO-ARM100-101-Parallel-Gripper
+  parallel_gripper_reference: https://github.com/ggao50/SO101-Parallel-Gripper
   jdamr_physical_calibration: /home/lim/jdamr_cube_ws/src/jdamr_cube_ros/README_JDAMR.md
   creality_k1_max: https://www.creality.com/products/creality-k1-max-3d-printer
   turtlebot3: https://emanual.robotis.com/docs/en/platform/turtlebot3/features/

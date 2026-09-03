@@ -42,5 +42,5 @@ rear_caster:
 
 inertia:
   cad_printed_parts: conservative_solid_volume_until_sliced_and_weighed
-  so101_parallel_arms: scaled_from_robonine_inertia_to_0_703kg_each
+  so101_parallel_arms: from_so_arm_101_link_masses_verified_on_jdamr
   gate: replace_with_measured_link_masses_before_dynamics_control
