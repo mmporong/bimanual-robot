@@ -433,7 +433,7 @@ def compose_model_status(output: Path, temporary: Path, spec: dict) -> None:
     draw = ImageDraw.Draw(canvas)
     draw.text((80, 58), "HOLD THE FLOW · P0 DIGITAL MODEL", font=font(24, "bold"), fill=BLUE)
     draw.text((80, 112), "URDF P0에 적용한 운반·붓기 후보 자세", font=font(54, "bold"), fill=INK)
-    draw.text((80, 190), "35 links · 34 joints · SO-101 ×2 · Robonine 평행그리퍼 · Astra S · LDS-03", font=font(25), fill=MUTED)
+    draw.text((80, 190), "35 links · 34 joints · SO-101 ×2 · ggao50 평행그리퍼 · Astra S · LDS-03", font=font(25), fill=MUTED)
 
     panels = [(70, 270, 970, 1110), (1030, 270, 1930, 1110)]
     for box, image_path, label, detail in (
@@ -546,7 +546,7 @@ def compose_part_catalog(output: Path, temporary: Path, manifest: dict) -> None:
         draw.text((x + 42, y + 373), "SUPPORT OFF", font=font(14, "bold"), fill=GREEN)
 
     draw.rounded_rectangle((70, 1980, 1930, 2045), radius=18, fill="#FFF5EB")
-    draw.text((100, 1997), "주의  Robonine 평행그리퍼 STL은 이 14종에 포함되지 않으며, Main frame·Clamp·Holder는 별도 tree support 검토 대상", font=font(20, "medium"), fill=AMBER)
+    draw.text((100, 1997), "주의  ggao50 평행그리퍼 STL은 이 14종에 포함되지 않으며 별도 tree support 대상", font=font(20, "medium"), fill=AMBER)
     canvas.save(output, quality=95)
 
 

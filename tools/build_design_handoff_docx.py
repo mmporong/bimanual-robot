@@ -513,8 +513,8 @@ def build() -> None:
         [2.0, 1.2, 1.5, 0.8],
     )
     add_heading(document, "근본 원인", 2)
-    add_body(document, "작업 자세는 JD-AMR에서 검증한 SO-101 관절 체인과 TCP 기준에서 나왔지만, 현재 URDF에는 Robonine 전체 팔 Xacro가 들어갔다. 두 모델의 joint origin·axis·zero·limit가 달라 좌표와 관절값이 같은 기준이 아니다.")
-    add_callout(document, "권고 아키텍처", "JD-AMR/SO-101 팔 체인은 유지하고 Robonine의 link5 이후 평행 죠 기구만 엔드이펙터로 부착한다. 이후 좌우 tool0/TCP, 서보 zero·sign·offset, 동일 URDF 기반 IK/FK 회귀시험을 만든다.", tone="blue")
+    add_body(document, "작업 자세는 JD-AMR에서 검증한 SO-101 관절 체인과 TCP 기준에서 나왔다. 2026-09-03 개정으로 URDF도 같은 체인을 쓰므로 좌표와 관절값이 같은 기준이다.")
+    add_callout(document, "권고 아키텍처", "JD-AMR/SO-101 팔 체인에 ggao50 평행 죠 프록시를 엔드이펙터로 부착했다. 좌우 tool0/TCP 도 추가했다. 남은 것은 서보 zero·sign·offset 과 동일 URDF 기반 IK/FK 회귀시험이다.", tone="blue")
     add_page_break(document)
 
     # 3. layout
@@ -540,7 +540,7 @@ def build() -> None:
     add_label(document, "04 · PRINT PACKAGE")
     add_heading(document, "K1 Max 출력 대상 14종", 1)
     add_picture(document, "02_print_part_catalog.png", 6.5, "K1 Max 원본 방향 출력 대상인 차체 CAD 14종의 형상, 크기, 수량 목록.")
-    add_callout(document, "범위 주의", "이 목록은 차체 CAD다. Robonine 평행그리퍼의 Main frame·Clamp·Holder는 별도 검증 트리이며 차체 14종에 포함되지 않는다.", tone="amber")
+    add_callout(document, "범위 주의", "이 목록은 차체 CAD다. ggao50 평행그리퍼의 Main frame·Clamp·Holder는 별도 검증 트리이며 차체 14종에 포함되지 않는다.", tone="amber")
 
     add_label(document, "05 · PRINT BOM")
     add_heading(document, "출력 순서와 동결 조건", 1)
@@ -590,7 +590,7 @@ def build() -> None:
             ["노즐 / 레이어", "0.4 mm / 0.20 mm", "쿠폰과 판 표면·홀 치수 비교"],
             ["벽 / 상하부", "6 walls / 6 top / 6 bottom", "팔·마스트 하중 경로와 홀 주변 밀폐"],
             ["인필", "40~50% gyroid", "슬라이서 질량·판 휨 결과로 조정"],
-            ["서포트", "OFF", "45° 분석 결과. Robonine 그리퍼는 별도"],
+            ["서포트", "OFF", "45° 분석 결과. ggao50 그리퍼는 별도"],
             ["브림", "큰 판 6~8 mm", "베드 제외영역·프라임 라인 확인"],
         ],
         [1.3, 1.8, 2.9],
@@ -633,10 +633,10 @@ def build() -> None:
         [
             ["총질량", "약 5.26~5.34 kg", "실물 부품·배선·체결재 포함 후 재측정"],
             ["주행 토크/휠", "0.234~0.237 N·m (SF 2)", "적재 가정별 값. C018 정격 0.981 N·m과 실물 시험"],
-            ["붓기 COM", "x=36.7, y=11.5, z=247.2 mm", "120 g 물체 + Robonine 기준 그리퍼 가정"],
+            ["붓기 COM", "x=36.7, y=11.5, z=247.2 mm", "120 g 물체 + 선정 그리퍼 가정"],
             ["동적 전방 여유", "24.1 mm", "5° 경사 + 0.3 m/s² 감속 가정"],
             ["컵 유지 토크", "0.948 N·m", "120 g 물체. 손목 전류·온도 기록"],
-            ["140 g 유지 토크", "1.003 N·m", "Robonine 원형 기준 정격 초과, 금지"],
+            ["140 g 유지 토크", "1.003 N·m", "선정 그리퍼 기준 정격 초과, 금지"],
         ],
         [1.6, 1.7, 2.7],
     )
@@ -708,7 +708,7 @@ def build() -> None:
     add_checklist(
         document,
         [
-            "□ JD-AMR 팔 체인 + Robonine 평행 죠 결합 방식을 확정함",
+            "□ JD-AMR 팔 체인 + ggao50 평행 죠 결합 방식을 확정함",
             "□ left/right tool0와 bottle/cup TCP 4개가 존재함",
             "□ 서보 raw↔URDF zero·sign·offset을 실물로 대조함",
             "□ 운반·붓기·배치 자세를 동일 URDF에서 다시 산출함",

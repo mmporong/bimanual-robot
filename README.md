@@ -40,7 +40,7 @@
 
 차체는 문서상의 치수표에 머물러 있지 않다. CadQuery 원본에서 K1 Max용 STEP·STL 14종을 다시 만들 수 있고, 하판·중판·상판과 팔 보강판, 카메라 마스트, Astra 거치대, LDS-03 받침대, 주행·캐스터 어댑터가 포함돼 있다. 상·중·하판과 상판 어댑터의 기준 위치는 [`hold_flow_printed_structure.step`](design/cad/exports/step/hold_flow_printed_structure.step)에서 확인한다.
 
-ROS 2 모델은 250 mm 이동 베이스와 SO-101 두 대, Robonine 평행 그리퍼 두 대, Astra S, LDS-03을 하나의 TF 트리로 묶었다. 좌우 팔은 같은 원본에서 `left_`와 `right_` prefix를 붙여 생성하며, 평행 죠는 prismatic·mimic joint로 움직인다. Xacro 확장본과 커밋된 URDF가 같은지, 메시 참조 51개가 실제로 존재하는지, 바퀴 간격과 센서·팔 좌표가 설계값과 일치하는지는 검증 스크립트가 확인한다.
+ROS 2 모델은 250 mm 이동 베이스와 SO-101 두 대, ggao50 평행 그리퍼 두 대, Astra S, LDS-03을 하나의 TF 트리로 묶었다. 좌우 팔은 같은 원본에서 `left_`와 `right_` prefix를 붙여 생성하며, 평행 죠는 prismatic·mimic joint로 움직인다. Xacro 확장본과 커밋된 URDF가 같은지, 메시 참조 51개가 실제로 존재하는지, 바퀴 간격과 센서·팔 좌표가 설계값과 일치하는지는 검증 스크립트가 확인한다.
 
 다만 장공을 원형공으로 바꾸는 일은 아직 남았다. SO-101 베이스, C018 혼과 JD-AMR 휠 허브, 볼 캐스터, Astra와 LDS-03 체결부를 실측한 뒤 어댑터를 확정해야 한다. 현재 출력물은 조립 검토용 P0이며 실측을 건너뛴 양산판이 아니다.
 
@@ -108,7 +108,7 @@ bimanual-robot/
 - [x] ROS 2·C++·Python·Nav2·MoveIt 2·ACT·Isaac Sim 구현 경계 문서화
 - [x] 250 mm 정사각 차체·SO-101×2·단일 Astra S 기둥의 기구 명세와 검증표 작성
 - [x] 5.26 kg 보수 질량·3점 접지·C018 12 V 주행·출력 구조 계산
-- [x] JD-AMR 65 mm 바퀴·볼 캐스터 재사용, K1 Max 한 장 판, Robonine 평행그리퍼 P0 기준 확정
+- [x] JD-AMR 65 mm 바퀴·볼 캐스터 재사용, K1 Max 한 장 판, ggao50 평행그리퍼 P0 기준 확정
 - [x] K1 Max용 파라메트릭 CAD와 STEP·STL 14종 생성, B-Rep·빌드 볼륨·서포트 검사 통과
 - [x] 모바일 베이스·SO-101×2·평행그리퍼×2·Astra·LDS-03 Xacro/URDF 생성과 TF 검사 통과
 - [x] 팀 공용 구현 아키텍처 HTML 사이트 제작·ChatGPT Sites 배포

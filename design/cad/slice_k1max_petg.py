@@ -22,8 +22,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HOME, ".cache", "orca-3d-holdflow")
 SKILL = os.path.join(HOME, ".claude", "skills", "3d", "scripts", "slice.py")
 
-MACHINE = "Creality K1 Max (0.4 nozzle)"
-PROCESS = "0.20mm Standard @Creality K1Max (0.4 nozzle)"
+PRINTERS = {
+    "k1max": {
+        "machine": "Creality K1 Max (0.4 nozzle)",
+        "process": "0.20mm Standard @Creality K1Max (0.4 nozzle)",
+        "build": (300.0, 300.0, 300.0),
+    },
+    "ender3s1": {
+        "machine": "Creality Ender-3 S1 0.4 nozzle",
+        "process": "0.20mm Standard @Creality Ender3S1",
+        "build": (220.0, 220.0, 270.0),
+    },
+}
+MACHINE = PRINTERS["k1max"]["machine"]
+PROCESS = PRINTERS["k1max"]["process"]
 FILAMENT = "Creality Generic PETG"
 FILAMENT_TPU = "Creality Generic TPU @K1-all"
 BED_TEMP_TPU = "45"
@@ -66,10 +78,13 @@ def load_skill():
     return m
 
 
-def build_presets(sl, idx, brim, filament_name=None, bed_temp=None):
+def build_presets(sl, idx, brim, filament_name=None, bed_temp=None,
+                  machine=None, process=None):
     os.makedirs(WORK, exist_ok=True)
+    machine = machine or MACHINE
+    process = process or PROCESS
     src = {k: idx.get((t, n)) for k, (t, n) in
-           {"machine": ("machine", MACHINE), "process": ("process", PROCESS),
+           {"machine": ("machine", machine), "process": ("process", process),
             "filament": ("filament", filament_name or FILAMENT)}.items()}
     missing = [k for k, v in src.items() if not v]
     if missing:
@@ -77,7 +92,7 @@ def build_presets(sl, idx, brim, filament_name=None, bed_temp=None):
 
     # 상대 압출 검증(-51) 통과용 G92 E0
     plate_temp = bed_temp or BED_TEMP
-    lcg = sl.resolved(idx, "machine", MACHINE, "layer_change_gcode", "") or ""
+    lcg = sl.resolved(idx, "machine", machine, "layer_change_gcode", "") or ""
     m_patch = {}
     if "G92" not in lcg:
         m_patch["layer_change_gcode"] = (lcg.rstrip("\n") + "\n" if lcg else "") + \
@@ -126,6 +141,8 @@ def main():
     ap.add_argument("--out", default=None, help="G-code 출력 디렉터리 (홈 아래)")
     ap.add_argument("--all", action="store_true", help="design/cad/exports/stl 전체")
     ap.add_argument("--emit-presets", action="store_true", help="GUI 임포트용 프리셋만 생성")
+    ap.add_argument("--printer", choices=sorted(PRINTERS), default="k1max",
+                    help="대상 프린터")
     ap.add_argument("--tpu", action="store_true",
                     help="TPU 95A 로 슬라이싱. 인서트용")
     ap.add_argument("--support", choices=["off", "tree", "normal"], default="off",
@@ -175,10 +192,13 @@ def main():
                 "support_threshold_angle": str(int(a.threshold)),
                 "support_on_build_plate_only": "1" if a.plate_only else "0",
             })
+        printer = PRINTERS[a.printer]
+        tpu_filament = FILAMENT_TPU if a.printer == "k1max" else "Creality Generic TPU"
         m, p, f = build_presets(
             sl, idx, brim,
-            filament_name=FILAMENT_TPU if a.tpu else None,
+            filament_name=tpu_filament if a.tpu else None,
             bed_temp=BED_TEMP_TPU if a.tpu else None,
+            machine=printer["machine"], process=printer["process"],
         )
         argv = list(cmd) + ["--load-settings", f"{m};{p}", "--load-filaments", f,
                             "--ensure-on-bed", "--slice", "0", "--outputdir", out, stl]
@@ -198,7 +218,8 @@ def main():
                             "error": info.get("error_string") or (r.stdout or r.stderr)[-400:]})
             continue
         tag = "TPU" if a.tpu else "PETG"
-        final = os.path.join(out, f"{stem}_K1Max_{tag}_0.2mm.gcode")
+        label = "K1Max" if a.printer == "k1max" else "Ender3S1"
+        final = os.path.join(out, f"{stem}_{label}_{tag}_0.2mm.gcode")
         os.replace(plates[0], final)
         for extra in plates[1:]:
             os.remove(extra)
@@ -206,7 +227,9 @@ def main():
         except OSError: pass
         results.append({"part": stem, "ok": True, "gcode": final, "verify": sl.verify(final)})
 
-    json.dump({"ok": failed == 0, "machine": MACHINE, "process": PROCESS, "filament": FILAMENT,
+    json.dump({"ok": failed == 0, "machine": PRINTERS[a.printer]["machine"],
+               "process": PRINTERS[a.printer]["process"],
+               "filament": (FILAMENT_TPU if a.printer == "k1max" else "Creality Generic TPU") if a.tpu else FILAMENT,
                "spec": PROCESS_SPEC, "bed_temp": BED_TEMP, "failed": failed, "results": results},
               sys.stdout, ensure_ascii=False, indent=1)
     print()

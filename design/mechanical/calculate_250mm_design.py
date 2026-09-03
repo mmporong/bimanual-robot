@@ -18,7 +18,6 @@ G = 9.81
 # 붓기 물체를 물 50 mL 기준 60 g으로 낮춘다. 물체를 낮추면 컵 유지 토크가 내려가
 # 165 g 그리퍼가 정격 안에 들어온다.
 SELECTED_GRIPPER_MASS_KG = 0.165      # ggao50 SO101-Parallel-Gripper
-ROBONINE_GRIPPER_MASS_KG = 0.170      # 비교용 대안 (Ø6 로드 2 + 베어링 2 필요)
 LIGHTWEIGHT_TARGET_MASS_KG = 0.130    # 경량 파생형 목표. 현재 필수 조건 아님
 OBJECT_MASS_KG = 0.060                # 병: 빈 500 mL 페트 25 g + 물 35 mL 상당
 GATED_OBJECT_MASS_KG = 0.120          # 전류·온도 통과 뒤 허용
@@ -83,18 +82,6 @@ def mass_and_com(components: tuple[Component, ...]) -> tuple[float, tuple[float,
         for axis in range(3)
     )
     return total, com
-
-
-def replace_gripper_mass(
-    components: tuple[Component, ...], mass_kg: float
-) -> tuple[Component, ...]:
-    """같은 자세에서 그리퍼 질량만 바꿔 공개 기준기의 영향을 비교한다."""
-    return tuple(
-        Component(component.name, mass_kg, component.xyz_m)
-        if component.name.endswith("parallel_gripper")
-        else component
-        for component in components
-    )
 
 
 def support_reactions_kg(
@@ -183,20 +170,9 @@ def gripper_force_each_jaw_n(
 def main() -> None:
     pour_mass, pour_com = mass_and_com(COMMON_COMPONENTS + POUR_COMPONENTS)
     transport_mass, transport_com = mass_and_com(COMMON_COMPONENTS + TRANSPORT_COMPONENTS)
-    robonine_pour_mass, robonine_pour_com = mass_and_com(
-        COMMON_COMPONENTS + replace_gripper_mass(POUR_COMPONENTS, ROBONINE_GRIPPER_MASS_KG)
-    )
-    robonine_transport_mass, robonine_transport_com = mass_and_com(
-        COMMON_COMPONENTS + replace_gripper_mass(TRANSPORT_COMPONENTS, ROBONINE_GRIPPER_MASS_KG)
-    )
     pour_reactions = support_reactions_kg(pour_mass, pour_com[:2])
     transport_reactions = support_reactions_kg(transport_mass, transport_com[:2])
-    robonine_pour_reactions = support_reactions_kg(robonine_pour_mass, robonine_pour_com[:2])
-    robonine_transport_reactions = support_reactions_kg(
-        robonine_transport_mass, robonine_transport_com[:2]
-    )
     traction_n, drive_torque_nm = drive_requirement(transport_mass)
-    robonine_traction_n, robonine_drive_torque_nm = drive_requirement(robonine_transport_mass)
 
     cup_hold = {
         "selected_ggao50_165g_with_60g_object": cup_hold_gravity_torque_nm(
@@ -204,12 +180,6 @@ def main() -> None:
         ),
         "selected_ggao50_165g_with_120g_object": cup_hold_gravity_torque_nm(
             SELECTED_GRIPPER_MASS_KG, GATED_OBJECT_MASS_KG
-        ),
-        "robonine_170g_with_60g_object": cup_hold_gravity_torque_nm(
-            ROBONINE_GRIPPER_MASS_KG, OBJECT_MASS_KG
-        ),
-        "robonine_170g_with_120g_object": cup_hold_gravity_torque_nm(
-            ROBONINE_GRIPPER_MASS_KG, GATED_OBJECT_MASS_KG
         ),
         "lightweight_130g_with_120g_object": cup_hold_gravity_torque_nm(
             LIGHTWEIGHT_TARGET_MASS_KG, GATED_OBJECT_MASS_KG
@@ -236,35 +206,6 @@ def main() -> None:
             "support_reactions_percent": [round(value / transport_mass * 100.0, 1) for value in transport_reactions],
             "static_front_margin_mm": round((0.090 - transport_com[0]) * 1000.0, 1),
             "dynamic_front_margin_5deg_0_3m_s2_mm": round(dynamic_front_margin_m(transport_com) * 1000.0, 1),
-        },
-        "robonine_reference_gripper_170g_with_120g_objects": {
-            "robot_without_objects_kg": round(robonine_pour_mass - 2.0 * OBJECT_MASS_KG, 3),
-            "pour_with_objects_kg": round(robonine_pour_mass, 3),
-            "transport_with_objects_kg": round(robonine_transport_mass, 3),
-            "pour_com_mm": [round(value * 1000.0, 1) for value in robonine_pour_com],
-            "transport_com_mm": [round(value * 1000.0, 1) for value in robonine_transport_com],
-            "pour_support_reactions_percent": [
-                round(value / robonine_pour_mass * 100.0, 1)
-                for value in robonine_pour_reactions
-            ],
-            "transport_support_reactions_percent": [
-                round(value / robonine_transport_mass * 100.0, 1)
-                for value in robonine_transport_reactions
-            ],
-            "pour_dynamic_front_margin_mm": round(
-                dynamic_front_margin_m(robonine_pour_com) * 1000.0, 1
-            ),
-            "transport_dynamic_front_margin_mm": round(
-                dynamic_front_margin_m(robonine_transport_com) * 1000.0, 1
-            ),
-            "drive_traction_required_n": round(robonine_traction_n, 3),
-            "drive_torque_each_with_sf2_nm": round(robonine_drive_torque_nm, 3),
-            "cup_hold_gravity_torque_60g_object_nm": round(
-                cup_hold["robonine_170g_with_60g_object"], 3
-            ),
-            "cup_hold_gravity_torque_120g_object_nm": round(
-                cup_hold["robonine_170g_with_120g_object"], 3
-            ),
         },
         "drive": {
             "traction_required_n": round(traction_n, 3),
@@ -306,10 +247,7 @@ def main() -> None:
     assert drive_torque_nm <= 0.300
     assert wheel_speed_m_s() >= 0.150
     assert cup_hold["selected_ggao50_165g_with_60g_object"] < 0.981
-    assert dynamic_front_margin_m(robonine_pour_com) >= 0.020
-    assert robonine_drive_torque_nm <= 0.300
     assert cup_hold["selected_ggao50_165g_with_120g_object"] < 0.981
-    assert cup_hold["robonine_170g_with_120g_object"] < 0.981
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
