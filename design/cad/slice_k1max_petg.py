@@ -25,6 +25,8 @@ SKILL = os.path.join(HOME, ".claude", "skills", "3d", "scripts", "slice.py")
 MACHINE = "Creality K1 Max (0.4 nozzle)"
 PROCESS = "0.20mm Standard @Creality K1Max (0.4 nozzle)"
 FILAMENT = "Creality Generic PETG"
+FILAMENT_TPU = "Creality Generic TPU @K1-all"
+BED_TEMP_TPU = "45"
 
 # 인계 문서 5.2절 시작 프로파일. G-code 승인값이 아니라 시작값이다.
 PROCESS_SPEC = {
@@ -64,16 +66,17 @@ def load_skill():
     return m
 
 
-def build_presets(sl, idx, brim):
+def build_presets(sl, idx, brim, filament_name=None, bed_temp=None):
     os.makedirs(WORK, exist_ok=True)
     src = {k: idx.get((t, n)) for k, (t, n) in
            {"machine": ("machine", MACHINE), "process": ("process", PROCESS),
-            "filament": ("filament", FILAMENT)}.items()}
+            "filament": ("filament", filament_name or FILAMENT)}.items()}
     missing = [k for k, v in src.items() if not v]
     if missing:
         raise SystemExit(f"시스템 프리셋을 찾지 못했습니다: {missing}. OrcaSlicer에서 Creality 벤더를 설치하세요.")
 
     # 상대 압출 검증(-51) 통과용 G92 E0
+    plate_temp = bed_temp or BED_TEMP
     lcg = sl.resolved(idx, "machine", MACHINE, "layer_change_gcode", "") or ""
     m_patch = {}
     if "G92" not in lcg:
@@ -83,12 +86,12 @@ def build_presets(sl, idx, brim):
     # 필라멘트: 상속을 미리 풀어 값을 명시한다 (CLI가 못 푸는 부분)
     f_patch = {}
     for k in FILAMENT_KEYS:
-        v = sl.resolved(idx, "filament", FILAMENT, k)
+        v = sl.resolved(idx, "filament", filament_name or FILAMENT, k)
         if v is not None:
             f_patch[k] = v
     for k in PLATE_TEMP_KEYS:
-        f_patch[k] = [BED_TEMP]
-        f_patch[k + "_initial_layer"] = [BED_TEMP]
+        f_patch[k] = [plate_temp]
+        f_patch[k + "_initial_layer"] = [plate_temp]
 
     p_patch = dict(PROCESS_SPEC)
     p_patch.update(brim)
@@ -123,6 +126,13 @@ def main():
     ap.add_argument("--out", default=None, help="G-code 출력 디렉터리 (홈 아래)")
     ap.add_argument("--all", action="store_true", help="design/cad/exports/stl 전체")
     ap.add_argument("--emit-presets", action="store_true", help="GUI 임포트용 프리셋만 생성")
+    ap.add_argument("--tpu", action="store_true",
+                    help="TPU 95A 로 슬라이싱. 인서트용")
+    ap.add_argument("--support", choices=["off", "tree", "normal"], default="off",
+                    help="서포트. ggao50 그리퍼 부품은 tree 가 필요하다")
+    ap.add_argument("--plate-only", action="store_true",
+                    help="서포트를 베드에서만 세운다. 모델 위 자국을 줄인다")
+    ap.add_argument("--threshold", type=float, default=30.0, help="서포트 임계각(도)")
     ap.add_argument("--infill", default=None,
                     help="인필 밀도 덮어쓰기 (예: 20%%). 쿠폰처럼 하중을 받지 않는 부품용")
     ap.add_argument("--dry-run", action="store_true")
@@ -155,7 +165,21 @@ def main():
         brim = dict(BRIM_LARGE if stem in LARGE_PARTS else BRIM_SMALL)
         if a.infill:
             brim["sparse_infill_density"] = a.infill
-        m, p, f = build_presets(sl, idx, brim)
+        if a.support == "off":
+            brim["enable_support"] = "0"
+        else:
+            brim.update({
+                "enable_support": "1",
+                "support_type": "tree(auto)" if a.support == "tree" else "normal(auto)",
+                "support_style": "organic" if a.support == "tree" else "snug",
+                "support_threshold_angle": str(int(a.threshold)),
+                "support_on_build_plate_only": "1" if a.plate_only else "0",
+            })
+        m, p, f = build_presets(
+            sl, idx, brim,
+            filament_name=FILAMENT_TPU if a.tpu else None,
+            bed_temp=BED_TEMP_TPU if a.tpu else None,
+        )
         argv = list(cmd) + ["--load-settings", f"{m};{p}", "--load-filaments", f,
                             "--ensure-on-bed", "--slice", "0", "--outputdir", out, stl]
         if a.dry_run:
@@ -173,7 +197,8 @@ def main():
             results.append({"part": stem, "ok": False, "returncode": r.returncode,
                             "error": info.get("error_string") or (r.stdout or r.stderr)[-400:]})
             continue
-        final = os.path.join(out, f"{stem}_K1Max_PETG_0.2mm_6wall_45infill.gcode")
+        tag = "TPU" if a.tpu else "PETG"
+        final = os.path.join(out, f"{stem}_K1Max_{tag}_0.2mm.gcode")
         os.replace(plates[0], final)
         for extra in plates[1:]:
             os.remove(extra)

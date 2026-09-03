@@ -48,6 +48,47 @@ ggao50 죠의 파지면은 완전 평면이다. STL을 직접 측정한 결과 �
 - 인서트에 `Ø3.4` 관통, 파지면 쪽에 `Ø6.5 × 1.6` 자리파기로 머리를 묻는다
 - 죠 쪽에 `Ø3.4` 관통 2개를 추가해야 한다. 죠 STEP을 수정하는 편이 뒤에 뚫는 것보다 정확하다
 
+## ggao50 본체 출력
+
+상류 STL 은 라이선스 표기가 없어 이 저장소에 두지 않는다. 필요할 때 받아서 방향을 잡고 슬라이싱한다.
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 design/gripper/prepare_ggao50_print.py --out "$HOME/gcode/ggao50"
+```
+
+받은 STL 과 생성한 G-code 는 `--out` 아래에만 생기고 커밋 대상이 아니다.
+
+| 부품 | 방향 | 서포트 | PETG | 시간 |
+|---|---|---|---:|---:|
+| `backplate` | Y+90 | tree | 67.1 cm³ | 2h 49m |
+| `leftgripper` | 원본 | tree | 26.4 cm³ | 1h 23m |
+| `rightgripper` | X180 | tree | 26.4 cm³ | 1h 23m |
+| `cameraplate` | 원본 | tree | 21.2 cm³ | 1h 42m |
+| `connectorplate` | 원본 | tree | 12.0 cm³ | 41m |
+| `pinion` | **X+90** | **off** | 2.7 cm³ | 17m |
+
+한 팔 `155.8 cm³` ≈ `198 g`, `8h 14m`. 양팔이면 `396 g`, `16h 29m`이다.
+
+`pinion` 은 X+90 으로 눕히면 서포트가 사라진다. 나머지 다섯은 회전으로 없앨 수 없어 tree 서포트를 베드에서만 세운다(`--plate-only`). 죠는 파지면이 수직이 되는 원본 방향을 유지해 접촉면에 서포트 자국이 남지 않게 한다.
+
+## 인서트 출력
+
+인서트는 TPU 95A 로 뽑는다.
+
+```bash
+python3 design/cad/slice_k1max_petg.py --out "$HOME/gcode/inserts" \
+  --tpu --infill 100% --support off design/gripper/exports/stl/insert_*.stl
+```
+
+| 인서트 | TPU | 시간 |
+|---|---:|---:|
+| `insert_A_flat_pad` | 20.6 cm³ | 1h 45m |
+| `insert_B_v_groove` | 33.0 cm³ | 2h 47m |
+| `insert_C_trapezoid` | 24.8 cm³ | 2h 07m |
+
+노즐 `230 °C`, 베드 `45 °C`. TPU 는 인필 100% 로 뽑아야 V 형상이 눌리지 않는다.
+
 ## 재생성
 
 ```bash
