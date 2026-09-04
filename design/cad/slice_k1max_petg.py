@@ -152,6 +152,8 @@ def main():
     ap.add_argument("--threshold", type=float, default=30.0, help="서포트 임계각(도)")
     ap.add_argument("--infill", default=None,
                     help="인필 밀도 덮어쓰기 (예: 20%%). 쿠폰처럼 하중을 받지 않는 부품용")
+    ap.add_argument("--brim", default=None,
+                    help="브림 폭 mm 덮어쓰기. 접지 면적이 작은 부품은 넓혀야 붙는다")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -182,6 +184,9 @@ def main():
         brim = dict(BRIM_LARGE if stem in LARGE_PARTS else BRIM_SMALL)
         if a.infill:
             brim["sparse_infill_density"] = a.infill
+        if a.brim:
+            brim["brim_type"] = "outer_only"
+            brim["brim_width"] = str(a.brim)
         if a.support == "off":
             brim["enable_support"] = "0"
         else:
