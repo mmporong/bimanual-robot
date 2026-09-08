@@ -1,0 +1,21 @@
+{
+  "failure_id": "EXAMPLE-20260908-0001",
+  "triage_owner": "example-integration-lane",
+  "immediate_action": "none",
+  "source": {
+    "run_id": "example-dry-run-0001",
+    "environment": "dry_run"
+  },
+  "observation": {
+    "stage": "cup_grasp",
+    "observed_code": "CUP_GRASP_MISS",
+    "summary": "저장 도구 사용법을 위한 가상 입력이며 실제 실험 결과가 아니다",
+    "detected_by": "human_observation",
+    "severity": "task_failure"
+  },
+  "context": {
+    "software_commits": {},
+    "calibration_ids": {},
+    "key_metrics": {}
+  }
+}

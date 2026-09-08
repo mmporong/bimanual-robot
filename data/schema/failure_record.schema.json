@@ -1,0 +1,605 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/bimanual-robot/failure-record.schema.json",
+  "title": "물 서빙 로봇 실패 분석 레코드",
+  "description": "관측된 실패와 확인된 원인을 분리하고, 근거·조치·동일 조건 재시험·데이터 활용을 한 ID로 연결한다",
+  "type": "object",
+  "required": [
+    "failure_id",
+    "recorded_at",
+    "triage_owner",
+    "status",
+    "source",
+    "observation",
+    "context",
+    "evidence",
+    "diagnosis",
+    "response",
+    "validation",
+    "data_use"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "failure_id": {
+      "type": "string",
+      "pattern": "^(FAIL|EXAMPLE)-[0-9]{8}-[0-9]{4}$",
+      "description": "실패 묶음의 안정 ID. 같은 원인을 조사하는 실행들은 하나의 레코드에 연결한다"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "triage_owner": {
+      "type": "string",
+      "minLength": 1,
+      "description": "원인 분석과 재시험 상태를 갱신할 담당자 또는 team lane"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "investigating", "confirmed", "resolved", "unresolved"]
+    },
+    "source": {
+      "type": "object",
+      "required": ["run_id", "environment"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "미션·정책 rollout·시뮬레이션 실행을 식별하는 ID"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "dataset_id": {
+          "type": "string"
+        },
+        "episode_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["real", "isaac_sim", "dry_run"]
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["stage", "observed_code", "summary", "detected_by", "severity"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "web_mission",
+            "nav_to_kitchen",
+            "align_kitchen",
+            "cup_grasp",
+            "jug_grasp",
+            "pour",
+            "jug_return",
+            "shelf_place",
+            "nav_to_table",
+            "align_table",
+            "table_place",
+            "nav_to_dock",
+            "dock",
+            "runtime",
+            "simulation"
+          ]
+        },
+        "observed_code": {
+          "type": "string",
+          "enum": [
+            "REQUEST_REJECTED",
+            "NAV_GOAL_FAILED",
+            "ARRIVAL_GATE_FAILED",
+            "ALIGNMENT_FAILED",
+            "OBJECT_NOT_FOUND",
+            "SCENE_OUT_OF_RANGE",
+            "LOW_VISION_CONFIDENCE",
+            "CUP_GRASP_MISS",
+            "CUP_SLIP",
+            "JUG_GRASP_MISS",
+            "JUG_SLIP",
+            "UNDER_FILL",
+            "OVER_FILL",
+            "SPILL",
+            "FILL_UNKNOWN",
+            "JUG_RETURN_FAILED",
+            "SHELF_PLACE_FAILED",
+            "TABLE_PLACE_FAILED",
+            "CUP_TILT_UNSAFE",
+            "DOCK_FAILED",
+            "CHARGE_NOT_STARTED",
+            "SERVO_STALL",
+            "COLLISION_RISK",
+            "TIMEOUT",
+            "OPERATOR_ABORT",
+            "SIM_REAL_MISMATCH",
+            "OTHER"
+          ],
+          "description": "관측된 증상 또는 결과. 확인된 원인과 혼용하지 않는다"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detected_by": {
+          "type": "string",
+          "enum": [
+            "ground_truth_measure",
+            "human_observation",
+            "vision_estimate",
+            "safety_gate",
+            "system_monitor"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["quality_degradation", "task_failure", "safe_stop"]
+        },
+        "time_range_s": {
+          "type": "array",
+          "items": {"type": "number", "minimum": 0},
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "실행 시작 기준 [관측 시작, 관측 종료]"
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": ["software_commits", "calibration_ids", "key_metrics"],
+      "additionalProperties": false,
+      "properties": {
+        "software_commits": {
+          "type": "object",
+          "additionalProperties": {"type": "string"},
+          "description": "실행 코드·URDF·인지 코드 등 재현에 필요한 저장소와 commit"
+        },
+        "calibration_ids": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        },
+        "policy_id": {
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "type": "string"
+        },
+        "station_id": {
+          "type": "string"
+        },
+        "scene_id": {
+          "type": "string"
+        },
+        "key_metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {"type": "number"},
+              {"type": "string"},
+              {"type": "boolean"},
+              {"type": "null"}
+            ]
+          },
+          "description": "원인 분리에 쓰인 원시값. 단위는 키 이름에 적는다"
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "uri", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^EV-[0-9]{2}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "video",
+              "rosbag",
+              "image",
+              "metric_json",
+              "trajectory",
+              "console_log",
+              "safety_log",
+              "measurement",
+              "other"
+            ]
+          },
+          "uri": {
+            "type": "string",
+            "minLength": 1,
+            "description": "private Hub·artifact storage·repo 파일의 안정 경로"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          },
+          "time_range_s": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0},
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "diagnosis": {
+      "type": "object",
+      "required": ["cause_status", "hypotheses"],
+      "additionalProperties": false,
+      "properties": {
+        "cause_status": {
+          "type": "string",
+          "enum": ["untriaged", "hypothesis", "confirmed", "unresolved"]
+        },
+        "hypotheses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "layer", "statement", "status", "evidence_ids"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^H-[0-9]{2}$"
+              },
+              "layer": {
+                "$ref": "#/$defs/cause_layer"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": ["pending", "rejected", "supported"]
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {"type": "string", "pattern": "^EV-[0-9]{2}$"},
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "root_cause": {
+          "type": "object",
+          "required": ["layer", "code", "summary", "confirmed_by"],
+          "additionalProperties": false,
+          "properties": {
+            "layer": {
+              "$ref": "#/$defs/cause_layer"
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]+$"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1
+            },
+            "confirmed_by": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "pattern": "^EV-[0-9]{2}$"},
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": ["immediate_action", "retraining_decision"],
+      "additionalProperties": false,
+      "properties": {
+        "immediate_action": {
+          "type": "string",
+          "enum": ["none", "stop", "abort", "retry", "human_takeover", "safe_park"]
+        },
+        "corrective_action": {
+          "type": "string"
+        },
+        "changed_artifacts": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "change_commit": {
+          "type": "string"
+        },
+        "retraining_decision": {
+          "type": "string",
+          "enum": [
+            "not_evaluated",
+            "not_needed",
+            "collect_more_success",
+            "collect_hil_recovery",
+            "relabel",
+            "retrain",
+            "do_not_retrain"
+          ]
+        },
+        "decision_reason": {
+          "type": "string"
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["result", "same_condition_run_ids", "regression_result", "regression_run_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol_id": {
+          "type": "string"
+        },
+        "same_condition_run_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "result": {
+          "type": "string",
+          "enum": ["not_run", "pass", "fail", "inconclusive"]
+        },
+        "regression_run_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "regression_result": {
+          "type": "string",
+          "enum": ["not_run", "pass", "fail", "inconclusive"]
+        },
+        "acceptance_evidence_ids": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^EV-[0-9]{2}$"},
+          "uniqueItems": true
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "data_use": {
+      "type": "object",
+      "required": ["primary_disposition", "include_in_training", "collection_priority", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "primary_disposition": {
+          "type": "string",
+          "enum": [
+            "failure_bank",
+            "exclude_from_bc",
+            "eval_only",
+            "hil_recovery",
+            "counterexample",
+            "relabel_pending"
+          ]
+        },
+        "include_in_training": {
+          "type": "boolean"
+        },
+        "training_dataset_id": {
+          "type": "string"
+        },
+        "source_dataset_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "HIL 복구 구간을 추출한 원본 데이터셋 ID"
+        },
+        "derived_dataset_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "실패 원본과 분리해 만든 복구 학습 데이터셋 ID"
+        },
+        "recovery_time_range_s": {
+          "type": "array",
+          "items": {"type": "number", "minimum": 0},
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "원본 실행 시작 기준 [복구 행동 시작, 복구 행동 종료]"
+        },
+        "recovery_evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^EV-[0-9]{2}$"},
+          "uniqueItems": true,
+          "description": "복구 구간 경계를 확인할 수 있는 evidence ID"
+        },
+        "recovery_verified_success": {
+          "type": "boolean",
+          "description": "recovery_evidence_ids의 근거를 보고 담당자가 복구 성공을 확인했는지"
+        },
+        "recovery_control_source": {
+          "type": "string",
+          "enum": ["human", "teleop"],
+          "description": "복구 구간의 실제 행동을 생성한 제어 주체"
+        },
+        "collection_priority": {
+          "type": "string",
+          "enum": ["P0", "P1", "P2", "none"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "cause_layer": {
+      "type": "string",
+      "enum": [
+        "mission_contract",
+        "navigation",
+        "localization",
+        "tf_time",
+        "perception",
+        "measurement_calibration",
+        "ik_reachability",
+        "policy_data",
+        "policy_runtime",
+        "control_runtime",
+        "hardware",
+        "mechanical",
+        "simulation_model",
+        "environment",
+        "operator"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "diagnosis": {
+            "properties": {"cause_status": {"const": "confirmed"}},
+            "required": ["cause_status"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "diagnosis": {"required": ["root_cause"]}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"enum": ["confirmed", "resolved"]}
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "diagnosis": {
+            "properties": {"cause_status": {"const": "confirmed"}},
+            "required": ["cause_status"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "resolved"}
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "validation": {
+            "properties": {"result": {"const": "pass"}},
+            "required": ["result"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "validation": {
+            "properties": {
+              "regression_result": {"enum": ["pass", "fail", "inconclusive"]}
+            },
+            "required": ["regression_result"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "validation": {
+            "properties": {
+              "regression_run_ids": {"minItems": 1}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "data_use": {
+            "properties": {
+              "primary_disposition": {
+                "enum": [
+                  "failure_bank",
+                  "exclude_from_bc",
+                  "eval_only",
+                  "counterexample",
+                  "relabel_pending"
+                ]
+              }
+            },
+            "required": ["primary_disposition"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data_use": {
+            "properties": {"include_in_training": {"const": false}},
+            "required": ["include_in_training"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "validation": {
+            "properties": {
+              "result": {"enum": ["pass", "fail", "inconclusive"]}
+            },
+            "required": ["result"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "validation": {
+            "properties": {
+              "same_condition_run_ids": {"minItems": 1}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "data_use": {
+            "properties": {"include_in_training": {"const": true}},
+            "required": ["include_in_training"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data_use": {"required": ["training_dataset_id"]}
+        }
+      }
+    }
+  ]
+}

@@ -1,63 +1,99 @@
 {
   "episode_index": 0,
-  "dataset_id": "TEAM/bimanual-pick-place-v1",
-  "recorded_at": "2026-08-25T14:32:10+09:00",
+  "dataset_id": "TEAM/water-kitchen-policy1-smoke-v1",
+  "run_id": "example-teleop-run-0001",
+  "recorded_at": "2026-09-07T14:32:10+09:00",
   "operator": "op_a",
   "task": {
-    "name": "pick_place_stage1",
-    "instruction": "빨간 블록을 오른팔로 집어 파란 트레이에 놓으세요",
-    "stage": 1
+    "name": "water_kitchen_policy1",
+    "instruction": "왼팔로 컵을 들고 오른팔로 물통을 기울인 뒤 물통을 원위치하고 컵을 선반에 놓으세요",
+    "mission_stage": "KITCHEN_POLICY_1",
+    "difficulty_stage": 1
+  },
+  "policy": {
+    "id": "policy_1",
+    "version": "contract-v1",
+    "execution_mode": "teleop_demo",
+    "action_representation": "absolute_joint_position",
+    "config_id": "example-only"
   },
   "arms": {
-    "mode": "single",
-    "used": ["right"],
-    "teleop_device": "leader_arm",
+    "mode": "simultaneous",
+    "used": ["left", "right"],
+    "teleop_device": "bi_so_leader",
     "calibration_files": {
-      "right": "calib/right_20260825.json#sha1:0000000000000000000000000000000000000000"
+      "left": "calib/left_example.json#sha256:example",
+      "right": "calib/right_example.json#sha256:example"
     }
   },
-  "object": {
-    "name": "red_cube_40mm",
-    "size_mm": [40, 40, 40],
-    "mass_g": 22,
-    "surface": "matte",
-    "start_zone": "grid_B2",
-    "start_pose": [0.28, -0.05, 0.02, 0.0],
-    "goal_zone": "tray_left"
-  },
+  "objects": [
+    {
+      "role": "cup",
+      "id": "cup_example_v1",
+      "size_mm": [70, 70, 100],
+      "mass_g": 20,
+      "surface": "transparent",
+      "start_zone": "kitchen_cup_slot",
+      "goal_zone": "robot_shelf_cup_slot"
+    },
+    {
+      "role": "jug",
+      "id": "jug_example_v1",
+      "surface": "mixed",
+      "start_zone": "kitchen_jug_slot",
+      "goal_zone": "kitchen_jug_slot"
+    },
+    {
+      "role": "shelf",
+      "id": "robot_shelf_example_v1",
+      "surface": "mixed",
+      "start_zone": "robot_shelf",
+      "goal_zone": "robot_shelf"
+    }
+  ],
   "scene": {
     "lighting": "indoor_fluorescent",
-    "background": "white_table",
+    "background": "kitchen_bench_example",
     "distractors": 0,
-    "location": "lab_bench_1"
+    "location": "lab_bench_1",
+    "station_id": "kitchen"
   },
   "robot": {
-    "type": "bimanual_so101_like",
+    "type": "hold_flow_bimanual_so101",
     "fps": 30,
     "cameras": [
       {
-        "key": "observation.images.top",
-        "kind": "rgb",
+        "key": "observation.images.mast",
+        "kind": "rgbd",
         "resolution": "640x480",
         "fps": 30,
-        "usb_bus": "bus1"
-      },
-      {
-        "key": "observation.images.depth",
-        "kind": "depth",
-        "resolution": "640x480",
-        "fps": 30,
-        "usb_bus": "bus2"
+        "usb_bus": "example-bus"
       }
     ],
-    "firmware_or_commit": "control@0000000"
+    "firmware_or_commit": "example-only",
+    "description_commit": "example-only"
+  },
+  "water_measurement": {
+    "cup_id": "cup_example_v1",
+    "target_ml": 0,
+    "fill_class": "DRY_RUN",
+    "calibration_id": "not-applicable-dry-run",
+    "spill_detected": false
   },
   "outcome": {
     "success": true,
-    "verified_by": "ground_truth_measure",
-    "duration_s": 11.4,
+    "verified_by": "human_observation",
+    "stage_results": {
+      "cup_grasp": true,
+      "jug_grasp": true,
+      "pour_motion": true,
+      "jug_return": true,
+      "shelf_place": true
+    },
+    "duration_s": 18.4,
     "anomalies": [],
-    "notes": "규약 검증용 예시. 실제 수집 데이터가 아님"
+    "human_intervention_count": 0,
+    "notes": "스키마 검증용 건식 예시이며 실제 수집 데이터가 아니다"
   },
   "split": "train",
   "include": true

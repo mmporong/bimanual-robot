@@ -1,40 +1,42 @@
 # HOLD THE FLOW · 이동형 양팔 로봇 프로젝트
 
-동국대 DAPIER 부트캠프 최종 팀 프로젝트의 **팀 공용 저장소**다. 팀원이 설계·코드·실험 데이터 규격·회의 결정·검증 증거를 이곳에서 함께 관리한다. 한 팔이 경량 병을 기울이고 다른 팔이 컵을 안정화하는 동안, 이동·인지·양팔 조작·계측 검증·실패 복구를 하나의 ROS 2 시스템으로 연결한다.
+동국대 DAPIER 부트캠프 최종 팀 프로젝트의 **팀 공용 저장소**다. 팀원이 설계·코드·실험 데이터 규격·회의 결정·검증 증거를 이곳에서 함께 관리한다. 현행 태스크는 웹 요청을 받은 이동형 양팔 로봇이 주방에서 물을 준비해 손님 테이블에 서빙하고 충전소로 복귀하는 단일 시나리오다.
 
-![HOLD THE FLOW 구현 아키텍처](docs/20260901_HOLD_THE_FLOW_구현아키텍처.svg)
-
-- 프로젝트 사이트: [HOLD THE FLOW · Team Project](https://hold-the-flow-bimanual.mmporong.chatgpt.site) — ChatGPT Sites 소유자 전용 배포
 - 시작: 2026-08-19 (킥오프 회의)
 - 기간: 약 3개월
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
 - 운영 방식: Issue → 작업 브랜치 → Pull Request → 로컬 검증 → `main`
-- 단일 원본: 팀 프로젝트의 최신 결정과 산출물은 이 저장소의 `docs/`, `research/`, `data/`, `src/`에서 관리
+- 태스크·정책·구현 상세 단일 원본: [2026-09-07 물 서빙 로봇 회의 결정](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
+- 기구 수치 단일 원본: [`hold_flow_mechanical_v0_2.yaml`](design/mechanical/hold_flow_mechanical_v0_2.yaml)
 
 ## 프로젝트 한 줄 정의
 
-### 이동은 넓게, 조작은 정밀하게, 결과는 계측한다
+### 충전소에서 출발해 한 잔을 준비하고 서빙한 뒤 돌아온다
 
-**SLAM/Nav2로 지정 위치까지 이동한 뒤 베이스를 정지하고, 한 팔은 경량 병을 기울이고 다른 팔은 받는 컵을 든다. 접촉 센서로 파지를 판정하고 붓기 뒤 낮은 도킹 패드에서 실제 유입량과 흘림을 검증하며, 실패하면 검증된 복구 스킬을 실행한다.**
+**로봇은 충전소에서 웹 요청을 받고 주방으로 자율주행한다. 왼팔로 컵을, 오른팔로 물통을 조작해 물을 따른 뒤 컵을 로봇 선반에 싣는다. 손님 테이블로 이동해 컵을 내려놓고 충전소로 복귀한다.**
 
-현재 개발과 실물 검증은 이동형 비정형 용기 붓기 1안에 집중한다. 일반 식탁은 사용하지 않는다. 로봇이 병과 빈 컵을 운반 자세로 들고 지정 위치까지 간 뒤, RGB-D/AprilTag로 마지막 정렬하고 정지 상태에서 물을 따른다. MoveIt 2/IK가 결정론적 기준선을 만들고, ACT는 기준선 통과 뒤 양팔 조작 구간에만 적용한다.
+현재 개발과 실물 검증은 이 물 서빙 시나리오 하나에 집중한다. 주행 중에는 팔이 컵을 들지 않고 선반에 적재하며, 팔 조작 중에는 베이스를 정지한다. ACT 정책은 조작 구간만 담당하고 SLAM/Nav2는 별도 이동 계층으로 유지한다. 물 양은 YOLO 계열 비전으로 판정하되, 검출 형식·컵 조건·높이-부피 보정은 본수집 전에 확정한다.
 
-- 기준 문서: [docs/20260828_1안_확정_이동형_양팔_붓기.md](docs/20260828_1안_확정_이동형_양팔_붓기.md)
-- 구현 아키텍처: [docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md)
+- 현행 기준 문서: [docs/20260907_물서빙로봇_회의결정과_실행범위.md](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
+- 세션 인계: [docs/20260904_양팔로봇_프로젝트_인계.md](docs/20260904_양팔로봇_프로젝트_인계.md)
+- 과거 붓기안 이력: [docs/20260828_1안_확정_이동형_양팔_붓기.md](docs/20260828_1안_확정_이동형_양팔_붓기.md)
+- 구현 아키텍처 참고: [docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md) — 태스크·policy 경계는 2026-09-07 회의 문서가 우선
 - 250 mm 차체 계산: [docs/20260901_250mm_차체_계산검증_v0.2.md](docs/20260901_250mm_차체_계산검증_v0.2.md)
 - 기구설계 명세: [docs/20260901_기구설계_제작명세_v0.2.md](docs/20260901_기구설계_제작명세_v0.2.md)
 - 기구 검증표: [docs/20260901_기구설계_검증체크리스트_v0.2.md](docs/20260901_기구설계_검증체크리스트_v0.2.md)
 - JD-AMR 구동계·K1 Max·평행그리퍼 반영: [docs/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md](docs/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md)
 - CAD·URDF 파라미터: [design/mechanical/hold_flow_mechanical_v0_2.yaml](design/mechanical/hold_flow_mechanical_v0_2.yaml)
+- 실패 데이터 저장·진단·활용 규약: [data/failures/README.md](data/failures/README.md)
 - 출력용 CAD 원본·STEP·STL: [design/cad/README.md](design/cad/README.md)
 - 양팔 ROS 2 모델: [src/hold_flow_description/README.md](src/hold_flow_description/README.md)
 - 확장된 단일 URDF: [src/hold_flow_description/urdf/hold_flow.urdf](src/hold_flow_description/urdf/hold_flow.urdf)
-- 논문 적용 설계: [research/R31_1안_이동형_양팔_붓기_논문적용.md](research/R31_1안_이동형_양팔_붓기_논문적용.md)
+- 과거 붓기안 논문 적용 이력: [research/R31_1안_이동형_양팔_붓기_논문적용.md](research/R31_1안_이동형_양팔_붓기_논문적용.md)
 - 팀 작업 방식: [docs/TEAM_WORKFLOW.md](docs/TEAM_WORKFLOW.md)
-- 회의 기록: [docs/20260828_회의결과_주제후보_역할분담.md](docs/20260828_회의결과_주제후보_역할분담.md)
-- 5쪽 발표자료: [docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx](docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx)
-- 발표자료 디자인 리포트: [docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx](docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx)
+- 과거 후보 회의 기록: [docs/20260828_회의결과_주제후보_역할분담.md](docs/20260828_회의결과_주제후보_역할분담.md)
+- 과거 붓기안 발표자료: [docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx](docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx)
+- 과거 붓기안 발표 디자인 리포트: [docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx](docs/20260828_HOLD_THE_FLOW_발표자료_디자인_리포트.docx)
+- 과거 붓기안 프로젝트 사이트: [HOLD THE FLOW · Team Project](https://hold-the-flow-bimanual.mmporong.chatgpt.site) — 현행 물 서빙 흐름 미반영
 
 ## CAD와 URDF
 
@@ -44,21 +46,25 @@ ROS 2 모델은 250 mm 이동 베이스와 SO-101 두 대, ggao50 평행 그리�
 
 다만 장공을 원형공으로 바꾸는 일은 아직 남았다. SO-101 베이스, C018 혼과 JD-AMR 휠 허브, 볼 캐스터, Astra와 LDS-03 체결부를 실측한 뒤 어댑터를 확정해야 한다. 현재 출력물은 조립 검토용 P0이며 실측을 건너뛴 양산판이 아니다.
 
-## 현재 구현 스택
+## 기술 선택과 구현 상태
 
-| 파트 | 채택 기술 | 직접 구현할 부분 |
-|---|---|---|
-| 시뮬레이션 | Isaac Sim 6.0, USD, ROS 2 Bridge | SO-101·모바일 베이스 자산, 센서, TF, sim/real gap |
-| 지도·이동 | SLAM Toolbox, AMCL, Nav2 | 지정 붓기 위치 staging pose, Action 결과, 반복 접근 평가 |
-| 로컬 정렬 | RGB-D, AprilTag, OpenCV, tf2 | `base_link→workcell` pose와 시간축 검증 |
-| 양팔 조작 | MoveIt 2, IK, Planning Scene | 파지·기울임·복귀 궤적과 양팔 충돌 검사 |
-| 실행·안전 | C++17, FollowJointTrajectory, command mux | 관절 한계, 타임아웃, 팔 간 거리, 안전 정지 |
-| 실물 연결 | LeRobot `bi_so_follower` Python bridge | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 |
-| 모방학습 | LeRobot ACT, PyTorch | 실물 양팔 시연 수집, 학습, rollout, IK 대조 |
-| 계측 | FSR 4채널, 병·컵 로드셀 도킹 패드 | 파지 안전, 유입량, 흘림 추정 |
-| 실패 복구 | Python 상태기계, 선택형 로컬 LLM | 허용된 복구 스킬만 선택, 직접 모터 제어 금지 |
+아래 표의 `채택`은 현행 기준 기술, `권장`은 첫 구현 후보, `미확정`은 실험이나 팀 결정이
+필요한 항목이다. 기술 이름이 적혀 있어도 구현 완료를 뜻하지 않는다.
 
-Isaac Sim 6.0의 공식 최소 VRAM은 16GB이며 현재 확인한 개발 노트북은 8GB다. ROS 2 코드와 자산은 이 장비에서 준비하되, Isaac Sim 실행은 Compatibility Checker를 통과한 GPU 워크스테이션이나 원격 장비에서 검증한다.
+| 파트 | 기술 | 결정 상태 | 구현 상태 | 직접 구현·검증할 부분 |
+|---|---|---|---|---|
+| 시뮬레이션 | Isaac Sim 6.0, USD, ROS 2 Bridge | 채택 | 계획 | 최종 URDF 반입, 센서·TF·ROS 2 Bridge smoke |
+| 요청 입력 | 웹 UI, FastAPI, ROS 2 Action client | 권장 | 계획 | 요청 검증, request ID, 테이블 목표 전달 |
+| 지도·이동 | SLAM Toolbox, AMCL, Nav2 DWB, Collision Monitor, Docking Server | 권장 | 계획 | station, 장애물 회피, 반복 접근·도킹 평가 |
+| 로컬 정렬 | RGB-D, OpenCV, tf2 | 권장 | 계획 | 주방·선반·테이블 상대 자세와 시간축 검증 |
+| 양팔 조작 | IK, 사전 검증 궤적, LeRobot ACT | 일부 채택 | 기존 IK 수정 필요·정책 계획 | 주방 policy 1, 테이블 policy 2, 미정 policy 번호 경계 확정 |
+| 실행·안전 | C++17, FollowJointTrajectory, command mux | 권장 | 계획 | 관절 한계, 타임아웃, 팔 간 거리, 안전 정지 |
+| 실물 연결 | LeRobot `bi_so_follower` Python bridge | 권장 | 양팔 ROS mux 어댑터 smoke 미검증 | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 |
+| 모방학습 | LeRobot ACT, PyTorch | 채택 | 현행 태스크 데이터·모델 없음 | 시연 수집, 학습·배포, 실패 분포 수집·수정·재학습 |
+| 물 양 인지 | YOLO 계열 비전 | 채택 | 형식 미확정·구현 전 | 컵·액체·흘림 관측, 컵별 높이-부피 보정, 결과 판정 |
+| 충전 | Nav2 도킹 목표, 충전 인터페이스 | 일부 권장·미확정 | 계획 | 복귀 자세, 접점, 충전 시작 판정 |
+
+Isaac Sim 6.0의 [공식 최소 VRAM은 16GB](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/requirements.html)이며 현재 확인한 개발 노트북은 8GB다. ROS 2 코드와 자산은 이 장비에서 준비하되, Isaac Sim 실행은 Compatibility Checker를 통과한 GPU 워크스테이션이나 원격 장비에서 검증한다.
 
 ## 팀 저장소 운영
 
@@ -72,13 +78,19 @@ Isaac Sim 6.0의 공식 최소 VRAM은 16GB이며 현재 확인한 개발 노트
 
 ## 현재 역할
 
-- 강사/멘토: 로컬 LLM·감독 에이전트, 교육·리뷰
-- [@mmporong](https://github.com/mmporong): **SLAM/Nav2 우선**, 250 mm 모바일 베이스·지정 위치 접근, 전체 통합
+- 강사/멘토: 교육·리뷰
+- [@mmporong](https://github.com/mmporong): **SLAM/Nav2·장애물 회피**, 옆 세션의 이동 계층 작업, IL·IK 세부 연결, 최종 모델 URDF 수신 후 Isaac Sim 시뮬레이션
 - 협업자 [@Minsuk-ji](https://github.com/Minsuk-ji): write 권한 수락, 세부 담당 확정 대기
 - 팀원 [@jangjunseo05](https://github.com/jangjunseo05): write 초대 수락 대기, 세부 담당 확정 대기
-- 공통: ACT, IK, Depth, 그리퍼·접촉 센서, 실물 데이터 수집·평가
+- 팀 1순위: 회의에서 지목한 policy 학습·배포, rollout 실패 케이스 수집, 수정·보강·재학습
+- 공통 선결: `3번 policy` 의미, policy 2 사용 팔, YOLO 물 양 규격 확정
 
-파트별 언어·ROS 인터페이스·구현 순서는 [구현 아키텍처](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md)를 기준으로 한다.
+파트별 언어와 ROS 인터페이스는 [구현 아키텍처](docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md)를 참고하되, 태스크·policy 범위와 구현 우선순위는 [2026-09-07 회의 결정](docs/20260907_물서빙로봇_회의결정과_실행범위.md)을 따른다.
+
+- 단계별 기술·입출력·성공·실패 처리: 현행 회의 문서 3~5절
+- ACT 수집·학습·배포·실패 개선: 현행 회의 문서 6절과 [data 규격](data/README.md)
+- Isaac Sim 범위와 안전 조건: 현행 회의 문서 8~9절
+- 실패의 관측·원인·조치·동일 조건 재시험: 현행 회의 문서 11절과 [실패 데이터 규약](data/failures/README.md)
 
 ## 폴더 구조
 
@@ -87,10 +99,11 @@ bimanual-robot/
 ├── design/        기구 파라미터, CadQuery 원본, STEP·STL 출력물
 ├── docs/          회의록·결정사항·담당 파트·설계 문서 (파일명 YYYYMMDD_ 접두)
 ├── research/      리서치 산출물 (양팔 텔레옵 선례, 적용 사례, GPU 비용 등)
-├── data/          데이터셋 규격·인덱스·스키마 (실데이터는 커밋하지 않음)
-│   └── schema/    에피소드 메타데이터 스키마, dataset card 템플릿
-├── src/           ROS 2·MoveIt·ACT·Isaac Sim 구현 코드
-├── site/          팀 프로젝트 HTML 사이트 소스·배포 설정
+├── data/          데이터셋 규격·인덱스·실패 데이터 계약 (실데이터는 커밋하지 않음)
+│   ├── failures/  실패 저장·진단·재시험·활용 규약
+│   └── schema/    에피소드·실패 레코드 스키마, dataset card 템플릿
+├── src/           ROS 2·IK·ACT·Isaac Sim 구현 코드
+├── site/          과거 붓기안 HTML 사이트 소스·배포 설정
 ├── tools/         수집·검증·변환 스크립트
 ├── PROGRESS.md    세션별 진행 로그 (최상단 append)
 └── CLAUDE.md      팀 저장소 작업 규칙
@@ -98,16 +111,28 @@ bimanual-robot/
 
 ## 현재 상태
 
+- [x] 최종 태스크를 충전소→주방→선반 운반→테이블 서빙→충전소 복귀의 물 서빙 로봇으로 고정
+- [x] 실제 키오스크 대신 웹 버튼 입력으로 고정
+- [x] 커넥터 체결·범용 3태스크·음성/STT/VLA를 현행 범위에서 제외
+- [x] 사용자 담당을 SLAM·장애물 회피·IL/IK 세부·URDF 이후 Isaac Sim으로 정리
+- [x] 웹·Nav2·정렬·ACT·YOLO·선반·도킹의 입력·성공 조건·실패 처리 상세화
+- [x] 물 서빙용 episode sidecar에 policy·다중 물체·물 양·실패·사람 개입 추적 추가
+- [x] 실패의 관측·가설·확정 원인·조치·동일 조건 재시험을 분리한 레코드 규격 추가
+- [x] 실패 근거 복사·SHA-256 검증·집계 CLI와 데이터 계약 회귀 테스트 구현
+- [ ] `3번 policy`의 정확한 시작·행동·종료 조건 확정
+- [ ] policy 2의 사용 팔 확정: 회의 본문은 왼팔, 괄호 주석은 오른팔
+- [ ] YOLO 태스크 형식·컵 재질·목표 물 양·허용 오차·높이-부피 보정 확정
+- [ ] 로봇 선반과 충전 도킹의 기구·좌표·인터페이스 확정
 - [x] 킥오프 회의 기록·결정사항 정리
 - [x] 데이터 저장 규격 초안 (스키마·dataset card·포함/제외 기준)
-- [x] 3인 회의 결과·두 시나리오·잠정 역할 문서화
-- [x] 물 따르기·접촉 센서·실패 복구·모바일 양팔 논문 재검증
-- [x] 논문 근거를 제어 상태기계·센서 책임·평가표·실패 데이터 규격으로 변환
-- [x] 물 따르기를 Plan A와 메인 시나리오로 확정
+- [x] 과거 3인 회의의 두 후보 시나리오·잠정 역할 문서화
+- [x] 구형 붓기안의 접촉 센서·실패 복구·모바일 양팔 논문 재검증
+- [x] 구형 붓기안의 논문 근거를 제어 상태기계·센서 책임·평가표·실패 데이터 규격으로 변환
+- [x] 물 따르기 중심의 구형 Plan A를 만들었으며, 2026-09-07 물 서빙 전체 흐름으로 대체
 - [x] 물 따르기 전용 5쪽 발표자료와 디자인 리포트 제작
-- [x] ROS 2·C++·Python·Nav2·MoveIt 2·ACT·Isaac Sim 구현 경계 문서화
+- [x] 구형 붓기안의 ROS 2·C++·Python·Nav2·ACT·Isaac Sim 구현 경계 문서화(현행 태스크·policy는 2026-09-07 회의 문서가 우선)
 - [x] 250 mm 정사각 차체·SO-101×2·단일 Astra S 기둥의 기구 명세와 검증표 작성
-- [x] 5.26 kg 보수 질량·3점 접지·C018 12 V 주행·출력 구조 계산
+- [x] 5.092 kg 계산 질량·3점 접지·C018 12 V 주행·출력 구조 계산
 - [x] JD-AMR 65 mm 바퀴·볼 캐스터 재사용, K1 Max 한 장 판, ggao50 평행그리퍼 P0 기준 확정
 - [x] K1 Max용 파라메트릭 CAD와 STEP·STL 14종 생성, B-Rep·빌드 볼륨·서포트 검사 통과
 - [x] 모바일 베이스·SO-101×2·평행그리퍼×2·Astra·LDS-03 Xacro/URDF 생성과 TF 검사 통과
@@ -116,12 +141,9 @@ bimanual-robot/
 - [ ] M1 K1 Max 출력 공차·6 mm 로드 시험편과 250 mm 한 장 판 평탄도 검증
 - [ ] M2~M4 차체 건식조립·정적하중·3점 지지 안정성 검증
 - [ ] Isaac Sim 6.0 실행 장비 Compatibility Checker와 ROS 2 Bridge smoke test
-- [ ] 물병 총중량·파지·미끄럼 POC
-- [ ] 컵 파지·건식 내용물 붓기·병/컵 도킹 저울 사후 판정 POC
-- [ ] 선택 확장: 로드셀 수신 모듈의 실시간 질량 판정 POC
-- [ ] SLAM/Nav2 지정 붓기 위치 반복 접근 기준선
-- [ ] Depth/표식 기반 작업 셀 로컬 정렬 기준선
-- [ ] 이동 → 정렬 → 양팔 파지 → 붓기 → 검증 상태기계 통합
-- [ ] MoveIt 2 양팔 SRDF·Planning Scene·무수 기울임 기준선
-- [ ] LeRobot 양팔 5 episode smoke dataset
-- [ ] ACT 20 episode 과적합 기준선과 IK 대조 평가
+- [ ] 주방의 컵·물통 파지와 건식 붓기 POC
+- [ ] SLAM/Nav2 충전소·주방·테이블 반복 접근 기준선
+- [ ] Depth 기반 주방·선반·테이블 로컬 정렬 기준선
+- [ ] 웹 요청 → 이동 → 주방 policy → 선반 운반 → 테이블 policy → 복귀 상태기계 통합
+- [ ] 지정 policy LeRobot smoke dataset과 ACT 과적합 기준선
+- [ ] 정책 배포 rollout, 실패 케이스 수집, 수정·재학습 비교
