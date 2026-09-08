@@ -1,20 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/bimanual-robot/episode_metadata.schema.json",
-  "title": "양팔 텔레옵 에피소드 수집 조건 메타데이터",
-  "description": "LeRobot v3.0 표준 메타에 없는 수집 시점 조건을 남기는 사이드카 스키마. episode_index로 데이터셋과 조인한다. 사후 복원이 불가능한 항목만 필수로 둔다.",
+  "$id": "https://example.invalid/bimanual-robot/water-serving-episode-metadata.schema.json",
+  "title": "물 서빙 ACT 에피소드 수집 조건 메타데이터",
+  "description": "LeRobot v3.0 표준 메타에 없는 policy, 물체, 물 양, 실패, 개입 조건을 episode_index로 연결하는 sidecar 스키마",
   "type": "object",
   "required": [
     "episode_index",
     "dataset_id",
+    "run_id",
     "recorded_at",
     "operator",
     "task",
+    "policy",
     "arms",
-    "object",
+    "objects",
     "scene",
     "robot",
-    "outcome"
+    "outcome",
+    "split",
+    "include"
   ],
   "additionalProperties": false,
   "properties": {
@@ -25,25 +29,90 @@
     },
     "dataset_id": {
       "type": "string",
-      "description": "HF repo id (예: <org>/bimanual-pick-place-v1)"
+      "minLength": 1,
+      "description": "HF repo ID 또는 팀 내부 dataset ID"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "미션·rollout·수집 실행을 연결하는 안정 ID"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "웹 요청부터 미션 실행까지 연결하는 요청 ID"
     },
     "recorded_at": {
       "type": "string",
       "format": "date-time",
-      "description": "수집 시각 (ISO 8601, 타임존 포함). 시각대별 조명 변화 추적에 쓰인다"
+      "description": "수집 시각. ISO 8601과 타임존을 포함한다"
     },
     "operator": {
       "type": "string",
-      "description": "텔레옵 조작자 식별자. 조작자별 시연 스타일 차이가 성능에 나타나므로 필수"
+      "minLength": 1,
+      "description": "텔레옵 또는 감독 조작자 식별자"
     },
     "task": {
       "type": "object",
-      "required": ["name", "instruction"],
+      "required": ["name", "instruction", "mission_stage"],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "description": "태스크 식별자 (예: pick_place_stage1)" },
-        "instruction": { "type": "string", "description": "자연어 인스트럭션. tasks.parquet와 일치시킬 것" },
-        "stage": { "type": "integer", "minimum": 1, "description": "난이도 단계" }
+        "name": {
+          "type": "string",
+          "enum": ["water_kitchen_policy1", "water_table_policy2"],
+          "description": "정의된 현행 ACT 태스크. policy 3은 경계 확정 전 추가하지 않는다"
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1,
+          "description": "tasks.parquet와 일치하는 고정 인스트럭션"
+        },
+        "mission_stage": {
+          "type": "string",
+          "enum": ["KITCHEN_POLICY_1", "TABLE_POLICY_2"]
+        },
+        "difficulty_stage": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "팀이 정의한 점진적 난이도 단계"
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["id", "version", "execution_mode", "action_representation"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": ["policy_1", "policy_2"]
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "policy 계약 또는 배포 버전"
+        },
+        "checkpoint_id": {
+          "type": "string",
+          "description": "자율 rollout/HIL에 사용한 체크포인트 경로·Hub ID·해시"
+        },
+        "execution_mode": {
+          "type": "string",
+          "enum": ["teleop_demo", "autonomous_rollout", "human_in_the_loop", "ik_baseline"]
+        },
+        "action_representation": {
+          "type": "string",
+          "enum": ["absolute_joint_position", "relative_joint_position", "cartesian_delta"]
+        },
+        "replan_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ACT 실행기가 새 관측으로 action chunk를 다시 계산하는 간격. 사용하지 않으면 생략"
+        },
+        "config_id": {
+          "type": "string",
+          "description": "학습·추론 config 파일 경로와 해시"
+        }
       }
     },
     "arms": {
@@ -54,118 +123,285 @@
         "mode": {
           "type": "string",
           "enum": ["simultaneous", "sequential", "single"],
-          "description": "simultaneous=두 팔 동시 조작, sequential=한 팔씩 순차 녹화, single=한 팔만 사용. 협응 태스크 학습 가능 여부가 여기서 갈린다"
+          "description": "두 팔의 실제 사용 방식"
         },
         "used": {
           "type": "array",
-          "items": { "type": "string", "enum": ["left", "right"] },
+          "items": {
+            "type": "string",
+            "enum": ["left", "right"]
+          },
           "minItems": 1,
           "uniqueItems": true
         },
         "teleop_device": {
           "type": "string",
-          "description": "리더암 / VR 컨트롤러 / 키보드 조그 등 조작 수단"
+          "description": "bi_so_leader, 단일 leader arm 등 조작 수단"
         },
         "calibration_files": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "팔별 캘리브레이션 파일 경로와 해시. 캘리브가 바뀌면 관절값의 의미가 바뀌므로 반드시 기록"
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "팔별 캘리브레이션 파일 경로와 해시"
         }
       }
     },
-    "object": {
-      "type": "object",
-      "required": ["name", "start_zone"],
-      "additionalProperties": false,
-      "properties": {
-        "name": { "type": "string" },
-        "size_mm": {
-          "type": "array",
-          "items": { "type": "number" },
-          "minItems": 3,
-          "maxItems": 3,
-          "description": "가로/세로/높이"
-        },
-        "mass_g": { "type": "number", "minimum": 0 },
-        "surface": {
-          "type": "string",
-          "enum": ["matte", "glossy", "transparent", "deformable"],
-          "description": "transparent는 depth 카메라가 못 읽으므로 실패 분석 시 1순위 용의자"
-        },
-        "start_zone": {
-          "type": "string",
-          "description": "시작 배치 구역 식별자 (격자 셀 이름 등). 조건별 성공률 집계의 축"
-        },
-        "start_pose": {
-          "type": "array",
-          "items": { "type": "number" },
-          "description": "측정한 경우의 실좌표 [x, y, z, yaw]. 단위 m/rad"
-        },
-        "goal_zone": { "type": "string" }
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["role", "id", "start_zone"],
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["cup", "jug", "shelf", "table", "other"]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "컵 형상·물통·선반·테이블 버전을 구분하는 식별자"
+          },
+          "size_mm": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "가로·세로·높이"
+          },
+          "mass_g": {
+            "type": "number",
+            "minimum": 0
+          },
+          "surface": {
+            "type": "string",
+            "enum": ["matte", "glossy", "transparent", "deformable", "mixed"]
+          },
+          "start_zone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_pose": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "측정한 경우 [x, y, z, yaw]. 단위 m/rad"
+          },
+          "goal_zone": {
+            "type": "string"
+          }
+        }
       }
     },
     "scene": {
       "type": "object",
-      "required": ["lighting"],
+      "required": ["lighting", "location"],
       "additionalProperties": false,
       "properties": {
         "lighting": {
           "type": "string",
-          "enum": ["daylight", "indoor_fluorescent", "indoor_dim", "mixed"],
-          "description": "조명 조건. 비전 성능 저하의 주요 축"
+          "enum": ["daylight", "indoor_fluorescent", "indoor_dim", "mixed"]
         },
-        "background": { "type": "string", "description": "배경·테이블 표면" },
+        "background": {
+          "type": "string",
+          "description": "배경·작업대·테이블 표면"
+        },
         "distractors": {
           "type": "integer",
-          "minimum": 0,
-          "description": "장면 내 방해 물체 개수"
+          "minimum": 0
         },
-        "location": { "type": "string", "description": "수집 장소" }
+        "location": {
+          "type": "string",
+          "minLength": 1
+        },
+        "station_id": {
+          "type": "string",
+          "description": "kitchen 또는 table station registry ID"
+        }
       }
     },
     "robot": {
       "type": "object",
-      "required": ["type"],
+      "required": ["type", "fps", "firmware_or_commit"],
       "additionalProperties": false,
       "properties": {
-        "type": { "type": "string", "description": "로봇 모델명" },
-        "fps": { "type": "integer", "minimum": 1 },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 1
+        },
         "cameras": {
           "type": "array",
-          "description": "카메라 구성. 해상도·fps 고정값을 남긴다 — 같은 USB 버스에 여러 대를 물리면 프레임 정지가 발생하므로 버스 정보도 함께",
           "items": {
             "type": "object",
             "required": ["key", "resolution", "fps"],
             "additionalProperties": false,
             "properties": {
-              "key": { "type": "string", "description": "video_key (예: observation.images.wrist_left)" },
-              "kind": { "type": "string", "enum": ["rgb", "depth", "rgbd"] },
-              "resolution": { "type": "string", "description": "예: 640x480" },
-              "fps": { "type": "integer", "minimum": 1 },
-              "usb_bus": { "type": "string" }
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["rgb", "depth", "rgbd"]
+              },
+              "resolution": {
+                "type": "string",
+                "pattern": "^[0-9]+x[0-9]+$"
+              },
+              "fps": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "usb_bus": {
+                "type": "string"
+              },
+              "crop_or_roi": {
+                "type": "string",
+                "description": "crop/ROI가 있으면 버전 또는 픽셀 범위"
+              }
             }
           }
         },
         "firmware_or_commit": {
           "type": "string",
-          "description": "제어 스택의 커밋 해시. 제어 코드가 바뀌면 같은 명령이 다른 움직임이 된다"
+          "minLength": 1
+        },
+        "description_commit": {
+          "type": "string",
+          "description": "URDF·xacro 기준 commit"
+        }
+      }
+    },
+    "water_measurement": {
+      "type": "object",
+      "required": ["cup_id", "target_ml", "fill_class", "calibration_id"],
+      "additionalProperties": false,
+      "properties": {
+        "cup_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_ml": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tolerance_ml": {
+          "type": "number",
+          "minimum": 0
+        },
+        "estimated_ml": {
+          "type": "number",
+          "minimum": 0
+        },
+        "ground_truth_ml": {
+          "type": "number",
+          "minimum": 0
+        },
+        "ground_truth_method": {
+          "type": "string",
+          "enum": ["scale", "graduated_vessel", "manual_unknown"]
+        },
+        "fill_class": {
+          "type": "string",
+          "enum": ["UNDER", "TARGET", "OVER", "SPILL", "UNKNOWN", "DRY_RUN"]
+        },
+        "vision_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "calibration_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spill_detected": {
+          "type": "boolean"
         }
       }
     },
     "outcome": {
       "type": "object",
-      "required": ["success", "verified_by"],
+      "required": ["success", "verified_by", "stage_results"],
       "additionalProperties": false,
       "properties": {
-        "success": { "type": "boolean", "description": "시연이 태스크를 완수했는지" },
+        "success": {
+          "type": "boolean"
+        },
         "verified_by": {
           "type": "string",
-          "enum": ["ground_truth_measure", "human_observation", "log_string"],
-          "description": "판정 근거. log_string은 신뢰하지 않는다 — 집계 시 제외 대상"
+          "enum": ["ground_truth_measure", "human_observation", "vision_estimate", "log_string"]
         },
-        "duration_s": { "type": "number", "minimum": 0 },
+        "stage_results": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "예: cup_grasp, jug_grasp, pour, jug_return, shelf_place"
+        },
+        "failure_stage": {
+          "type": "string",
+          "enum": [
+            "scene",
+            "cup_grasp",
+            "jug_grasp",
+            "pour",
+            "jug_return",
+            "shelf_place",
+            "table_place",
+            "runtime"
+          ]
+        },
+        "failure_code": {
+          "type": "string",
+          "description": "실행에서 관측된 증상·결과의 빠른 집계 코드. 확인된 원인은 failure_record_id가 가리키는 별도 레코드에 기록한다",
+          "enum": [
+            "OBJECT_NOT_FOUND",
+            "SCENE_OUT_OF_RANGE",
+            "LOW_VISION_CONFIDENCE",
+            "CUP_GRASP_MISS",
+            "CUP_SLIP",
+            "JUG_GRASP_MISS",
+            "JUG_SLIP",
+            "UNDER_FILL",
+            "OVER_FILL",
+            "SPILL",
+            "FILL_UNKNOWN",
+            "JUG_RETURN_FAILED",
+            "SHELF_PLACE_FAILED",
+            "TABLE_PLACE_FAILED",
+            "CUP_TILT_UNSAFE",
+            "SERVO_STALL",
+            "COLLISION_RISK",
+            "TIMEOUT",
+            "OPERATOR_ABORT",
+            "OTHER"
+          ]
+        },
+        "failure_record_id": {
+          "type": "string",
+          "pattern": "^FAIL-[0-9]{8}-[0-9]{4}$",
+          "description": "failure_record.schema.json을 따르는 상세 진단 레코드 ID"
+        },
+        "duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
         "anomalies": {
           "type": "array",
+          "description": "원인 확정 전에도 관측 가능한 이상 현상 태그. root cause로 단정하지 않는다",
           "items": {
             "type": "string",
             "enum": [
@@ -176,26 +412,281 @@
               "collision",
               "object_slip",
               "operator_error",
+              "liquid_not_visible",
+              "cup_occluded",
+              "low_confidence",
+              "water_spill",
               "other"
             ]
           },
-          "description": "관측된 이상. 포함/제외 판정의 입력"
+          "uniqueItems": true
         },
-        "notes": { "type": "string" }
+        "human_intervention_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "human_intervention_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "interventions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["start_s", "end_s", "control_source", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "start_s": {
+                "type": "number",
+                "minimum": 0
+              },
+              "end_s": {
+                "type": "number",
+                "minimum": 0
+              },
+              "control_source": {
+                "type": "string",
+                "minLength": 1,
+                "description": "개입 중 실제 명령을 낸 장치·조작자·supervisor"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "description": "관측된 개입 조건. 확인되지 않은 원인 대신 현상을 적는다"
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
       }
     },
     "split": {
       "type": "string",
-      "enum": ["train", "holdout_eval"],
-      "description": "수집 전에 정한 홀드아웃 축에 따라 수집 시점에 부여한다. 사후 부여 금지"
+      "enum": ["train", "holdout_eval"]
     },
     "include": {
-      "type": "boolean",
-      "description": "학습 포함 여부. 기준은 schema/에피소드_포함제외_기준.md"
+      "type": "boolean"
     },
     "exclude_reason": {
       "type": "string",
-      "description": "include=false일 때 필수. 기준 문서의 항목 번호를 적는다"
+      "minLength": 1,
+      "description": "include=false일 때 포함·제외 기준의 항목 번호"
+    },
+    "training_provenance": {
+      "type": "object",
+      "required": [
+        "source_dataset_id",
+        "source_episode_index",
+        "source_split",
+        "derived_dataset_id",
+        "recovery_time_range_s",
+        "evidence_uri",
+        "control_source",
+        "source_duration_s",
+        "source_intervention_time_range_s"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source_dataset_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "HIL 개입 전체를 보존한 원본 데이터셋 ID"
+        },
+        "source_episode_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_split": {
+          "type": "string",
+          "enum": ["train", "holdout_eval"],
+          "description": "원본의 데이터 분할. 최상위 split과 같아야 하며 holdout 원본을 학습으로 전환하지 않는다"
+        },
+        "source_duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "추출 전 원본 에피소드 전체 길이"
+        },
+        "source_intervention_time_range_s": {
+          "type": "array",
+          "items": {"type": "number", "minimum": 0},
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "원본 에피소드 시간축의 사람 제어 구간. 복구 추출 구간을 포함해야 한다"
+        },
+        "derived_dataset_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "복구 구간만 추출한 파생 데이터셋 ID. 최상위 dataset_id와 같아야 한다"
+        },
+        "recovery_time_range_s": {
+          "type": "array",
+          "items": {"type": "number", "minimum": 0},
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "원본 에피소드 시작 기준 [복구 시작, 복구 종료]"
+        },
+        "evidence_uri": {
+          "type": "string",
+          "minLength": 1,
+          "description": "구간 경계를 확인할 수 있는 영상·trajectory·annotation 경로"
+        },
+        "control_source": {
+          "type": "string",
+          "enum": ["human", "teleop"],
+          "description": "복구 행동을 생성한 제어 주체"
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "properties": {"name": {"const": "water_kitchen_policy1"}},
+            "required": ["name"]
+          }
+        },
+        "required": ["task"]
+      },
+      "then": {
+        "properties": {
+          "task": {
+            "properties": {"mission_stage": {"const": "KITCHEN_POLICY_1"}}
+          },
+          "policy": {
+            "properties": {"id": {"const": "policy_1"}}
+          },
+          "arms": {
+            "properties": {
+              "mode": {"enum": ["simultaneous", "sequential"]},
+              "used": {
+                "minItems": 2,
+                "maxItems": 2,
+                "allOf": [
+                  {"contains": {"const": "left"}},
+                  {"contains": {"const": "right"}}
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": {"human_intervention_count": {"minimum": 1}},
+            "required": ["human_intervention_count"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "outcome": {"required": ["interventions", "duration_s"]}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "properties": {"name": {"const": "water_table_policy2"}},
+            "required": ["name"]
+          }
+        },
+        "required": ["task"]
+      },
+      "then": {
+        "properties": {
+          "task": {
+            "properties": {"mission_stage": {"const": "TABLE_POLICY_2"}}
+          },
+          "policy": {
+            "properties": {"id": {"const": "policy_2"}}
+          },
+          "arms": {
+            "properties": {
+              "mode": {"const": "single"},
+              "used": {"minItems": 1, "maxItems": 1}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "include": { "const": false }
+        },
+        "required": ["include"]
+      },
+      "then": {
+        "required": ["exclude_reason"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "properties": {
+              "name": { "const": "water_kitchen_policy1" }
+            },
+            "required": ["name"]
+          }
+        },
+        "required": ["task"]
+      },
+      "then": {
+        "required": ["water_measurement"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "execution_mode": {
+                "enum": ["autonomous_rollout", "human_in_the_loop"]
+              }
+            },
+            "required": ["execution_mode"]
+          }
+        },
+        "required": ["policy"]
+      },
+      "then": {
+        "properties": {
+          "policy": {
+            "required": ["checkpoint_id"]
+          }
+        },
+        "required": ["request_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": {
+              "success": { "const": false }
+            },
+            "required": ["success"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "required": ["failure_stage", "failure_code", "failure_record_id"]
+          }
+        }
+      }
+    }
+  ]
 }

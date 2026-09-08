@@ -1,0 +1,133 @@
+{
+  "failure_id": "EXAMPLE-20260907-0001",
+  "recorded_at": "2026-09-07T16:20:00+09:00",
+  "triage_owner": "example-policy-integration-lane",
+  "status": "resolved",
+  "source": {
+    "run_id": "example-mission-run-0042",
+    "request_id": "example-request-0042",
+    "dataset_id": "TEAM/water-kitchen-policy1-rollout-v1",
+    "episode_index": 42,
+    "environment": "dry_run"
+  },
+  "observation": {
+    "stage": "cup_grasp",
+    "observed_code": "CUP_GRASP_MISS",
+    "summary": "Nav2 성공 뒤 같은 checkpoint에서 컵 오른쪽으로 접근해 파지하지 못한 가상 작성 예시",
+    "detected_by": "human_observation",
+    "severity": "task_failure",
+    "time_range_s": [12.1, 14.8]
+  },
+  "context": {
+    "software_commits": {
+      "mission": "example-only",
+      "navigation": "example-only",
+      "robot_description": "example-only"
+    },
+    "calibration_ids": {
+      "left_arm": "example-left-calibration",
+      "rgbd": "example-rgbd-calibration"
+    },
+    "policy_id": "policy_1",
+    "checkpoint_id": "example-checkpoint",
+    "station_id": "kitchen",
+    "scene_id": "example-scene-fixed-cup-v1",
+    "key_metrics": {
+      "nav_result": "SUCCEEDED",
+      "final_x_error_m": 0.041,
+      "final_y_error_m": 0.008,
+      "final_yaw_error_rad": 0.02,
+      "base_linear_speed_mps_at_policy_start": 0.0,
+      "policy_training_x_limit_m": 0.02,
+      "ik_reachable": true
+    }
+  },
+  "evidence": [
+    {
+      "id": "EV-01",
+      "kind": "video",
+      "uri": "hf-private://TEAM/water-kitchen-policy1-rollout-v1/episode-0042#t=12.1,14.8",
+      "time_range_s": [12.1, 14.8],
+      "description": "컵 오른쪽으로 벗어난 접근과 파지 실패 구간을 보여주는 가상 경로"
+    },
+    {
+      "id": "EV-02",
+      "kind": "metric_json",
+      "uri": "artifact-private://example-mission-run-0042/nav_arrival.json",
+      "description": "도착 위치 오차와 policy 시작 시 베이스 정지 상태를 담은 가상 경로"
+    },
+    {
+      "id": "EV-03",
+      "kind": "trajectory",
+      "uri": "artifact-private://example-mission-run-0042/joint_action_window.parquet",
+      "time_range_s": [10.0, 15.0],
+      "description": "동일 checkpoint의 관측·action·관절 상태를 담은 가상 경로"
+    },
+    {
+      "id": "EV-04",
+      "kind": "metric_json",
+      "uri": "artifact-private://example-retest/nav_alignment_retest.json",
+      "description": "로컬 정렬 적용 뒤 동일 조건 재시험 결과를 담은 가상 경로"
+    }
+  ],
+  "diagnosis": {
+    "cause_status": "confirmed",
+    "hypotheses": [
+      {
+        "id": "H-01",
+        "layer": "policy_data",
+        "statement": "ACT가 고정 컵 조건에 과적합해 파지하지 못했다",
+        "status": "rejected",
+        "evidence_ids": ["EV-03", "EV-04"]
+      },
+      {
+        "id": "H-02",
+        "layer": "navigation",
+        "statement": "주방 도착 X 오차가 policy 학습 범위를 벗어났다",
+        "status": "supported",
+        "evidence_ids": ["EV-01", "EV-02", "EV-04"]
+      }
+    ],
+    "root_cause": {
+      "layer": "navigation",
+      "code": "NAV_ARRIVAL_X_OUT_OF_POLICY_RANGE",
+      "summary": "Nav2 성공과 별개로 최종 X 오차가 policy 시작 허용 범위를 벗어났다",
+      "confirmed_by": ["EV-02", "EV-04"]
+    }
+  },
+  "response": {
+    "immediate_action": "stop",
+    "corrective_action": "policy를 재학습하지 않고 주방 RGB-D 로컬 정렬과 시작 오차 게이트를 적용한다",
+    "changed_artifacts": [
+      "config/stations/kitchen.yaml",
+      "src/hold_flow_alignment"
+    ],
+    "change_commit": "example-only",
+    "retraining_decision": "not_needed",
+    "decision_reason": "동일 checkpoint가 허용 위치에서는 성공했고 실패가 도착 오차와 함께 재현됐기 때문이다"
+  },
+  "validation": {
+    "protocol_id": "example-fixed-cup-same-checkpoint-v1",
+    "same_condition_run_ids": [
+      "example-retest-same-001",
+      "example-retest-same-002",
+      "example-retest-same-003"
+    ],
+    "result": "pass",
+    "regression_run_ids": [
+      "example-retest-other-001",
+      "example-retest-other-002",
+      "example-retest-other-003"
+    ],
+    "regression_result": "pass",
+    "acceptance_evidence_ids": ["EV-04"],
+    "notes": "이 파일은 저장 형식 설명용 가상 예시이며 실제 실험 결과가 아니다"
+  },
+  "data_use": {
+    "primary_disposition": "eval_only",
+    "include_in_training": false,
+    "collection_priority": "none",
+    "reason": "정책 데이터 부족이 아니라 station 인계 조건 문제이므로 BC 학습에는 넣지 않는다",
+    "tags": ["nav-policy-boundary", "arrival-gate", "example-only"]
+  }
+}
