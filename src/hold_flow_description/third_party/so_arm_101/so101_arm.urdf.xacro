@@ -4,9 +4,13 @@
   관절 오리진과 한계는 로컬 JD-AMR 실기에서 검증된 값이다. 출처는 같은
   디렉터리의 NOTICE 를 본다.
 
+  TheRobotStudio/SO-ARM100 commit: eecbe3e0a9ebb23e25ad7b2759b03884c6660903
+  upstream SO101 URDF sha256: 3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c
+  local calibrated input sha256: d80275f4b4313229001a55836529fdf2747917bb49fc6c8490195ff42f0d7634
+
   이 파일은 scripts/generate_so101_arm_xacro.py 가 생성한다. 직접 편집하지 않는다.
-  그리퍼는 여기에 없다. 상류 회전식 죠 대신 ggao50 평행 그리퍼를 쓰므로
-  urdf/ggao50_gripper.xacro 가 ${prefix}gripper_link 에 이어 붙는다.
+  그리퍼는 여기에 없다. 왼팔 기본 회전식 죠와 오른팔 ggao50 평행 그리퍼를
+  별도 Xacro가 ${prefix}gripper_link 에 이어 붙인다.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="so101_arm" params="prefix parent *origin">
@@ -278,6 +282,8 @@
       <child link="${prefix}shoulder_link" />
       <axis xyz="0 0 1" />
       <limit effort="10" velocity="10" lower="-1.91986" upper="1.91986" />
+      <dynamics damping="0.08" friction="0.02" />
+      <safety_controller soft_lower_limit="-1.86986" soft_upper_limit="1.86986" k_position="30" k_velocity="3" />
     </joint>
 
     <joint name="${prefix}shoulder_lift" type="revolute">
@@ -286,6 +292,8 @@
       <child link="${prefix}upper_arm_link" />
       <axis xyz="0 0 1" />
       <limit effort="10" velocity="10" lower="-1.74533" upper="1.74533" />
+      <dynamics damping="0.08" friction="0.02" />
+      <safety_controller soft_lower_limit="-1.69533" soft_upper_limit="1.69533" k_position="30" k_velocity="3" />
     </joint>
 
     <joint name="${prefix}elbow_flex" type="revolute">
@@ -294,6 +302,8 @@
       <child link="${prefix}lower_arm_link" />
       <axis xyz="0 0 1" />
       <limit effort="10" velocity="10" lower="-1.69" upper="1.69" />
+      <dynamics damping="0.08" friction="0.02" />
+      <safety_controller soft_lower_limit="-1.64" soft_upper_limit="1.64" k_position="30" k_velocity="3" />
     </joint>
 
     <joint name="${prefix}wrist_flex" type="revolute">
@@ -302,6 +312,8 @@
       <child link="${prefix}wrist_link" />
       <axis xyz="0 0 1" />
       <limit effort="10" velocity="10" lower="-1.65806" upper="1.65806" />
+      <dynamics damping="0.08" friction="0.02" />
+      <safety_controller soft_lower_limit="-1.60806" soft_upper_limit="1.60806" k_position="30" k_velocity="3" />
     </joint>
 
     <joint name="${prefix}wrist_roll" type="revolute">
@@ -310,6 +322,8 @@
       <child link="${prefix}gripper_link" />
       <axis xyz="0 0 1" />
       <limit effort="10" velocity="10" lower="-2.74385" upper="2.84121" />
+      <dynamics damping="0.08" friction="0.02" />
+      <safety_controller soft_lower_limit="-2.69385" soft_upper_limit="2.79121" k_position="30" k_velocity="3" />
     </joint>
   </xacro:macro>
 </robot>

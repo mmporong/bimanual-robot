@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-09-08 | 300 mm·720 mm 시뮬레이션용 양팔 URDF/CAD v0.3
+
+**결론**: 300×300 mm 상판 윗면을 z=720 mm로 두고 SO-101 두 대를 `(0, ±75, 726) mm`,
+RGB-D 광학 중심을 `(-110, 0, 970) mm`에 배치한 v0.3 모델을 만들었다. 왼팔은 기본 SO-101
+회전식 죠, 오른팔은 ggao50 평행 그리퍼 치수 프록시이며, 주행부는 구동륜 2개와 앞·뒤
+볼캐스터 2개다.
+
+**구현**
+- `hold_flow_mechanical_v0_3.yaml`과 300 mm·720 mm 기하/명목 COM 계산기 추가
+- 300 mm 판 3종, 2020 후보 기둥 4개, 팔·카메라·라이다·구동·캐스터 CAD 재생성
+- Apache-2.0 SO-101 moving jaw를 복원하고 혼합 그리퍼 URDF 구성
+- 기본 죠용 60~82 mm 파라메트릭 컵 오버캡 STEP/STL 생성기 추가
+- Isaac Sim 6.0 공식 `URDFImporter` 경로의 USD 변환 스크립트와 정적 계약 검증기 추가
+- 커스텀 구조 collision을 삼각형 메시 대신 보수적 primitive로 분리
+
+**검증**
+- 배터리·전자부·배선/체결 여유를 포함한 URDF 0자세 명목 질량 6.126 kg, COM `(30.1, -1.5, 439.7) mm`, 정적 지지다각형 여유 71.0 mm
+- Xacro·`check_urdf`: 46링크/45관절 PASS
+- 질량·positive-definite 관성·축·hard/soft limit·dynamics·visual/collision 감사 문제 0건
+- YAML↔URDF 핵심 좌표 16건, 기둥 4개, 캐스터 2개, 오른쪽 mimic 1개 PASS
+- YAML↔CAD 조립 배치: 카메라 보강판 z=720 mm, 마스트 z=728 mm와 팔·기둥 좌표 PASS
+- CAD와 컵 오버캡 BREP 유효
+- 컵 오버캡 3D 분석: 원본 자세도 스트랩 슬롯 서포트 필요, 제안된 Y-90 회전은 미적용
+- `python3 -m unittest discover -s tests -v`: 57개 PASS
+
+**검증 공백**: 이 호스트에는 Isaac Sim이 없어 실제 USD 생성, 바닥 4점 접촉, joint gain,
+120 Hz 60초 안정성은 실행하지 못했다. 300 mm 판은 K1 Max의 안전 출력 폭을 넘어 절삭 판재
+또는 분할 설계가 필요하다. 상판·압출재·홀·컵·카메라·휠·캐스터 실측값도 아직 명목값이다.
+
+---
+
 ## 2026-09-08 | 물 서빙 메인 README·PLANNED/ACT/HYBRID 계약 최신화
 
 **결론**: 물 서빙 조작을 `PLANNED_ALL`, `ACT_ALL`, phase별 `HYBRID` 세 전략으로 같은

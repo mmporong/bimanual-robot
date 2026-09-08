@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<!--
+  SO-101 기본 회전식 죠. 관절 원점·축·한계·관성은 로컬 JD-AMR 실기 URDF에서
+  가져왔고, moving_jaw_so101_v1.stl은 TheRobotStudio SO-ARM100/101의
+  Apache-2.0 형상이다. 컵 오버캡은 실물 맞춤 전이라 기본 URDF에는 붙이지 않는다.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:property name="stock_cup_tcp_offset" value="0 0 0"/>
+
+  <xacro:macro name="so101_stock_gripper" params="prefix parent">
+    <link name="${prefix}moving_jaw_link">
+      <inertial>
+        <origin xyz="-0.00157495 -0.0300244 0.0192755" rpy="0 0 0"/>
+        <mass value="0.012"/>
+        <inertia
+          ixx="6.61427e-06" ixy="-3.19807e-07" ixz="-5.90717e-09"
+          iyy="1.89032e-06" iyz="-1.09945e-07" izz="5.28738e-06"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0.0189" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://hold_flow_description/meshes/so101/moving_jaw_so101_v1.stl"/>
+        </geometry>
+        <material name="so101_3d_printed"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0.0189" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="package://hold_flow_description/meshes/so101/moving_jaw_so101_v1.stl"/>
+        </geometry>
+      </collision>
+      <collision name="${prefix}moving_finger_tip">
+        <origin xyz="-0.0083 -0.0756 0.0189" rpy="0 0 0"/>
+        <geometry><box size="0.0181 0.0129 0.0203"/></geometry>
+      </collision>
+      <collision name="${prefix}moving_finger_mid">
+        <origin xyz="-0.0030 -0.0549 0.0189" rpy="0 0 0"/>
+        <geometry><box size="0.0256 0.0398 0.0238"/></geometry>
+      </collision>
+      <collision name="${prefix}moving_finger_base">
+        <origin xyz="0 -0.0150 0.0189" rpy="0 0 0"/>
+        <geometry><box size="0.0200 0.0399 0.0480"/></geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}gripper" type="revolute">
+      <origin xyz="0.0202 0.0188 -0.0234" rpy="1.5708 -5.24284e-08 -1.41553e-15"/>
+      <parent link="${parent}"/>
+      <child link="${prefix}moving_jaw_link"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="10" velocity="10" lower="-0.174533" upper="1.74533"/>
+      <dynamics damping="0.08" friction="0.04"/>
+      <safety_controller
+        soft_lower_limit="-0.124533" soft_upper_limit="1.69533"
+        k_position="30" k_velocity="3"/>
+    </joint>
+
+    <!-- 실기 URDF의 gripper_frame 변환을 IK/TCP 기준으로 보존한다. -->
+    <link name="${prefix}tool0"/>
+    <joint name="${prefix}tool0_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}tool0"/>
+      <origin xyz="-0.0079 -0.000218121 -0.0981274" rpy="0 3.14159 0"/>
+    </joint>
+
+    <link name="${prefix}cup_tcp"/>
+    <joint name="${prefix}cup_tcp_joint" type="fixed">
+      <parent link="${prefix}tool0"/>
+      <child link="${prefix}cup_tcp"/>
+      <origin xyz="${stock_cup_tcp_offset}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+</robot>

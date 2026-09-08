@@ -92,7 +92,12 @@ def assert_xyz(actual: list[float], expected: list[float], tolerance: float = 1e
 def main() -> None:
     env = os.environ.copy()
     existing = env.get("AMENT_PREFIX_PATH", "")
-    env["AMENT_PREFIX_PATH"] = str(REPO_ROOT / "install") + (":" + existing if existing else "")
+    package_prefix = REPO_ROOT / "install/hold_flow_description"
+    env["AMENT_PREFIX_PATH"] = str(package_prefix) + (":" + existing if existing else "")
+    ros_python = Path("/opt/ros/jazzy/lib/python3.12/site-packages")
+    if ros_python.is_dir():
+        existing_python = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(ros_python) + (":" + existing_python if existing_python else "")
     with tempfile.TemporaryDirectory(prefix="hold_flow_urdf_") as temp_dir:
         urdf_path = Path(temp_dir) / "hold_flow.urdf"
         expanded_urdf = command_output(["xacro", str(XACRO.relative_to(REPO_ROOT))], env)
@@ -131,12 +136,12 @@ def main() -> None:
     required_links = {
         "base_footprint",
         "base_link",
+        "battery_link",
+        "electronics_link",
         "left_base_link",
         "right_base_link",
-        "left_gripper_base_link",
         "right_gripper_base_link",
-        "left_finger1_link",
-        "left_finger2_link",
+        "left_moving_jaw_link",
         "right_finger1_link",
         "right_finger2_link",
         "left_tool0",
@@ -144,7 +149,14 @@ def main() -> None:
         "camera_backing_link",
         "camera_cradle_link",
         "camera_depth_optical_frame",
+        "camera_color_optical_frame",
         "laser_link",
+        "front_caster_link",
+        "rear_caster_link",
+        "front_left_frame_column_link",
+        "front_right_frame_column_link",
+        "rear_left_frame_column_link",
+        "rear_right_frame_column_link",
     }
     required_joints = {
         "left_wheel_joint",
@@ -159,8 +171,7 @@ def main() -> None:
         "right_elbow_flex",
         "right_wrist_flex",
         "right_wrist_roll",
-        "left_finger1_joint",
-        "left_finger2_joint",
+        "left_gripper",
         "right_finger1_joint",
         "right_finger2_joint",
         "left_tool0_joint",
@@ -176,16 +187,16 @@ def main() -> None:
         xyz = [float(value) for value in joint.find("origin").attrib["xyz"].split()]
         wheel_origins[name] = xyz
     separation = abs(wheel_origins["left_wheel_joint"][1] - wheel_origins["right_wheel_joint"][1])
-    assert math.isclose(separation, 0.270, abs_tol=1e-9)
+    assert math.isclose(separation, 0.320, abs_tol=1e-9)
     transforms = link_transforms(root)
     camera_xyz = xyz_of(transforms["camera_depth_optical_frame"])
     lidar_xyz = xyz_of(transforms["laser_link"])
     left_arm_xyz = xyz_of(transforms["left_base_link"])
     right_arm_xyz = xyz_of(transforms["right_base_link"])
-    assert_xyz(camera_xyz, [-0.170, 0.0, 0.800], tolerance=2e-6)
-    assert_xyz(lidar_xyz, [0.0, 0.0, 0.165])
-    assert_xyz(left_arm_xyz, [-0.065, 0.070, 0.119])
-    assert_xyz(right_arm_xyz, [-0.065, -0.070, 0.119])
+    assert_xyz(camera_xyz, [-0.110, 0.0, 0.970], tolerance=2e-6)
+    assert_xyz(lidar_xyz, [0.100, 0.0, 0.165])
+    assert_xyz(left_arm_xyz, [0.0, 0.075, 0.726])
+    assert_xyz(right_arm_xyz, [0.0, -0.075, 0.726])
 
     report = {
         "xacro": str(XACRO.relative_to(REPO_ROOT)),
@@ -201,13 +212,15 @@ def main() -> None:
         "lidar_xyz_from_base_footprint_m": [round(value, 6) for value in lidar_xyz],
         "left_arm_base_xyz_from_base_footprint_m": [round(value, 6) for value in left_arm_xyz],
         "right_arm_base_xyz_from_base_footprint_m": [round(value, 6) for value in right_arm_xyz],
-        "parallel_gripper_primary_stroke_m": 0.037,
+        "left_gripper": "stock_so101_rotating_jaw",
+        "right_gripper": "ggao50_parallel_proxy",
+        "right_parallel_gripper_primary_stroke_m": 0.0333,
         "mimic_joints": [
             joint.attrib["name"] for joint in joints if joint.find("mimic") is not None
         ],
     }
     assert report["check_urdf_root"]
-    assert report["mimic_joints"] == ["left_finger2_joint", "right_finger2_joint"]
+    assert report["mimic_joints"] == ["right_finger2_joint"]
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 

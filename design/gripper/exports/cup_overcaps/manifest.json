@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.1",
+  "generator": "design/gripper/generate_so101_cup_overcaps.py",
+  "design": "SO-101 기본 회전식 죠용 독립 스트랩 컵 오버캡",
+  "quantity": 2,
+  "cup_outer_diameter_mm": 70.0,
+  "radial_clearance_mm": 0.8,
+  "bounds_mm": [
+    24.501,
+    44.001,
+    30.022
+  ],
+  "valid_brep": true,
+  "volume_cm3_each": 17.309,
+  "solid_petg_mass_g_each": 22.0,
+  "print_orientation": "as_exported_no_rotation",
+  "support_expected": true,
+  "support_reason": "24mm strap slots bridge in original orientation; analyzer suggested Y-90 but rotation was not applied",
+  "step": "design/gripper/exports/cup_overcaps/step/so101_cup_overcap.step",
+  "stl": "design/gripper/exports/cup_overcaps/stl/so101_cup_overcap.stl",
+  "status": "fit_coupon_and_simulation_preview_not_wet_payload_qualified",
+  "measurement_gates": [
+    "컵 실제 외경·테이퍼",
+    "기본 SO-101 고정·가동 죠 접촉면과 스트랩 간섭",
+    "젖은 컵의 미끄럼·변형·낙하 시험"
+  ]
+}
