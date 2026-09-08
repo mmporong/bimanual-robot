@@ -8,4 +8,13 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(
+  PROGRAMS
+    scripts/audit_urdf_quality.py
+    scripts/import_isaac_sim.py
+    scripts/validate_description.py
+    scripts/validate_isaac_contract.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

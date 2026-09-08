@@ -22,11 +22,11 @@ PACKAGE_URI_PREFIX = "package://hold_flow_description/"
 FRAME_ONLY_LINKS = {
     "base_footprint",
     "camera_depth_optical_frame",
+    "camera_color_optical_frame",
     "left_tool0",
     "right_tool0",
-    "left_bottle_tcp",
-    "right_bottle_tcp",
     "left_cup_tcp",
+    "right_bottle_tcp",
     "right_cup_tcp",
 }
 GEOMETRY_FREE_LINKS = FRAME_ONLY_LINKS | {"base_link"}

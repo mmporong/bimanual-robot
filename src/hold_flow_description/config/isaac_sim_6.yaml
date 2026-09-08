@@ -1,0 +1,52 @@
+schema_version: "0.1"
+target: Isaac_Sim_6_0
+source_urdf: src/hold_flow_description/urdf/hold_flow.urdf
+output_usd_default: build/isaac/hold_flow/hold_flow.usd
+
+importer:
+  collision_from_visuals: false
+  merge_mesh: false
+  merge_fixed_joints: false
+  allow_self_collision: false
+  fix_base: false
+  robot_type: Mobile Manipulators
+
+articulation_contract:
+  arm_position_joints:
+    - left_shoulder_pan
+    - left_shoulder_lift
+    - left_elbow_flex
+    - left_wrist_flex
+    - left_wrist_roll
+    - left_gripper
+    - right_shoulder_pan
+    - right_shoulder_lift
+    - right_elbow_flex
+    - right_wrist_flex
+    - right_wrist_roll
+    - right_finger1_joint
+  mimic_joints:
+    - right_finger2_joint
+  wheel_velocity_joints:
+    - left_wheel_joint
+    - right_wheel_joint
+  fixed_contact_proxies:
+    - front_caster_link
+    - rear_caster_link
+
+physics_tuning_after_import:
+  required:
+    - add_ground_plane_and_verify_all_four_contacts
+    - assign_high_friction_material_to_drive_wheels
+    - assign_low_friction_material_to_ball_caster_proxies
+    - tune_arm_position_drive_stiffness_and_damping_with_gain_tuner
+    - tune_wheel_velocity_drive_and_measure_straight_line_yaw_drift
+    - verify_no_exploding_or_drifting_at_120Hz_for_60s
+    - replace_SO101_triangle_collisions_with_convex_decomposition_if_realtime_factor_is_low
+  numeric_gains_status: deliberately_unset_until_imported_articulation_is_measured
+
+limitations:
+  - ggao50_geometry_is_a_project_authored_dimensional_proxy_because_upstream_has_no_license
+  - ball_casters_are_fixed_sphere_contact_proxies_not_three_axis_rolling_mechanisms
+  - masses_for_tabletop_extrusions_and_custom_brackets_are_nominal_until_hardware_is_weighed
+  - camera_extrinsics_are_design_coordinates_until_calibrated

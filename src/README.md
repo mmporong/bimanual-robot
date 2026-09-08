@@ -12,7 +12,7 @@
 | 패키지 | 상태 | 주 언어·기술 | 현행 책임 | 착수 조건 |
 |---|---|---|---|---|
 | `hold_flow_interfaces` | 예정 | ROS IDL | 미션·정렬·policy·물 양·로그 계약 | policy 번호·상태명 확정 |
-| `hold_flow_description` | 존재 | xacro·YAML·URDF | 모바일 베이스·SO-101×2·Astra S·LDS-03 TF | 최종 URDF 수신 후 재검증 |
+| `hold_flow_description` | v0.3 정적 검증 완료 | xacro·YAML·URDF | 300 mm·720 mm 모바일 베이스, 혼합 그리퍼 SO-101×2, Astra S·LDS-03 TF | 실측값 반영과 Isaac 동역학 검증 |
 | `hold_flow_bringup` | 예정 | Python·YAML | 실물/sim launch profile, lifecycle 실행 순서 | 첫 실행 패키지와 함께 |
 | `hold_flow_web` | 예정 | FastAPI·HTML·JavaScript·rclpy | 웹 요청 검증, `ServeDrink` Action client | 요청 JSON 계약 |
 | `hold_flow_navigation` | 예정 | Nav2·SLAM Toolbox·AMCL·DWB·Collision Monitor | 지도, station registry, 장애물 회피, 도킹 staging | 실험 공간·station 실측 |
@@ -23,7 +23,7 @@
 | `hold_flow_learning` | 예정 | Python·LeRobot 0.6.1·PyTorch·ACT | phase 표시 수집, ACT_ALL·로컬 ACT, rollout, 실패/HIL 데이터 | phase·backend 계약·데이터 게이트 |
 | `hold_flow_mission` | 예정 | Python·rclpy | 웹→이동→조작→서빙→도킹 상태기계 | Action mock 통과 |
 | `hold_flow_logging` | 예정 | Python·rosbag2·JSON·Parquet | request ID로 미션·episode·실패 연결 | 인터페이스와 함께 |
-| `hold_flow_isaac` | 예정 | Python·USD·Isaac Sim 6.0·ROS 2 Bridge | 최종 URDF, Nav2·양팔·센서 SIL, sim/real gap | 최종 모델 URDF |
+| `hold_flow_isaac` | importer·정적 계약 존재 | Python·USD·Isaac Sim 6.0·ROS 2 Bridge | v0.3 URDF→USD, Nav2·양팔·센서 SIL, sim/real gap | Isaac 장비에서 USD·접촉·gain 검증 |
 
 ## 명령과 데이터 경로
 
@@ -87,7 +87,7 @@ joint state·action·strategy·backend·safety event → logging → episode sid
 4. LDS-03 obstacle layer와 Collision Monitor 감속·정지 영역을 검증한다.
 5. 장애물 회피·재계획 실패 코드와 Nav2 feedback을 기록한다.
 6. 새 팔 역할과 선반 frame을 기준으로 IK 시작·복귀 자세를 검증한다.
-7. 최종 모델 URDF 수신 뒤 Isaac Sim에서 같은 인터페이스로 검증한다.
+7. 현행 v0.3 URDF를 Isaac Sim에서 USD로 만들고 같은 인터페이스·접촉·gain을 검증한다.
 
 ### 인지 lane
 

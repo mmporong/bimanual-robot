@@ -1,0 +1,239 @@
+schema_version: "0.3"
+design_id: hold_flow_mechanical_v0_3
+status: simulation_model_ready_physical_measurements_pending
+revision: 2026-09-08_table_height_dual_gripper_four_point_base
+units:
+  length: mm
+  mass: kg
+  angle: deg
+  torque: N_m
+
+coordinate_convention:
+  x: forward
+  y: left
+  z: up
+  base_footprint_origin: chassis_center_on_floor
+  note: 모든 xyz는 별도 parent가 없으면 base_footprint 기준
+
+provenance:
+  tabletop_height:
+    selected_design_datum: 720.0
+    evidence: 710_to_865_mm_accessible_work_surface_range
+    source: https://www.access-board.gov/ada/ada-ibc-comparison/chapter-9/
+    confidence: design_assumption_not_measured_average
+  so101:
+    source: https://github.com/TheRobotStudio/SO-ARM100
+    checked_commit: eecbe3e0a9ebb23e25ad7b2759b03884c6660903
+    upstream_urdf: Simulation/SO101/so101_new_calib.urdf
+    upstream_urdf_sha256: 3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c
+    license: Apache-2.0
+    local_kinematic_source: calibrated_JD_AMR_SO101_URDF
+    local_source_sha256: d80275f4b4313229001a55836529fdf2747917bb49fc6c8490195ff42f0d7634
+  right_parallel_gripper:
+    source: https://github.com/ggao50/SO101-Parallel-Gripper
+    checked_commit: b0614b72c62e3891b1f7faa8b06c6eb3d490a9c2
+    upstream_license_status: no_license_file_found_on_2026_09_08
+    redistribution_policy: do_not_vendor_upstream_meshes_use_project_authored_proxy
+
+chassis:
+  tabletop_footprint: [300.0, 300.0]
+  corner_radius: 12.0
+  plates:
+    bottom:
+      z_bottom: 6.0
+      thickness: 6.0
+      fabrication: printed_or_cut_plate_candidate
+    middle:
+      z_bottom: 62.0
+      thickness: 6.0
+      fabrication: printed_or_cut_plate_candidate
+    tabletop:
+      z_bottom: 712.0
+      thickness: 8.0
+      z_top: 720.0
+      fabrication: cut_sheet_not_one_piece_fdm
+      material_for_simulation: birch_plywood_nominal_600kg_m3
+      simulation_mass: 0.424
+  k1_max:
+    nominal_build_volume: [300.0, 300.0, 300.0]
+    one_piece_tabletop_safe_to_print: false
+    reason: exact_300mm_part_has_no_brim_skirt_or_machine_tolerance_margin
+  vertical_frame:
+    type: four_2020_extrusion_candidates
+    centers_xy:
+      - [130.0, 130.0]
+      - [130.0, -130.0]
+      - [-130.0, 130.0]
+      - [-130.0, -130.0]
+    section: [20.0, 20.0]
+    z_bottom: 68.0
+    z_top: 712.0
+    length: 644.0
+    nominal_mass_each: 0.290
+    mass_status: replace_with_selected_extrusion_catalog_or_measured_value
+
+internal_payloads:
+  battery:
+    center_xyz: [-40.0, 0.0, 40.0]
+    envelope: [140.0, 80.0, 40.0]
+    simulation_mass: 0.550
+    status: candidate_not_selected
+  electronics:
+    center_xyz: [30.0, 0.0, 90.0]
+    envelope: [160.0, 120.0, 40.0]
+    simulation_mass: 0.350
+    status: distributed_lumped_proxy
+  wiring_fasteners_allowance:
+    simulation_mass: 0.250
+    status: distributed_lumped_into_base_link
+
+arm_mounts:
+  source_base_envelope: [110.93, 72.0, 87.0]
+  adapter:
+    footprint: [130.0, 70.0]
+    thickness: 6.0
+    fabrication: printed_petg_candidate
+  left:
+    xyz: [0.0, 75.0, 726.0]
+    rpy: [0.0, 0.0, 0.0]
+    gripper: stock_so101_rotating_jaw
+  right:
+    xyz: [0.0, -75.0, 726.0]
+    rpy: [0.0, 0.0, 0.0]
+    gripper: ggao50_parallel_gripper_project_proxy
+  center_spacing: 150.0
+  side_margin: 39.0
+  center_gap: 78.0
+  mount_hole_pattern_status: physical_measurement_required
+  servo_variant_status: physical_label_check_required
+
+left_cup_gripper:
+  p0_actuator: stock_so101_rotating_jaw
+  selected_attachment: independent_strap_mount_concave_jaw_overcaps
+  generator: design/gripper/generate_so101_cup_overcaps.py
+  default_design_cup_outer_diameter: 70.0
+  supported_parametric_range: [60.0, 82.0]
+  material: PETG_body_plus_TPU_contact_pad
+  retention: two_independent_overcaps_each_with_two_4mm_strap_slots
+  rigid_bridge_between_jaws: prohibited
+  status: simulation_and_fit_coupon_only
+  measurement_gates:
+    - actual_cup_outer_diameter_and_taper
+    - stock_fixed_and_moving_jaw_contact_envelopes
+    - strap_clearance_at_full_joint_range
+    - wet_surface_retention_and_slip_test
+
+right_parallel_gripper:
+  model: ggao50_SO101_Parallel_Gripper
+  opening_max_published: 105.0
+  reach_published: 72.0
+  mass_published: 0.165
+  urdf_proxy_mass: 0.159
+  mass_status: published_value_is_approximate_proxy_is_nominal_until_weighed
+  urdf_geometry: project_authored_dimensional_proxy
+  proxy_scope: rail_connector_racks_jaws_and_contact_inserts
+  exact_mesh_gate: author_license_permission_or_user_local_nonredistributed_asset
+  simulation_joint:
+    type: dual_prismatic_mimic
+    primary_stroke: [10.0, 43.3]
+    effort: 40.0
+    velocity: 50.0
+
+camera:
+  model: Orbbec_Astra_S
+  design_envelope: [40.0, 165.0, 48.0]
+  mass: 0.310
+  optical_center_xyz: [-110.0, 0.0, 970.0]
+  height_above_tabletop: 250.0
+  pitch_down: 35.0
+  depth_range: [400.0, 2000.0]
+  depth_fov_hv: [58.4, 45.5]
+  interface: USB_2_0
+  mount:
+    mast_center_xy: [-120.0, 0.0]
+    mast_section: [20.0, 20.0]
+    mast_z_bottom: 728.0
+    mast_length: 240.0
+    backing_footprint: [55.0, 55.0]
+    backing_thickness: 8.0
+    body_center_xyz: [-126.383, 0.0, 981.472]
+  physical_measurement_gates:
+    - actual_optical_center_from_mount
+    - selected_camera_serial_intrinsics
+    - wrist_and_gripper_occlusion_map
+
+navigation:
+  drive_type: differential_two_wheel_two_ball_caster
+  wheel:
+    measured_diameter: 65.0
+    calibrated_effective_radius: 32.9
+    center_xyz_left: [0.0, 160.0, 32.9]
+    center_xyz_right: [0.0, -160.0, 32.9]
+    geometric_center_separation: 320.0
+    effective_separation_status: calibrate_on_physical_chassis
+    mass_each: 0.110
+    joint_effort: 0.981
+    joint_velocity: 4.72
+  ball_casters:
+    ball_radius: 12.5
+    mass_each: 0.060
+    centers_xyz:
+      - [120.0, 0.0, 12.5]
+      - [-120.0, 0.0, 12.5]
+    joint_model: fixed_sphere_contact_proxy
+    physics_limit: urdf_cannot_model_free_rolling_ball_spin_axes
+    isaac_tuning: assign_low_friction_contact_material_after_import
+  support_polygon_xy:
+    - [120.0, 0.0]
+    - [0.0, 160.0]
+    - [-120.0, 0.0]
+    - [0.0, -160.0]
+  lidar_candidate:
+    model: ROBOTIS_LDS_03
+    center_xyz: [100.0, 0.0, 165.0]
+    envelope: [54.7, 39.7, 34.0]
+    mass: 0.042
+    status: selected_p0_scan_plane_and_occlusion_measurement_required
+    mount_riser:
+      footprint: [65.0, 50.0]
+      height: 80.0
+      z_bottom: 68.0
+
+simulation:
+  target: NVIDIA_Isaac_Sim_6_0
+  urdf_import:
+    robot_type: Mobile Manipulators
+    fix_base: false
+    merge_fixed_joints: false
+    collision_from_visuals: false
+    allow_self_collision: false
+    joint_drive_type: position
+  timestep_hz_candidate: 120
+  collision_policy:
+    custom_structure: primitive_convex_collision
+    so101_links: upstream_mesh_collision_pending_convex_decomposition_for_realtime
+    right_gripper: project_proxy_primitives
+  drive_gain_policy:
+    arm_position_gains: apply_and_tune_in_usd_after_import
+    wheel_velocity_gains: apply_and_tune_in_usd_after_import
+    no_unverified_gain_claims: true
+  runtime_status_on_authoring_host: isaac_sim_not_installed_static_validation_only
+
+verification:
+  required:
+    - xacro_expands
+    - check_urdf_passes
+    - committed_urdf_matches_xacro
+    - cad_assembly_placements_match_this_spec
+    - all_non_frame_links_have_positive_mass_and_positive_definite_inertia
+    - visual_and_collision_sets_match
+    - tabletop_arm_camera_wheel_and_caster_coordinates_match_this_spec
+    - isaac_import_contract_static_check_passes
+  physical_measurement_blockers:
+    - tabletop_material_and_actual_mass
+    - extrusion_catalog_mass_and_fastener_locations
+    - so101_mount_hole_pattern
+    - left_cup_overcap_jaw_fit
+    - right_gripper_wrist_transform_and_exact_collision_mesh
+    - wheel_effective_separation_and_caster_preload
+    - camera_extrinsic_and_intrinsic_calibration

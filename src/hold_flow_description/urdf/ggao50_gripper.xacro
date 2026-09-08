@@ -79,12 +79,7 @@
     </joint>
 
     <!-- 두 죠 사이 중앙의 파지 기준. IK 목표와 FK 대조는 이 프레임을 쓴다. -->
-    <link name="${prefix}tool0">
-      <inertial>
-        <mass value="1e-9"/>
-        <inertia ixx="1e-12" ixy="0" ixz="0" iyy="1e-12" iyz="0" izz="1e-12"/>
-      </inertial>
-    </link>
+    <link name="${prefix}tool0"/>
 
     <xacro:object_tcp prefix="${prefix}" name="bottle_tcp" offset="${bottle_cap_offset_z}"/>
     <xacro:object_tcp prefix="${prefix}" name="cup_tcp" offset="${cup_rim_offset_z}"/>
@@ -98,12 +93,7 @@
       <child link="${prefix}${name}"/>
       <origin xyz="0 0 ${offset}" rpy="0 0 0"/>
     </joint>
-    <link name="${prefix}${name}">
-      <inertial>
-        <mass value="1e-9"/>
-        <inertia ixx="1e-12" ixy="0" ixz="0" iyy="1e-12" iyz="0" izz="1e-12"/>
-      </inertial>
-    </link>
+    <link name="${prefix}${name}"/>
   </xacro:macro>
 
   <xacro:macro name="ggao50_jaw" params="prefix side sign">
@@ -113,6 +103,10 @@
       <origin xyz="0 -0.010 0" rpy="0 0 0"/>
       <axis xyz="${sign} 0 0"/>
       <limit lower="${ggao50_jaw_min}" upper="${ggao50_jaw_max}" effort="40" velocity="0.05"/>
+      <dynamics damping="0.50" friction="0.10"/>
+      <safety_controller
+        soft_lower_limit="0.011" soft_upper_limit="0.0423"
+        k_position="30" k_velocity="3"/>
       <xacro:if value="${side == 'finger2'}">
         <mimic joint="${prefix}finger1_joint" multiplier="1.0" offset="0.0"/>
       </xacro:if>

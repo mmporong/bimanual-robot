@@ -9,7 +9,8 @@
 - 최종 문서 갱신: 2026-09-08
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
-- 기구 수치 단일 원본: [`design/mechanical/hold_flow_mechanical_v0_2.yaml`](design/mechanical/hold_flow_mechanical_v0_2.yaml)
+- 기구 수치 단일 원본: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
+- 시뮬레이션 모델: [300×300 mm·720 mm 양팔 URDF와 Isaac Sim 모델](docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md)
 - 태스크·구현 단일 원본: [물 서빙 로봇 회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
 - 팀 보고: [무선 운용·SLAM·PLANNED·ACT 비교](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md)
 - 세션 인계: [양팔 로봇 프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md)
@@ -245,8 +246,8 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 
 | 영역 | 현재 확인된 것 | 아직 필요한 것 |
 |---|---|---|
-| 기구 | 250 mm 3층 베이스, 파라메트릭 CAD·STEP·STL, 계산 질량 5.092 kg | 체결홀·부품·하중·판 평탄도 실측, 선반·도크 확정 |
-| URDF | 모바일 베이스·SO-101×2·평행그리퍼×2·Astra S·LDS-03 통합 모델 | 최종 모델 교체, 실측 좌표·메시·충돌 재검증 |
+| 기구 | 300×300 mm 상판, 상판 높이 720 mm, 2020 기둥×4·2륜·2볼캐스터 CAD, 배터리·전자부·배선/체결 여유 포함 명목 질량 모델 6.126 kg | 판재·압출재·체결홀·실제 질량·평탄도 실측, 선반·도크 확정 |
+| URDF | 46링크/45관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
 | IK | 구형 역할의 solver와 검증 도구 존재, 결함 기록됨 | 왼팔 컵·오른팔 물통 기준 수정과 회귀검증 |
 | ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
 | Nav2 | 설계·검증 항목 문서화 | 지도·station·반복 접근·장애물·도킹 실측 |
@@ -255,7 +256,7 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 | YOLO 물 양 | segmentation·보정 방식 결정 | 카메라 POC·라벨·보정표·실시간 판정 |
 | 무선 | Pi↔노트북 책임과 프로토콜 후보 문서화 | 실제 지연·드랍·두절·재연결·watchdog 검증 |
 | 데이터 도구 | failure bank·스키마·회귀 테스트 존재 | 실제 실행 로그 연결과 담당자 대조 |
-| Isaac Sim | 범위·검증 항목 문서화 | 실행 장비와 최종 URDF 필요 |
+| Isaac Sim | 6.0 공식 importer 스크립트와 정적 가져오기 계약 PASS | Isaac 장비에서 USD 생성·4점 접촉·gain·60초 안정성 검증 |
 
 현재 노트북 VRAM은 8GB이고 Isaac Sim 6.0 공식 최소 VRAM은 16GB다. 이 장비에서 ROS 2 코드와
 자산을 준비할 수 있지만, Isaac Sim 실행은 Compatibility Checker를 통과한 워크스테이션이나
@@ -272,7 +273,7 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 5. 같은 protocol로 PLANNED_ALL·ACT_ALL·HYBRID를 비교한다.
 6. 원인이 확인된 실패만 시스템 수정 또는 phase 데이터 보강으로 처리한다.
 7. Nav2·정렬·조작을 mock Action부터 실제 backend로 하나씩 교체한다.
-8. 최종 URDF 이후 Isaac Sim, 그 뒤 승인된 환경에서 실물 건식·물 서빙을 검증한다.
+8. 현행 v0.3 URDF를 Isaac Sim 장비에서 USD로 변환하고 접촉·gain·충돌을 검증한 뒤, 승인된 환경에서 실물 건식·물 서빙을 검증한다.
 
 ### 본수집을 막는 결정
 
@@ -287,7 +288,7 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 ## 역할
 
 - `@mmporong`: SLAM/Nav2·장애물 회피, station·반복 접근, PLANNED/ACT phase 연결,
-  최종 URDF 이후 Isaac Sim
+  v0.3 URDF의 Isaac Sim USD·접촉 동역학 검증
 - 팀 policy lane: phase 표시 시연, ACT_ALL·로컬 ACT 학습·배포, rollout 실패 개선
 - 인지 lane: Astra S POC, YOLO segmentation, 컵별 보정과 실측 물 양 검증
 - 통합 lane: 웹 요청, 미션 상태기계, 조작 router, 무선 adapter, command mux·안전·logging
@@ -316,7 +317,8 @@ bimanual-robot/
 | 다른 세션 인계 | [프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md) |
 | 산업용 피킹과 IL·휴머노이드 차이 | [R33 산업용 피킹과 IL·ACT 적용 경계](research/R33_산업용_피킹과_IL_ACT_적용경계.md) |
 | ROS 2 패키지·인터페이스 경계 | [`src/README.md`](src/README.md) |
-| 기구 계산 | [`design/mechanical/hold_flow_mechanical_v0_2.yaml`](design/mechanical/hold_flow_mechanical_v0_2.yaml) |
+| 기구 계산 | [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) |
+| URDF·Isaac Sim 모델 | [300×300 mm·720 mm 모델 문서](docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md) |
 | CAD·출력물 | [`design/cad/README.md`](design/cad/README.md) |
 | 실패 저장·재시험·학습 사용 | [`data/failures/README.md`](data/failures/README.md) |
 | 전체 변경 증거 | [`PROGRESS.md`](PROGRESS.md) |

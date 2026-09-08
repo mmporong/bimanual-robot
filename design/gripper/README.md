@@ -1,6 +1,32 @@
-# 그리퍼 파지 인서트
+# 좌우 그리퍼 출력 부품
 
-ggao50 `SO101-Parallel-Gripper` 죠에 볼트로 붙이는 교체형 파지면이다. 죠 본체는 그대로 두고 물체에 닿는 면만 갈아 끼운다.
+현행 v0.3은 왼팔에 기본 SO-101 회전식 죠, 오른팔에 ggao50 `SO101-Parallel-Gripper`를 쓴다. 왼쪽은 컵 오버캡 fit coupon, 오른쪽은 평행 죠용 교체 인서트를 따로 관리한다.
+
+## 왼쪽 기본 죠용 컵 오버캡
+
+컵 그리퍼를 최종 선정하기 전, 기본 SO-101 죠에 같은 오버캡 두 개를 각각 스트랩으로 묶는 P0 설계다. 두 죠를 하나의 강체로 연결하지 않는다.
+
+```bash
+cd "$HOME/bimanual-robot"
+"$HOME/.cache/bimanual-cad-venv/bin/python" \
+  design/gripper/generate_so101_cup_overcaps.py \
+  --cup-diameter 70 --radial-clearance 0.8
+python3 "$HOME/.codex/skills/3d/scripts/analyze_stl.py" \
+  design/gripper/exports/cup_overcaps/stl/so101_cup_overcap.stl
+```
+
+- 기본 컵 외경 70 mm, 허용 파라미터 60~82 mm
+- 약 24.5×44.0×30.0 mm, 고체 PETG 명목 22.0 g/개
+- 동일 부품 2개, 오목 접촉면과 3 mm 하단 턱
+- 현재 3D 분석 결과: 원본 자세도 스트랩 슬롯 서포트 필요
+- 분석기가 제안한 `Y-90` 회전은 적용하지 않음
+- 상태: 실물 죠·컵 맞춤과 젖은 컵 미끄럼 시험 전 fit coupon
+
+산출물은 `exports/cup_overcaps` 아래 STEP·STL·manifest에 있다.
+
+## 오른쪽 ggao50 파지 인서트
+
+ggao50 죠에 볼트로 붙이는 교체형 파지면이다. 죠 본체는 그대로 두고 물체에 닿는 면만 갈아 끼운다.
 
 ## 왜 필요한가
 
