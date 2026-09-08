@@ -166,14 +166,47 @@
         "policy_id": {
           "type": "string"
         },
+        "control_strategy": {
+          "type": "string",
+          "enum": ["TELEOP", "PLANNED_ALL", "ACT_ALL", "HYBRID"],
+          "description": "실패 실행에서 선택한 조작 전략"
+        },
+        "phase_id": {
+          "type": "string",
+          "enum": [
+            "CUP_PICK",
+            "JUG_PICK",
+            "MOVE_TO_PREPOUR",
+            "POUR",
+            "JUG_RETURN",
+            "SHELF_PLACE",
+            "TABLE_PICK_PLACE"
+          ]
+        },
+        "backend": {
+          "type": "string",
+          "enum": ["TELEOP", "PLANNED", "ACT"]
+        },
         "checkpoint_id": {
           "type": "string"
+        },
+        "backend_artifacts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "ACT checkpoint 또는 PLANNED planner·trajectory·controller·config 식별자"
         },
         "station_id": {
           "type": "string"
         },
         "scene_id": {
           "type": "string"
+        },
+        "scenario_id": {
+          "type": "string",
+          "description": "에피소드 sidecar와 세 전략 비교 조건을 연결하는 ID"
         },
         "key_metrics": {
           "type": "object",

@@ -10,7 +10,10 @@
 | 포맷 버전 | LeRobot v3.0 |
 | 태스크 | |
 | policy ID·version | |
-| checkpoint | 텔레옵 시연이면 해당 없음 |
+| control strategy | TELEOP / PLANNED_ALL / ACT_ALL / HYBRID |
+| episode scope | full_skill / phase_slice |
+| phase·backend | phase별 TELEOP / PLANNED / ACT |
+| checkpoint·PLANNED 산출물 | 텔레옵 시연이면 해당 없음 |
 | action 표현 | absolute joint / relative joint / Cartesian delta |
 | 에피소드 수 | 총 / 학습 포함 / 제외 |
 | 총 길이 | 프레임 수, 시간 |
@@ -31,13 +34,15 @@ crop을 반드시 명시한다.
 | `action` | (D,) | |
 | `observation.images.<key>` | HxWx3 | |
 
-## policy 경계
+## policy·phase 경계
 
 - 시작 상태:
 - 포함 동작:
 - 종료 상태:
 - 외부 정지 조건:
 - 반대 팔 상태:
+- phase 순서와 각 시작·종료 조건:
+- backend 전환 시 정지·lease·ACT chunk 폐기 조건:
 
 policy 1과 policy 2의 경계가 다르면 별도 dataset card를 만든다. 정의되지 않은 policy 3을
 기존 데이터와 임의로 합치지 않는다.
@@ -49,7 +54,8 @@ policy 1과 policy 2의 경계가 다르면 별도 dataset card를 만든다. �
 - 카메라 배치와 해상도·fps:
 - 수집 환경 (장소·조명·배경):
 - 컵·물통·선반·테이블 ID와 버전:
-- policy/checkpoint/config ID:
+- policy/strategy/phase backend/checkpoint 또는 planner·trajectory·controller·config ID:
+- phase_slice의 원본 dataset·episode·시간 범위·시작 상태 출처:
 - YOLO·컵 보정표 ID:
 
 ## 조건 분포
@@ -64,6 +70,7 @@ policy 1과 policy 2의 경계가 다르면 별도 dataset card를 만든다. �
 | 컵·물통 버전 | | |
 | 카메라 가림 | | |
 | 목표 물 양 | | |
+| phase 시작 상태 출처 | teleop / planned rollout / ACT rollout | |
 
 ## 무엇을 뺐나
 
@@ -77,9 +84,17 @@ policy 1과 policy 2의 경계가 다르면 별도 dataset card를 만든다. �
 - 분할 그룹(세션·장면 조건)과 원본/복구 구간이 같은 분할에 있는지:
 - 분석·튜닝에 이미 사용한 회귀 조건과 아직 사용하지 않은 최종 holdout의 구분:
 
-## 결과와 실패 분포
+## 전략별 결과와 실패 분포
 
-| 단계 | 성공 / 전체 | 주요 failure code | 사람 개입 횟수 |
+PLANNED_ALL·ACT_ALL·HYBRID는 같은 scenario matrix와 holdout을 썼는지 먼저 적는다.
+
+| 전략 | 성공 / 전체 | cycle time | 사람 개입 | 변경 비용·비고 |
+|---|---|---|---|---|
+| PLANNED_ALL | | | | |
+| ACT_ALL | | | | |
+| HYBRID | | | | |
+
+| 단계·backend | 성공 / 전체 | 주요 failure code | 사람 개입 횟수 |
 |---|---|---|---|
 | 컵 파지 | | | |
 | 물통 파지 | | | |

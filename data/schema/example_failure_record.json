@@ -6,7 +6,7 @@
   "source": {
     "run_id": "example-mission-run-0042",
     "request_id": "example-request-0042",
-    "dataset_id": "TEAM/water-kitchen-policy1-rollout-v1",
+    "dataset_id": "TEAM/water-kitchen-act-all-rollout-v1",
     "episode_index": 42,
     "environment": "dry_run"
   },
@@ -29,9 +29,17 @@
       "rgbd": "example-rgbd-calibration"
     },
     "policy_id": "policy_1",
+    "control_strategy": "ACT_ALL",
+    "phase_id": "CUP_PICK",
+    "backend": "ACT",
     "checkpoint_id": "example-checkpoint",
+    "backend_artifacts": {
+      "checkpoint": "example-checkpoint",
+      "policy_config": "example-only"
+    },
     "station_id": "kitchen",
     "scene_id": "example-scene-fixed-cup-v1",
+    "scenario_id": "example-kitchen-fixed-dry-v1",
     "key_metrics": {
       "nav_result": "SUCCEEDED",
       "final_x_error_m": 0.041,

@@ -1,15 +1,15 @@
-# data — 물 서빙 정책 데이터셋 규격과 인덱스
+# data — 물 서빙 조작 데이터·실패 근거 규격과 인덱스
 
 **이 폴더에는 실데이터를 넣지 않는다.** 에피소드·영상·가중치는 Hugging Face Hub(private)에
 두고, 여기에는 저장 위치 인덱스와 데이터를 만드는 계약만 둔다.
 
-현행 태스크와 policy 경계는
+현행 태스크, 조작 phase와 `PLANNED_ALL / ACT_ALL / HYBRID` 비교 경계는
 [2026-09-07 물 서빙 로봇 회의 결정](../docs/20260907_물서빙로봇_회의결정과_실행범위.md)을
 따른다. 커넥터·범용 3태스크·음성 명령 데이터는 현행 데이터셋에 섞지 않는다.
 
 ## 1. 저장 위치 인덱스
 
-| 데이터셋 | HF repo | policy | 에피소드 수 | 수집 기간 | 상태 |
+| 데이터셋 | HF repo | policy·scope | 에피소드 수 | 수집 기간 | 상태 |
 |---|---|---|---|---|---|
 | (아직 없음) | | | | | |
 
@@ -20,12 +20,17 @@
 
 | dataset ID 예시 | 목적 | 포함 범위 |
 |---|---|---|
-| `water_kitchen_policy1_v1` | 주방 ACT 기준선 | 컵·물통 파지부터 물통 반환·컵 선반 적재 |
-| `water_table_policy2_v1` | 테이블 ACT 기준선 | 선반 컵 파지부터 테이블 놓기·팔 복귀 |
-| `water_kitchen_policy1_hil_v1` | 실패 교정 데이터 | 사람 개입 전후 문맥 + 개입·성공 복구 구간(구간 경계 표시) |
+| `water_kitchen_full_demo_v1` | 전체 ACT와 phase ACT의 공통 원본 | 주방 전체 시연 + 6개 phase 시작·종료 timestamp |
+| `water_kitchen_phase_<phase>_v1` | phase별 ACT 파생 데이터 | 공통 원본에서 자른 단일 phase, 시작 상태 출처 포함 |
+| `water_table_full_demo_v1` | 테이블 ACT 기준선 원본 | 선반 컵 파지부터 테이블 놓기·팔 복귀 |
+| `water_kitchen_strategy_eval_v1` | 세 전략 공통 평가 기록 | 같은 scenario matrix의 PLANNED_ALL·ACT_ALL·HYBRID 실행 |
+| `water_kitchen_hil_recovery_v1` | 실패 교정 데이터 | 사람 개입 전후 문맥 + 검증된 성공 복구 구간 |
 
 - Nav2 이동은 ACT 데이터셋에 넣지 않는다.
 - policy 1과 policy 2를 한 데이터셋 태스크 문자열만 바꿔 섞지 않는다.
+- 전체 시연 원본은 한 번 보존하고 `episode_scope=full_skill`과 6개 phase 시간을 기록한다.
+- phase 데이터는 원본을 덮어쓰지 않고 `episode_scope=phase_slice`인 파생 dataset ID로 만든다.
+- PLANNED 실행도 planner·trajectory·controller·config 버전과 phase별 결과를 같은 sidecar로 남긴다.
 - `policy 3`은 정의되기 전까지 dataset ID를 만들지 않는다.
 - 실물·Isaac Sim·혼합 데이터는 repo ID 또는 명시적인 split으로 분리한다.
 
@@ -63,7 +68,7 @@ LeRobot v2와 v3 메타 파일을 같은 repo에 섞지 않는다. 다른 버전
 | 공용 카메라 | 접두어 없음 | `top` 또는 `mast` |
 
 - policy 2가 한 팔만 사용해도 반대 팔 키를 제거하지 않는다.
-- 첫 기준선의 action은 팔별 관절·그리퍼 **절대 목표 위치**로 고정한다.
+- 첫 ACT 기준선의 action은 팔별 관절·그리퍼 **절대 목표 위치**로 고정한다.
 - 상대 action이나 Cartesian action을 시험하려면 별도 dataset ID를 사용한다.
 - 카메라 key·해상도·fps·crop과 관절 순서는 dataset version 동안 바꾸지 않는다.
 - 관측·action timestamp와 실제 제어 주기 지터를 기록한다.
@@ -86,7 +91,9 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
 
 | 범주 | 필드 |
 |---|---|
-| policy | policy ID·version·checkpoint·실행 모드·action 표현 |
+| 비교 조건 | `scenario_id`, dataset·run·request ID |
+| 실행 구분 | policy ID·version, `control_strategy`, `episode_scope`, 실행 모드·action 표현 |
+| phase | phase ID·시작/종료 시각·backend·시작 상태 출처·checkpoint 또는 PLANNED 산출물 ID |
 | 로봇 | 캘리브레이션 파일 해시·카메라·fps·제어 코드 commit |
 | 물체 | 컵·물통·선반·테이블 ID, 질량·표면·시작 영역 |
 | 물 양 | 목표·YOLO 추정·ground truth·보정표 ID·판정 class |
@@ -104,7 +111,8 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
 3. 짧은 에피소드를 수집한다.
 4. sidecar 검증기와 LeRobot 로더가 모두 읽는지 확인한다.
 5. 영상·상태·action의 시간 정렬을 눈으로 대조한다.
-6. 같은 episode에 과적합해 action이 재생되는지 확인한다.
+6. 전체 시연에서 6개 phase slice를 손실 없이 만들 수 있는지 대조한다.
+7. 같은 episode에 과적합해 ACT action이 재생되는지 확인한다.
 
 ### 6.2 본수집
 
@@ -112,6 +120,8 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
 - 한 episode 안에서 실패를 숨기기 위해 여러 번 처음부터 재시도하지 않는다.
 - 조작자 실수나 스톨이 있으면 원본은 failure bank에 보존하고 BC 학습 제외 사유를 남긴다.
 - 성공 시연 데이터와 HIL 교정 데이터는 dataset ID를 분리한다.
+- 같은 원본 시연으로 ACT_ALL을 학습하고, 필요한 phase만 잘라 로컬 ACT를 학습한다.
+- HYBRID phase slice에는 `start_state_source=planned_rollout`처럼 실제 시작 상태 출처를 남긴다.
 - policy 1의 실제 물 수집은 건식 파지·붓기 동작과 YOLO stop gate가 먼저 통과한 뒤 한다.
 
 ## 7. 실패 데이터 저장과 활용
@@ -131,7 +141,7 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
 | pour | `UNDER_FILL`, `OVER_FILL`, `SPILL`, `FILL_UNKNOWN` | YOLO mask·추정/실측 mL·붓기 phase |
 | return/place | `JUG_RETURN_FAILED`, `SHELF_PLACE_FAILED` | 목표 영역·최종 pose |
 | table serve | `TABLE_PLACE_FAILED`, `CUP_TILT_UNSAFE` | 테이블 영역·컵 기울기 |
-| runtime | `SERVO_STALL`, `COLLISION_RISK`, `TIMEOUT` | safety state·action window |
+| runtime | `SERVO_STALL`, `COLLISION_RISK`, `TIMEOUT` | strategy·backend·safety state·action window |
 
 실패 분석 레코드에는 다음 순서를 한 `failure_id`로 연결한다.
 
@@ -146,13 +156,31 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
   → 학습·평가 데이터 사용 결정
 ```
 
-- Nav2·TF·캘리브레이션·기구·서보 문제는 시스템을 고친 뒤 같은 checkpoint로 재시험한다.
+- Nav2·TF·캘리브레이션·기구·서보 문제는 시스템을 고친 뒤 같은 checkpoint 또는 같은
+  PLANNED 산출물 버전으로 재시험한다.
 - 데이터 분포 문제가 다른 계층과 분리된 경우에만 새 성공 시연이나 HIL 복구 데이터를 모은다.
 - 실패 에피소드는 BC 성공 시연에 섞지 않고 failure bank·회귀 평가에 사용한다.
 - 사람 개입 복구 구간은 별도 HIL dataset ID로 분리한다.
 - 원인 미확정 실패는 `unresolved`로 보존하고 추정 원인을 확정값처럼 쓰지 않는다.
 
-## 8. 포함·제외와 holdout
+## 8. 세 전략 비교 데이터
+
+세 전략은 별도 난이도나 유리한 시작 자세로 평가하지 않는다. 같은 컵·물통·station·조명·
+목표 물 양·초기 자세를 묶은 `scenario_id`와 사전 고정한 holdout을 공유한다.
+
+| 비교 단위 | 반드시 함께 기록할 값 |
+|---|---|
+| 실행 | strategy, policy ID, dataset/checkpoint 또는 planner artifact, code commit |
+| phase | backend, 시작·종료 시각, 시작 상태 출처, 성공·실패, 개입 |
+| 물 양 | 목표·추정·실측 mL, 허용오차, UNDER/OVER/SPILL/UNKNOWN |
+| 운용 | cycle time, 관측→명령 지연, 지터, 안전 거부·정지 |
+| 변경 비용 | 새 물체·station 대응에 든 재설정·재수집·재학습 범위 |
+
+`HYBRID`는 PLANNED와 ACT backend가 실제로 한 번 이상 사용된 전체 실행에만 붙인다. 단일
+phase 파생 데이터는 그 phase의 제어 주체에 따라 `TELEOP`, `PLANNED_ALL`, `ACT_ALL`로 적고,
+원래 HYBRID rollout과의 관계는 dataset/run provenance로 연결한다.
+
+## 9. 포함·제외와 holdout
 
 수집한 것을 전부 학습에 넣지 않는다. 기준과 근거는
 [에피소드 포함·제외 기준](schema/에피소드_포함제외_기준.md)을 따른다.
@@ -174,7 +202,7 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
 팀이 합격 수치를 정하기 전에는 임의의 성공률을 넣지 않는다. 매 평가에서 성공 횟수/전체
 횟수, 단계별 실패 수, 사람 개입 횟수, 물 양 오차를 함께 기록한다.
 
-## 9. dataset card
+## 10. dataset card
 
 Hub에 올릴 때 [dataset card 템플릿](schema/dataset_card_TEMPLATE.md)을 함께 채운다. 카드에는
 policy 경계, 카메라·action key, 물체 버전, 포함·제외 규칙, holdout 조건, 알려진 실패를

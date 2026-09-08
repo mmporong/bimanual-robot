@@ -35,6 +35,24 @@ class FailureRecordValidationTest(unittest.TestCase):
     def test_example_is_valid(self) -> None:
         self.assertEqual([], self.validate(copy.deepcopy(FAILURE_EXAMPLE)))
 
+    def test_manipulation_failure_requires_reproducible_backend_context(self) -> None:
+        for field in ("control_strategy", "phase_id", "backend"):
+            document = copy.deepcopy(FAILURE_EXAMPLE)
+            document["context"].pop(field)
+            self.assertTrue(any(field in error for error in self.validate(document)))
+
+        document = copy.deepcopy(FAILURE_EXAMPLE)
+        document["context"]["phase_id"] = "POUR"
+        self.assertTrue(any("stage와 phase" in error for error in self.validate(document)))
+
+        document = copy.deepcopy(FAILURE_EXAMPLE)
+        document["context"].update(control_strategy="PLANNED_ALL", backend="ACT")
+        self.assertTrue(any("strategy와 backend" in error for error in self.validate(document)))
+
+        document["context"].update(backend="PLANNED", backend_artifacts={})
+        document["context"].pop("checkpoint_id")
+        self.assertTrue(any("PLANNED 실패 재현" in error for error in self.validate(document)))
+
     def test_duplicate_and_missing_evidence_ids_are_rejected(self) -> None:
         document = copy.deepcopy(FAILURE_EXAMPLE)
         document["evidence"][1]["id"] = "EV-01"
@@ -174,6 +192,83 @@ class EpisodeMetadataValidationTest(unittest.TestCase):
     def test_example_is_valid(self) -> None:
         self.assertEqual([], self.validate(copy.deepcopy(EPISODE_EXAMPLE)))
 
+    def test_planned_act_and_hybrid_strategy_contracts_are_checked(self) -> None:
+        planned = copy.deepcopy(EPISODE_EXAMPLE)
+        planned["policy"].update(
+            execution_mode="planned_baseline",
+            control_strategy="PLANNED_ALL",
+        )
+        for phase in planned["policy"]["phase_executions"]:
+            phase["backend"] = "PLANNED"
+            phase["artifact_ids"] = {
+                "trajectory": f"example-{phase['phase_id'].lower()}-trajectory",
+                "controller": "example-controller-v1",
+            }
+        self.assertEqual([], self.validate(planned))
+
+        inconsistent = copy.deepcopy(planned)
+        inconsistent["policy"]["phase_executions"][0].update(
+            backend="ACT", checkpoint_id="example-act-checkpoint"
+        )
+        inconsistent["policy"]["phase_executions"][0].pop("artifact_ids")
+        self.assertTrue(any("모순" in error for error in self.validate(inconsistent)))
+
+        hybrid = copy.deepcopy(planned)
+        hybrid["request_id"] = "example-request-hybrid-0001"
+        hybrid["policy"].update(
+            execution_mode="autonomous_rollout",
+            control_strategy="HYBRID",
+        )
+        pour = hybrid["policy"]["phase_executions"][3]
+        pour.update(backend="ACT", checkpoint_id="example-pour-checkpoint")
+        pour.pop("artifact_ids")
+        self.assertEqual([], self.validate(hybrid))
+
+        for phase in hybrid["policy"]["phase_executions"]:
+            phase["backend"] = "PLANNED"
+            phase.pop("checkpoint_id", None)
+            phase.setdefault("artifact_ids", {"trajectory": "example-trajectory"})
+        self.assertTrue(any("모두 필요" in error for error in self.validate(hybrid)))
+
+    def test_act_phase_requires_checkpoint_and_phase_times_are_checked(self) -> None:
+        document = copy.deepcopy(EPISODE_EXAMPLE)
+        document["request_id"] = "example-request-act-0001"
+        document["policy"].update(
+            execution_mode="autonomous_rollout",
+            control_strategy="ACT_ALL",
+        )
+        for phase in document["policy"]["phase_executions"]:
+            phase["backend"] = "ACT"
+        self.assertTrue(any("checkpoint_id" in error for error in self.validate(document)))
+
+        document["policy"]["checkpoint_id"] = "example-act-all-checkpoint"
+        self.assertEqual([], self.validate(document))
+        document["policy"]["phase_executions"][1].update(start_s=2.0, end_s=19.0)
+        errors = self.validate(document)
+        self.assertTrue(any("겹침" in error for error in errors))
+        self.assertTrue(any("duration_s" in error for error in errors))
+
+    def test_phase_slice_requires_only_phase_relevant_measurements(self) -> None:
+        cup_pick = copy.deepcopy(EPISODE_EXAMPLE)
+        cup_pick["policy"].update(
+            episode_scope="phase_slice",
+            phase_executions=[copy.deepcopy(cup_pick["policy"]["phase_executions"][0])],
+        )
+        cup_pick.pop("water_measurement")
+        self.assertEqual([], self.validate(cup_pick))
+
+        pour = copy.deepcopy(cup_pick)
+        pour["policy"]["phase_executions"] = [
+            {
+                "phase_id": "POUR",
+                "backend": "TELEOP",
+                "start_s": 0.0,
+                "end_s": 3.0,
+                "start_state_source": "teleop_demo",
+            }
+        ]
+        self.assertTrue(any("POUR phase" in error for error in self.validate(pour)))
+
     def test_duplicate_episode_join_key_is_rejected(self) -> None:
         documents = [(Path(name), copy.deepcopy(EPISODE_EXAMPLE)) for name in ("a.json", "b.json")]
         errors = validate_episode_meta.validate_full(EPISODE_SCHEMA, documents)
@@ -249,6 +344,16 @@ class EpisodeMetadataValidationTest(unittest.TestCase):
         document["policy"].update(
             execution_mode="human_in_the_loop",
             checkpoint_id="TEAM/checkpoint-v1",
+            episode_scope="phase_slice",
+            phase_executions=[
+                {
+                    "phase_id": "CUP_PICK",
+                    "backend": "TELEOP",
+                    "start_s": 0.0,
+                    "end_s": 2.2,
+                    "start_state_source": "teleop_demo",
+                }
+            ],
         )
         document["request_id"] = "request-0001"
         errors = self.validate(document)
@@ -304,6 +409,15 @@ class EpisodeMetadataValidationTest(unittest.TestCase):
             instruction="왼팔로 선반의 컵을 손님 테이블에 놓으세요",
         )
         document["policy"]["id"] = "policy_2"
+        document["policy"]["phase_executions"] = [
+            {
+                "phase_id": "TABLE_PICK_PLACE",
+                "backend": "TELEOP",
+                "start_s": 0.0,
+                "end_s": 18.4,
+                "start_state_source": "episode_start",
+            }
+        ]
         document["arms"].update(mode="single", used=["left"])
         document["objects"].append({"role": "table", "id": "table_example", "start_zone": "table"})
         document.pop("water_measurement")

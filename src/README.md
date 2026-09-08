@@ -17,10 +17,10 @@
 | `hold_flow_web` | 예정 | FastAPI·HTML·JavaScript·rclpy | 웹 요청 검증, `ServeDrink` Action client | 요청 JSON 계약 |
 | `hold_flow_navigation` | 예정 | Nav2·SLAM Toolbox·AMCL·DWB·Collision Monitor | 지도, station registry, 장애물 회피, 도킹 staging | 실험 공간·station 실측 |
 | `hold_flow_perception` | 예정 | Python·RGB-D·YOLO·OpenCV·tf2 | station 정렬, 컵·물통·선반·테이블·액면 인지 | 컵·카메라 POC |
-| `hold_flow_motion` | 예정 | C++·Eigen·FollowJointTrajectory | IK, 시작·복귀 자세, 검증 궤적 | 새 팔 역할·선반 좌표 |
+| `hold_flow_motion` | 예정 | C++·Eigen·FollowJointTrajectory | PLANNED phase의 그립·IK·시작·복귀·검증 궤적·붓기 폐루프 | 새 팔 역할·선반 좌표 |
 | `hold_flow_safety` | 예정 | C++·rclcpp·tf2 | command lease, 관절 delta, timeout, 정지 | 첫 실물 명령 전에 |
 | `hold_flow_hardware` | 예정 | Python→C++ 선택·LeRobot·serial | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 | 포트·서보 변종 감사 |
-| `hold_flow_learning` | 예정 | Python·LeRobot 0.6.1·PyTorch·ACT | 수집, 학습, rollout, 실패/HIL 데이터 | policy 계약·데이터 게이트 |
+| `hold_flow_learning` | 예정 | Python·LeRobot 0.6.1·PyTorch·ACT | phase 표시 수집, ACT_ALL·로컬 ACT, rollout, 실패/HIL 데이터 | phase·backend 계약·데이터 게이트 |
 | `hold_flow_mission` | 예정 | Python·rclpy | 웹→이동→조작→서빙→도킹 상태기계 | Action mock 통과 |
 | `hold_flow_logging` | 예정 | Python·rosbag2·JSON·Parquet | request ID로 미션·episode·실패 연결 | 인터페이스와 함께 |
 | `hold_flow_isaac` | 예정 | Python·USD·Isaac Sim 6.0·ROS 2 Bridge | 최종 URDF, Nav2·양팔·센서 SIL, sim/real gap | 최종 모델 URDF |
@@ -34,19 +34,21 @@
   → hold_flow_mission
       ├─ NavigateToPose / DockRobot → Nav2 → base controller
       ├─ AlignToStation → perception
-      ├─ ExecuteManipulationPolicy → ACT executor ┐
-      └─ IK 시작·복귀 궤적 → motion             ├→ command_mux → safety_guard → 양팔 bridge
-                                                   ┘
+      └─ ExecuteManipulationSkill → phase router
+            ├─ backend=PLANNED → motion ┐
+            └─ backend=ACT → learning   ├→ command_mux → safety_guard → 양팔 bridge
+                                        ┘
 
-Astra S RGB-D → perception → station pose / fill estimate → mission·logging
-joint state·action·safety event → logging → LeRobot episode sidecar
+Astra S RGB-D → perception → station pose / fill estimate → mission·phase router·logging
+joint state·action·strategy·backend·safety event → logging → episode sidecar / failure bank
 ```
 
 ### 소유권 규칙
 
 - 베이스 이동 중에는 Nav2만 베이스 명령 lease를 가진다.
 - 팔 조작 중에는 베이스 lease를 해제하고 정지 상태를 확인한다.
-- ACT·IK·teleop 중 하나만 팔 명령 lease를 가진다.
+- PLANNED·ACT·teleop 중 하나만 팔 명령 lease를 가진다.
+- backend 전환은 관절 속도 0, 허용 자세, 남은 ACT chunk 폐기와 기존 lease 해제 뒤에만 한다.
 - 좌우 SO-101 시리얼 포트는 `hold_flow_hardware` 한 프로세스만 연다.
 - perception은 actuator 명령을 직접 내리지 않고 판정 결과만 반환한다.
 - Action 취소는 mission→policy executor→hardware까지 전파한다.
@@ -57,7 +59,7 @@ joint state·action·safety event → logging → LeRobot episode sidecar
 |---|---|---|
 | `ServeDrink.action` | 전체 미션 실행 | request ID, final state, error code |
 | `AlignToStation.action` | 주방·테이블 정밀 정렬 | pose, quality, timestamp |
-| `ExecuteManipulationPolicy.action` | ACT policy 실행 | policy/checkpoint ID, failure stage/code, intervention count |
+| `ExecuteManipulationSkill.action` | PLANNED·ACT·HYBRID 조작 | skill/strategy, phase별 backend·checkpoint, failure stage/code, intervention count |
 | `EstimateFillLevel.srv` 또는 Action | 물 양 판정 | estimated mL, class, confidence, cup calibration ID |
 | `MissionEvent.msg` | 계층 간 공통 로그 | request ID, stage, event, timestamp |
 | `SafetyState.msg` | 실행 허용·정지 상태 | active lease, stop reason, timestamp |
@@ -69,11 +71,13 @@ joint state·action·safety event → logging → LeRobot episode sidecar
 
 ### policy lane — 팀 1순위
 
-1. policy 1·2와 회의의 `3번 policy` 의미를 확정한다.
-2. 시작·종료 상태와 action key를 문서·IDL로 고정한다.
-3. 주방·테이블 장면을 수동 배치해 LeRobot smoke episode를 수집한다.
-4. ACT 과적합 기준선을 만든다.
-5. rollout 실패를 단계별 코드로 수집하고 데이터 보강·재학습한다.
+1. policy 1·2 내부 phase와 회의의 `3번 policy` 의미를 확정한다.
+2. `PLANNED_ALL / ACT_ALL / HYBRID` preset과 phase별 시작·종료·backend 계약을 IDL로 고정한다.
+3. PLANNED_ALL mock·dry-run으로 phase·성공 판정·안전 정지를 연결한다.
+4. 주방·테이블 장면을 수동 배치해 phase 표시 LeRobot smoke episode를 수집한다.
+5. ACT_ALL과 phase별 ACT 과적합 기준선을 만든다.
+6. 같은 scenario matrix에서 세 전략을 비교한다.
+7. rollout 실패를 strategy·backend·phase별로 수집하고 확인된 원인만 수정·보강한다.
 
 ### 이동·IK lane — 사용자 담당
 
@@ -95,9 +99,10 @@ joint state·action·safety event → logging → LeRobot episode sidecar
 ### 통합 lane
 
 1. 실제 Nav2·policy 대신 mock Action server로 상태기계를 먼저 통과시킨다.
-2. 각 실제 패키지를 하나씩 mock과 교체한다.
-3. Action 결과·취소·timeout·재시도를 검증한다.
-4. 마지막에 웹 요청부터 충전 시작까지 request ID 하나로 연결한다.
+2. phase router와 세 preset을 mock PLANNED·ACT backend로 검증한다.
+3. 각 실제 패키지를 하나씩 mock과 교체한다.
+4. backend 전환, Action 결과·취소·timeout·재시도를 검증한다.
+5. 마지막에 웹 요청부터 충전 시작까지 request ID 하나로 연결한다.
 
 ## 코드 리뷰에서 반드시 확인할 것
 
@@ -105,7 +110,8 @@ joint state·action·safety event → logging → LeRobot episode sidecar
 - 단위가 degree/radian, mm/m 중 무엇인지 필드와 코드에서 명시됐는가
 - `frame_id`와 timestamp가 있으며 오래된 TF·영상이 거부되는가
 - timeout·취소·실제 hold/stop 경로가 있는가
-- 베이스와 팔, ACT와 IK의 명령 소유자가 동시에 활성화되지 않는가
+- 베이스와 팔, PLANNED와 ACT의 명령 소유자가 동시에 활성화되지 않는가
+- strategy·phase·backend·checkpoint 또는 planner/trajectory/controller 버전이 기록되는가
 - 카메라·joint state·action의 실제 fps와 주기 지터를 기록하는가
 - policy ID, checkpoint, dataset, calibration, code commit을 연결했는가
 - 성공률뿐 아니라 단계별 실패 코드와 사람 개입을 남기는가

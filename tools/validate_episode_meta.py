@@ -140,6 +140,103 @@ def _semantic_errors(path: Path, doc: dict) -> list[str]:
                 if abs(measured - target) > tolerance:
                     errors.append(f"{path.name}: water_measurement — 실측량이 목표 허용 범위를 벗어남")
 
+    policy = doc.get("policy", {})
+    phase_executions = policy.get("phase_executions", [])
+    phase_ids = [item["phase_id"] for item in phase_executions]
+    expected_phases = {
+        "water_kitchen_policy1": [
+            "CUP_PICK",
+            "JUG_PICK",
+            "MOVE_TO_PREPOUR",
+            "POUR",
+            "JUG_RETURN",
+            "SHELF_PLACE",
+        ],
+        "water_table_policy2": ["TABLE_PICK_PLACE"],
+    }.get(doc.get("task", {}).get("name"), [])
+    water_measurement_required = (
+        doc.get("task", {}).get("name") == "water_kitchen_policy1"
+        and (
+            policy.get("episode_scope") == "full_skill"
+            or "POUR" in phase_ids
+        )
+    )
+    if water_measurement_required and not isinstance(water_measurement, dict):
+        errors.append(
+            f"{path.name}: water_measurement — 주방 전체 실행 또는 POUR phase에 필요"
+        )
+    if policy.get("episode_scope") == "full_skill" and phase_ids != expected_phases:
+        errors.append(
+            f"{path.name}: policy/phase_executions — full_skill phase 순서가 태스크 계약과 다름"
+        )
+    if policy.get("episode_scope") == "phase_slice" and len(phase_executions) != 1:
+        errors.append(
+            f"{path.name}: policy/phase_executions — phase_slice는 phase 하나만 포함해야 함"
+        )
+
+    duration_s = outcome.get("duration_s")
+    previous_end = 0.0
+    for index, phase in enumerate(phase_executions):
+        time_range = [phase.get("start_s"), phase.get("end_s")]
+        if not _ordered_time_range(time_range):
+            errors.append(
+                f"{path.name}: policy/phase_executions/{index} — "
+                "phase 시작·종료 시각이 올바르지 않음"
+            )
+            continue
+        if time_range[0] < previous_end:
+            errors.append(
+                f"{path.name}: policy/phase_executions — phase 시간 순서 역전 또는 겹침"
+            )
+        previous_end = time_range[1]
+        if isinstance(duration_s, (int, float)) and time_range[1] > duration_s:
+            errors.append(
+                f"{path.name}: policy/phase_executions/{index}/end_s — "
+                "episode duration_s를 벗어남"
+            )
+
+    strategy = policy.get("control_strategy")
+    backends = [item["backend"] for item in phase_executions]
+    strategy_backend = {
+        "TELEOP": "TELEOP",
+        "PLANNED_ALL": "PLANNED",
+        "ACT_ALL": "ACT",
+    }
+    required_backend = strategy_backend.get(strategy)
+    if required_backend and any(backend != required_backend for backend in backends):
+        errors.append(
+            f"{path.name}: policy/control_strategy — {strategy}와 phase backend가 모순됨"
+        )
+    if strategy == "HYBRID" and set(backends) != {"PLANNED", "ACT"}:
+        errors.append(
+            f"{path.name}: policy/control_strategy — HYBRID에는 PLANNED와 ACT phase가 모두 필요"
+        )
+    for index, phase in enumerate(phase_executions):
+        if phase["backend"] == "ACT" and not (
+            phase.get("checkpoint_id") or policy.get("checkpoint_id")
+        ):
+            errors.append(
+                f"{path.name}: policy/phase_executions/{index}/checkpoint_id — "
+                "ACT phase 재현에 필요"
+            )
+        if phase["backend"] == "PLANNED" and not phase.get("artifact_ids"):
+            errors.append(
+                f"{path.name}: policy/phase_executions/{index}/artifact_ids — "
+                "PLANNED phase 재현에 필요"
+            )
+    if policy.get("execution_mode") == "teleop_demo" and strategy != "TELEOP":
+        errors.append(
+            f"{path.name}: policy/execution_mode — teleop_demo는 TELEOP 전략이어야 함"
+        )
+    if policy.get("execution_mode") == "planned_baseline" and strategy != "PLANNED_ALL":
+        errors.append(
+            f"{path.name}: policy/execution_mode — planned_baseline은 PLANNED_ALL 전략이어야 함"
+        )
+    if policy.get("execution_mode") == "autonomous_rollout" and strategy == "TELEOP":
+        errors.append(
+            f"{path.name}: policy/execution_mode — autonomous_rollout은 TELEOP일 수 없음"
+        )
+
     interventions = outcome.get("interventions", [])
     intervention_count = outcome.get("human_intervention_count", 0)
     if isinstance(intervention_count, int) and not isinstance(intervention_count, bool):
@@ -147,7 +244,6 @@ def _semantic_errors(path: Path, doc: dict) -> list[str]:
             errors.append(
                 f"{path.name}: outcome/interventions — human_intervention_count와 개수가 다름"
             )
-    duration_s = outcome.get("duration_s")
     previous_end = 0.0
     intervention_duration = 0.0
     for index, intervention in enumerate(interventions):
@@ -176,7 +272,6 @@ def _semantic_errors(path: Path, doc: dict) -> list[str]:
     provenance = doc.get("training_provenance", {})
     if provenance and provenance.get("source_split") != doc.get("split"):
         errors.append(f"{path.name}: training_provenance/source_split — 원본과 파생물 split이 다름")
-    policy = doc.get("policy", {})
     if (
         policy.get("execution_mode") == "human_in_the_loop"
         and doc.get("split") == "train"

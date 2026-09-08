@@ -134,6 +134,15 @@ def summarize(documents: list[tuple[Path, dict]], include_examples: bool = False
             for stage in sorted({doc["observation"]["stage"] for doc in records})
         },
         "by_observed_code": counts(doc["observation"]["observed_code"] for doc in records),
+        "by_control_strategy": counts(
+            doc["context"].get("control_strategy", "unrecorded") for doc in records
+        ),
+        "by_phase_id": counts(
+            doc["context"].get("phase_id", "not_applicable") for doc in records
+        ),
+        "by_backend": counts(
+            doc["context"].get("backend", "not_applicable") for doc in records
+        ),
         "by_confirmed_cause": counts(
             doc["diagnosis"]["root_cause"]["layer"]
             if doc["diagnosis"]["cause_status"] == "confirmed" else "unconfirmed"
