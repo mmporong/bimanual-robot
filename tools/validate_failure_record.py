@@ -87,6 +87,46 @@ def _semantic_errors(path: Path, document: dict) -> list[str]:
                 f"{path.name}: evidence/{index}/time_range_s — 시작 시각이 종료 시각보다 늦음"
             )
 
+    observation_stage = document.get("observation", {}).get("stage")
+    context = document.get("context", {})
+    stage_phase = {
+        "cup_grasp": "CUP_PICK",
+        "jug_grasp": "JUG_PICK",
+        "pour": "POUR",
+        "jug_return": "JUG_RETURN",
+        "shelf_place": "SHELF_PLACE",
+        "table_place": "TABLE_PICK_PLACE",
+    }
+    expected_phase = stage_phase.get(observation_stage)
+    if expected_phase:
+        for field in ("control_strategy", "phase_id", "backend"):
+            if not context.get(field):
+                errors.append(
+                    f"{path.name}: context/{field} — 조작 phase 실패 재현에 필요"
+                )
+        if context.get("phase_id") and context.get("phase_id") != expected_phase:
+            errors.append(
+                f"{path.name}: context/phase_id — observation stage와 phase가 모순됨"
+            )
+    strategy = context.get("control_strategy")
+    backend = context.get("backend")
+    required_backend = {
+        "TELEOP": "TELEOP",
+        "PLANNED_ALL": "PLANNED",
+        "ACT_ALL": "ACT",
+    }.get(strategy)
+    if required_backend and backend and backend != required_backend:
+        errors.append(
+            f"{path.name}: context/backend — control_strategy와 backend가 모순됨"
+        )
+    backend_artifacts = context.get("backend_artifacts", {})
+    if backend == "ACT" and not (
+        context.get("checkpoint_id") or backend_artifacts.get("checkpoint")
+    ):
+        errors.append(f"{path.name}: context/checkpoint_id — ACT 실패 재현에 필요")
+    if backend == "PLANNED" and not backend_artifacts:
+        errors.append(f"{path.name}: context/backend_artifacts — PLANNED 실패 재현에 필요")
+
     diagnosis = document.get("diagnosis", {})
     hypotheses = diagnosis.get("hypotheses", [])
     hypothesis_ids = [item.get("id") for item in hypotheses if isinstance(item, dict)]

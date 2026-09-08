@@ -90,6 +90,9 @@ class FailureBankTests(unittest.TestCase):
         self.assertEqual(included["record_count"], 1)
         self.assertEqual(included["by_confirmed_cause"], {"unconfirmed": 1})
         self.assertEqual(included["by_stage_and_code"], {"cup_grasp": {"CUP_GRASP_MISS": 1}})
+        self.assertEqual(included["by_control_strategy"], {"ACT_ALL": 1})
+        self.assertEqual(included["by_phase_id"], {"CUP_PICK": 1})
+        self.assertEqual(included["by_backend"], {"ACT": 1})
         self.assertEqual(included["training_review"], [])
 
     def test_recursive_bundle_read_and_duplicate_id_rejection(self):

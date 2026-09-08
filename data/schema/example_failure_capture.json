@@ -16,6 +16,16 @@
   "context": {
     "software_commits": {},
     "calibration_ids": {},
+    "policy_id": "policy_1",
+    "control_strategy": "ACT_ALL",
+    "phase_id": "CUP_PICK",
+    "backend": "ACT",
+    "checkpoint_id": "example-checkpoint",
+    "backend_artifacts": {
+      "checkpoint": "example-checkpoint",
+      "policy_config": "example-only"
+    },
+    "scenario_id": "example-kitchen-fixed-dry-v1",
     "key_metrics": {}
   }
 }

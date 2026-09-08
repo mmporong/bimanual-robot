@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/bimanual-robot/water-serving-episode-metadata.schema.json",
-  "title": "물 서빙 ACT 에피소드 수집 조건 메타데이터",
-  "description": "LeRobot v3.0 표준 메타에 없는 policy, 물체, 물 양, 실패, 개입 조건을 episode_index로 연결하는 sidecar 스키마",
+  "title": "물 서빙 조작 에피소드 수집 조건 메타데이터",
+  "description": "LeRobot v3.0 표준 메타에 없는 조작 전략, phase backend, 물체, 물 양, 실패, 개입 조건을 episode_index로 연결하는 sidecar 스키마",
   "type": "object",
   "required": [
     "episode_index",
     "dataset_id",
     "run_id",
+    "scenario_id",
     "recorded_at",
     "operator",
     "task",
@@ -36,6 +37,11 @@
       "type": "string",
       "minLength": 1,
       "description": "미션·rollout·수집 실행을 연결하는 안정 ID"
+    },
+    "scenario_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "세 전략이 공유하는 컵·물통·station·조명·초기 자세 조건 ID"
     },
     "request_id": {
       "type": "string",
@@ -80,7 +86,15 @@
     },
     "policy": {
       "type": "object",
-      "required": ["id", "version", "execution_mode", "action_representation"],
+      "required": [
+        "id",
+        "version",
+        "execution_mode",
+        "control_strategy",
+        "episode_scope",
+        "action_representation",
+        "phase_executions"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -98,7 +112,17 @@
         },
         "execution_mode": {
           "type": "string",
-          "enum": ["teleop_demo", "autonomous_rollout", "human_in_the_loop", "ik_baseline"]
+          "enum": ["teleop_demo", "autonomous_rollout", "human_in_the_loop", "planned_baseline"]
+        },
+        "control_strategy": {
+          "type": "string",
+          "enum": ["TELEOP", "PLANNED_ALL", "ACT_ALL", "HYBRID"],
+          "description": "미션 조작 구간의 실행 전략. policy ID와 ACT 모델 ID를 대신하지 않는다"
+        },
+        "episode_scope": {
+          "type": "string",
+          "enum": ["full_skill", "phase_slice"],
+          "description": "전체 policy 실행인지, phase 학습·분석용 파생 구간인지 구분한다"
         },
         "action_representation": {
           "type": "string",
@@ -112,6 +136,66 @@
         "config_id": {
           "type": "string",
           "description": "학습·추론 config 파일 경로와 해시"
+        },
+        "phase_executions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["phase_id", "backend", "start_s", "end_s", "start_state_source"],
+            "additionalProperties": false,
+            "properties": {
+              "phase_id": {
+                "type": "string",
+                "enum": [
+                  "CUP_PICK",
+                  "JUG_PICK",
+                  "MOVE_TO_PREPOUR",
+                  "POUR",
+                  "JUG_RETURN",
+                  "SHELF_PLACE",
+                  "TABLE_PICK_PLACE"
+                ]
+              },
+              "backend": {
+                "type": "string",
+                "enum": ["TELEOP", "PLANNED", "ACT"]
+              },
+              "start_s": {
+                "type": "number",
+                "minimum": 0
+              },
+              "end_s": {
+                "type": "number",
+                "minimum": 0
+              },
+              "start_state_source": {
+                "type": "string",
+                "enum": [
+                  "episode_start",
+                  "previous_phase",
+                  "teleop_demo",
+                  "planned_rollout",
+                  "act_rollout"
+                ],
+                "description": "phase_slice가 실제 어느 시작 상태 분포에서 만들어졌는지 추적한다"
+              },
+              "checkpoint_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "해당 ACT phase를 실행한 checkpoint 경로·Hub ID·해시"
+              },
+              "artifact_ids": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "해당 PLANNED phase의 planner·trajectory·controller·config 식별자"
+              }
+            }
+          }
         }
       }
     },
@@ -632,22 +716,6 @@
     {
       "if": {
         "properties": {
-          "task": {
-            "properties": {
-              "name": { "const": "water_kitchen_policy1" }
-            },
-            "required": ["name"]
-          }
-        },
-        "required": ["task"]
-      },
-      "then": {
-        "required": ["water_measurement"]
-      }
-    },
-    {
-      "if": {
-        "properties": {
           "policy": {
             "properties": {
               "execution_mode": {
@@ -660,11 +728,6 @@
         "required": ["policy"]
       },
       "then": {
-        "properties": {
-          "policy": {
-            "required": ["checkpoint_id"]
-          }
-        },
         "required": ["request_id"]
       }
     },

@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-09-08 | 물 서빙 메인 README·PLANNED/ACT/HYBRID 계약 최신화
+
+**결론**: 물 서빙 조작을 `PLANNED_ALL`, `ACT_ALL`, phase별 `HYBRID` 세 전략으로 같은
+조건에서 비교한다. `policy 1/2`는 ACT 모델명이 아니라 미션 조작 구간이며, 주방 구간은
+`CUP_PICK → JUG_PICK → MOVE_TO_PREPOUR → POUR → JUG_RETURN → SHELF_PLACE`로 나눈다.
+첫 HYBRID 후보는 `POUR`만 ACT로 두되, phase별 결과에서 이점이 확인된 구간만 교체한다.
+
+**조사·문서**
+- 씨메스로보틱스·ABB·FANUC·Dex-Net과 ACT·RT-1·Figure의 공개 자료를 비교해 산업형
+  비전·그립 선택·계획·제어와 사람 시연 IL을 구분한 `research/R33_산업용_피킹과_IL_ACT_적용경계.md` 추가
+- 현행 회의 문서, 무선·SLAM 팀 보고, 프로젝트 인계, IK/IL 경계, `src/README.md`, 데이터·실패
+  규약과 루트 `README.md`를 물 서빙 단일 미션과 세 전략 기준으로 갱신
+- phase 순차 전환은 별도 통합 신경망 없이 정지·허용 자세·ACT chunk 폐기·command lease
+  인계로 수행하고, 같은 틱의 residual 결합은 새 정책·별도 검증이 필요한 후속 범위로 분리
+
+**구현**
+- 에피소드 sidecar에 `control_strategy`, `episode_scope`, phase별 backend·시간·시작 상태 출처·
+  ACT checkpoint 또는 PLANNED 산출물 ID를 추가
+- 검증기에 strategy/backend 모순, phase 순서·시간, ACT checkpoint, PLANNED 산출물 누락 차단 추가
+- 실패 레코드에 strategy·phase·backend·산출물 문맥을 추가하고 실패 집계를 전략·phase·backend별로 확장
+
+**검증**
+- 에피소드·실패 예시 JSON full validation PASS
+- JSON Schema Draft 2020-12 자체 검사 2개 PASS
+- `python3 -m unittest discover -s tests -v`: 50개 PASS
+- 변경 문서 로컬 링크 89개 확인, 누락 0
+- `git diff --check` PASS
+
+**미수행**: 실제 데이터 수집·ACT 학습·PLANNED/ACT/HYBRID router 구현, Nav2·무선·Isaac Sim·
+실물 로봇 실행과 성능 측정. 문서·스키마·검증 도구 완료를 로봇 동작 완료로 간주하지 않는다.
+
+---
+
 ## 2026-09-08 | 무선 운용·SLAM·ACT 팀 보고서 작성
 
 **산출물**: `docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md` (13개 절).

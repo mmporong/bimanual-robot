@@ -1,7 +1,8 @@
 {
   "episode_index": 0,
-  "dataset_id": "TEAM/water-kitchen-policy1-smoke-v1",
+  "dataset_id": "TEAM/water-kitchen-full-demo-smoke-v1",
   "run_id": "example-teleop-run-0001",
+  "scenario_id": "example-kitchen-fixed-dry-v1",
   "recorded_at": "2026-09-07T14:32:10+09:00",
   "operator": "op_a",
   "task": {
@@ -12,10 +13,56 @@
   },
   "policy": {
     "id": "policy_1",
-    "version": "contract-v1",
+    "version": "phase-contract-v2",
     "execution_mode": "teleop_demo",
+    "control_strategy": "TELEOP",
+    "episode_scope": "full_skill",
     "action_representation": "absolute_joint_position",
-    "config_id": "example-only"
+    "config_id": "example-only",
+    "phase_executions": [
+      {
+        "phase_id": "CUP_PICK",
+        "backend": "TELEOP",
+        "start_s": 0.0,
+        "end_s": 3.0,
+        "start_state_source": "episode_start"
+      },
+      {
+        "phase_id": "JUG_PICK",
+        "backend": "TELEOP",
+        "start_s": 3.0,
+        "end_s": 6.0,
+        "start_state_source": "previous_phase"
+      },
+      {
+        "phase_id": "MOVE_TO_PREPOUR",
+        "backend": "TELEOP",
+        "start_s": 6.0,
+        "end_s": 8.5,
+        "start_state_source": "previous_phase"
+      },
+      {
+        "phase_id": "POUR",
+        "backend": "TELEOP",
+        "start_s": 8.5,
+        "end_s": 12.0,
+        "start_state_source": "previous_phase"
+      },
+      {
+        "phase_id": "JUG_RETURN",
+        "backend": "TELEOP",
+        "start_s": 12.0,
+        "end_s": 15.0,
+        "start_state_source": "previous_phase"
+      },
+      {
+        "phase_id": "SHELF_PLACE",
+        "backend": "TELEOP",
+        "start_s": 15.0,
+        "end_s": 18.4,
+        "start_state_source": "previous_phase"
+      }
+    ]
   },
   "arms": {
     "mode": "simultaneous",

@@ -11,7 +11,7 @@
 ## 1. 저장 단위
 
 `failure_id`는 한 원인 조사를 식별한다. `source.run_id`는 조사를 시작한 대표 실행이며,
-같은 조사에 속하는 추가 정책 실행은 각 episode sidecar의 `run_id`와 동일한
+같은 조사에 속하는 추가 조작 실행은 각 episode sidecar의 `run_id`와 동일한
 `failure_record_id`로 연결한다. 재시험은 `validation`의 run ID와 근거 파일로 연결한다.
 추가 실행의 개별 조건·관측을 대표 실행의 `context` 위에 덮어쓰지 않는다.
 Nav2 등 sidecar가 없는 추가 발생은 별도 실패 레코드로 기록해 관측과 조건을 보존한다.
@@ -70,8 +70,8 @@ private-artifacts/
 
 | 경계 또는 단계 | 함께 보존할 데이터 | 구분하려는 원인 |
 |---|---|---|
-| Nav2 → 조작 시작 | 목표·실제 pose, XY·yaw 오차, covariance, 베이스 속도, TF age, 로컬 정렬량, IK 도달성 | 정책 실패와 도착·정렬 실패 |
-| policy phase | checkpoint·dataset·config, 영상, 관측/action/관절 window, 그리퍼, inference 시간, 제어 지터, 안전 게이트 | 데이터·정책·실행기·하드웨어 실패 |
+| Nav2 → 조작 시작 | 목표·실제 pose, XY·yaw 오차, covariance, 베이스 속도, TF age, 로컬 정렬량, IK 도달성 | 조작 실패와 도착·정렬 실패 |
+| 조작 phase | `control_strategy`·backend·phase, checkpoint 또는 planner·trajectory·controller·config, 영상, 관측/action/관절 window, 그리퍼, inference·계획 시간, 제어 지터, 안전 게이트 | 인지·계획·데이터·정책·실행기·하드웨어 실패 |
 | 물 양 판정 | target·YOLO 추정·저울 실측 mL, mask, confidence, 가림, calibration ID, 물통 기울기·시간 | segmentation·보정표·붓기 제어 실패 |
 | Isaac Sim ↔ 실물 | URDF commit, 관절 축·방향·한계, 동일 관절값의 말단 pose, 충돌·접촉, 지연 | 모델 오류와 제어·물성 gap |
 | 미션 전이 | request/run ID, 상태 진입·종료 시각, Action 결과·취소, timeout, 센서 최신성 | 상태기계·인터페이스 실패 |
@@ -111,7 +111,8 @@ clock 기준을 정해 영상·관절·action·센서의 동일 시점을 연결
 
 실패가 많다고 곧바로 데이터를 더 모으지 않는다.
 
-- 도착·TF·캘리브레이션·기구·서보 원인이면 시스템을 수정하고 같은 checkpoint로 재시험한다.
+- 도착·TF·캘리브레이션·기구·서보 원인이면 시스템을 수정하고 같은 checkpoint 또는 같은
+  PLANNED 산출물 버전으로 재시험한다.
 - 관측 분포 밖의 초기 상태이면서 시스템 이상이 배제된 경우에만 성공 시연 또는 HIL 복구
   데이터를 보강한다.
 - HIL 학습 포함 검증은 확인된 원인층 `policy_data`만 허용한다. navigation·hardware 등
@@ -144,7 +145,8 @@ HIL 파생 sidecar의 `training_provenance`에는 원본 전체 길이 `source_d
 판정하지 않으므로, 담당자는 원본 manifest와 근거를 대조한 후 승인한다.
 
 에피소드 검증은 객체 ID 중복, 정책별 필수 역할(주방: cup/jug/shelf, 테이블: cup/shelf/table),
-`water_measurement.cup_id`의 실제 cup 객체 참조도 검사한다. `jsonschema`가 없으면 축소 검증만
+strategy와 phase backend의 일치, phase 시간·순서·시작 상태 출처, ACT checkpoint와 PLANNED
+산출물 ID, `water_measurement.cup_id`의 실제 cup 객체 참조도 검사한다. `jsonschema`가 없으면 축소 검증만
 수행하고 실패 레코드 참조 대조는 생략하며 종료 코드 3을 반환한다. 이를 검증 PASS로 취급하지 않는다.
 
 ## 6. 집계와 포트폴리오 증거
@@ -186,7 +188,8 @@ python3 tools/validate_failure_record.py /path/to/failure-record-directory
 
 수집 입력은 `failure_id`, `triage_owner`, `source`, `observation`, `context`,
 `immediate_action` 여섯 필드다. `source`에 run ID·환경을, `observation`에 관측 단계·코드·
-요약·판정 주체·심각도를 적는다. `context`에는 실행 당시의 코드·캘리브레이션·계측을 넣는다.
+요약·판정 주체·심각도를 적는다. `context`에는 실행 당시의 scenario·strategy·phase backend·
+코드·캘리브레이션·계측을 넣는다.
 현재 PC의 Git HEAD를 실험 당시 commit으로 대신 기록하지 않는다. 모르는 값은 추정하지
 않고 빈 매핑으로 남긴 뒤 분석 때 보강한다. `immediate_action`에는 실제 취한 조치만 적는다.
 
@@ -217,8 +220,9 @@ calibration ID, 기구 변경이면 부품 버전과 계측 기록을 `response`
 
 원인이 확인된 상태(`confirmed`)와 수정이 검증된 상태(`resolved`)를 구분한다. 같은 조건
 재시험과 다른 조건 회귀가 모두 PASS하고 protocol·판정 근거가 있어야 `resolved`로 닫는다.
-run ID 목록만 적는 것으로 실험을 대신하지 않으며, 근거 파일에 각 run의 조건·checkpoint·
-결과·사람 개입 여부와 전체 시도 수를 남긴다. 미실행은 `not_run`, 실패는 `fail`로 유지한다.
+run ID 목록만 적는 것으로 실험을 대신하지 않으며, 근거 파일에 각 run의 조건·strategy·
+phase backend·checkpoint 또는 PLANNED 산출물·결과·사람 개입 여부와 전체 시도 수를 남긴다.
+미실행은 `not_run`, 실패는 `fail`로 유지한다.
 
 ```bash
 cd ~/bimanual-robot
@@ -228,8 +232,8 @@ python3 tools/validate_episode_meta.py "$HOME/robot-artifacts/episode-meta" \
 python3 tools/failure_bank.py summary "$HOME/robot-artifacts/failures"
 ```
 
-집계는 EXAMPLE ID를 기본 제외하고 환경·단계·관측 코드·확정 원인·재시험·재학습 결정과
-미분석/재시험 대기 ID를 출력한다. 중복 ID나 잘못된 레코드가 있으면 부분 집계를 성공으로
+집계는 EXAMPLE ID를 기본 제외하고 환경·전략·phase·backend·관측 코드·확정 원인·재시험·
+재학습 결정과 미분석/재시험 대기 ID를 출력한다. 중복 ID나 잘못된 레코드가 있으면 부분 집계를 성공으로
 출력하지 않는다. 성공 실행의 분모가 없으므로 성공률은 `null`로 남긴다.
 
 ### 8.3 검증 뒤 팀에 공유한다
