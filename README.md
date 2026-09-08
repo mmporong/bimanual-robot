@@ -8,6 +8,7 @@
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
 - 운영 방식: Issue → 작업 브랜치 → Pull Request → 로컬 검증 → `main`
 - 태스크·정책·구현 상세 단일 원본: [2026-09-07 물 서빙 로봇 회의 결정](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
+- 팀 보고: [무선 운용·SLAM·ACT 처리 분담과 검증 순서](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md)
 - 기구 수치 단일 원본: [`hold_flow_mechanical_v0_2.yaml`](design/mechanical/hold_flow_mechanical_v0_2.yaml)
 
 ## 프로젝트 한 줄 정의
