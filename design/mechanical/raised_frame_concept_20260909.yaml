@@ -1,0 +1,76 @@
+status: preliminary_trade_study_not_build_release
+units: SI
+provenance:
+  base: docs/20260909_하단프레임_실물치수_모델링기록.md
+  target_height: 0.720 m, previous design datum; actual table measurement pending
+  profile_2020: https://cdn.item24.com/product-assets/DOK_PROD_37015_%23SEN_%23AIN_%23V1.pdf
+  profile_2040: https://th.misumi-ec.com/en/vona2/detail/110302684350/
+  aluminum_modulus: https://www.aluminum.org/sites/default/files/2021-11/103.1_Aluminum_EPD_HotRolledAluminum.pdf
+  servo_12v_candidate: https://www.feetechrc.com/525603.html
+  arms: previous URDF nominal inertial masses, not weighed
+  mass_and_load_cases: engineering assumptions for sensitivity study, not measurements
+geometry:
+  deck_height: 0.720
+  deck_thickness: 0.002
+  reference_flat_deck_thickness: 0.004
+  lower_frame_top: 0.060
+  lower_crossmember_height: 0.020
+  upper_ring_height: 0.020
+  tower_width: 0.260
+  upper_profile_total_length: 1.520
+  support_front_x: 0.110
+  support_rear_x: -0.110
+  rear_contact_half_width: 0.215
+  wheel_outer_half_width: 0.270
+  assumed_wheel_width: 0.030
+  wheel_radius: 0.035
+  camera_center_height_above_deck_candidates: [0.380, 0.540]
+  recommended_camera_center_height_above_deck: 0.540
+  recommended_camera_pitch_down_degrees: 43.0
+materials:
+  E_aluminum: 69000000000.0
+  I_2020: 0.0000000072
+  I_2040_weak: 0.00000001358
+  I_2040_strong: 0.0000000513
+  density_aluminum: 2700.0
+  E_steel: 200000000000.0
+  density_steel: 7850.0
+  profile_2020_kg_per_m: 0.48
+  strap_width: 0.020
+  strap_thickness: 0.0015
+weight_optimization:
+  folded_deck_skin_thickness: 0.002
+  folded_deck_flange_mass_allowance: 0.130
+  brace_material: aluminum
+  note: 절곡 판과 알루미늄 인장재 후보; 체결부 시험 전
+screening:
+  g: 9.80665
+  lateral_force: 20.0
+  upper_applied_moment: 8.0
+  effective_top_mass: 4.0
+  ideal_to_joint_stiffness_fractions: [1.0, 0.1, 0.01]
+  acceleration_cases: [0.20, 0.50, 1.0]
+  slope_degrees: [0.0, 3.0, 5.0]
+  rolling_coefficient_cases: [0.02, 0.05, 0.10]
+  tire_friction_assumption: 0.5
+  screening_margin_target: 0.030
+  service_speed_candidate: 0.080
+  rated_torque_candidate: 0.980665
+  no_load_rpm_candidate: 45.0
+  step_height_cases: [0.002, 0.005, 0.010]
+mass_assumptions:
+  drive_and_casters: {mass: 0.50, x: 0.0, z: 0.035}
+  brackets_wiring: {mass: 0.50, x: 0.0, z: 0.30}
+  battery: {mass: 0.80, x: -0.04, z: 0.12}
+  boards_pi: {mass: 0.35, x: -0.04, z: 0.15}
+  lower_tray: {mass: 0.25, x: 0.0, z: 0.12}
+  camera_mast: {mass: 0.40, x: -0.12, z: 0.90, basis: legacy_250mm_camera_height_screening_budget_not_current_540mm_design}
+  lidar_mount: {mass: 0.08, x: 0.19, z: 0.20}
+  left_arm: {mass: 0.690006, x: 0.0, z: 0.82}
+  right_arm: {mass: 0.837006, x: 0.0, z: 0.82}
+poses:
+  parked: {arm_com_x: 0.02, arm_com_z: 0.82, left_payload: 0.0, right_payload: 0.0, payload_x: 0.0}
+  transport_cup_shelf_assumption: {arm_com_x: 0.02, arm_com_z: 0.82, left_payload: 0.30, right_payload: 0.0, payload_x: 0.0, payload_y_half: 0.0, payload_z: 0.65}
+  legacy_light: {arm_com_x: 0.16, arm_com_z: 0.80, left_payload: 0.12, right_payload: 0.12, payload_x: 0.35}
+  serving_example: {arm_com_x: 0.16, arm_com_z: 0.80, left_payload: 0.30, right_payload: 0.56, payload_x: 0.35}
+  heavy_pitcher: {arm_com_x: 0.16, arm_com_z: 0.80, left_payload: 0.30, right_payload: 1.10, payload_x: 0.35}

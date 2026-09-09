@@ -1,0 +1,108 @@
+{
+  "left_": {
+    "prefix": "left_",
+    "source_urdf": "src/hold_flow_description/urdf/hold_flow.urdf",
+    "mount_xyz_mm": [
+      0.0,
+      75.0,
+      728.4
+    ],
+    "joint_positions_rad_or_m": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": -1.1,
+      "elbow_flex": 1.1,
+      "wrist_flex": -0.7,
+      "wrist_roll": 0.0,
+      "gripper": 0.35
+    },
+    "bounds_min_mm": [
+      -51.52670914792987,
+      19.537572866748242,
+      725.9997402677371
+    ],
+    "bounds_max_mm": [
+      250.7706066826263,
+      130.46259874596097,
+      1063.0222412999465
+    ],
+    "size_mm": [
+      302.29731583055616,
+      110.92502587921274,
+      337.02250103220933
+    ],
+    "visual_count": 17,
+    "triangle_count": 398884,
+    "triangle_policy": "source STL triangles preserved; URDF boxes triangulated exactly",
+    "scale_policy": "URDF mesh scale, transforms, then metres-to-millimetres only",
+    "collision_checked": false,
+    "right_gripper_geometry_note": null
+  },
+  "right_": {
+    "prefix": "right_",
+    "source_urdf": "src/hold_flow_description/urdf/hold_flow.urdf",
+    "mount_xyz_mm": [
+      0.0,
+      -75.0,
+      728.4
+    ],
+    "joint_positions_rad_or_m": {
+      "shoulder_pan": 0.0,
+      "shoulder_lift": -1.1,
+      "elbow_flex": 1.1,
+      "wrist_flex": -0.7,
+      "wrist_roll": 0.0,
+      "finger1_joint": 0.02
+    },
+    "bounds_min_mm": [
+      -51.52670914792987,
+      -130.46242713325177,
+      725.9997402677371
+    ],
+    "bounds_max_mm": [
+      250.7706066826263,
+      -19.53740125403904,
+      1030.0053426653676
+    ],
+    "size_mm": [
+      302.29731583055616,
+      110.92502587921273,
+      304.00560239763047
+    ],
+    "visual_count": 24,
+    "triangle_count": 370710,
+    "triangle_policy": "source STL triangles preserved; URDF boxes triangulated exactly",
+    "scale_policy": "URDF mesh scale, transforms, then metres-to-millimetres only",
+    "collision_checked": false,
+    "right_gripper_geometry_note": "right parallel gripper visuals are URDF dimension proxies, not redistributed upstream CAD"
+  },
+  "camera": {
+    "envelope_whd_mm": [
+      165,
+      48,
+      40
+    ],
+    "status": "공식 Astra Series 외곽; 세부 형상·렌즈 위치는 근사",
+    "candidate_center_heights_above_deck_mm": [
+      380,
+      540
+    ],
+    "recommended_center_height_above_deck_mm": 540,
+    "initial_pitch_down_deg": 43,
+    "source": "https://www.orbbec.com/products/structured-light-camera/astra-series/",
+    "compared_configurations": {
+      "deck_plus_380mm_pitch_30deg_max_object_height_mm": [
+        308.4,
+        302.1
+      ],
+      "deck_plus_540mm_pitch_43deg_max_object_height_mm": [
+        332.3,
+        314.2
+      ],
+      "target_x_from_chassis_center_mm": [
+        443,
+        492
+      ],
+      "camera_x_from_chassis_center_mm": -120
+    }
+  }
+}

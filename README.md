@@ -6,10 +6,13 @@
 
 - 시작: 2026-08-19
 - 현행 태스크 확정: 2026-09-07
-- 최종 문서 갱신: 2026-09-08
+- 최종 문서 갱신: 2026-09-09
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
-- 기구 수치 단일 원본: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
+- 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) — 아래 실물 변경사항은 아직 미반영
+- 최신 실물 치수·추가 기록: [450×340 mm 하단 프레임 모델링 기록](docs/20260909_하단프레임_실물치수_모델링기록.md) — 설명 수집 중, CAD·URDF 반영 전
+- 상부 구조 제안: [책상 높이 상승 프레임·경량화·구조 검토와 이미지](docs/20260909_상승프레임_경량화_구조검토.md) — 1차 개념안, 실측·접합 해석·주행 시험 전
+- 완성품 외형 후보: [실축 SO101·Astra와 카메라 높이 380/540 mm 비교](docs/20260909_완성품_디자인후보_4안.md) — 물 서빙 전 과정의 시야 역할 포함
 - 시뮬레이션 모델: [300×300 mm·720 mm 양팔 URDF와 Isaac Sim 모델](docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md)
 - 태스크·구현 단일 원본: [물 서빙 로봇 회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
 - 팀 보고: [무선 운용·SLAM·PLANNED·ACT 비교](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md)

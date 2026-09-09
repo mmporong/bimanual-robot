@@ -1,0 +1,50 @@
+{
+  "units": "mm",
+  "base_frame": [
+    450,
+    340
+  ],
+  "deck": [
+    300,
+    300
+  ],
+  "deck_z": 720,
+  "wheel_outer_width": 540,
+  "deck_side_inset": 75,
+  "deck_fore_aft_inset": 20,
+  "drive_centers": [
+    [
+      110,
+      -255,
+      35
+    ],
+    [
+      110,
+      255,
+      35
+    ]
+  ],
+  "assumed_wheel_width": 30,
+  "caster_xy": [
+    [
+      -110,
+      -215
+    ],
+    [
+      -110,
+      215
+    ]
+  ],
+  "camera_envelope_whd": [
+    165,
+    48,
+    40
+  ],
+  "camera_center_height_above_deck_candidates": [
+    380,
+    540
+  ],
+  "recommended_camera_center_height_above_deck": 540,
+  "initial_camera_pitch_down_deg": 43,
+  "scope": "SO101 URDF/STL 원본 축척. 카메라 외곽 근사. 오른손/캐스터 프록시; 자세는 시각화용"
+}
