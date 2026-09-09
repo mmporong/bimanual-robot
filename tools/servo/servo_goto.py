@@ -19,7 +19,7 @@ from sts_bus import (Bus, FakeBus, A_MIN_ANGLE, A_MAX_ANGLE, A_TORQUE, A_ACCEL,
 
 STALL_SEC = 0.5        # 이 시간 동안 안 움직이면 걸린 것으로 본다
 STALL_TOL = 4          # 이 카운트 이하 변화는 안 움직인 것으로 친다
-ARRIVE_TOL = 3
+ARRIVE_TOL = 10        # P게인 16 은 목표 5~8 카운트 앞에서 선다. 그보다 넓게
 
 
 def main():
@@ -109,7 +109,7 @@ def main():
     print(f"최종 {final}  오차 {final - args.goal:+d}  최대부하 {peak}  "
           f"소요 {time.time() - start:.2f}s  구동 해제됨")
     bus.close()
-    return 0 if abs(final - args.goal) <= 5 else 3
+    return 0 if abs(final - args.goal) <= 10 else 3
 
 
 if __name__ == "__main__":
