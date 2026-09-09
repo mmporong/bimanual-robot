@@ -77,11 +77,23 @@ def main():
     ap.add_argument("--gripper-drive-mode", type=int, default=0, choices=(0, 1))
     ap.add_argument("--gripper-margin", type=int, default=0,
                     help="그리퍼 양 끝에서 이만큼 안쪽으로 한계를 잡는다 (레일 이탈 방지, 40 권장)")
+    ap.add_argument("--only", help="이 관절만 다시 기록하고 나머지는 기존 JSON 값을 유지. 예: wrist_flex 또는 wrist_flex,gripper")
     ap.add_argument("--execute", action="store_true")
     args = ap.parse_args()
 
     bus = Bus(find_port(args.port))
     ids = list(range(1, 7))
+    only = None
+    if args.only:
+        only = [n.strip() for n in args.only.split(",")]
+        bad = [n for n in only if n not in SO101]
+        if bad:
+            print(f"모르는 관절: {bad}. 가능: {SO101}"); return 1
+        ids = [SO101.index(n) + 1 for n in only]
+        existing = Path(args.out).expanduser()
+        if not existing.is_file():
+            print(f"--only 는 기존 JSON 이 있어야 합니다: {existing}"); return 1
+        keep = json.loads(existing.read_text())
     for sid in ids:
         if bus.read(sid, A_TORQUE) != 0:
             print(f"ID {sid} 구동이 켜져 있습니다. 풀고 다시. 중단.")
@@ -90,7 +102,8 @@ def main():
     lo, hi, dropped = record(bus, ids, args.jump)
     print("\n=== 기록 결과 ===")
     calib = {}
-    for sid, name in zip(ids, SO101):
+    for sid in ids:
+        name = SO101[sid - 1]
         if name in FULL_TURN:
             mn, mx = 0, RESOLUTION - 1
         else:
@@ -104,12 +117,20 @@ def main():
                        "homing_offset": decode_offset(bus.read(sid, A_OFFSET, 2)),
                        "range_min": mn, "range_max": mx}
 
+    if only:
+        merged = dict(keep)
+        merged.update(calib)
+        calib = {n: merged[n] for n in SO101 if n in merged}
+        print(f"(--only) 나머지 관절은 기존 JSON 값 유지: {[n for n in SO101 if n not in only]}")
+
     if not args.execute:
         print("\ndry-run. --execute 를 주면 서보 한계와 JSON 을 쓴다.")
         bus.close()
         return 0
 
     for name, c in calib.items():
+        if only and name not in only:
+            continue                                   # 기존 관절은 서보도 건드리지 않는다
         bus.write_eeprom(c["id"], A_MIN_ANGLE, c["range_min"])
         bus.write_eeprom(c["id"], A_MAX_ANGLE, c["range_max"])
         got = (bus.read(c["id"], A_MIN_ANGLE, 2), bus.read(c["id"], A_MAX_ANGLE, 2))
