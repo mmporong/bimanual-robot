@@ -60,13 +60,22 @@ def main():
         print("dry-run 으로 끝났습니다. 실물 적용은 --execute 입니다.")
         return 0
 
+    def restore_profile():
+        # 시험용 속도·가속을 서보에 남기면 그 뒤 텔레옵이 그 속도로 기어간다 (2026-09-09)
+        if prev_speed is not None:
+            bus.write(sid, A_SPEED, prev_speed, 2)
+        if prev_accel is not None:
+            bus.write(sid, A_ACCEL, prev_accel)
+
     def stop_and_release(where, why):
         if where is not None:
             bus.write(sid, A_GOAL, where, 2)
         bus.write(sid, A_TORQUE, 0)
+        restore_profile()
         time.sleep(0.05)
         print(f"  {why} -> 정지·구동해제. 위치 {bus.read(sid, A_POS, 2)}")
 
+    prev_speed, prev_accel = bus.read(sid, A_SPEED, 2), bus.read(sid, A_ACCEL)   # 끝나면 되돌린다
     bus.write(sid, A_GOAL, pos, 2)                 # 안전장치 1
     bus.write(sid, A_ACCEL, 10)
     bus.write(sid, A_SPEED, args.speed, 2)
@@ -104,6 +113,7 @@ def main():
             return 2
 
     bus.write(sid, A_TORQUE, 0)
+    restore_profile()
     time.sleep(0.05)
     final = bus.read(sid, A_POS, 2)
     print(f"최종 {final}  오차 {final - args.goal:+d}  최대부하 {peak}  "
