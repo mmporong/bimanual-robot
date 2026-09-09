@@ -31,6 +31,8 @@ def main():
     ap.add_argument("--speed", type=int, default=300)
     ap.add_argument("--load-limit", type=int, default=600,
                     help="정상 이동 부하는 350 안팎이다. 너무 낮게 잡으면 정상 이동에서 걸린다")
+    ap.add_argument("--diverge-tol", type=int, default=15,
+                    help="목표에서 이 카운트 이상 멀어지면 극성 반대로 보고 즉시 차단")
     ap.add_argument("--execute", action="store_true")
     ap.add_argument("--mock", action="store_true")
     ap.add_argument("--mock-wall", type=int, help="모의 하드 스톱 위치")
@@ -75,6 +77,8 @@ def main():
     budget = max(8.0, abs(delta) / max(args.speed, 1) * 1.5 + 2.0)
     start = time.time()
     peak, last, moved_at = 0, pos, time.time()
+    err0 = abs(args.goal - pos)                    # 시작 오차
+    worst_err = err0
     while time.time() - start < budget:
         time.sleep(0.03)
         now = bus.read(sid, A_POS, 2)
@@ -82,8 +86,14 @@ def main():
         if now is None:
             continue
         peak = max(peak, load)
+        err = abs(args.goal - now)
         if abs(now - last) > STALL_TOL:
             last, moved_at = now, time.time()
+        # 안전장치 5: 발산 — 목표에서 시작 오차보다 멀어지면 극성 반대. 즉시 차단
+        if err > err0 + args.diverge_tol:
+            stop_and_release(now, f"발산: 목표에서 멀어짐 (오차 {err0}->{err}). 모터-엔코더 극성 반대 의심")
+            return 4
+        worst_err = max(worst_err, err)
         if load > args.load_limit:                 # 안전장치 3
             stop_and_release(now, f"부하 {load} > {args.load_limit}")
             return 2

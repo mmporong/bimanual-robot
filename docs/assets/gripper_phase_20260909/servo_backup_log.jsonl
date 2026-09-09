@@ -1,0 +1,8 @@
+{"id": 6, "kind": "limits", "min": 1988, "max": 3660, "note": "ggao50 그리퍼 장착 전 순정값", "saved": "2026-09-07 18:47:52"}
+{"id": 6, "kind": "offset", "offset": 0, "offset_raw": 0, "pos": 1721, "note": "오프셋 적용 전. 그때 맞물림에서 완전 닫힘이 1721 로 읽혔다", "saved": "2026-09-07 18:55:23"}
+{"id": 6, "kind": "offset", "offset": -1485, "offset_raw": 3533, "pos": 472, "saved": "2026-09-09 15:39:06"}
+{"id": 6, "kind": "offset", "offset": -1745, "offset_raw": 3793, "pos": 1657, "saved": "2026-09-09 15:45:37"}
+{"id": 6, "kind": "offset", "offset": -1745, "offset_raw": 3793, "pos": 1657, "saved": "2026-09-09 15:46:18"}
+{"id": 6, "kind": "limits", "min": 763, "max": 3600, "pos": 3601, "saved": "2026-09-09 15:46:18"}
+{"id": 6, "kind": "offset", "offset": 0, "offset_raw": 0, "pos": 1123, "saved": "2026-09-09 16:01:25"}
+{"id": 6, "kind": "offset", "offset": 1719, "offset_raw": 1719, "pos": 1289, "saved": "2026-09-09 16:13:50"}

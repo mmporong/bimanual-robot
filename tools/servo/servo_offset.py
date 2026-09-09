@@ -16,7 +16,7 @@ import json
 import time
 from pathlib import Path
 
-from sts_bus import (Bus, FakeBus, A_OFFSET, A_TORQUE, A_POS,
+from sts_bus import (Bus, FakeBus, A_OFFSET, A_TORQUE, A_POS, RESOLUTION,
                      decode_offset, encode_offset, find_port)
 
 PROBE = 100                    # 부호 판정용 시험값
@@ -39,10 +39,12 @@ def main():
     ap.add_argument("--execute", action="store_true")
     ap.add_argument("--mock", action="store_true")
     ap.add_argument("--mock-sign", type=int, default=1, choices=(1, -1))
+    ap.add_argument("--mock-pos", type=int, default=1721)
+    ap.add_argument("--mock-offset", type=int, default=0)
     args = ap.parse_args()
 
     sid = args.id
-    bus = (FakeBus(sid=sid, pos=1721, offset=0, sign=args.mock_sign)
+    bus = (FakeBus(sid=sid, pos=args.mock_pos, offset=args.mock_offset, sign=args.mock_sign)
            if args.mock else Bus(find_port(args.port)))
 
     pos = bus.read(sid, A_POS, 2)
@@ -58,9 +60,6 @@ def main():
     need = args.target - pos
     print(f"ID {sid}  현재 읽히는 위치 {pos}  현재 오프셋 {current} (raw {raw})")
     print(f"목표 {args.target}  ->  옮겨야 할 양 {need:+d}")
-    if abs(need) > 2047:
-        print("오프셋 한계 ±2047 을 넘습니다. 물린 톱니를 바꿔야 합니다. 중단.")
-        return 1
     if not args.execute:
         print("dry-run 으로 끝났습니다. 실물 적용은 --execute 입니다.")
         return 0
@@ -83,6 +82,11 @@ def main():
     print(f"판정: 오프셋을 키우면 위치가 {'커진다' if sign > 0 else '작아진다'}")
 
     final = current + sign * need
+    # 오프셋은 한 바퀴(4096) 를 돌아 같은 값이 되므로 ±2047 안으로 접는다
+    if final > 2047:
+        final -= RESOLUTION
+    elif final < -2047:
+        final += RESOLUTION
     if abs(final) > 2047:
         put(current)
         print(f"필요한 오프셋 {final} 이 한계를 넘습니다. 원래대로 돌리고 중단합니다.")
