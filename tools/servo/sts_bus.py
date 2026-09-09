@@ -77,6 +77,9 @@ class Bus:
         rest = self.ser.read(head[3])
         if len(rest) < head[3]:
             return None
+        # 체크섬 검증 — 깨진 패킷이 그럴듯한 값으로 들어오는 것을 막는다 (2026-09-09 범위 기록 오염)
+        if ((~(head[2] + head[3] + sum(rest[:-1]))) & 0xFF) != rest[-1]:
+            return None
         return rest[1:-1]
 
     def ping(self, sid):
