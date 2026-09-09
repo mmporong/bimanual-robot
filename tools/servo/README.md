@@ -102,11 +102,13 @@ python3 servo_read.py --id 6                          # 구동이 0 인지 확�
 python3 servo_offset.py --target 3600 --execute       # 그 자세를 3600 으로
 
 # 2. 죠를 손으로 완전히 벌린 뒤
-python3 servo_read.py --id 6                          # 열림 끝 값을 읽는다 (예: 732)
-python3 servo_limits.py --min 760 --max 3600 --execute
+python3 servo_read.py --id 6                          # 열림 끝 값을 읽는다 (예: 506)
+python3 servo_limits.py --min 546 --max 3480 --execute
 
-# 3. 검증 — 20 mm 를 명령하고 자로 잰다
-python3 servo_goto.py --goal 3000 --execute
+# 3. 12 V 를 껐다 켠다 — EEPROM 을 쓴 뒤 재부팅 없이 움직이면 제어가 꼬인다
+
+# 4. 검증 — 20 mm 를 명령하고 자로 잰다 (3500 − 20 × 30.5 ≈ 2890)
+python3 servo_goto.py --goal 2890 --execute
 ```
 
 `--execute` 를 빼고 먼저 돌리면 무엇을 바꿀지 보여주고 끝난다.
