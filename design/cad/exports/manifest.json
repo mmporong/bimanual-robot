@@ -10,20 +10,35 @@
   "printer": "Creality K1 Max 300×300×300 mm",
   "material_assumption": "부품별 명목 밀도, 중공 CAD 체적; 실제 출력 infill·판재·압출재 질량은 실측으로 교체",
   "assembly_placements_mm": {
-    "chassis_bottom": [
-      0.0,
-      0.0,
-      6.0
+    "tabletop_front_left": [
+      60.15,
+      112.65,
+      714.0
     ],
-    "chassis_middle": [
-      0.0,
-      0.0,
-      62.0
+    "tabletop_front_right": [
+      60.15,
+      -112.65,
+      714.0
     ],
-    "chassis_top": [
+    "tabletop_rear_left": [
+      -110.15,
+      112.65,
+      714.0
+    ],
+    "tabletop_rear_right": [
+      -110.15,
+      -112.65,
+      714.0
+    ],
+    "battery_mount_plate": [
+      -40.0,
       0.0,
+      68.0
+    ],
+    "lidar_mount_plate": [
+      100.0,
       0.0,
-      712.0
+      145.0
     ],
     "camera_backing": [
       -120.0,
@@ -35,110 +50,179 @@
       0.0,
       728.0
     ],
-    "lidar_riser": [
-      100.0,
-      0.0,
-      68.0
-    ],
     "arm_adapters": [
       [
-        0.0,
+        20.0,
         75.0,
         720.0
       ],
       [
-        0.0,
+        20.0,
         -75.0,
         720.0
       ]
     ],
     "frame_columns": [
       [
-        130.0,
-        130.0,
-        68.0
+        150.0,
+        205.0,
+        60.0
       ],
       [
-        130.0,
-        -130.0,
-        68.0
+        150.0,
+        -205.0,
+        60.0
       ],
       [
-        -130.0,
-        130.0,
-        68.0
+        -150.0,
+        205.0,
+        60.0
       ],
       [
-        -130.0,
-        -130.0,
-        68.0
+        -150.0,
+        -205.0,
+        60.0
+      ]
+    ],
+    "frame_rail_x": [
+      [
+        0.0,
+        -215.0,
+        50.0
+      ],
+      [
+        0.0,
+        215.0,
+        50.0
+      ],
+      [
+        0.0,
+        -215.0,
+        704.0
+      ],
+      [
+        0.0,
+        215.0,
+        704.0
+      ],
+      [
+        0.0,
+        0.0,
+        704.0
+      ]
+    ],
+    "frame_rail_y": [
+      [
+        -160.0,
+        0.0,
+        50.0
+      ],
+      [
+        160.0,
+        0.0,
+        50.0
+      ],
+      [
+        -160.0,
+        0.0,
+        704.0
+      ],
+      [
+        160.0,
+        0.0,
+        704.0
+      ],
+      [
+        -50.0,
+        0.0,
+        704.0
       ]
     ]
   },
-  "estimated_total_material_mass_g": 2866.2,
+  "estimated_total_material_mass_g": 4189.2,
   "all_breps_valid": true,
   "all_parts_fit_k1_max": false,
-  "all_fdm_parts_safe_fit_k1_max": false,
+  "all_fdm_parts_safe_fit_k1_max": true,
   "parts": [
     {
-      "name": "chassis_bottom",
+      "name": "tabletop_front_left",
       "quantity": 1,
       "valid_brep": true,
       "bounds_mm": [
-        300.017,
-        300.017,
-        48.01
+        219.708,
+        224.708,
+        6.017
       ],
-      "volume_cm3_each": 315.162,
+      "volume_cm3_each": 292.21,
       "material": "PETG",
-      "estimated_material_mass_g_each": 400.3,
+      "estimated_material_mass_g_each": 371.1,
       "fdm_part": true,
-      "k1_max_fit": false,
-      "k1_max_safe_fit": false,
-      "step": "design/cad/exports/step/chassis_bottom.step",
-      "stl": "design/cad/exports/stl/chassis_bottom.stl",
-      "note": "바퀴측 모터 지지벽이 통합된 하판",
-      "measurement_gate": null
+      "k1_max_fit": true,
+      "k1_max_safe_fit": true,
+      "step": "design/cad/exports/step/tabletop_front_left.step",
+      "stl": "design/cad/exports/stl/tabletop_front_left.stl",
+      "note": "340×450 mm 상판을 K1 Max용으로 나눈 PETG 판",
+      "measurement_gate": "프로파일 체결공·SO101 체결부 인서트와 상판 평탄도 실측"
     },
     {
-      "name": "chassis_middle",
+      "name": "tabletop_front_right",
       "quantity": 1,
       "valid_brep": true,
       "bounds_mm": [
-        300.017,
-        300.017,
-        6.029
+        219.708,
+        224.708,
+        6.017
       ],
-      "volume_cm3_each": 267.576,
+      "volume_cm3_each": 292.21,
       "material": "PETG",
-      "estimated_material_mass_g_each": 339.8,
+      "estimated_material_mass_g_each": 371.1,
       "fdm_part": true,
-      "k1_max_fit": false,
-      "k1_max_safe_fit": false,
-      "step": "design/cad/exports/step/chassis_middle.step",
-      "stl": "design/cad/exports/stl/chassis_middle.stl",
-      "note": "배터리·제어기 층의 경량 중판",
-      "measurement_gate": null
+      "k1_max_fit": true,
+      "k1_max_safe_fit": true,
+      "step": "design/cad/exports/step/tabletop_front_right.step",
+      "stl": "design/cad/exports/stl/tabletop_front_right.stl",
+      "note": "340×450 mm 상판을 K1 Max용으로 나눈 PETG 판",
+      "measurement_gate": "프로파일 체결공·SO101 체결부 인서트와 상판 평탄도 실측"
     },
     {
-      "name": "chassis_top",
+      "name": "tabletop_rear_left",
       "quantity": 1,
       "valid_brep": true,
       "bounds_mm": [
-        300.017,
-        300.017,
-        8.017
+        119.708,
+        224.716,
+        6.017
       ],
-      "volume_cm3_each": 706.08,
-      "material": "birch_plywood_nominal",
-      "estimated_material_mass_g_each": 423.6,
-      "fdm_part": false,
-      "k1_max_fit": false,
-      "k1_max_safe_fit": false,
-      "step": "design/cad/exports/step/chassis_top.step",
-      "stl": "design/cad/exports/stl/chassis_top.stl",
-      "note": "양팔·카메라 마스트가 체결되는 300×300×8 mm 절삭 상판",
-      "measurement_gate": "판재 재질·평탄도·질량과 절삭 공차 확정"
+      "volume_cm3_each": 159.427,
+      "material": "PETG",
+      "estimated_material_mass_g_each": 202.5,
+      "fdm_part": true,
+      "k1_max_fit": true,
+      "k1_max_safe_fit": true,
+      "step": "design/cad/exports/step/tabletop_rear_left.step",
+      "stl": "design/cad/exports/stl/tabletop_rear_left.stl",
+      "note": "340×450 mm 상판을 K1 Max용으로 나눈 PETG 판",
+      "measurement_gate": "프로파일 체결공·SO101 체결부 인서트와 상판 평탄도 실측"
+    },
+    {
+      "name": "tabletop_rear_right",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        119.708,
+        224.716,
+        6.017
+      ],
+      "volume_cm3_each": 159.427,
+      "material": "PETG",
+      "estimated_material_mass_g_each": 202.5,
+      "fdm_part": true,
+      "k1_max_fit": true,
+      "k1_max_safe_fit": true,
+      "step": "design/cad/exports/step/tabletop_rear_right.step",
+      "stl": "design/cad/exports/stl/tabletop_rear_right.stl",
+      "note": "340×450 mm 상판을 K1 Max용으로 나눈 PETG 판",
+      "measurement_gate": "프로파일 체결공·SO101 체결부 인서트와 상판 평탄도 실측"
     },
     {
       "name": "frame_column",
@@ -147,18 +231,98 @@
       "bounds_mm": [
         20.002,
         20.002,
-        644.002
+        634.002
       ],
-      "volume_cm3_each": 91.846,
+      "volume_cm3_each": 90.42,
       "material": "aluminum_6063_nominal",
-      "estimated_material_mass_g_each": 248.0,
+      "estimated_material_mass_g_each": 244.1,
       "fdm_part": false,
       "k1_max_fit": false,
       "k1_max_safe_fit": false,
       "step": "design/cad/exports/step/frame_column.step",
       "stl": "design/cad/exports/stl/frame_column.stl",
-      "note": "상판을 720 mm로 지지하는 2020 중공 기둥 후보",
+      "note": "상부 프레임을 720 mm 작업 높이로 지지하는 2020 중공 기둥 후보",
       "measurement_gate": "선정 압출재 카탈로그 단면·선형 질량·체결 브래킷 확정"
+    },
+    {
+      "name": "frame_rail_x",
+      "quantity": 5,
+      "valid_brep": true,
+      "bounds_mm": [
+        20.002,
+        20.002,
+        300.002
+      ],
+      "volume_cm3_each": 42.785,
+      "material": "aluminum_6063_nominal",
+      "estimated_material_mass_g_each": 115.5,
+      "fdm_part": false,
+      "k1_max_fit": false,
+      "k1_max_safe_fit": false,
+      "step": "design/cad/exports/step/frame_rail_x.step",
+      "stl": "design/cad/exports/stl/frame_rail_x.stl",
+      "note": "하부·상부 프레임과 중앙 이음부를 받치는 x축 2020 프로파일",
+      "measurement_gate": "실물 하부 프레임 체결 길이와 브래킷 간섭 측정"
+    },
+    {
+      "name": "frame_rail_y",
+      "quantity": 5,
+      "valid_brep": true,
+      "bounds_mm": [
+        20.002,
+        20.002,
+        450.002
+      ],
+      "volume_cm3_each": 64.178,
+      "material": "aluminum_6063_nominal",
+      "estimated_material_mass_g_each": 173.3,
+      "fdm_part": false,
+      "k1_max_fit": false,
+      "k1_max_safe_fit": false,
+      "step": "design/cad/exports/step/frame_rail_y.step",
+      "stl": "design/cad/exports/stl/frame_rail_y.stl",
+      "note": "하부·상부 프레임과 중앙 이음부를 받치는 y축 2020 프로파일",
+      "measurement_gate": "실물 하부 프레임 체결 길이와 브래킷 간섭 측정"
+    },
+    {
+      "name": "battery_mount_plate",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        180.011,
+        120.011,
+        6.011
+      ],
+      "volume_cm3_each": 126.433,
+      "material": "PETG",
+      "estimated_material_mass_g_each": 160.6,
+      "fdm_part": true,
+      "k1_max_fit": true,
+      "k1_max_safe_fit": true,
+      "step": "design/cad/exports/step/battery_mount_plate.step",
+      "stl": "design/cad/exports/stl/battery_mount_plate.stl",
+      "note": "배터리 스트랩 슬롯과 M4 체결공을 가진 하단 출력판",
+      "measurement_gate": "배터리 실물 외곽·커넥터 방향·스트랩 폭 측정"
+    },
+    {
+      "name": "lidar_mount_plate",
+      "quantity": 1,
+      "valid_brep": true,
+      "bounds_mm": [
+        90.01,
+        75.01,
+        3.011
+      ],
+      "volume_cm3_each": 19.019,
+      "material": "PETG",
+      "estimated_material_mass_g_each": 24.2,
+      "fdm_part": true,
+      "k1_max_fit": true,
+      "k1_max_safe_fit": true,
+      "step": "design/cad/exports/step/lidar_mount_plate.step",
+      "stl": "design/cad/exports/stl/lidar_mount_plate.stl",
+      "note": "LDS-03 조절 장공과 케이블 구멍을 가진 출력판",
+      "measurement_gate": "LDS-03 하부 체결공과 광학 스캔면 높이 측정"
     },
     {
       "name": "arm_adapter",
@@ -239,26 +403,6 @@
       "stl": "design/cad/exports/stl/astra_cradle.stl",
       "note": "Astra S 40×165×48 mm 설계 포락선용 거치대",
       "measurement_gate": "보유 Astra의 하단 M6 위치와 실제 외곽 치수 측정 후 측면 유격 확정"
-    },
-    {
-      "name": "lidar_riser",
-      "quantity": 1,
-      "valid_brep": true,
-      "bounds_mm": [
-        65.008,
-        50.008,
-        80.011
-      ],
-      "volume_cm3_each": 215.488,
-      "material": "PETG",
-      "estimated_material_mass_g_each": 273.7,
-      "fdm_part": true,
-      "k1_max_fit": true,
-      "k1_max_safe_fit": true,
-      "step": "design/cad/exports/step/lidar_riser.step",
-      "stl": "design/cad/exports/stl/lidar_riser.stl",
-      "note": "중판에서 LDS-03 중심 z≈165 mm를 만드는 80 mm 받침대",
-      "measurement_gate": "LDS-03 실물 광학 스캔면 높이와 하부 체결공 측정 후 상단 장공 확정"
     },
     {
       "name": "drive_side_carrier",

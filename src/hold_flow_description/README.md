@@ -1,13 +1,13 @@
 # hold_flow_description
 
-300×300 mm 상판, 720 mm 작업 높이, SO-101 두 대, 왼쪽 기본 회전식 죠, 오른쪽 ggao50 평행 그리퍼 프록시, Astra S, LDS-03, 2륜+2볼캐스터를 하나의 TF 트리로 묶는 ROS 2 Jazzy 설명 패키지다.
+450×340 mm 상·하부 프레임, 4분할 상판, 720 mm 작업 높이, SO-101 두 대, 왼쪽 기본 회전식 죠, 오른쪽 ggao50 평행 그리퍼 프록시, Astra S, LDS-03, 2륜+2볼캐스터를 하나의 TF 트리로 묶는 ROS 2 Jazzy 설명 패키지다.
 
 ## 좌표 기준
 
 - `base_footprint`: 차체 중심의 바닥
 - `base_link`: `base_footprint`에서 z=32.9 mm인 구동륜 축 높이
-- 상판: 300×300×8 mm, 윗면 z=720 mm
-- 좌우 팔 베이스: `(0, ±75, 726) mm`
+- 상판: 450(W)×340(D)×6 mm 4분할, 윗면 z=720 mm
+- 좌우 팔 베이스: `(20, ±75, 726) mm`, 전면에서 150 mm
 - Astra S depth optical 중심: `(-110, 0, 970) mm`, 상판보다 250 mm 위
 - LDS-03 후보 중심: `(100, 0, 165) mm`
 - 구동륜 중심: `(0, ±160, 32.9) mm`, 기하 중심거리 320 mm
@@ -35,9 +35,9 @@ python3 src/hold_flow_description/scripts/validate_isaac_contract.py
 python3 src/hold_flow_description/scripts/import_isaac_sim.py --check-only
 ```
 
-검사는 Xacro 확장, `check_urdf`, 커밋 URDF 일치, 메시 존재·CAD 복사본 해시, 양의 질량·관성, 관절축·hard/soft limit·dynamics, 16개 핵심 좌표, 바퀴·캐스터·기둥 수, 오른쪽 mimic 관절과 커스텀 구조의 primitive collision을 확인한다.
+검사는 Xacro 확장, `check_urdf`, 커밋 URDF 일치, 메시 존재·CAD 복사본 해시, 양의 질량·관성, 관절축·hard/soft limit·dynamics, 핵심 좌표, 상판 4개·바퀴·캐스터·기둥 수, 오른쪽 mimic 관절과 커스텀 구조의 primitive collision을 확인한다.
 
-2026-09-08 결과는 46링크, 45관절, 축 관절 15개, 품질 문제 0건이다. 이 결과는 정적 모델 일관성 증거이며 Isaac Sim 물리 안정성이나 실물 안전 증거가 아니다.
+2026-09-10 결과는 58링크, 57관절, 축 관절 15개, 품질 문제 0건이다. 0자세 명목 질량은 7.379 kg이다. 이 결과는 정적 모델 일관성 증거이며 Isaac Sim 물리 안정성이나 실물 안전 증거가 아니다.
 
 ## Isaac Sim 6.0
 
@@ -54,7 +54,7 @@ cd "$HOME/bimanual-robot"
 
 ## 아직 측정해야 하는 값
 
-- 상판 재질·실제 질량·평탄도와 2020 압출재 제품
+- 4분할 상판 출력 조건·실제 질량·평탄도와 2020 압출재 제품
 - SO-101 베이스 체결공
 - C018 혼–휠–외부 베어링 축 조합
 - 앞·뒤 볼캐스터 플랜지·preload·접촉 높이
@@ -63,4 +63,4 @@ cd "$HOME/bimanual-robot"
 - 오른쪽 ggao50 손목 변환과 정확한 충돌 메시
 - 물 서빙 작업 자세별 팔↔팔·팔↔상판·팔↔카메라 충돌
 
-전체 배치·가져오기·검증 경계는 `docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md`에 있다.
+전체 배치·무게·JDAMR 바퀴 서보 재사용·Pi 5 후순위안·가져오기 검증 경계는 `docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md`에 있다.

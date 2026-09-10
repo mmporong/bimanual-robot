@@ -1,7 +1,7 @@
 schema_version: "0.3"
 design_id: hold_flow_mechanical_v0_3
 status: simulation_model_ready_physical_measurements_pending
-revision: 2026-09-08_table_height_dual_gripper_four_point_base
+revision: 2026-09-10_full_size_upper_frame_split_printed_deck
 units:
   length: mm
   mass: kg
@@ -36,7 +36,9 @@ provenance:
     redistribution_policy: do_not_vendor_upstream_meshes_use_project_authored_proxy
 
 chassis:
-  tabletop_footprint: [300.0, 300.0]
+  # 실제 하부 프로파일 외곽은 폭(y) 450 mm × 전후(x) 340 mm다.
+  frame_outer_footprint: [340.0, 450.0]
+  tabletop_footprint: [340.0, 450.0]
   corner_radius: 12.0
   plates:
     bottom:
@@ -48,33 +50,63 @@ chassis:
       thickness: 6.0
       fabrication: printed_or_cut_plate_candidate
     tabletop:
-      z_bottom: 712.0
-      thickness: 8.0
+      z_bottom: 714.0
+      thickness: 6.0
       z_top: 720.0
-      fabrication: cut_sheet_not_one_piece_fdm
-      material_for_simulation: birch_plywood_nominal_600kg_m3
-      simulation_mass: 0.424
+      fabrication: four_piece_fdm_petg
+      split_x: -50.0
+      seam_gap: 0.6
+      quadrant_names: [front_left, front_right, rear_left, rear_right]
+      material_for_simulation: PETG_nominal_20pct_infill
+      simulation_mass_each: 0.170
+      support_profiles: perimeter_plus_split_crossmembers
   k1_max:
     nominal_build_volume: [300.0, 300.0, 300.0]
     one_piece_tabletop_safe_to_print: false
-    reason: exact_300mm_part_has_no_brim_skirt_or_machine_tolerance_margin
+    four_piece_tabletop_safe_to_print: true
+    reason: 340x450mm assembly is divided into 220x224.7mm and 119.7x224.7mm panels
   vertical_frame:
     type: four_2020_extrusion_candidates
     centers_xy:
-      - [130.0, 130.0]
-      - [130.0, -130.0]
-      - [-130.0, 130.0]
-      - [-130.0, -130.0]
+      - [150.0, 205.0]
+      - [150.0, -205.0]
+      - [-150.0, 205.0]
+      - [-150.0, -205.0]
     section: [20.0, 20.0]
-    z_bottom: 68.0
-    z_top: 712.0
-    length: 644.0
-    nominal_mass_each: 0.290
+    z_bottom: 60.0
+    z_top: 694.0
+    length: 634.0
+    nominal_mass_each: 0.304
     mass_status: replace_with_selected_extrusion_catalog_or_measured_value
+  profile_rings:
+    section: [20.0, 20.0]
+    lower_center_z: 50.0
+    upper_center_z: 704.0
+    x_rail_length: 300.0
+    y_rail_length: 450.0
+    x_rail_center_y: 215.0
+    y_rail_center_x: 160.0
+    center_crossmembers: true
+    nominal_linear_mass_kg_m: 0.48
+
+printed_mounts:
+  battery_plate:
+    origin_xyz: [-40.0, 0.0, 68.0]
+    footprint: [180.0, 120.0]
+    thickness: 6.0
+    simulation_mass: 0.120
+    fabrication: FDM_PETG_flat_no_support
+  lidar_plate:
+    origin_xyz: [100.0, 0.0, 145.0]
+    footprint: [90.0, 75.0]
+    thickness: 3.0
+    simulation_mass: 0.035
+    fabrication: FDM_PETG_flat_no_support
+    support_note: lower-frame standoffs are provisional until LDS-03 hole pattern is measured
 
 internal_payloads:
   battery:
-    center_xyz: [-40.0, 0.0, 40.0]
+    center_xyz: [-40.0, 0.0, 94.0]
     envelope: [140.0, 80.0, 40.0]
     simulation_mass: 0.550
     status: candidate_not_selected
@@ -94,15 +126,16 @@ arm_mounts:
     thickness: 6.0
     fabrication: printed_petg_candidate
   left:
-    xyz: [0.0, 75.0, 726.0]
+    xyz: [20.0, 75.0, 726.0]
     rpy: [0.0, 0.0, 0.0]
     gripper: stock_so101_rotating_jaw
   right:
-    xyz: [0.0, -75.0, 726.0]
+    xyz: [20.0, -75.0, 726.0]
     rpy: [0.0, 0.0, 0.0]
     gripper: ggao50_parallel_gripper_project_proxy
   center_spacing: 150.0
-  side_margin: 39.0
+  front_edge_distance: 150.0
+  side_margin: 114.0
   center_gap: 78.0
   mount_hole_pattern_status: physical_measurement_required
   servo_variant_status: physical_label_check_required
@@ -164,6 +197,17 @@ camera:
 
 navigation:
   drive_type: differential_two_wheel_two_ball_caster
+  reuse_source:
+    repository: https://github.com/mmporong/jdamr_cube_ros
+    checked_commit: 82fa87a257080bd2298bada2b11d60f686c555f1
+    firmware: firmware/jdamr_cube_fw/jdamr_cube_fw.ino
+    motor: Feetech_STS3215_C018_12V
+    bus_baud: 1000000
+    left_servo_id: 2
+    right_servo_id: 1
+    host_parameter_source: jdamr_cube_bringup/launch/real_bringup.launch.py
+    old_effective_wheel_separation_mm: 183.6
+    reuse_decision: hardware_reusable_ros_geometry_and_direction_check_required
   wheel:
     measured_diameter: 65.0
     calibrated_effective_radius: 32.9
@@ -174,6 +218,11 @@ navigation:
     mass_each: 0.110
     joint_effort: 0.981
     joint_velocity: 4.72
+    initial_host_parameters:
+      wheel_radius_m: 0.0329
+      wheel_separation_m: 0.320
+      counts_per_rev: 4096
+      note: wheel_separation 0.320 m는 기하 시작값이며 직진·제자리 회전으로 유효값을 재보정
   ball_casters:
     ball_radius: 12.5
     mass_each: 0.060
@@ -195,9 +244,9 @@ navigation:
     mass: 0.042
     status: selected_p0_scan_plane_and_occlusion_measurement_required
     mount_riser:
-      footprint: [65.0, 50.0]
-      height: 80.0
-      z_bottom: 68.0
+      footprint: [90.0, 75.0]
+      height: 3.0
+      z_bottom: 145.0
 
 simulation:
   target: NVIDIA_Isaac_Sim_6_0
@@ -218,6 +267,18 @@ simulation:
     wheel_velocity_gains: apply_and_tune_in_usd_after_import
     no_unverified_gain_claims: true
   runtime_status_on_authoring_host: isaac_sim_not_installed_static_validation_only
+
+compute_plan:
+  current:
+    architecture: onboard_base_io_plus_wireless_notebook_gpu
+    onboard_scope: wheel_servo_io_watchdog_lidar_and_ros2_transport
+    notebook_scope: ACT_inference_RGBD_perception_training_and_visualization
+  later_raspberry_pi_5:
+    priority: deferred
+    scope: Nav2_SLAM_sensor_drivers_base_driver_mission_safety_and_logging
+    keep_on_notebook: ACT_and_heavy_vision_inference
+    transport: wired_or_wifi_ros2_with_deadline_watchdog_and_local_stop
+    migration_gate: measure_cpu_memory_temperature_network_latency_and_packet_loss_before_cutover
 
 verification:
   required:

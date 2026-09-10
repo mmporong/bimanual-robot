@@ -195,8 +195,8 @@ def main() -> None:
     right_arm_xyz = xyz_of(transforms["right_base_link"])
     assert_xyz(camera_xyz, [-0.110, 0.0, 0.970], tolerance=2e-6)
     assert_xyz(lidar_xyz, [0.100, 0.0, 0.165])
-    assert_xyz(left_arm_xyz, [0.0, 0.075, 0.726])
-    assert_xyz(right_arm_xyz, [0.0, -0.075, 0.726])
+    assert_xyz(left_arm_xyz, [0.020, 0.075, 0.726])
+    assert_xyz(right_arm_xyz, [0.020, -0.075, 0.726])
 
     report = {
         "xacro": str(XACRO.relative_to(REPO_ROOT)),
