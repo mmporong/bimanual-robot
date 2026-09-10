@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-09-10 | 양팔(bi_so_follower/bi_so_leader) 텔레옵 구성, 왼팔 캘리브레이션 확보, 사용법 문서 반영
+
+**결론**: 왼팔(리더 COM5·팔로워 COM15) 서보 EEPROM 에 이미 유효한 캘리브레이션 범위가 있는
+것을 읽기 전용으로 확인하고 lerobot JSON 으로 내보내, 오른팔(이 문서 상단 세션에서 완료)과
+합쳐 `bi_so_follower`/`bi_so_leader` 로 한 프로세스에서 양팔 동시 텔레옵을 확인했다.
+`bi_so_follower.py` 가 좌우 `gripper_protection` 을 안 읽는 문제를 patch 로 추가 보강했다.
+`docs/20260910_텔레옵_IL_사용법.md` 에 양팔 텔레옵·녹화·학습·자율실행 절차를 반영했다.
+
+**구현**
+- `calibration/so_follower_left/follower_left.json`, `calibration/so_leader_left/leader_left.json` — 왼팔 EEPROM 을 `export_lerobot_calibration.py` 로 그대로 내보냄 (서보 미동작)
+- `calibration/bi_follower/{arms_left,arms_right}.json`, `calibration/bi_leader/{arms_left,arms_right}.json` — `bi_so_follower`/`bi_so_leader` 가 기대하는 `<id>_left.json`/`<id>_right.json` 이름 규칙으로 좌우 개별 파일 조립
+- `tools/servo/bi_so_follower_gripper_protection.patch` — `bi_so_follower.py` 가 `left_arm_config`/`right_arm_config` 의 `gripper_protection` 을 안 읽고 항상 `false` 로 무시하던 문제 패치
+- `docs/20260910_텔레옵_IL_사용법.md` — 3-1절(양팔 동시 텔레옵), 5절 양팔 녹화, 6·7절 양팔 비고, 10절 관련 파일 추가
+
+**검증**
+- 왼팔 `servo_check_calibration.py`: JSON=EEPROM 일치, `0~4095 오염`·`폭 작음` 없음 (elbow_flex 가 현재 자세에서 기록 범위를 5~7틱 벗어남 — 오차 수준, ok 판정에 영향 없음)
+- `bi_so_follower_gripper_protection.patch`: `git apply --check` 통과 (아직 사용자가 실제 적용은 안 함)
+- 양팔 동시 텔레옵(`bi_so_follower`/`bi_so_leader`, COM15/COM16 팔로워, COM5/COM14 리더) 사용자 확인 — 정상 동작
+
+**배운 것**
+- 이 하드웨어는 왼팔도 이미 물리적으로 캘리브레이션돼 있었다 — JSON export 만 누락된 상태였다. 재캘리브레이션 전에 `servo_read.py`/`export_lerobot_calibration.py` 로 EEPROM 부터 확인하면 4절 전체를 다시 안 해도 될 수 있다
+- 왼팔은 스톡 회전 죠라 `gripper_protection=true` 가 필요하고 오른팔(ggao50)은 `false` 가 필요하다 — 좌우가 반대
+- `bi_so_follower`/`bi_so_leader` 의 캘리브레이션 파일명은 `{calibration_dir}/{robot.id}_{left,right}.json` 규칙이라 단일팔 캘리브레이션 파일을 그대로 못 쓰고 이름을 맞춰 복사해야 한다
+- 팀 로컬 patch(`lerobot_gripper_protection.patch`)는 `so_follower.py` 만 고쳐서 `bi_so_follower.py` 경로에는 반영이 안 된다 — 양팔 확장 시 패치 커버리지를 따로 확인해야 한다
+
+**남은 일**: `bi_so_follower_gripper_protection.patch` 실제 적용·재검증(과부하 없이 왼팔 그리퍼가
+쥐는지), 외부 카메라 2~3대(정면 공용 + 좌우 손목) 경로 확정 후 양팔 첫 녹화, 이 세션 변경분
+커밋·푸시
+
+---
+
 ## 2026-09-10 | ggao50 그리퍼 서보 Phase 반전 해결, 리더-팔로워 재캘리브레이션, 텔레옵·IL 사용법
 
 **결론**: 오른팔 그리퍼 서보(ID 6)가 어떤 목표든 열림 끝으로 달아나 레일 이탈이 4회 났던
