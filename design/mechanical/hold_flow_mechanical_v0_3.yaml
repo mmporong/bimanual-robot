@@ -126,17 +126,18 @@ arm_mounts:
     thickness: 6.0
     fabrication: printed_petg_candidate
   left:
-    xyz: [20.0, 75.0, 726.0]
+    xyz: [20.0, 170.0, 726.0]
     rpy: [0.0, 0.0, 0.0]
     gripper: stock_so101_rotating_jaw
   right:
-    xyz: [20.0, -75.0, 726.0]
+    xyz: [20.0, -170.0, 726.0]
     rpy: [0.0, 0.0, 0.0]
     gripper: ggao50_parallel_gripper_project_proxy
-  center_spacing: 150.0
+  center_spacing: 340.0
   front_edge_distance: 150.0
-  side_margin: 114.0
-  center_gap: 78.0
+  side_margin: 19.0
+  adapter_edge_margin: 20.0
+  center_gap: 268.0
   mount_hole_pattern_status: physical_measurement_required
   servo_variant_status: physical_label_check_required
 

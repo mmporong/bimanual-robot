@@ -30,8 +30,8 @@ class MechanicalV03Test(unittest.TestCase):
         self.assertEqual(len(spec["chassis"]["plates"]["tabletop"]["quadrant_names"]), 4)
         self.assertEqual(spec["chassis"]["profile_rings"]["y_rail_center_x"], 160.0)
         self.assertEqual(spec["chassis"]["plates"]["tabletop"]["z_top"], 720.0)
-        self.assertEqual(spec["arm_mounts"]["left"]["xyz"], [20.0, 75.0, 726.0])
-        self.assertEqual(spec["arm_mounts"]["right"]["xyz"], [20.0, -75.0, 726.0])
+        self.assertEqual(spec["arm_mounts"]["left"]["xyz"], [20.0, 170.0, 726.0])
+        self.assertEqual(spec["arm_mounts"]["right"]["xyz"], [20.0, -170.0, 726.0])
         self.assertEqual(spec["camera"]["height_above_tabletop"], 250.0)
         self.assertEqual(spec["camera"]["mount"]["mast_z_bottom"], 728.0)
         self.assertEqual(
@@ -85,7 +85,7 @@ class MechanicalV03Test(unittest.TestCase):
         self.assertEqual(placements["camera_mast_segment"], [-120.0, 0.0, 728.0])
         self.assertEqual(
             placements["arm_adapters"],
-            [[20.0, 75.0, 720.0], [20.0, -75.0, 720.0]],
+            [[20.0, 170.0, 720.0], [20.0, -170.0, 720.0]],
         )
         self.assertEqual(len(placements["frame_columns"]), 4)
         self.assertEqual(len(placements["frame_rail_x"]), 5)

@@ -373,6 +373,11 @@ def render_urdf(
         camera.SetFocalPoint(-40, 0, 380)
         camera.SetViewUp(0, 0, 1)
         camera.SetParallelScale(500 if parallel_scale is None else parallel_scale)
+    elif view == "front":
+        camera.SetPosition(1450, 0, 430)
+        camera.SetFocalPoint(0, 0, 430)
+        camera.SetViewUp(0, 0, 1)
+        camera.SetParallelScale(560 if parallel_scale is None else parallel_scale)
     else:
         raise ValueError(view)
 
