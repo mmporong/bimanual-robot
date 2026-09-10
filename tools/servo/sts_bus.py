@@ -68,10 +68,13 @@ class Bus:
         self.ser = serial.Serial(port, baud, timeout=timeout)
 
     def _txn(self, sid, instr, params=b""):
-        self.ser.reset_input_buffer()
-        self.ser.write(_frame(sid, instr, params))
-        self.ser.flush()
-        head = self.ser.read(4)
+        try:
+            self.ser.reset_input_buffer()
+            self.ser.write(_frame(sid, instr, params))
+            self.ser.flush()
+            head = self.ser.read(4)
+        except Exception as exc:                       # USB 가 빠지거나 다른 프로그램이 포트를 잡은 경우
+            raise SystemExit(f"포트 통신 실패: {exc}\n보드 USB·전원, 그리고 텔레옵 등 다른 프로그램이 같은 포트를 열고 있지 않은지 확인하세요.")
         if len(head) < 4 or head[:2] != b"\xff\xff":
             return None
         rest = self.ser.read(head[3])
