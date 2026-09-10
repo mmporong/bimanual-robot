@@ -74,6 +74,31 @@ def add_scene(window,key,viewport=(0,0,1,1),detail=False,camera_height_mm=model.
     label(renderer,'자세·접합·충돌 미검증 / 오른손 그리퍼는 치수 근사',.06,.025,16)
     return renderer
 
+def add_a_structure_scene(window,viewport,view):
+    renderer=vtk.vtkRenderer();renderer.SetViewport(*viewport);renderer.SetBackground(.975,.982,.986);window.AddRenderer(renderer)
+    scene=Scene(renderer)
+    model.chassis(scene);model.tower(scene,'A');model.top_structure(scene)
+    camera=renderer.GetActiveCamera();camera.ParallelProjectionOn();camera.SetViewUp(0,0,1)
+    camera.SetFocalPoint(0,0,390);camera.SetParallelScale(405)
+    if view=='front':
+        camera.SetPosition(1500,0,390)
+        label(renderer,'정면 구조',.06,.92,21)
+        label(renderer,'전면 개방 · 화면 속 X는 후면 가새',.06,.865,16)
+    elif view=='side':
+        camera.SetPosition(0,-1500,390)
+        label(renderer,'측면 구조',.06,.92,21)
+        label(renderer,'20×1.5 mm X 인장재 후보',.06,.865,16)
+    else:
+        raise ValueError(f'unsupported A structure view: {view}')
+    renderer.ResetCameraClippingRange()
+    return renderer
+
+def add_a_overview(window):
+    main=add_scene(window,'A',(0,0,.62,1))
+    label(main,'선택 기준: 첫 제작·수정용 구조 기준안',.06,.745,17)
+    add_a_structure_scene(window,(.62,.50,1,1),'front')
+    add_a_structure_scene(window,(.62,0,1,.50),'side')
+
 def save(window,path):
     window.Render()
     capture=vtk.vtkWindowToImageFilter();capture.SetInput(window);capture.ReadFrontBufferOff();capture.Update()
@@ -87,7 +112,8 @@ def window(width,height):
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
     REAL_OUT.mkdir(parents=True,exist_ok=True)
-    for key in 'ABCD':
+    w=window(1900,1500);add_a_overview(w);save(w,REAL_OUT/'A_real_scale.png')
+    for key in 'BCD':
         w=window(1200,1500);add_scene(w,key);save(w,REAL_OUT/f'{key}_real_scale.png')
     w=window(2000,2200)
     for key,vp in zip('ABCD',[(0,.5,.5,1),(.5,.5,1,1),(0,0,.5,.5),(.5,0,1,.5)]):add_scene(w,key,vp)
@@ -123,6 +149,7 @@ def main():
               'wheel_outer_width':540,'deck_side_inset':75,'deck_fore_aft_inset':20,
               'drive_centers':[[110,-255,35],[110,255,35]],'assumed_wheel_width':30,
               'caster_xy':[[-110,-215],[-110,215]],'camera_envelope_whd':[165,48,40],
+              'a_brace_flat_bar':[model.A_BRACE_WIDTH,model.A_BRACE_THICKNESS],
               'camera_center_height_above_deck_candidates':[380,540],
               'recommended_camera_center_height_above_deck':540,
               'initial_camera_pitch_down_deg':model.DEFAULT_CAMERA_PITCH_DEG,

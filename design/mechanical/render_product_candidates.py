@@ -22,6 +22,8 @@ ARM_POSE={'shoulder_lift':-1.1,'elbow_flex':1.1,'wrist_flex':-.7}
 ARM_MOUNT_Z=728.4  # STL 바닥이 root에서 -2.4 mm: 6 mm 어댑터 상면 z726에 맞춘 표시 위치.
 DEFAULT_CAMERA_HEIGHT_ABOVE_DECK=540
 DEFAULT_CAMERA_PITCH_DEG=43
+A_BRACE_WIDTH=20
+A_BRACE_THICKNESS=1.5
 
 def poly(ax, faces, color, alpha=1):
     if hasattr(ax, 'add_faces'):
@@ -37,6 +39,50 @@ def box(ax, center, size, color=SILVER, alpha=1):
 
 def bar(ax,p,q,width=7,color=ORANGE):
     ax.plot(*np.array([p,q]).T,color=color,lw=width,solid_capstyle='round')
+
+def flat_strap_faces(p,q,width=A_BRACE_WIDTH,thickness=A_BRACE_THICKNESS,plane_normal=(0,1,0)):
+    """평면 안의 폭과 평면 밖 두께를 보존한 직육면체 가새 면을 반환한다."""
+    if width<=0 or thickness<=0:
+        raise ValueError('flat strap width and thickness must be positive')
+    start=np.asarray(p,dtype=float);end=np.asarray(q,dtype=float)
+    direction=end-start
+    length=np.linalg.norm(direction)
+    if length==0:
+        raise ValueError('flat strap endpoints must differ')
+    direction/=length
+    normal=np.asarray(plane_normal,dtype=float)
+    normal_length=np.linalg.norm(normal)
+    if normal_length==0:
+        raise ValueError('flat strap plane normal must be non-zero')
+    normal/=normal_length
+    if not np.isclose(np.dot(direction,normal),0.0,atol=1e-9):
+        raise ValueError('flat strap direction must lie in its mounting plane')
+    across=np.cross(normal,direction)
+    across*=width/(2*np.linalg.norm(across))
+    depth=normal*thickness/2
+    vertices=np.array([
+        start-across-depth,start+across-depth,start+across+depth,start-across+depth,
+        end-across-depth,end+across-depth,end+across+depth,end-across+depth,
+    ])
+    return [vertices[list(indexes)] for indexes in (
+        (0,1,2,3),(4,7,6,5),(0,4,5,1),(1,5,6,2),(2,6,7,3),(3,7,4,0),
+    )]
+
+def flat_strap(ax,p,q,width=A_BRACE_WIDTH,thickness=A_BRACE_THICKNESS,plane_normal=(0,1,0),color=ORANGE):
+    poly(ax,flat_strap_faces(p,q,width,thickness,plane_normal),color)
+
+def mounted_flat_strap_faces(p,q,outward_normal,width=A_BRACE_WIDTH,thickness=A_BRACE_THICKNESS):
+    """프로파일 외면의 두 끝점을 받아 바깥쪽에 접하는 가새 면을 반환한다."""
+    normal=np.asarray(outward_normal,dtype=float)
+    normal_length=np.linalg.norm(normal)
+    if normal_length==0:
+        raise ValueError('mounted flat strap outward normal must be non-zero')
+    normal/=normal_length
+    offset=normal*thickness/2
+    return flat_strap_faces(np.asarray(p)+offset,np.asarray(q)+offset,width,thickness,normal)
+
+def mounted_flat_strap(ax,p,q,outward_normal,width=A_BRACE_WIDTH,thickness=A_BRACE_THICKNESS,color=ORANGE):
+    poly(ax,mounted_flat_strap_faces(p,q,outward_normal,width,thickness),color)
 
 def wheel(ax,x,y,z,r=35,w=30):
     t=np.linspace(0,2*np.pi,32)
@@ -88,9 +134,7 @@ def camera(ax,height_above_deck=DEFAULT_CAMERA_HEIGHT_ABOVE_DECK,pitch_deg=DEFAU
         poly(ax,[local_inner@rotation.T+center],'#427e92')
 
 def shared_top_and_parts(ax,camera_height_above_deck=DEFAULT_CAMERA_HEIGHT_ABOVE_DECK,camera_pitch_deg=DEFAULT_CAMERA_PITCH_DEG):
-    for x in (-130,130):box(ax,(x,0,708),(20,280,20))
-    for y in (-130,130,-75,75):box(ax,(0,y,708),(240,20,20))
-    box(ax,(0,0,719),(300,300,2),WHITE)
+    top_structure(ax)
     for prefix,y in [('left_',75),('right_',-75)]:
         box(ax,(0,y,723),(90,75,6),SILVER)
         for triangles,color in arm_visuals(prefix=prefix,mount_xyz_mm=(0,y,ARM_MOUNT_Z),joint_positions=ARM_POSE):
@@ -109,14 +153,20 @@ def shared_top_and_parts(ax,camera_height_above_deck=DEFAULT_CAMERA_HEIGHT_ABOVE
     box(ax,(40,0,593),(55,55,75),WHITE)
     ball(ax,145,-100,685,9,'#ba4442')
 
+def top_structure(ax):
+    for x in (-130,130):box(ax,(x,0,708),(20,280,20))
+    for y in (-130,130,-75,75):box(ax,(0,y,708),(240,20,20))
+    box(ax,(0,0,719),(300,300,2),WHITE)
+
 def tower(ax,key):
     if key in ('A','C'):
         for x,y in itertools.product((-130,130),repeat=2):box(ax,(x,y,389),(20,20,618))
         for y in (-140,140):
-            bar(ax,(-130,y,85),(130,y,693),2,ORANGE)
-            bar(ax,(130,y,85),(-130,y,693),2,ORANGE)
-        bar(ax,(-140,-130,85),(-140,130,693),2,ORANGE)
-        bar(ax,(-140,130,85),(-140,-130,693),2,ORANGE)
+            outward=(0,int(np.sign(y)),0)
+            mounted_flat_strap(ax,(-130,y,85),(130,y,693),outward)
+            mounted_flat_strap(ax,(130,y,85),(-130,y,693),outward)
+        mounted_flat_strap(ax,(-140,-130,85),(-140,130,693),(-1,0,0))
+        mounted_flat_strap(ax,(-140,130,85),(-140,-130,693),(-1,0,0))
         if key=='C':
             for y in (-147,147):box(ax,(0,y,389),(294,2,618),WHITE)
             box(ax,(-147,0,389),(2,294,618),WHITE)
@@ -170,6 +220,7 @@ def main():
               'wheel_outer_width':540,'deck_side_inset':75,'deck_fore_aft_inset':20,
               'drive_centers':[[110,-255,35],[110,255,35]],'assumed_wheel_width':30,
               'caster_xy':[[-110,-215],[-110,215]],'tower_post_xy':[[-130,-130],[-130,130],[130,-130],[130,130]],
+              'a_brace_flat_bar':[A_BRACE_WIDTH,A_BRACE_THICKNESS],
               'camera_envelope_whd':[165,48,40],
               'camera_center_height_above_deck':DEFAULT_CAMERA_HEIGHT_ABOVE_DECK,
               'scope':'SO101 URDF/STL 원본 축척. 카메라 외곽 근사. 오른손/캐스터 프록시; 자세는 시각화용'}

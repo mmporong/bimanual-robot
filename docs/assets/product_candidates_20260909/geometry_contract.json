@@ -40,6 +40,10 @@
     48,
     40
   ],
+  "a_brace_flat_bar": [
+    20,
+    1.5
+  ],
   "camera_center_height_above_deck_candidates": [
     380,
     540
