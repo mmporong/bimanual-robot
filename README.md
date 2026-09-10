@@ -28,7 +28,7 @@
 ## 현행 기구 기준안
 
 <p align="center">
-  <img src="docs/assets/full_size_frame_20260910/product_concept_imagegen.png" width="720" alt="450×340 mm 양팔 물 서빙 로봇 완성품 콘셉트">
+  <img src="docs/assets/full_size_frame_20260910/product_concept_imagegen_v2.png" width="720" alt="450×340 mm 양팔 물 서빙 로봇 완성품 콘셉트">
 </p>
 
 첫 제작 기준은 하부와 같은 **450×340 mm 상부 프레임**, 2020 기둥 4개, 4분할 PETG
