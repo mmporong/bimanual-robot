@@ -72,8 +72,16 @@ python3 servo_read.py
 | `servo_release.py` | 구동 해제 | 아니오 | 불필요 |
 | `servo_offset.py` | 지금 자세가 지정 값으로 읽히게 눈금 이동 | 아니오 | 필요 |
 | `servo_limits.py` | 각도 한계 변경 | 아니오 | 필요 |
-| `servo_goto.py` | 지정 위치로 이동 | **예** | 필요 |
-| `sts_bus.py` | 통신 헬퍼. 직접 실행하지 않는다 | — | — |
+| `servo_goto.py` | 지정 위치로 이동 (델타·부하·정지·발산 감시) | **예** | 필요 |
+| `servo_home.py` | 지금 자세를 2047 로 — 범위가 0/4095 를 안 넘게 | 아니오 | 필요 |
+| `servo_record_ranges.py` | 손으로 훑는 동안 범위 기록 → 서보 한계 + lerobot JSON | 아니오 | 필요 |
+| `servo_check_calibration.py` | lerobot JSON 과 서보 EEPROM 대조, 범위 오염 검사 | 아니오 | 불필요 |
+| `export_lerobot_calibration.py` | 서보 EEPROM 값을 lerobot JSON 으로 내보내기 | 아니오 | 필요 |
+| `sts_bus.py` | 통신 헬퍼(체크섬 검증 포함). 직접 실행하지 않는다 | — | — |
+| `lerobot_gripper_protection.patch` | lerobot 로컬 패치 — 연결 때 그리퍼 토크를 낮추는 코드를 끈다 | — | `git apply` |
+
+전체 흐름(전원 → 텔레옵 → 녹화 → 학습)은
+[`docs/20260910_텔레옵_IL_사용법.md`](../../docs/20260910_텔레옵_IL_사용법.md) 에 있다.
 
 `--execute` 가 없으면 전부 dry-run 으로 끝난다. 무엇을 바꿀지 먼저 출력해서 보여준다.
 

@@ -1,0 +1,56 @@
+From 3f686da66a874ecd1bf6ca84a2b423b763e2fbbe Mon Sep 17 00:00:00 2001
+From: mmporong <mmporong@gmail.com>
+Date: Wed, 9 Sep 2026 17:21:21 +0900
+Subject: [PATCH] =?UTF-8?q?feat(so=5Ffollower):=20=EA=B7=B8=EB=A6=AC?=
+ =?UTF-8?q?=ED=8D=BC=20=EB=B3=B4=ED=98=B8=EA=B0=92=20=EC=93=B0=EA=B8=B0?=
+ =?UTF-8?q?=EB=A5=BC=20gripper=5Fprotection=20=ED=94=8C=EB=9E=98=EA=B7=B8?=
+ =?UTF-8?q?=EB=A1=9C=20=EB=B6=84=EB=A6=AC=20(=EB=A1=9C=EC=BB=AC=20?=
+ =?UTF-8?q?=EA=B8=B0=EB=B3=B8=20=EA=BA=BC=EC=A7=90)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ggao50 랙-피니언 그리퍼는 닫힘 부하가 35 % 라 upstream 의 과부하 25 % 가
+정상 동작에서 걸린다. 스톡 그리퍼는 --robot.gripper_protection=true 로 복원.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019AkefRzDeCsGU6nqQtRZuh
+---
+ src/lerobot/robots/so_follower/config_so_follower.py | 7 +++++++
+ src/lerobot/robots/so_follower/so_follower.py        | 2 +-
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/lerobot/robots/so_follower/config_so_follower.py b/src/lerobot/robots/so_follower/config_so_follower.py
+index af4dda78..e820a535 100644
+--- a/src/lerobot/robots/so_follower/config_so_follower.py
++++ b/src/lerobot/robots/so_follower/config_so_follower.py
+@@ -46,6 +46,13 @@ class SOFollowerConfig:
+     position_i_coefficient: int = 0
+     position_d_coefficient: int = 32
+ 
++    # Upstream lerobot lowers the gripper motor's Max_Torque_Limit / Protection_Current /
++    # Overload_Torque at connect time (500 / 250 / 25) to protect the stock SO-101 gripper.
++    # The ggao50 rack-and-pinion gripper draws ~35 % torque just to close, so those values
++    # trip its overload protection. Local default is off; pass --robot.gripper_protection=true
++    # to restore upstream behaviour for a stock gripper. (bimanual-robot, 2026-09-09)
++    gripper_protection: bool = False
++
+     # Number of extra attempts when a `sync_read` of the motors fails. Feetech buses can occasionally
+     # return a corrupted status packet ("Incorrect status packet!"), especially when several joints move
+     # at once, which otherwise aborts the control loop. Retries are immediate (no sleep) and only happen on
+diff --git a/src/lerobot/robots/so_follower/so_follower.py b/src/lerobot/robots/so_follower/so_follower.py
+index 85dc43dc..292b41f0 100644
+--- a/src/lerobot/robots/so_follower/so_follower.py
++++ b/src/lerobot/robots/so_follower/so_follower.py
+@@ -165,7 +165,7 @@ class SOFollower(Robot):
+                 self.bus.write("I_Coefficient", motor, self.config.position_i_coefficient)
+                 self.bus.write("D_Coefficient", motor, self.config.position_d_coefficient)
+ 
+-                if motor == "gripper":
++                if motor == "gripper" and self.config.gripper_protection:
+                     self.bus.write("Max_Torque_Limit", motor, 500)  # 50% of max torque to avoid burnout
+                     self.bus.write("Protection_Current", motor, 250)  # 50% of max current to avoid burnout
+                     self.bus.write("Overload_Torque", motor, 25)  # 25% torque when overloaded
+-- 
+2.43.0
+
