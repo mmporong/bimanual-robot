@@ -9,11 +9,9 @@
 - 최종 문서 갱신: 2026-09-10
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
-- 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) — 아래 실물 변경사항은 아직 미반영
-- 최신 실물 치수·추가 기록: [450×340 mm 하단 프레임 모델링 기록](docs/20260909_하단프레임_실물치수_모델링기록.md) — 설명 수집 중, CAD·URDF 반영 전
-- 상부 구조 제안: [책상 높이 상승 프레임·경량화·구조 검토와 이미지](docs/20260909_상승프레임_경량화_구조검토.md) — 1차 개념안, 실측·접합 해석·주행 시험 전
-- 완성품 외형 기준안: [A 노출 프레임의 실축 조립·정면·측면도와 4안 비교](docs/20260909_완성품_디자인후보_4안.md) — 첫 제작은 A로 구조를 검증하고, 이후 C형 외장을 검토
-- 시뮬레이션 모델: [300×300 mm·720 mm 양팔 URDF와 Isaac Sim 모델](docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md)
+- 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
+- 최신 실물 치수 기록: [450×340 mm 하단 프레임 모델링 기록](docs/20260909_하단프레임_실물치수_모델링기록.md)
+- 현행 시뮬레이션·제작 기준: [450×340 mm 4분할 상판 모델과 JDAMR 구동계 재사용](docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md)
 - 태스크·구현 단일 원본: [물 서빙 로봇 회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
 - 팀 보고: [무선 운용·SLAM·PLANNED·ACT 비교](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md)
 - 세션 인계: [양팔 로봇 프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md)
@@ -29,12 +27,12 @@
 
 ## 현행 기구 기준안
 
-![A 노출 프레임의 실제 축척 조립도와 구조 확대](docs/assets/product_candidates_20260909/Real_scale/A_real_scale.png)
+![현행 450×340 mm 프레임과 실제 축척 부품](docs/assets/full_size_frame_20260910/model_overview.png)
 
-첫 제작 기준은 **A 노출 프레임**이다. 2020 기둥 4개와 좌우·후면의 20×1.5 mm X 인장재
-후보를 사용하고 전면은 정비 접근을 위해 개방한다. 그림은 SO101 URDF/STL 원본 축척과
-Astra 외곽 치수를 사용한 배치 검토용 렌더다. 접합 강도·가새 장력·충돌·전도·배선·방적은
-아직 검증 전이므로 제조 승인 도면이나 안전 검증 결과로 사용하지 않는다.
+첫 제작 기준은 하부와 같은 **450×340 mm 상부 프레임**, 2020 기둥 4개, 4분할 PETG
+상판이다. 둘레 링과 분할선 아래 가로재가 팔 하중을 프로파일로 전달한다. 그림은 커밋된
+SO101·Astra·차체 URDF/STL의 실제 축척 렌더다. 명목 빈 질량은 7.379 kg이며 접합 강도,
+동적 전도, 배선·방적과 실물 질량은 아직 검증 전이다.
 
 ## 현재 범위
 
@@ -258,8 +256,8 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 
 | 영역 | 현재 확인된 것 | 아직 필요한 것 |
 |---|---|---|
-| 기구 | 300×300 mm 상판, 상판 높이 720 mm, 2020 기둥×4·2륜·2볼캐스터 CAD, 배터리·전자부·배선/체결 여유 포함 명목 질량 모델 6.126 kg | 판재·압출재·체결홀·실제 질량·평탄도 실측, 선반·도크 확정 |
-| URDF | 46링크/45관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
+| 기구 | 상·하부 450×340 mm, 4분할 6 mm 상판, 2020 기둥×4·2륜·2볼캐스터 CAD, 명목 질량 7.379 kg | 압출재·체결홀·출력 조건·실제 질량·평탄도 실측, 선반·도크 확정 |
+| URDF | 58링크/57관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
 | IK | 구형 역할의 solver와 검증 도구 존재, 결함 기록됨 | 왼팔 컵·오른팔 물통 기준 수정과 회귀검증 |
 | ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
 | Nav2 | 설계·검증 항목 문서화 | 지도·station·반복 접근·장애물·도킹 실측 |
@@ -267,6 +265,7 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 | PLANNED/ACT/HYBRID | phase·전환·평가 구조 문서화 | router·Action·backend·전환 테스트 구현 |
 | YOLO 물 양 | segmentation·보정 방식 결정 | 카메라 POC·라벨·보정표·실시간 판정 |
 | 무선 | Pi↔노트북 책임과 프로토콜 후보 문서화 | 실제 지연·드랍·두절·재연결·watchdog 검증 |
+| Raspberry Pi 5 | 후순위 전환안: Nav2·센서·베이스·안전은 Pi 5, ACT·고부하 비전은 노트북 GPU | 부하·온도·무선 지연 측정 후 전환 |
 | 데이터 도구 | failure bank·스키마·회귀 테스트 존재 | 실제 실행 로그 연결과 담당자 대조 |
 | Isaac Sim | 6.0 공식 importer 스크립트와 정적 가져오기 계약 PASS | Isaac 장비에서 USD 생성·4점 접촉·gain·60초 안정성 검증 |
 
@@ -330,7 +329,7 @@ bimanual-robot/
 | 산업용 피킹과 IL·휴머노이드 차이 | [R33 산업용 피킹과 IL·ACT 적용 경계](research/R33_산업용_피킹과_IL_ACT_적용경계.md) |
 | ROS 2 패키지·인터페이스 경계 | [`src/README.md`](src/README.md) |
 | 기구 계산 | [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) |
-| URDF·Isaac Sim 모델 | [300×300 mm·720 mm 모델 문서](docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md) |
+| URDF·Isaac Sim·JDAMR 구동계 | [450×340 mm 4분할 상판 모델](docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md) |
 | CAD·출력물 | [`design/cad/README.md`](design/cad/README.md) |
 | 실패 저장·재시험·학습 사용 | [`data/failures/README.md`](data/failures/README.md) |
 | 전체 변경 증거 | [`PROGRESS.md`](PROGRESS.md) |

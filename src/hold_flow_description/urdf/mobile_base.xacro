@@ -76,21 +76,36 @@
       <origin xyz="0 0 0.0329" rpy="0 0 0"/>
     </joint>
 
-    <xacro:cad_mesh_link name="chassis_bottom_link" parent="base_link" xyz="0 0 -0.0269" mesh="chassis_bottom.stl" mass="0.400" sx="0.300" sy="0.300" sz="0.048" material="hold_flow_dark"/>
-    <xacro:cad_mesh_link name="chassis_middle_link" parent="base_link" xyz="0 0 0.0291" mesh="chassis_middle.stl" mass="0.340" sx="0.300" sy="0.300" sz="0.006" material="hold_flow_white"/>
-    <xacro:cad_mesh_link name="chassis_top_link" parent="base_link" xyz="0 0 0.6791" mesh="chassis_top.stl" mass="0.424" sx="0.300" sy="0.300" sz="0.008" material="hold_flow_white"/>
+    <!-- 하부와 상부는 같은 340(x)×450(y) mm 2020 프로파일 외곽이다. -->
+    <xacro:primitive_box_link name="lower_front_rail_link" parent="base_link" xyz="0.160 0 0.0171" mass="0.216" sx="0.020" sy="0.450" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="lower_rear_rail_link" parent="base_link" xyz="-0.160 0 0.0171" mass="0.216" sx="0.020" sy="0.450" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="lower_left_rail_link" parent="base_link" xyz="0 0.215 0.0171" mass="0.144" sx="0.300" sy="0.020" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="lower_right_rail_link" parent="base_link" xyz="0 -0.215 0.0171" mass="0.144" sx="0.300" sy="0.020" sz="0.020" material="silver"/>
 
-    <xacro:cad_mesh_link name="front_left_frame_column_link" parent="base_link" xyz="0.130 0.130 0.0351" mesh="frame_column.stl" mass="0.290" sx="0.020" sy="0.020" sz="0.644" material="silver"/>
-    <xacro:cad_mesh_link name="front_right_frame_column_link" parent="base_link" xyz="0.130 -0.130 0.0351" mesh="frame_column.stl" mass="0.290" sx="0.020" sy="0.020" sz="0.644" material="silver"/>
-    <xacro:cad_mesh_link name="rear_left_frame_column_link" parent="base_link" xyz="-0.130 0.130 0.0351" mesh="frame_column.stl" mass="0.290" sx="0.020" sy="0.020" sz="0.644" material="silver"/>
-    <xacro:cad_mesh_link name="rear_right_frame_column_link" parent="base_link" xyz="-0.130 -0.130 0.0351" mesh="frame_column.stl" mass="0.290" sx="0.020" sy="0.020" sz="0.644" material="silver"/>
+    <xacro:primitive_box_link name="upper_front_rail_link" parent="base_link" xyz="0.160 0 0.6711" mass="0.216" sx="0.020" sy="0.450" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="upper_rear_rail_link" parent="base_link" xyz="-0.160 0 0.6711" mass="0.216" sx="0.020" sy="0.450" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="upper_left_rail_link" parent="base_link" xyz="0 0.215 0.6711" mass="0.144" sx="0.300" sy="0.020" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="upper_right_rail_link" parent="base_link" xyz="0 -0.215 0.6711" mass="0.144" sx="0.300" sy="0.020" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="upper_x_seam_support_link" parent="base_link" xyz="-0.050 0 0.6711" mass="0.216" sx="0.020" sy="0.450" sz="0.020" material="silver"/>
+    <xacro:primitive_box_link name="upper_y_seam_support_link" parent="base_link" xyz="0 0 0.6711" mass="0.144" sx="0.300" sy="0.020" sz="0.020" material="silver"/>
 
-    <xacro:cad_mesh_link name="left_arm_backing_link" parent="base_link" xyz="0 0.075 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
-    <xacro:cad_mesh_link name="right_arm_backing_link" parent="base_link" xyz="0 -0.075 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
+    <xacro:cad_mesh_link name="tabletop_front_left_link" parent="base_link" xyz="0.06015 0.11265 0.6811" mesh="tabletop_front_left.stl" mass="0.170" sx="0.2197" sy="0.2247" sz="0.006" material="hold_flow_white"/>
+    <xacro:cad_mesh_link name="tabletop_front_right_link" parent="base_link" xyz="0.06015 -0.11265 0.6811" mesh="tabletop_front_right.stl" mass="0.170" sx="0.2197" sy="0.2247" sz="0.006" material="hold_flow_white"/>
+    <xacro:cad_mesh_link name="tabletop_rear_left_link" parent="base_link" xyz="-0.11015 0.11265 0.6811" mesh="tabletop_rear_left.stl" mass="0.170" sx="0.1197" sy="0.2247" sz="0.006" material="hold_flow_white"/>
+    <xacro:cad_mesh_link name="tabletop_rear_right_link" parent="base_link" xyz="-0.11015 -0.11265 0.6811" mesh="tabletop_rear_right.stl" mass="0.170" sx="0.1197" sy="0.2247" sz="0.006" material="hold_flow_white"/>
+
+    <xacro:cad_mesh_link name="front_left_frame_column_link" parent="base_link" xyz="0.150 0.205 0.0271" mesh="frame_column.stl" mass="0.304" sx="0.020" sy="0.020" sz="0.634" material="silver"/>
+    <xacro:cad_mesh_link name="front_right_frame_column_link" parent="base_link" xyz="0.150 -0.205 0.0271" mesh="frame_column.stl" mass="0.304" sx="0.020" sy="0.020" sz="0.634" material="silver"/>
+    <xacro:cad_mesh_link name="rear_left_frame_column_link" parent="base_link" xyz="-0.150 0.205 0.0271" mesh="frame_column.stl" mass="0.304" sx="0.020" sy="0.020" sz="0.634" material="silver"/>
+    <xacro:cad_mesh_link name="rear_right_frame_column_link" parent="base_link" xyz="-0.150 -0.205 0.0271" mesh="frame_column.stl" mass="0.304" sx="0.020" sy="0.020" sz="0.634" material="silver"/>
+
+    <xacro:cad_mesh_link name="left_arm_backing_link" parent="base_link" xyz="0.020 0.075 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
+    <xacro:cad_mesh_link name="right_arm_backing_link" parent="base_link" xyz="0.020 -0.075 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
     <xacro:cad_mesh_link name="camera_backing_link" parent="base_link" xyz="-0.120 0 0.6871" mesh="camera_backing.stl" mass="0.030" sx="0.055" sy="0.055" sz="0.008" material="hold_flow_dark"/>
-    <xacro:cad_mesh_link name="lidar_riser_link" parent="base_link" xyz="0.100 0 0.0351" mesh="lidar_riser.stl" mass="0.274" sx="0.065" sy="0.050" sz="0.080" material="hold_flow_dark"/>
+    <xacro:cad_mesh_link name="battery_mount_plate_link" parent="base_link" xyz="-0.040 0 0.0351" mesh="battery_mount_plate.stl" mass="0.120" sx="0.180" sy="0.120" sz="0.006" material="hold_flow_blue"/>
+    <xacro:cad_mesh_link name="lidar_mount_plate_link" parent="base_link" xyz="0.100 0 0.1121" mesh="lidar_mount_plate.stl" mass="0.035" sx="0.090" sy="0.075" sz="0.003" material="hold_flow_blue"/>
 
-    <xacro:primitive_box_link name="battery_link" parent="base_link" xyz="-0.040 0 0.0071" mass="0.550" sx="0.140" sy="0.080" sz="0.040" material="hold_flow_blue"/>
+    <xacro:primitive_box_link name="battery_link" parent="base_link" xyz="-0.040 0 0.0611" mass="0.550" sx="0.140" sy="0.080" sz="0.040" material="hold_flow_blue"/>
     <xacro:primitive_box_link name="electronics_link" parent="base_link" xyz="0.030 0 0.0571" mass="0.350" sx="0.160" sy="0.120" sz="0.040" material="hold_flow_dark"/>
 
     <link name="left_wheel_link">
