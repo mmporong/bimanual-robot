@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-09-10 | ggao50 그리퍼 서보 Phase 반전 해결, 리더-팔로워 재캘리브레이션, 텔레옵·IL 사용법
+
+**결론**: 오른팔 그리퍼 서보(ID 6)가 어떤 목표든 열림 끝으로 달아나 레일 이탈이 4회 났던
+원인은 Phase 레지스터(18번)가 개체에 맞지 않는 12(정답 76)였다. 76 + 재부팅으로 첫 이동에서
+도달. 이어서 두 팔을 같은 기준으로 재캘리브레이션해 텔레옵이 자세·그리퍼 방향·속도 모두
+정상. 팀원이 캘리브된 상태로 받아 바로 녹화·학습으로 가는 문서를 남겼다.
+
+**구현**
+- `tools/servo/`: STS3215 도구 8개 — 읽기·이동(델타·부하·정지·발산 감시)·0점·범위 기록(체크섬·글리치 필터)·한계·오프셋·대조·lerobot JSON 내보내기
+- `calibration/so_follower/follower.json`, `calibration/so_leader/leader.json` — lerobot 이 `--robot.calibration_dir` 로 직접 읽는 캘리브레이션. 팔로워 `gripper drive_mode 1`
+- `tools/servo/lerobot_gripper_protection.patch` — lerobot 이 연결 때 그리퍼 토크를 50 % 로 낮추는 코드를 플래그로 분리(로컬 기본 꺼짐). ggao50 은 닫힘 부하 35 % 라 필요
+- `docs/20260910_텔레옵_IL_사용법.md` — 전원 → 텔레옵 → `lerobot-record` → `lerobot-train` → 자율 실행, 금지 사항, 문제 해결
+- `docs/20260909_그리퍼_서보_Phase반전_사고분석.md` + `docs/assets/gripper_phase_20260909/` — 가설 8개 기각 과정, 테스트 로그 원문, 서보 12개 EEPROM 덤프
+
+**검증**
+- 그리퍼: 2890 명령 → 자로 2 cm, 1670 → 6 cm, 546 → 95 mm. 발산 감지 도입 후 시험 8회 이탈 0건
+- 두 팔 `servo_check_calibration.py` 일치, lerobot `is_calibrated=True`, 12개 모터 범위에 0/4095 없음
+- `lerobot-teleoperate` 60 Hz 정상, 그리퍼 방향·속도 정상 (재캘리브 후 자세 일치는 사용자 확인 대기)
+- 도구 모의 버스 리허설: 이동 5경로, 오프셋 부호 양쪽, 글리치 필터 3경로 통과
+
+**배운 것**
+- 이 서보 펌웨어는 Homing_Offset 을 켜진 채로 바꾸면 재부팅 전까지 제어가 꼬인다 → 오프셋 변경 후 12 V 재부팅
+- `lerobot-calibrate` 의 범위 기록은 이 버스에서 깨진 패킷에 오염된다(MIN 0 / MAX 4095) → 체크섬·글리치 필터 도구로 대체
+- lerobot `use_degrees` 모드의 자세 0점은 기록된 범위의 한가운데. 두 팔이 같은 물리적 끝까지 훑어야 자세가 맞는다
+- Phase 는 같은 팔 형제와 맞추는 값이 아니다. 리더-팔로워 방향은 JSON `drive_mode` 로만
+
+**남은 일**: 재캘리브 후 텔레옵 자세 일치 확인, 외부 카메라 2대 경로 확정 후 첫 녹화, PR #22 병합
+
+---
+
 ## 2026-09-08 | 300 mm·720 mm 시뮬레이션용 양팔 URDF/CAD v0.3
 
 **결론**: 300×300 mm 상판 윗면을 z=720 mm로 두고 SO-101 두 대를 `(0, ±75, 726) mm`,
