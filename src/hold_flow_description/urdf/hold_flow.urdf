@@ -476,7 +476,7 @@
   <joint name="left_arm_backing_link_joint" type="fixed">
     <parent link="base_link"/>
     <child link="left_arm_backing_link"/>
-    <origin rpy="0 0 0" xyz="0.020 0.075 0.6871"/>
+    <origin rpy="0 0 0" xyz="0.020 0.170 0.6871"/>
   </joint>
   <link name="right_arm_backing_link">
     <inertial>
@@ -500,7 +500,7 @@
   <joint name="right_arm_backing_link_joint" type="fixed">
     <parent link="base_link"/>
     <child link="right_arm_backing_link"/>
-    <origin rpy="0 0 0" xyz="0.020 -0.075 0.6871"/>
+    <origin rpy="0 0 0" xyz="0.020 -0.170 0.6871"/>
   </joint>
   <link name="camera_backing_link">
     <inertial>
@@ -827,7 +827,7 @@
   <joint name="left_mount_joint" type="fixed">
     <parent link="base_link"/>
     <child link="left_base_link"/>
-    <origin rpy="0 0 0" xyz="0.020 0.075 0.6931"/>
+    <origin rpy="0 0 0" xyz="0.020 0.170 0.6931"/>
   </joint>
   <link name="left_base_link">
     <inertial>
@@ -1127,7 +1127,7 @@
   <joint name="right_mount_joint" type="fixed">
     <parent link="base_link"/>
     <child link="right_base_link"/>
-    <origin rpy="0 0 0" xyz="0.020 -0.075 0.6931"/>
+    <origin rpy="0 0 0" xyz="0.020 -0.170 0.6931"/>
   </joint>
   <link name="right_base_link">
     <inertial>

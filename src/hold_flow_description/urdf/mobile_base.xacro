@@ -99,8 +99,8 @@
     <xacro:cad_mesh_link name="rear_left_frame_column_link" parent="base_link" xyz="-0.150 0.205 0.0271" mesh="frame_column.stl" mass="0.304" sx="0.020" sy="0.020" sz="0.634" material="silver"/>
     <xacro:cad_mesh_link name="rear_right_frame_column_link" parent="base_link" xyz="-0.150 -0.205 0.0271" mesh="frame_column.stl" mass="0.304" sx="0.020" sy="0.020" sz="0.634" material="silver"/>
 
-    <xacro:cad_mesh_link name="left_arm_backing_link" parent="base_link" xyz="0.020 0.075 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
-    <xacro:cad_mesh_link name="right_arm_backing_link" parent="base_link" xyz="0.020 -0.075 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
+    <xacro:cad_mesh_link name="left_arm_backing_link" parent="base_link" xyz="0.020 0.170 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
+    <xacro:cad_mesh_link name="right_arm_backing_link" parent="base_link" xyz="0.020 -0.170 0.6871" mesh="arm_adapter.stl" mass="0.058" sx="0.130" sy="0.070" sz="0.006" material="hold_flow_dark"/>
     <xacro:cad_mesh_link name="camera_backing_link" parent="base_link" xyz="-0.120 0 0.6871" mesh="camera_backing.stl" mass="0.030" sx="0.055" sy="0.055" sz="0.008" material="hold_flow_dark"/>
     <xacro:cad_mesh_link name="battery_mount_plate_link" parent="base_link" xyz="-0.040 0 0.0351" mesh="battery_mount_plate.stl" mass="0.120" sx="0.180" sy="0.120" sz="0.006" material="hold_flow_blue"/>
     <xacro:cad_mesh_link name="lidar_mount_plate_link" parent="base_link" xyz="0.100 0 0.1121" mesh="lidar_mount_plate.stl" mass="0.035" sx="0.090" sy="0.075" sz="0.003" material="hold_flow_blue"/>

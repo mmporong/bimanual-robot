@@ -12,10 +12,10 @@
 
   <!-- 전면 모서리 x=170 mm에서 150 mm 뒤(x=20 mm), 상판 윗면 + 어댑터 6 mm. -->
   <xacro:so101_arm prefix="left_" parent="base_link">
-    <origin xyz="0.020 0.075 0.6931" rpy="0 0 0"/>
+    <origin xyz="0.020 0.170 0.6931" rpy="0 0 0"/>
   </xacro:so101_arm>
   <xacro:so101_arm prefix="right_" parent="base_link">
-    <origin xyz="0.020 -0.075 0.6931" rpy="0 0 0"/>
+    <origin xyz="0.020 -0.170 0.6931" rpy="0 0 0"/>
   </xacro:so101_arm>
 
   <!-- P0: 왼팔은 기본 SO-101 죠, 오른팔은 ggao50 평행 그리퍼 프록시다. -->
