@@ -53,8 +53,7 @@ python3 servo_read.py
 
 ## 실행
 
-경로를 명령줄에 적지 말고 디렉터리로 들어가서 실행한다. 이 저장소 경로가 명령줄에
-들어가면 `arm-motion-guard` 훅이 차단한다.
+도구가 같은 디렉터리의 `sts_bus.py`를 읽도록 서보 도구 디렉터리에서 실행한다.
 
 ```bash
 cd ~/bimanual-robot/tools/servo
@@ -76,6 +75,7 @@ python3 servo_read.py
 | `servo_home.py` | 지금 자세를 2047 로 — 범위가 0/4095 를 안 넘게 | 아니오 | 필요 |
 | `servo_record_ranges.py` | 손으로 훑는 동안 범위 기록 → 서보 한계 + lerobot JSON | 아니오 | 필요 |
 | `servo_check_calibration.py` | lerobot JSON 과 서보 EEPROM 대조, 범위 오염 검사 | 아니오 | 불필요 |
+| `servo_check_phase.py` | STS3215 Phase(주소 18)를 기대값과 대조 | 아니오 | 불필요 |
 | `export_lerobot_calibration.py` | 서보 EEPROM 값을 lerobot JSON 으로 내보내기 | 아니오 | 필요 |
 | `sts_bus.py` | 통신 헬퍼(체크섬 검증 포함). 직접 실행하지 않는다 | — | — |
 | `lerobot_gripper_protection.patch` | lerobot 로컬 패치 — 연결 때 그리퍼 토크를 낮추는 코드를 끈다 | — | `git apply` |
