@@ -1,0 +1,18 @@
+--- a/src/lerobot/robots/bi_so_follower/bi_so_follower.py
++++ b/src/lerobot/robots/bi_so_follower/bi_so_follower.py
+@@ -60,6 +60,7 @@
+             position_p_coefficient=config.left_arm_config.position_p_coefficient,
+             position_i_coefficient=config.left_arm_config.position_i_coefficient,
+             position_d_coefficient=config.left_arm_config.position_d_coefficient,
++            gripper_protection=config.left_arm_config.gripper_protection,
+             use_degrees=config.left_arm_config.use_degrees,
+             num_read_retries=config.left_arm_config.num_read_retries,
+             cameras=left_arm_cameras,
+@@ -74,6 +75,7 @@
+             position_p_coefficient=config.right_arm_config.position_p_coefficient,
+             position_i_coefficient=config.right_arm_config.position_i_coefficient,
+             position_d_coefficient=config.right_arm_config.position_d_coefficient,
++            gripper_protection=config.right_arm_config.gripper_protection,
+             use_degrees=config.right_arm_config.use_degrees,
+             num_read_retries=config.right_arm_config.num_read_retries,
+             cameras=config.right_arm_config.cameras,
