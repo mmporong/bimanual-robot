@@ -6,7 +6,7 @@
 
 - 시작: 2026-08-19
 - 현행 태스크 확정: 2026-09-07
-- 최종 문서 갱신: 2026-09-10
+- 최종 문서 갱신: 2026-09-11
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
 - 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
@@ -14,6 +14,7 @@
 - 현행 시뮬레이션·제작 기준: [450×340 mm 4분할 상판 모델과 JDAMR 구동계 재사용](docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md)
 - 태스크·구현 단일 원본: [물 서빙 로봇 회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
 - 팀 보고: [무선 운용·SLAM·PLANNED·ACT 비교](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md)
+- IL 실행 인계: [양팔 수집·비공개 Hub 업로드·다른 PC ACT 학습](docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)
 - 세션 인계: [양팔 로봇 프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md)
 
 ## 한 줄 정의
@@ -329,6 +330,7 @@ bimanual-robot/
 |---|---|
 | 현행 태스크·phase·인터페이스·평가 | [2026-09-07 회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md) |
 | 팀 전체 공유와 무선·SLAM 설명 | [2026-09-08 팀 보고](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md) |
+| 다른 팀원의 양팔 IL 수집·Hub 공유·다른 PC 학습 | [2026-09-11 IL 실행 인계](docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md) |
 | 다른 세션 인계 | [프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md) |
 | 산업용 피킹과 IL·휴머노이드 차이 | [R33 산업용 피킹과 IL·ACT 적용 경계](research/R33_산업용_피킹과_IL_ACT_적용경계.md) |
 | ROS 2 패키지·인터페이스 경계 | [`src/README.md`](src/README.md) |

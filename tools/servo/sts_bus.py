@@ -17,6 +17,7 @@ RESOLUTION = 4096              # 한 바퀴 카운트
 # EEPROM — 쓰려면 A_LOCK 을 0 으로 풀어야 한다
 A_MIN_ANGLE, A_MAX_ANGLE = 9, 11
 A_MAX_TEMP = 13
+A_PHASE = 18                     # 특수 기능 바이트. ggao50 ID 6 실측 기준은 76
 A_P, A_D, A_I = 21, 22, 23
 A_OFFSET = 31                  # 위치 보정. 12bit 부호크기, bit11 이 음수 표시
 
@@ -125,13 +126,13 @@ class FakeBus:
     `wall` 은 원시 엔코더 기준으로 더 이상 못 가는 하드 스톱 위치다.
     """
 
-    def __init__(self, sid=6, pos=3600, lo=760, hi=3600, offset=0, sign=1, wall=None):
+    def __init__(self, sid=6, pos=3600, lo=760, hi=3600, offset=0, phase=12, sign=1, wall=None):
         self.sid = sid
         self.sign = sign
         self.wall = wall
         self.raw = pos - sign * offset
         self.reg = {
-            A_MIN_ANGLE: lo, A_MAX_ANGLE: hi, A_MAX_TEMP: 65,
+            A_MIN_ANGLE: lo, A_MAX_ANGLE: hi, A_MAX_TEMP: 65, A_PHASE: phase,
             A_P: 16, A_D: 32, A_I: 0, A_OFFSET: encode_offset(offset),
             A_TORQUE: 0, A_ACCEL: 0, A_GOAL: pos, A_SPEED: 0, A_LOCK: 1,
             A_PRESENT_SPEED: 0, A_LOAD: 20, A_VOLT: 123, A_TEMP: 34,
