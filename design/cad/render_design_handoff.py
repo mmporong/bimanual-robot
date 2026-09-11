@@ -324,7 +324,14 @@ def object_actor(kind: str, center_chassis_mm: list[float], tilt_deg: float = 0.
     return [primitive_actor("cylinder", (0.032, 0.080), matrix, color_tuple("#DDE6F3"), 0.9)]
 
 
-def render_urdf(path: Path, positions: dict[str, float], *, view: str, task_objects: dict[str, tuple[list[float], float]] | None = None) -> None:
+def render_urdf(
+    path: Path,
+    positions: dict[str, float],
+    *,
+    view: str,
+    task_objects: dict[str, tuple[list[float], float]] | None = None,
+    parallel_scale: float | None = None,
+) -> None:
     scene = UrdfScene(URDF_PATH)
     renderer = vtk.vtkRenderer()
     renderer.SetBackground(*color_tuple(WHITE))
@@ -355,17 +362,22 @@ def render_urdf(path: Path, positions: dict[str, float], *, view: str, task_obje
         camera.SetPosition(1050, -1180, 880)
         camera.SetFocalPoint(-40, 0, 360)
         camera.SetViewUp(0, 0, 1)
-        camera.SetParallelScale(520)
+        camera.SetParallelScale(520 if parallel_scale is None else parallel_scale)
     elif view == "top":
         camera.SetPosition(-40, 0, 1450)
         camera.SetFocalPoint(-40, 0, 100)
         camera.SetViewUp(1, 0, 0)
-        camera.SetParallelScale(390)
+        camera.SetParallelScale(390 if parallel_scale is None else parallel_scale)
     elif view == "side":
         camera.SetPosition(-40, -1450, 380)
         camera.SetFocalPoint(-40, 0, 380)
         camera.SetViewUp(0, 0, 1)
-        camera.SetParallelScale(500)
+        camera.SetParallelScale(500 if parallel_scale is None else parallel_scale)
+    elif view == "front":
+        camera.SetPosition(1450, 0, 430)
+        camera.SetFocalPoint(0, 0, 430)
+        camera.SetViewUp(0, 0, 1)
+        camera.SetParallelScale(560 if parallel_scale is None else parallel_scale)
     else:
         raise ValueError(view)
 

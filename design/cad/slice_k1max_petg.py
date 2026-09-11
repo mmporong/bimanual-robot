@@ -11,11 +11,11 @@ OrcaSlicer CLI는 필라멘트 프리셋의 상속 체인을 스스로 풀지 �
 
 사용법:
   python3 design/cad/slice_k1max_petg.py --out ~/gcode STL...
-  python3 design/cad/slice_k1max_petg.py --out ~/gcode --all      # exports/stl 전체
+  python3 design/cad/slice_k1max_petg.py --out ~/gcode --all      # manifest의 FDM 부품 전체
   python3 design/cad/slice_k1max_petg.py --emit-presets           # GUI 임포트용 프리셋만 생성
 출력: stdout JSON
 """
-import argparse, glob, importlib.util, json, os, subprocess, sys
+import argparse, importlib.util, json, os, subprocess, sys
 
 HOME = os.path.expanduser("~")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,7 +55,10 @@ PROCESS_SPEC = {
 }
 BRIM_LARGE = {"brim_type": "outer_only", "brim_width": "8"}   # 250 mm 판
 BRIM_SMALL = {"brim_type": "auto_brim", "brim_width": "5"}
-LARGE_PARTS = {"chassis_bottom", "chassis_middle", "chassis_top"}
+LARGE_PARTS = {
+    "tabletop_front_left", "tabletop_front_right",
+    "tabletop_rear_left", "tabletop_rear_right", "battery_mount_plate",
+}
 
 # 상속 체인에서 실제 값을 읽어올 필라멘트 키
 FILAMENT_KEYS = [
@@ -139,7 +142,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stl", nargs="*")
     ap.add_argument("--out", default=None, help="G-code 출력 디렉터리 (홈 아래)")
-    ap.add_argument("--all", action="store_true", help="design/cad/exports/stl 전체")
+    ap.add_argument("--all", action="store_true", help="CAD manifest에서 FDM 부품만 선택")
     ap.add_argument("--emit-presets", action="store_true", help="GUI 임포트용 프리셋만 생성")
     ap.add_argument("--printer", choices=sorted(PRINTERS), default="k1max",
                     help="대상 프린터")
@@ -167,7 +170,13 @@ def main():
 
     stls = [os.path.abspath(s) for s in a.stl]
     if a.all:
-        stls = sorted(glob.glob(os.path.join(HERE, "exports", "stl", "*.stl")))
+        manifest_path = os.path.join(HERE, "exports", "manifest.json")
+        manifest = json.load(open(manifest_path, encoding="utf-8"))
+        stls = sorted(
+            os.path.join(HERE, "exports", "stl", part["name"] + ".stl")
+            for part in manifest["parts"]
+            if part["fdm_part"]
+        )
     if not stls:
         raise SystemExit("슬라이싱할 STL이 없습니다. 경로를 주거나 --all 을 쓰세요.")
     if not a.out:

@@ -26,10 +26,12 @@ SO101_LICENSE = REPO_ROOT / "src/hold_flow_description/third_party/so_arm_101/LI
 class MechanicalV03Test(unittest.TestCase):
     def test_design_spec_has_requested_geometry(self) -> None:
         spec = yaml.safe_load(SPEC_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(spec["chassis"]["tabletop_footprint"], [300.0, 300.0])
+        self.assertEqual(spec["chassis"]["tabletop_footprint"], [340.0, 450.0])
+        self.assertEqual(len(spec["chassis"]["plates"]["tabletop"]["quadrant_names"]), 4)
+        self.assertEqual(spec["chassis"]["profile_rings"]["y_rail_center_x"], 160.0)
         self.assertEqual(spec["chassis"]["plates"]["tabletop"]["z_top"], 720.0)
-        self.assertEqual(spec["arm_mounts"]["left"]["xyz"], [0.0, 75.0, 726.0])
-        self.assertEqual(spec["arm_mounts"]["right"]["xyz"], [0.0, -75.0, 726.0])
+        self.assertEqual(spec["arm_mounts"]["left"]["xyz"], [20.0, 170.0, 726.0])
+        self.assertEqual(spec["arm_mounts"]["right"]["xyz"], [20.0, -170.0, 726.0])
         self.assertEqual(spec["camera"]["height_above_tabletop"], 250.0)
         self.assertEqual(spec["camera"]["mount"]["mast_z_bottom"], 728.0)
         self.assertEqual(
@@ -38,6 +40,13 @@ class MechanicalV03Test(unittest.TestCase):
             + spec["camera"]["mount"]["backing_thickness"],
         )
         self.assertEqual(len(spec["navigation"]["ball_casters"]["centers_xyz"]), 2)
+        self.assertEqual(spec["navigation"]["reuse_source"]["left_servo_id"], 2)
+        self.assertEqual(spec["navigation"]["reuse_source"]["right_servo_id"], 1)
+        self.assertEqual(
+            spec["navigation"]["wheel"]["initial_host_parameters"]["wheel_separation_m"],
+            0.320,
+        )
+        self.assertEqual(spec["compute_plan"]["later_raspberry_pi_5"]["priority"], "deferred")
         self.assertEqual(
             spec["provenance"]["so101"]["checked_commit"],
             "eecbe3e0a9ebb23e25ad7b2759b03884c6660903",
@@ -45,7 +54,7 @@ class MechanicalV03Test(unittest.TestCase):
 
     def test_calculation_and_isaac_static_contract_pass(self) -> None:
         commands = (
-            ["python3", "design/mechanical/calculate_300mm_tabletop_design.py"],
+            ["python3", "design/mechanical/calculate_full_size_tabletop_design.py"],
             ["python3", str(DESCRIPTION_VALIDATOR.relative_to(REPO_ROOT))],
             ["python3", str(QUALITY_AUDITOR.relative_to(REPO_ROOT)), "--strict"],
             ["python3", "src/hold_flow_description/scripts/validate_isaac_contract.py"],
@@ -61,17 +70,26 @@ class MechanicalV03Test(unittest.TestCase):
         self.assertEqual(cad["source_spec"], "design/mechanical/hold_flow_mechanical_v0_3.yaml")
         self.assertTrue(cad["all_breps_valid"])
         parts = {part["name"]: part for part in cad["parts"]}
-        self.assertAlmostEqual(parts["chassis_top"]["bounds_mm"][0], 300.0, delta=0.05)
+        panel_names = {
+            "tabletop_front_left", "tabletop_front_right",
+            "tabletop_rear_left", "tabletop_rear_right",
+        }
+        self.assertTrue(panel_names <= parts.keys())
+        self.assertTrue(all(parts[name]["fdm_part"] for name in panel_names))
+        self.assertTrue(all(parts[name]["k1_max_safe_fit"] for name in panel_names))
         self.assertEqual(parts["frame_column"]["quantity"], 4)
-        self.assertFalse(parts["chassis_top"]["fdm_part"])
+        self.assertTrue(parts["battery_mount_plate"]["fdm_part"])
+        self.assertTrue(parts["lidar_mount_plate"]["fdm_part"])
         placements = cad["assembly_placements_mm"]
         self.assertEqual(placements["camera_backing"], [-120.0, 0.0, 720.0])
         self.assertEqual(placements["camera_mast_segment"], [-120.0, 0.0, 728.0])
         self.assertEqual(
             placements["arm_adapters"],
-            [[0.0, 75.0, 720.0], [0.0, -75.0, 720.0]],
+            [[20.0, 170.0, 720.0], [20.0, -170.0, 720.0]],
         )
         self.assertEqual(len(placements["frame_columns"]), 4)
+        self.assertEqual(len(placements["frame_rail_x"]), 5)
+        self.assertEqual(len(placements["frame_rail_y"]), 5)
         self.assertTrue(cup["valid_brep"])
         self.assertEqual(cup["quantity"], 2)
         self.assertTrue(cup["support_expected"])
@@ -79,7 +97,7 @@ class MechanicalV03Test(unittest.TestCase):
 
     def test_urdf_mass_matches_provisional_mass_model(self) -> None:
         calculation = subprocess.run(
-            ["python3", "design/mechanical/calculate_300mm_tabletop_design.py"],
+            ["python3", "design/mechanical/calculate_full_size_tabletop_design.py"],
             cwd=REPO_ROOT,
             check=True,
             capture_output=True,
@@ -93,6 +111,8 @@ class MechanicalV03Test(unittest.TestCase):
             for mass in root.findall("link/inertial/mass")
         )
         self.assertAlmostEqual(actual_total, expected_total, places=6)
+        self.assertAlmostEqual(sum(mass_model["groups_kg"].values()), mass_model["total_kg"], places=3)
+        self.assertEqual(mass_model["task_mass_cases_kg"]["empty_robot"], 7.379)
 
     def test_isaac_yaml_is_the_importer_source(self) -> None:
         spec = importlib.util.spec_from_file_location("hold_flow_isaac_import", IMPORT_SCRIPT)
