@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source": {
     "repository": "https://github.com/mmporong/jdamr_cube_ros",
     "commit": "8204ffde34985fa7984fe4e6093801ff3897432c"
@@ -14,7 +14,13 @@
     "base_frame": "base_footprint"
   },
   "hardware": {
-    "motor_and_controller_reuse_confirmed": false,
+    "user_plan_confirmed_on": "2026-09-13",
+    "target_motor_same_model_confirmed": true,
+    "target_motor_origin": "different_chassis",
+    "target_left_id": null,
+    "target_right_id": null,
+    "controller_reuse_confirmed": true,
+    "pi_reuse_confirmed": true,
     "source_motor": "STS3215-C018",
     "source_left_id": 2,
     "source_right_id": 1,
@@ -23,6 +29,7 @@
     "source_servo_bus_baud": 1000000,
     "source_lidar": "YDLIDAR G4",
     "target_design_lidar": "ROBOTIS LDS-03",
+    "planned_lidar": "YDLIDAR G4",
     "installed_lidar": null,
     "measured_lidar_tf": null,
     "measured_transport_footprint": null

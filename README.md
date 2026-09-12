@@ -6,7 +6,7 @@
 
 - 시작: 2026-08-19
 - 현행 태스크 확정: 2026-09-07
-- 최종 문서 갱신: 2026-09-11
+- 최종 문서 갱신: 2026-09-13
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
 - 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
@@ -16,6 +16,16 @@
 - 팀 보고: [무선 운용·SLAM·PLANNED·ACT 비교](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md)
 - IL 실행 인계: [양팔 수집·비공개 Hub 업로드·다른 PC ACT 학습](docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)
 - 세션 인계: [양팔 로봇 프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md)
+
+## 다음 세션 최우선 작업 · 2026-09-13
+
+사용자 확정 순서는 **기존 차체 임시 장착 RGB-D 단독 Visual SLAM 검증 → LiDAR·RGB-D 역할 분담 통합**이다.
+새 양팔 차체 완성을 기다리지 않고 카메라 입력·보정·기록 재생부터 시작한다. 이 항목은 다음
+작업 순서이며 구현 완료를 뜻하지 않는다. 실제 베이스·팔 이동은 별도 실행 요청 범위에서만 한다.
+
+- [RGB-D → LiDAR 통합 우선순위·다음 세션 인계](docs/20260913_RGBD_SLAM_우선순위와_다음세션.md)
+- [기존 JD-AMR 이식 기준선과 하드웨어 확인 사항](docs/20260912_JDAMR_SLAM_실기체이식.md)
+
 
 ## 한 줄 정의
 
