@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "https://github.com/mmporong/jdamr_cube_ros",
+    "commit": "8204ffde34985fa7984fe4e6093801ff3897432c"
+  },
+  "target_design": {
+    "source": "design/mechanical/hold_flow_mechanical_v0_3.yaml",
+    "wheel_radius_initial_m": 0.0329,
+    "wheel_separation_geometric_m": 0.320,
+    "wheel_separation_effective_m": null,
+    "chassis_xy_m": [0.340, 0.450],
+    "footprint_scope": "chassis_only_not_arms_or_payload",
+    "base_frame": "base_footprint"
+  },
+  "hardware": {
+    "motor_and_controller_reuse_confirmed": false,
+    "source_motor": "STS3215-C018",
+    "source_left_id": 2,
+    "source_right_id": 1,
+    "source_counts_per_rev": 4096,
+    "source_host_uart_baud": 115200,
+    "source_servo_bus_baud": 1000000,
+    "source_lidar": "YDLIDAR G4",
+    "target_design_lidar": "ROBOTIS LDS-03",
+    "installed_lidar": null,
+    "measured_lidar_tf": null,
+    "measured_transport_footprint": null
+  },
+  "software": {
+    "mapping_backend": "cartographer",
+    "navigation": "saved_map_amcl_nav2",
+    "command_chain": ["controller", "velocity_smoother", "collision_monitor", "base_driver"],
+    "discovery_range": "LOCALHOST",
+    "physical_motion_enabled": false,
+    "synthetic_traction_guard_for_physical_robot": false
+  }
+}
