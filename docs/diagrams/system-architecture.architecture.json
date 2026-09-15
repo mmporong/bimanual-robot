@@ -1,0 +1,386 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "양팔 물 서빙 로봇 시스템 구조",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "command-path",
+        "label": "명령 경로",
+        "focus": [
+          "web",
+          "mission",
+          "router",
+          "plan",
+          "mux",
+          "safe",
+          "arm"
+        ],
+        "note": "웹 요청이 팔 하드웨어에 닿기까지 반드시 지나는 단일 경로입니다."
+      },
+      {
+        "id": "perception",
+        "label": "인지 입력",
+        "focus": [
+          "cam",
+          "align",
+          "fill",
+          "router"
+        ],
+        "note": "인지 계층은 판단 재료만 올리고 명령을 직접 내리지 않습니다."
+      },
+      {
+        "id": "navigation",
+        "label": "주행과 기록",
+        "focus": [
+          "mission",
+          "nav",
+          "base",
+          "log"
+        ],
+        "note": "이동 계통과 하나의 run_id로 묶이는 기록 계통입니다."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "cam",
+      "type": "external",
+      "label": "Astra S",
+      "sublabel": "RGB-D",
+      "pos": [
+        160,
+        110
+      ],
+      "size": [
+        120,
+        56
+      ]
+    },
+    {
+      "id": "align",
+      "type": "backend",
+      "label": "로컬 정렬",
+      "sublabel": "작업대 기준",
+      "pos": [
+        340,
+        110
+      ],
+      "size": [
+        130,
+        56
+      ]
+    },
+    {
+      "id": "fill",
+      "type": "backend",
+      "label": "YOLO 액면·흘림",
+      "sublabel": "물 양 판정",
+      "pos": [
+        510,
+        110
+      ],
+      "size": [
+        150,
+        56
+      ]
+    },
+    {
+      "id": "web",
+      "type": "external",
+      "label": "웹 요청",
+      "sublabel": "주문 접수",
+      "pos": [
+        20,
+        300
+      ],
+      "size": [
+        110,
+        56
+      ]
+    },
+    {
+      "id": "mission",
+      "type": "backend",
+      "label": "미션 상태기계",
+      "sublabel": "ROS 2",
+      "pos": [
+        160,
+        300
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "phase router",
+      "sublabel": "전략 선택",
+      "pos": [
+        340,
+        300
+      ],
+      "size": [
+        130,
+        56
+      ]
+    },
+    {
+      "id": "plan",
+      "type": "backend",
+      "label": "PLANNED",
+      "sublabel": "비전·IK·폐루프",
+      "pos": [
+        510,
+        215
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "act",
+      "type": "backend",
+      "label": "ACT",
+      "sublabel": "노트북 GPU 추론",
+      "pos": [
+        510,
+        385
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "mux",
+      "type": "messagebus",
+      "label": "command mux",
+      "sublabel": "lease 중재",
+      "pos": [
+        690,
+        300
+      ],
+      "size": [
+        130,
+        56
+      ]
+    },
+    {
+      "id": "safe",
+      "type": "security",
+      "label": "안전 게이트",
+      "sublabel": "최종 차단",
+      "pos": [
+        860,
+        300
+      ],
+      "size": [
+        120,
+        56
+      ]
+    },
+    {
+      "id": "arm",
+      "type": "external",
+      "label": "양팔 하드웨어",
+      "sublabel": "좌·우 암",
+      "pos": [
+        1020,
+        300
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "nav",
+      "type": "backend",
+      "label": "Nav2",
+      "sublabel": "SLAM · AMCL",
+      "pos": [
+        160,
+        480
+      ],
+      "size": [
+        130,
+        56
+      ]
+    },
+    {
+      "id": "base",
+      "type": "external",
+      "label": "베이스 제어",
+      "sublabel": "구동륜",
+      "pos": [
+        340,
+        480
+      ],
+      "size": [
+        130,
+        56
+      ]
+    },
+    {
+      "id": "log",
+      "type": "database",
+      "label": "미션 로그",
+      "sublabel": "episode · failure",
+      "pos": [
+        510,
+        480
+      ],
+      "size": [
+        150,
+        56
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "인지 계층 — 명령을 내리지 않는다",
+      "wraps": [
+        "cam",
+        "align",
+        "fill"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "command lease · 한 번에 하나만",
+      "wraps": [
+        "plan",
+        "act"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "단일 중재 경로",
+      "wraps": [
+        "mux",
+        "safe"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "order",
+      "from": "web",
+      "to": "mission",
+      "variant": "emphasis"
+    },
+    {
+      "id": "dispatch",
+      "from": "mission",
+      "to": "router",
+      "variant": "emphasis"
+    },
+    {
+      "id": "to-planned",
+      "from": "router",
+      "to": "plan"
+    },
+    {
+      "id": "to-act",
+      "from": "router",
+      "to": "act"
+    },
+    {
+      "id": "planned-cmd",
+      "from": "plan",
+      "to": "mux"
+    },
+    {
+      "id": "act-cmd",
+      "from": "act",
+      "to": "mux"
+    },
+    {
+      "id": "arbitrated",
+      "from": "mux",
+      "to": "safe",
+      "variant": "emphasis"
+    },
+    {
+      "id": "actuate",
+      "from": "safe",
+      "to": "arm",
+      "label": "승인된 명령",
+      "variant": "emphasis",
+      "labelDy": -22
+    },
+    {
+      "id": "sense-align",
+      "from": "cam",
+      "to": "align"
+    },
+    {
+      "id": "sense-fill",
+      "from": "cam",
+      "to": "fill",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "align-fix",
+      "from": "align",
+      "to": "mission",
+      "label": "정렬 보정",
+      "fromSide": "left",
+      "toSide": "top"
+    },
+    {
+      "id": "fill-judgement",
+      "from": "fill",
+      "to": "router",
+      "label": "물 양",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "navigate",
+      "from": "mission",
+      "to": "nav",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "drive",
+      "from": "nav",
+      "to": "base"
+    },
+    {
+      "id": "record",
+      "from": "base",
+      "to": "log",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "단일 명령 경로",
+      "items": [
+        "인지 계층은 actuator 명령을 직접 내리지 않는다",
+        "PLANNED · ACT · TELEOP 가운데 하나만 팔 command lease를 갖는다",
+        "모든 명령은 같은 중재기와 안전 게이트를 지난다"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "추적 단위",
+      "items": [
+        "하나의 request_id / run_id로 접수부터 도킹까지 연결한다",
+        "phase별 결과와 물 양, 실패 사유를 같은 키에 묶는다",
+        "요청 성공은 HTTP 200이 아니라 CHARGING 복귀 또는 명시적 실패다"
+      ]
+    }
+  ]
+}
