@@ -35,6 +35,14 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(lidar_tf['child_frame'], 'laser_link')
         self.assertEqual(lidar_tf['translation_m'], [-0.010, 0.000, 0.150])
         self.assertEqual(lidar_tf['rpy_rad'], [0.000, 0.000, 3.141592653589793])
+        base = hardware['measured_base_footprint']
+        self.assertEqual(base['base_frame'], 'base_footprint')
+        self.assertEqual(base['scope'], 'assembled_lower_frame_and_wheels_only')
+        self.assertEqual(base['front_m'] - base['rear_m'], base['frame_length_m'])
+        self.assertEqual(base['left_m'] - base['right_m'], base['wheel_outer_width_m'])
+        self.assertAlmostEqual(base['wheel_outer_width_m'] - base['frame_width_m'], 0.090)
+        self.assertEqual(base['front_m'], 0.065)
+        self.assertEqual(base['measurement_date'], '2026-09-15')
         self.assertIsNone(hardware['measured_transport_footprint'])
         self.assertEqual(
             contract['target_design']['wheel_separation_geometric_m'], 0.510)

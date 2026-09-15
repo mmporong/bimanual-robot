@@ -14,6 +14,23 @@
 - 기존 YDLIDAR G4도 사용하며 장착 높이·위치가 변경될 수 있다. 방향을 포함한 센서 TF를 최종 실측한다.
 - `config/navigation/jdamr_migration.json`의 schema v2는 과거의 모터·보드 재사용 결합 필드를 분리해 동일 모델 모터·기존 보드/Pi 사용 계획과 `planned_lidar=YDLIDAR G4`를 기록한다. 목표 모터 ID·실장 LiDAR·실측 TF·외곽은 `null`, `physical_motion_enabled=false`는 유지한다. 계획 확인은 장착 검증이나 이동 승인이 아니다. 내보내기 도구의 하드웨어 실행 기능은 추가하지 않는다.
 
+## 2026-09-15 하단 차체 외곽 갱신
+
+사용자가 확인한 [하단 프레임 실물 치수](20260909_하단프레임_실물치수_모델링기록.md)는
+좌우 450 mm, 전후 340 mm이며 좌우 바퀴 최외측을 포함한 폭은 540 mm다.
+오늘 사용자가 바퀴축을 앞 끝에서 65 mm 뒤로 실측해 과거 문서의 60 mm보다 우선한다.
+따라서 바퀴축 중앙의 `base_footprint` 기준 **베이스 외곽**은
+전방 `+0.065 m`, 후방 `-0.275 m`, 좌우 `±0.270 m`다.
+`config/navigation/jdamr_migration.json`의 `measured_base_footprint`에 출처와 유효 범위를 기록했다.
+팔·선반·적재물의 운반 외피는 아직 측정하지 않았으므로
+`measured_transport_footprint=null`을 유지한다. 이 베이스 외곽만으로
+Nav2의 실기체 운반 자세 충돌 회피가 검증되었다고 보지 않는다.
+
+기존 JD-AMR Nav2 footprint는 좌우 `±0.20 m`이고 Collision Monitor StopZone은
+좌우 `±0.25 m`다. 새 바퀴는 `±0.27 m`까지 있으므로 어느 쪽도 새 차체의
+실기체 안전 설정으로 재사용하지 않는다. 정지거리·스캔 지연·운반 외피를
+검증하기 전에는 Nav2와 Collision Monitor의 자동 주행을 활성화하지 않는다.
+
 ## 기준선 재현
 
 원본은 `mmporong/jdamr_cube_ros`의 `8204ffde34985fa7984fe4e6093801ff3897432c`다.
