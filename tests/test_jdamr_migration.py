@@ -27,10 +27,21 @@ class MigrationTest(unittest.TestCase):
         self.assertTrue(hardware['controller_reuse_confirmed'])
         self.assertTrue(hardware['pi_reuse_confirmed'])
         self.assertEqual(hardware['planned_lidar'], 'YDLIDAR G4')
-        for field in ('target_left_id', 'target_right_id', 'installed_lidar',
-                      'measured_lidar_tf', 'measured_transport_footprint'):
-            self.assertIsNone(hardware[field], field)
+        self.assertEqual(hardware['target_left_id'], 2)
+        self.assertEqual(hardware['target_right_id'], 1)
+        self.assertEqual(hardware['installed_lidar'], 'YDLIDAR G4')
+        lidar_tf = hardware['measured_lidar_tf']
+        self.assertEqual(lidar_tf['parent_frame'], 'base_footprint')
+        self.assertEqual(lidar_tf['child_frame'], 'laser_link')
+        self.assertEqual(lidar_tf['translation_m'], [-0.010, 0.000, 0.150])
+        self.assertEqual(lidar_tf['rpy_rad'], [0.000, 0.000, 3.141592653589793])
+        self.assertIsNone(hardware['measured_transport_footprint'])
+        self.assertEqual(
+            contract['target_design']['wheel_separation_geometric_m'], 0.510)
         self.assertIsNone(contract['target_design']['wheel_separation_effective_m'])
+        self.assertTrue(
+            contract['physical_verification']['motor_side_mapping_passed'])
+        self.assertEqual(contract['software']['discovery_range'], 'SUBNET')
         self.assertFalse(contract['software']['physical_motion_enabled'])
         self.assertFalse(contract['software']['synthetic_traction_guard_for_physical_robot'])
 

@@ -7,7 +7,7 @@
   "target_design": {
     "source": "design/mechanical/hold_flow_mechanical_v0_3.yaml",
     "wheel_radius_initial_m": 0.0329,
-    "wheel_separation_geometric_m": 0.320,
+    "wheel_separation_geometric_m": 0.510,
     "wheel_separation_effective_m": null,
     "chassis_xy_m": [0.340, 0.450],
     "footprint_scope": "chassis_only_not_arms_or_payload",
@@ -17,8 +17,8 @@
     "user_plan_confirmed_on": "2026-09-13",
     "target_motor_same_model_confirmed": true,
     "target_motor_origin": "different_chassis",
-    "target_left_id": null,
-    "target_right_id": null,
+    "target_left_id": 2,
+    "target_right_id": 1,
     "controller_reuse_confirmed": true,
     "pi_reuse_confirmed": true,
     "source_motor": "STS3215-C018",
@@ -30,15 +30,28 @@
     "source_lidar": "YDLIDAR G4",
     "target_design_lidar": "ROBOTIS LDS-03",
     "planned_lidar": "YDLIDAR G4",
-    "installed_lidar": null,
-    "measured_lidar_tf": null,
+    "installed_lidar": "YDLIDAR G4",
+    "measured_lidar_tf": {
+      "parent_frame": "base_footprint",
+      "child_frame": "laser_link",
+      "translation_m": [-0.010, 0.000, 0.150],
+      "rpy_rad": [0.000, 0.000, 3.141592653589793],
+      "measurement_date": "2026-09-15",
+      "measurement_basis": "wheel_axis_center_and_lidar_scan_plane"
+    },
     "measured_transport_footprint": null
+  },
+  "physical_verification": {
+    "verified_on": "2026-09-15",
+    "operator_observation": ["forward", "reverse", "left_turn", "right_turn"],
+    "motor_side_mapping_passed": true,
+    "slam_geometry_calibration_pending": true
   },
   "software": {
     "mapping_backend": "cartographer",
     "navigation": "saved_map_amcl_nav2",
     "command_chain": ["controller", "velocity_smoother", "collision_monitor", "base_driver"],
-    "discovery_range": "LOCALHOST",
+    "discovery_range": "SUBNET",
     "physical_motion_enabled": false,
     "synthetic_traction_guard_for_physical_robot": false
   }
