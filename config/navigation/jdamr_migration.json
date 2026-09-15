@@ -63,6 +63,15 @@
     "motor_side_mapping_passed": true,
     "slam_geometry_calibration_pending": true
   },
+  "base_nav2_candidate_policy": {
+    "claim_scope": "offline_base_only_review_not_physical_navigation_approval",
+    "footprint_padding_m": 0.020,
+    "maximum_forward_speed_mps": 0.080,
+    "maximum_angular_speed_radps": 0.300,
+    "stop_zone": {"front_m": 0.350, "rear_m": -0.380, "half_width_m": 0.350},
+    "slowdown_zone": {"front_m": 0.450, "rear_m": -0.450, "half_width_m": 0.400},
+    "scan_source_timeout_s": 0.300
+  },
   "software": {
     "mapping_backend": "cartographer",
     "navigation": "saved_map_amcl_nav2",

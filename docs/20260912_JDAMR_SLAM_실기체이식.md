@@ -31,6 +31,29 @@ Nav2의 실기체 운반 자세 충돌 회피가 검증되었다고 보지 않�
 실기체 안전 설정으로 재사용하지 않는다. 정지거리·스캔 지연·운반 외피를
 검증하기 전에는 Nav2와 Collision Monitor의 자동 주행을 활성화하지 않는다.
 
+`tools/build_base_nav2_candidate.py`는 원본 Nav2 YAML을 읽어 **검토용 파일**만 만든다.
+베이스 외곽에 후보 여유 20 mm를 더해 costmap footprint를
+`x=+0.085~-0.295 m`, `y=±0.290 m`로 설정하고 StopZone을
+`x=+0.350~-0.380 m`, `y=±0.350 m`로 확장한다. 정책값과 검증 범위는
+`config/navigation/jdamr_migration.json`의 `base_nav2_candidate_policy`에 둔다.
+기존 JD-AMR의 실제 Nav2 파일이나 파이 설정은 변경하지 않는다.
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/build_base_nav2_candidate.py \
+  --source "$HOME/jdamr_cube_ws/src/jdamr_cube_ros/jdamr_cube_navigation/config/nav2_params.yaml" \
+  --output "$HOME/jdamr_artifacts/new_base_nav2_review.yaml"
+```
+
+이 파일은 실차 자동 주행 승인 설정이 아니다. 기존 지도/Keepout이 새 폭에 맞는지,
+LiDAR 스캔 지연·손실 시 정지, 팔·선반·짐의 운반 외피, 실제 정지거리와
+TF 일치 여부를 각각 확인해야 한다. 후보 속도 `0.08 m/s`도 보정된 운용 속도가 아니다.
+또한 기존 `onboard_nav2_core.launch.py`의 `obstacle_base_candidate` 프로필은
+`base_obstacle_protection.yaml`에서 JD-AMR의 더 좁은 StopZone·SlowdownZone을
+YAML 위에 덮어쓴다. 따라서 생성된 후보 파일을 기존 프로필에 연결해도
+새 보호영역이 적용되지 않는다. 별도 새 차체 프로필과 런타임 파라미터 확인 전에는
+이 파일을 파이에 배포하거나 자동 주행에 사용하지 않는다.
+
 ## 기준선 재현
 
 원본은 `mmporong/jdamr_cube_ros`의 `8204ffde34985fa7984fe4e6093801ff3897432c`다.
