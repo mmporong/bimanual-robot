@@ -100,7 +100,11 @@ phase별 결과, 물 양, 실패, 도킹과 최종 `CHARGING` 또는 명시적 �
 ## 시스템 구조
 
 <p align="center">
-  <img src="docs/assets/system-architecture.png" width="900" alt="웹 요청이 미션 상태기계와 phase router를 지나 command mux와 안전 게이트를 통과해 양팔 하드웨어에 닿는 구조. 인지 계층, command lease, 단일 중재 경로가 각각 경계로 묶여 있다">
+  <a href="https://raw.githack.com/mmporong/bimanual-robot/main/docs/assets/system-architecture.html">
+    <img src="docs/assets/system-architecture.png" width="900" alt="웹 요청이 미션 상태기계와 phase router를 지나 command mux와 안전 게이트를 통과해 양팔 하드웨어에 닿는 구조. 인지 계층, command lease, 단일 중재 경로가 각각 경계로 묶여 있다">
+  </a>
+  <br>
+  <sub>그림을 누르면 <a href="https://raw.githack.com/mmporong/bimanual-robot/main/docs/assets/system-architecture.html">조작 가능한 도식</a>이 열린다 — 노드를 누르면 연결된 경로만 남고, 상단 세 갈래로 명령 경로·인지 입력·주행 계통을 따로 볼 수 있다.</sub>
 </p>
 
 인지 계층은 actuator 명령을 직접 내리지 않는다. `PLANNED`, `ACT`, `TELEOP` 가운데 하나만
