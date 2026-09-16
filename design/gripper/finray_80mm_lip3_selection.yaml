@@ -1,0 +1,52 @@
+schema_version: "1.0"
+decision_date: 2026-09-16
+status: selected_for_left_hand_printed_pair_physical_validation_pending
+
+role:
+  arm: left
+  task: cup_pick_carry_and_place
+  actuator: stock_so101_gripper_servo_and_linkage
+  change_scope: replace_contact_fingers_only
+
+selected_finger:
+  name: SO101_TPU_FinRay_80mm_lip3_reinforced
+  quantity: 2
+  material: TPU_95A
+  measured_stl_envelope_mm: [80.0, 24.75, 24.09]
+  finger_length_mm: 80.0
+  tip_lip_mm: 3.0
+  source_filename: SO101_finray_80mm_lip3_reinforced_TPU95A.stl
+  source_sha256: 93d2fd90adc2b6b045f3cca8f153ed68d5431e301bcc370924c75d72f82b6373
+  source_status: user_selected_local_asset
+  exact_source_url_status: not_recorded
+  license_status: not_verified
+  repository_policy: do_not_commit_source_mesh_or_derived_gcode_until_license_is_verified
+
+print_baseline:
+  printer: Creality_Ender_3_S1_0_4mm
+  orientation: X_plus_90_length_parallel_to_bed
+  pair_on_one_plate: true
+  layer_height_mm: 0.2
+  wall_loops: 3
+  sparse_infill_percent: 20
+  support: normal_auto
+  support_build_plate_only: true
+  brim_outer_mm: 8
+  nozzle_temperature_c: 240
+  bed_temperature_c: 45
+  slicer_estimated_time: 5h_18m_44s
+  gcode_sha256: 6aa78bc5797605230d812ebc999e8c3e4319371884f1fd93377954c6bff3a304
+  artifact_location: local_only_under_HOME_Downloads
+
+validation_gates:
+  - printed_pair_mass
+  - mount_hole_and_servo_linkage_fit
+  - full_open_close_without_self_collision
+  - dry_cup_static_hold
+  - wet_cup_slip_and_tip_lip_retention
+  - shelf_pick_and_place_repeatability
+
+control_notes:
+  lerobot_gripper_protection: keep_enabled_for_left_stock_actuator
+  recalibration_required_after_installation: true
+  urdf_geometry_status: stock_jaw_proxy_until_license_or_project_authored_finray_proxy_is_available

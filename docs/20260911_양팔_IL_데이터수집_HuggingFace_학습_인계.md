@@ -163,7 +163,7 @@ python -m pip install -e ".[core_scripts,feetech]" jsonschema
 
 ### 3.3 양팔 그리퍼 패치
 
-현행 하드웨어는 왼팔 스톡 그리퍼, 오른팔 ggao50 평행그리퍼다. 오른팔은 LeRobot 기본
+현행 하드웨어는 왼팔 스톡 SO-101 구동부에 80 mm·립 3 mm TPU 95A FinRay 손가락 두 개를 장착하는 구성이고, 오른팔은 ggao50 평행그리퍼다. 왼팔은 손가락 형상만 바뀌므로 스톡 구동부의 LeRobot 보호 설정을 유지한다. 오른팔은 LeRobot 기본
 그리퍼 보호값으로 닫히지 않을 수 있고, 양팔 wrapper는 좌우 `gripper_protection` 설정을
 전달하도록 패치해야 한다.
 
@@ -440,7 +440,7 @@ AI는 다음 필드가 실제 값으로 채워지고 commit SHA가 정해지기 
 - 팔 작업 반경에 사람, 케이블, 컵, 물통 외 장애물이 없다.
 - 전원을 즉시 끌 담당자가 팔 옆에 있다.
 - 두 리더 팔과 팔로워 팔의 시작 자세가 비슷하고 그리퍼는 열려 있다.
-- 왼팔 스톡 그리퍼에만 `gripper_protection=true`를 사용한다.
+- 왼팔 스톡 구동부+FinRay 손가락에만 `gripper_protection=true`를 사용한다. 장착 뒤 캘리브레이션 범위는 다시 기록한다.
 - 오른팔 ggao50에는 `gripper_protection=true`를 넣지 않는다.
 - 종료 시 토크가 풀려 팔이 떨어질 수 있으므로 받침 위치가 준비됐다.
 
