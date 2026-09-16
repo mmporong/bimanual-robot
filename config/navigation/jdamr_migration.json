@@ -55,13 +55,54 @@
       "axle_offset_source": "2026-09-15 사용자 실측: 앞 끝에서 65 mm",
       "supersedes_prior_axle_offset_m": 0.060
     },
+    "rgbd_connection_plan": {
+      "model": "Orbbec Astra S",
+      "interface": "USB 2.0",
+      "bench_poc_host": "development_laptop_direct_usb",
+      "mobile_host": "Raspberry Pi 4B USB-A",
+      "mobile_processing_split": {
+        "raspberry_pi": ["camera_driver", "timestamp", "ROS topic publish"],
+        "development_laptop": ["recording", "RTAB-Map", "3D map generation", "analysis"]
+      },
+      "observed_pi_topology": {
+        "observed_on": "2026-09-16",
+        "base_controller": "/dev/ttyS0 via 40-pin header UART; no USB port",
+        "lidar": "/dev/ttyUSB0 via Silicon Labs CP210x; USB 12 Mbps",
+        "enumerated_external_usb_devices": 1,
+        "usb_a_ports_total": 4,
+        "usb_a_ports_used_by_current_ros_hardware": 1,
+        "usb_a_ports_available": 3,
+        "rgbd_usb_a_port_available": true
+      },
+      "port_identity_policy": "pin /dev/v4l/by-path after enumeration",
+      "usb_note": "A USB 3.0 socket is compatible but the Astra S link remains USB 2.0",
+      "forbidden_connections": ["General Driver servo bus", "motor power rail", "LiDAR UART"]
+    },
     "measured_transport_footprint": null
   },
   "physical_verification": {
-    "verified_on": "2026-09-15",
+    "verified_on": "2026-09-16",
     "operator_observation": ["forward", "reverse", "left_turn", "right_turn"],
     "motor_side_mapping_passed": true,
-    "slam_geometry_calibration_pending": true
+    "slam_geometry_calibration_pending": true,
+    "manual_payload_trial": {
+      "observed_on": "2026-09-16",
+      "added_payload_kg": 5.0,
+      "added_payload_not_total_mass": true,
+      "drive_mode": "manual_web_teleop",
+      "surface": "indoor_level_floor",
+      "operator_observation": ["motion_completed", "no_obvious_speed_reduction"],
+      "result": "preliminary_pass",
+      "actual_base_mass_kg": null,
+      "total_test_mass_kg": null,
+      "command_speed_mps": null,
+      "duration_s": null,
+      "distance_m": null,
+      "motor_current_a": null,
+      "motor_temperature_c": null,
+      "battery_voltage_sag_v": null,
+      "claim_limit": "This is not a rated payload or continuous-duty validation"
+    }
   },
   "base_nav2_candidate_policy": {
     "claim_scope": "offline_base_only_review_not_physical_navigation_approval",

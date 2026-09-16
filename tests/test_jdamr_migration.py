@@ -49,6 +49,26 @@ class MigrationTest(unittest.TestCase):
         self.assertIsNone(contract['target_design']['wheel_separation_effective_m'])
         self.assertTrue(
             contract['physical_verification']['motor_side_mapping_passed'])
+        payload = contract['physical_verification']['manual_payload_trial']
+        self.assertEqual(payload['added_payload_kg'], 5.0)
+        self.assertTrue(payload['added_payload_not_total_mass'])
+        self.assertEqual(payload['result'], 'preliminary_pass')
+        self.assertIsNone(payload['actual_base_mass_kg'])
+        self.assertIsNone(payload['total_test_mass_kg'])
+        self.assertIn('not a rated payload', payload['claim_limit'])
+        rgbd = hardware['rgbd_connection_plan']
+        self.assertEqual(rgbd['model'], 'Orbbec Astra S')
+        self.assertEqual(rgbd['interface'], 'USB 2.0')
+        self.assertEqual(rgbd['bench_poc_host'], 'development_laptop_direct_usb')
+        self.assertEqual(rgbd['mobile_host'], 'Raspberry Pi 4B USB-A')
+        topology = rgbd['observed_pi_topology']
+        self.assertIn('/dev/ttyS0', topology['base_controller'])
+        self.assertIn('/dev/ttyUSB0', topology['lidar'])
+        self.assertEqual(topology['enumerated_external_usb_devices'], 1)
+        self.assertEqual(topology['usb_a_ports_total'], 4)
+        self.assertEqual(topology['usb_a_ports_available'], 3)
+        self.assertTrue(topology['rgbd_usb_a_port_available'])
+        self.assertIn('General Driver servo bus', rgbd['forbidden_connections'])
         self.assertEqual(contract['software']['discovery_range'], 'SUBNET')
         self.assertFalse(contract['software']['physical_motion_enabled'])
         self.assertFalse(contract['software']['synthetic_traction_guard_for_physical_robot'])
