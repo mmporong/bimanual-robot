@@ -92,14 +92,20 @@ def assert_xyz(actual: list[float], expected: list[float], tolerance: float = 1e
 def main() -> None:
     env = os.environ.copy()
     existing = env.get("AMENT_PREFIX_PATH", "")
-    package_prefix = REPO_ROOT / "install/hold_flow_description"
-    env["AMENT_PREFIX_PATH"] = str(package_prefix) + (":" + existing if existing else "")
     ros_python = Path("/opt/ros/jazzy/lib/python3.12/site-packages")
     if ros_python.is_dir():
         existing_python = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = str(ros_python) + (":" + existing_python if existing_python else "")
     with tempfile.TemporaryDirectory(prefix="hold_flow_urdf_") as temp_dir:
-        urdf_path = Path(temp_dir) / "hold_flow.urdf"
+        temp_root = Path(temp_dir)
+        package_prefix = temp_root / "prefix"
+        package_index = package_prefix / "share/ament_index/resource_index/packages"
+        package_index.mkdir(parents=True)
+        (package_index / "hold_flow_description").write_text("", encoding="utf-8")
+        package_share = package_prefix / "share/hold_flow_description"
+        package_share.symlink_to(PACKAGE_ROOT, target_is_directory=True)
+        env["AMENT_PREFIX_PATH"] = str(package_prefix) + (":" + existing if existing else "")
+        urdf_path = temp_root / "hold_flow.urdf"
         expanded_urdf = command_output(["xacro", str(XACRO.relative_to(REPO_ROOT))], env)
         urdf_path.write_text(expanded_urdf, encoding="utf-8")
         check = command_output(["check_urdf", str(urdf_path)], env)
