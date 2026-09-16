@@ -1,0 +1,19 @@
+[Unit]
+Description=JD-AMR Orbbec Astra S depth camera
+After=network-online.target jdamr-base.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lim
+Environment=ROS_DOMAIN_ID=12
+Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+Environment=FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+WorkingDirectory=/home/lim/astra_ws
+ExecStart=/bin/bash -lc 'source /opt/ros/jazzy/setup.bash; source /home/lim/astra_ws/install/setup.bash; exec ros2 launch astra_camera astra.launch.xml enable_color:=false enable_ir:=false enable_point_cloud:=false depth_width:=320 depth_height:=240 depth_fps:=30'
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

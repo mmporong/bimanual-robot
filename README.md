@@ -331,7 +331,7 @@ bimanual-robot/
 ├── research/      외부 근거와 프로젝트 적용 판정
 ├── data/          episode·failure 계약과 외부 데이터 인덱스
 ├── src/           ROS 2·IK·ACT·Isaac Sim 구현 경계와 코드
-├── tools/         계산·검증·데이터 도구
+├── tools/         계산·검증·데이터 도구와 AMMR 실기체 센서 관제
 ├── PROGRESS.md    날짜별 완료 증거와 남은 작업
 └── CLAUDE.md      저장소 작업 규칙
 ```
@@ -346,6 +346,7 @@ bimanual-robot/
 | ROS 2 패키지·인터페이스 경계 | [`src/README.md`](src/README.md) |
 | 기구 계산 | [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) |
 | URDF·Isaac Sim·JDAMR 구동계 | [450×340 mm 4분할 상판 모델](docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md) |
+| Astra S·LiDAR 실시간 관제 | [`tools/ammr_dashboard/README.md`](tools/ammr_dashboard/README.md) |
 | CAD·출력물 | [`design/cad/README.md`](design/cad/README.md) |
 | 실패 저장·재시험·학습 사용 | [`data/failures/README.md`](data/failures/README.md) |
 | 전체 변경 증거 | [`PROGRESS.md`](PROGRESS.md) |

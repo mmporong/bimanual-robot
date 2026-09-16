@@ -1,0 +1,20 @@
+[Unit]
+Description=JD-AMR live sensor dashboard
+After=network-online.target jdamr-base.service jdamr-astra-camera.service
+Wants=network-online.target jdamr-astra-camera.service
+
+[Service]
+Type=simple
+User=lim
+Environment=PYTHONUNBUFFERED=1
+Environment=ROS_DOMAIN_ID=12
+Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+Environment=FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+WorkingDirectory=/home/lim/ammr_dashboard
+ExecStart=/bin/bash -lc 'source /opt/ros/jazzy/setup.bash; exec /usr/bin/python3 /home/lim/ammr_dashboard/ammr_dashboard.py --port 8090'
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=8
+
+[Install]
+WantedBy=multi-user.target
