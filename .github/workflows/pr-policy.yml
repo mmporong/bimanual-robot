@@ -1,0 +1,69 @@
+name: PR policy
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: 위험도 분류와 정책 안내
+        shell: bash
+        run: |
+          files=$(gh pr view "$PR_NUMBER" --json files --jq '.files[].path')
+          risk=medium
+          if printf '%s\n' "$files" | grep -Eq '^(firmware/|tools/servo/)'; then
+            risk=hardware
+          elif printf '%s\n' "$files" | grep -Eq '^\.github/'; then
+            risk=automation
+          elif printf '%s\n' "$files" | grep -Eq '^(src/|design/mechanical/)'; then
+            risk=high
+          elif [ -n "$files" ] && printf '%s\n' "$files" | grep -Evq '^(docs/|README\.md$)'; then
+            risk=medium
+          else
+            risk=low
+          fi
+
+          for label in risk:low risk:medium risk:high risk:hardware risk:automation; do
+            gh pr edit "$PR_NUMBER" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+          gh pr edit "$PR_NUMBER" --add-label "risk:$risk"
+
+          marker='<!-- hold-flow-pr-bot -->'
+          if [ "$risk" = low ]; then
+            decision='필수 검사가 통과하면 squash 방식으로 자동 병합합니다.'
+          else
+            decision='자동 병합 대상이 아닙니다. 검증 결과를 확인한 뒤 병합해야 합니다.'
+          fi
+          body="$marker
+          위험도: \`risk:$risk\`
+
+          $decision
+
+          실물 로봇 명령은 실행하지 않습니다."
+          comment_id=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$comment_id" -f body="$body" >/dev/null
+          else
+            gh api --method POST "repos/$GH_REPO/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+          fi
+          is_draft=$(gh pr view "$PR_NUMBER" --json isDraft --jq '.isDraft')
+          if [ "$risk" = low ] && [ "$is_draft" = false ]; then
+            gh pr merge "$PR_NUMBER" --auto --squash
+          fi

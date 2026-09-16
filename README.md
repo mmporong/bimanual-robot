@@ -17,6 +17,25 @@
 - IL 실행 인계: [양팔 수집·비공개 Hub 업로드·다른 PC ACT 학습](docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)
 - 세션 인계: [양팔 로봇 프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md)
 
+<!-- AUTO:PROJECT-STATUS:START -->
+## 단일 원본 자동 요약
+
+> 아래 표는 기계 YAML과 왼손 그리퍼 선정 매니페스트에서 생성한다. 수정하려면 표가 아니라 연결된 원본 파일을 고친다.
+
+| 항목 | 현행 값 |
+|---|---|
+| 기계 개정 | `2026-09-10_full_size_upper_frame_split_printed_deck` |
+| 상·하부 프레임 | 450×340 mm |
+| 상판 높이 | 720 mm |
+| 왼손 | SO-101 스톡 구동부 + 80 mm·립 3 mm TPU 95A FinRay 2개 |
+| 오른손 | `ggao50_SO101_Parallel_Gripper` |
+| RGB-D | Orbbec_Astra_S, 상판 위 250 mm |
+| 베이스 | differential_two_wheel_two_ball_caster, Feetech_STS3215_C018_12V |
+| 모델 상태 | `simulation_model_ready_physical_measurements_pending` |
+
+원본: [`hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml), [`finray_80mm_lip3_selection.yaml`](design/gripper/finray_80mm_lip3_selection.yaml)
+<!-- AUTO:PROJECT-STATUS:END -->
+
 ## 다음 세션 최우선 작업 · 2026-09-14
 
 사용자 확정 순서는 **같은 모델의 다른 바퀴 모터 이식 → 기본 주행 검증 → SLAM → LiDAR·RGB-D 역할 분담 통합**이다.
