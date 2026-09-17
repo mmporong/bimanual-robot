@@ -112,6 +112,86 @@ def finite_or_none(value: float) -> float | None:
     return round(value, 3) if math.isfinite(value) else None
 
 
+def _pair_set(pairs: list[list[str]]) -> set[tuple[str, str]]:
+    return {tuple(pair) for pair in pairs}
+
+
+def find_monotonic_recovery(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    """Find the first safe sample when the path only escapes existing contacts.
+
+    A recovery path is intentionally stricter than an ordinary path.  The initial
+    state may already violate a joint limit or touch the table, but every sampled
+    step must improve the joint-limit margin, must not introduce a new collision
+    pair, and must not re-enter a violation after becoming safe.
+    """
+    if not samples or not samples[0]["violates"]:
+        return {
+            "required": False,
+            "ready_for_explicit_motion_approval": False,
+            "reason": "시작 상태가 정상 경로 게이트를 이미 통과함",
+        }
+
+    first = samples[0]
+    initial_pairs = (
+        _pair_set(first["cross_arm_collision_pairs"])
+        | _pair_set(first["self_collision_pairs"])
+        | _pair_set(first["structure_collision_pairs"])
+    )
+    previous_margin = float(first["joint_limit_margin_deg"])
+    previous_collision_count = len(initial_pairs)
+    safe_index: int | None = None
+    reasons: list[str] = []
+
+    for sample in samples[1:]:
+        current_pairs = (
+            _pair_set(sample["cross_arm_collision_pairs"])
+            | _pair_set(sample["self_collision_pairs"])
+            | _pair_set(sample["structure_collision_pairs"])
+        )
+        margin = float(sample["joint_limit_margin_deg"])
+        if not current_pairs.issubset(initial_pairs):
+            reasons.append(f"sample {sample['sample']}: 새 충돌 쌍 발생")
+            break
+        if len(current_pairs) > previous_collision_count:
+            reasons.append(f"sample {sample['sample']}: 충돌 쌍 수 증가")
+            break
+        if margin + 1e-6 < previous_margin:
+            reasons.append(f"sample {sample['sample']}: 관절 한계 여유 감소")
+            break
+        previous_collision_count = len(current_pairs)
+        previous_margin = margin
+        if not sample["violates"]:
+            safe_index = int(sample["sample"])
+            break
+
+    if safe_index is None:
+        return {
+            "required": True,
+            "ready_for_explicit_motion_approval": False,
+            "reason": reasons[0] if reasons else "감사 구간 안에서 안전 상태에 도달하지 못함",
+        }
+
+    if any(sample["violates"] for sample in samples[safe_index + 1:]):
+        return {
+            "required": True,
+            "ready_for_explicit_motion_approval": False,
+            "reason": "안전 상태 도달 뒤 위반이 다시 발생함",
+        }
+
+    target = samples[safe_index]
+    start = np.asarray(samples[0]["joint_deg"], dtype=float)
+    target_deg = np.asarray(target["joint_deg"], dtype=float)
+    return {
+        "required": True,
+        "ready_for_explicit_motion_approval": True,
+        "reason": "기존 접촉만 단계적으로 해소하고 새 충돌 없이 안전 상태에 도달함",
+        "safe_sample": safe_index,
+        "target_joint_deg": [round(float(value), 3) for value in target_deg],
+        "maximum_joint_delta_deg": round(float(np.max(np.abs(target_deg - start))), 3),
+        "joint_limit_margin_deg": round(float(target["joint_limit_margin_deg"]), 3),
+    }
+
+
 def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: list[float],
                      max_step_deg: float, minimum_margin_deg: float) -> dict[str, Any]:
     if plan.get("motion_command_emitted") is not False:
@@ -140,6 +220,7 @@ def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: li
     ]
 
     findings = []
+    sample_reports = []
     worst_margin = float("inf")
     minimum_cross = float("inf")
     minimum_gripper = float("inf")
@@ -174,8 +255,7 @@ def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: li
         polys = {name: poly for name, poly in polys.items() if poly is not None}
         self_hits = collision_hits(polys, self_pairs)
         structure_hits = collision_hits(polys, structure_pairs)
-        if margin < minimum_margin_deg or not clearance["passes"] or self_hits or structure_hits:
-            findings.append({
+        sample_report = {
                 "sample": index,
                 "phase": phase,
                 "joint_deg": [round(float(value), 3) for value in q_deg],
@@ -183,7 +263,15 @@ def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: li
                 "cross_arm_collision_pairs": clearance["triangle_collision_pairs_cross_arm"],
                 "self_collision_pairs": self_hits,
                 "structure_collision_pairs": structure_hits,
-            })
+            }
+        sample_report["violates"] = bool(
+            margin < minimum_margin_deg or not clearance["passes"] or self_hits or structure_hits
+        )
+        sample_reports.append(sample_report)
+        if sample_report["violates"]:
+            findings.append({key: value for key, value in sample_report.items() if key != "violates"})
+
+    recovery = find_monotonic_recovery(sample_reports)
 
     return {
         "mode": "trajectory_collision_audit_only",
@@ -203,6 +291,7 @@ def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: li
         "failed_sample_count": len(findings),
         "failed_samples": findings,
         "trajectory_ready_for_preview": not findings,
+        "start_recovery": recovery,
     }
 
 

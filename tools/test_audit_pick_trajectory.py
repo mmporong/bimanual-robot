@@ -51,3 +51,50 @@ def test_unready_ik_plan_is_rejected_before_sampling():
         assert "게이트" in str(exc)
     else:
         raise AssertionError("준비되지 않은 IK 계획이 허용됨")
+
+
+def _sample(index, margin, pairs=(), violates=True):
+    return {
+        "sample": index,
+        "joint_deg": [float(index)] * 5,
+        "joint_limit_margin_deg": margin,
+        "cross_arm_collision_pairs": [],
+        "self_collision_pairs": [list(pair) for pair in pairs],
+        "structure_collision_pairs": [],
+        "violates": violates,
+    }
+
+
+def test_monotonic_existing_contact_escape_produces_recovery_target():
+    samples = [
+        _sample(0, -2.0, (("a", "b"), ("c", "d"))),
+        _sample(1, 1.0, (("a", "b"),)),
+        _sample(2, 5.0, (), False),
+        _sample(3, 8.0, (), False),
+    ]
+    recovery = MODULE.find_monotonic_recovery(samples)
+    assert recovery["ready_for_explicit_motion_approval"] is True
+    assert recovery["safe_sample"] == 2
+    assert recovery["target_joint_deg"] == [2.0] * 5
+
+
+def test_recovery_rejects_a_new_collision_pair():
+    samples = [
+        _sample(0, -2.0, (("a", "b"),)),
+        _sample(1, 1.0, (("x", "y"),)),
+        _sample(2, 5.0, (), False),
+    ]
+    recovery = MODULE.find_monotonic_recovery(samples)
+    assert recovery["ready_for_explicit_motion_approval"] is False
+    assert "새 충돌" in recovery["reason"]
+
+
+def test_recovery_rejects_joint_margin_regression():
+    samples = [
+        _sample(0, -2.0, (("a", "b"),)),
+        _sample(1, -3.0, (("a", "b"),)),
+        _sample(2, 5.0, (), False),
+    ]
+    recovery = MODULE.find_monotonic_recovery(samples)
+    assert recovery["ready_for_explicit_motion_approval"] is False
+    assert "여유 감소" in recovery["reason"]

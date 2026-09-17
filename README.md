@@ -328,6 +328,34 @@ python3 tools/audit_pick_trajectory.py \
   --strict
 ```
 
+현재 상태가 이미 상판 접촉이나 hard limit 밖에 있으면 일반 파지 경로를 바로 실행하지 않는다.
+중립 자세 방향을 2도 간격으로 탐색해, 기존 접촉 쌍은 줄고 새 충돌은 생기지 않으며 관절 한계
+여유 5도를 확보하는 첫 복귀 목표를 별도로 계산한다.
+
+```bash
+python3 tools/plan_safe_recovery.py \
+  --state /tmp/holdflow_left_state.json \
+  --output /tmp/holdflow_left_recovery_plan.json \
+  --strict
+```
+
+복귀 실행기는 기본적으로 실물 상태만 읽는 dry-run이다. 계획 생성 뒤 자세가 12 tick 이상
+달라졌거나, 토크가 이미 켜져 있거나, 전체 이동이 220 tick을 넘으면 중단한다. 실행 시에도
+5개 관절을 최대 23 tick(약 2도) waypoint로 함께 움직이고 부하·온도·스톨을 감시한 뒤 항상
+토크를 해제한다. `--execute`는 해당 팔 동작을 명시적으로 승인한 경우에만 붙인다.
+
+```bash
+# 읽기 전용 실물 대조
+python3 tools/servo/execute_safe_recovery.py \
+  --plan /tmp/holdflow_left_recovery_plan.json \
+  --port /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B3E088747-if00
+
+# 모의 버스 전체 실행
+python3 tools/servo/execute_safe_recovery.py \
+  --plan /tmp/holdflow_left_recovery_plan.json \
+  --mock --execute
+```
+
 ## 구현 상태
 
 기술 이름이 적혀 있어도 구현 완료를 뜻하지 않는다.
@@ -336,7 +364,7 @@ python3 tools/audit_pick_trajectory.py \
 |---|---|---|
 | 기구 | 상·하부 450×340 mm, 바퀴 포함 폭 540 mm, 실차 기하 중심거리 510 mm, 추가 적재 5 kg 수동 평지 주행 예비 통과, 완성 모델 명목 빈 질량 7.379 kg | 실제 차체·총질량, 전류·온도·전압 강하·연속 운전, 압출재·체결홀·평탄도 실측 |
 | URDF | 58링크/57관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
-| IK | 투명 컵 YOLO 검출, 평면 좌표 보정 도구, 왼팔 `left_cup_tcp` DLS 드라이런과 FK 회귀검증 | 실측 평면 보정, 충돌·보간 경로 검사, 건별 승인 실물 검증 |
+| IK | 투명 컵 YOLO 검출, 평면 좌표 보정 도구, 왼팔 `left_cup_tcp` DLS 드라이런·FK 회귀검증, 현재 자세 판독·충돌 보간·단조 복귀 계획과 저속 동기 실행기 | 실측 평면 보정, 복귀 동작 건별 승인·실물 검증, 실제 컵 접근 경로 검증 |
 | ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
 | Nav2 | 설계·검증 항목 문서화 | 지도·station·반복 접근·장애물·도킹 실측 |
 | ACT | 리서치·데이터 계약 | 현행 물 서빙 시연·모델·rollout 없음 |
