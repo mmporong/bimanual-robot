@@ -35,7 +35,13 @@ python3 "$HOME/.codex/skills/3d/scripts/analyze_stl.py" \
 
 산출물은 `exports/cup_overcaps` 아래 STEP·STL·manifest에 있다.
 
-## 오른쪽 ggao50 파지 인서트
+## 오른쪽 ggao50 현행 사양: 순정 평면 죠
+
+2026-09-17 사용자 결정으로 **홈·교체형 인서트를 쓰지 않고 ggao50 순정 평면 죠를 무가공 상태로 사용**한다. `prepare_ggao50_print.py`는 죠에 볼트 구멍을 뚫지 않는다. 물병 미끄럼·회전은 순정 죠로 실물 검증한 후 관측값을 남긴다.
+
+### 과거 인서트 실험 기록
+
+아래 인서트 치수·산출물은 의사결정 이력을 보존하는 실험 기록이다. 현행 제작·출력·URDF 기준으로 사용하지 않는다.
 
 ggao50 죠에 볼트로 붙이는 교체형 파지면이다. 죠 본체는 그대로 두고 물체에 닿는 면만 갈아 끼운다.
 
@@ -104,7 +110,7 @@ ggao50 죠의 파지면은 완전 평면이다. STL을 직접 측정한 결과 �
 
 - M3 볼트 2개, 손가락 방향 중심거리 20 mm
 - 인서트에 `Ø3.4` 관통, 파지면 쪽에 `Ø6.5 × 1.6` 자리파기로 머리를 묻는다
-- 죠 쪽 `Ø3.4` 관통 2개는 [`drill_jaw_insert_holes.py`](drill_jaw_insert_holes.py)가 상류 STEP 에 직접 뚫는다. `prepare_ggao50_print.py` 가 자동으로 호출하므로 따로 실행할 필요는 없다
+- 죠 쪽 `Ø3.4` 관통 2개는 과거 실험에서 [`drill_jaw_insert_holes.py`](drill_jaw_insert_holes.py)로 만들었다. 현행 `prepare_ggao50_print.py`는 이 도구를 호출하지 않는다
 - 볼트는 `M3 × 30 mm`. 인서트 두께 11 + 죠 13.5~15 + 와셔 + 락너트를 지난다
 - 죠 뒷면이 테이퍼라 너트 자리를 파지 않는다. **평와셔로 받는다**
 
@@ -143,7 +149,7 @@ python3 design/gripper/prepare_ggao50_print.py --out "$HOME/gcode/ggao50"
 
 `pinion` 은 X+90 으로 눕히면 서포트가 사라진다. 나머지 다섯은 회전으로 없앨 수 없어 tree 서포트를 베드에서만 세운다(`--plate-only`). 죠는 파지면이 수직이 되는 원본 방향을 유지해 접촉면에 서포트 자국이 남지 않게 한다.
 
-## 인서트 출력
+## 과거 인서트 출력 기록 — 현행안 아님
 
 인서트는 TPU 95A 로 뽑는다.
 
@@ -162,7 +168,7 @@ python3 design/cad/slice_k1max_petg.py --out "$HOME/gcode/inserts" \
 
 노즐 `230 °C`, 베드 `45 °C`. TPU 는 인필 100% 로 뽑아야 V 형상이 눌리지 않는다.
 
-## 재생성
+## 과거 인서트 재생성 기록
 
 ```bash
 cd "$HOME/bimanual-robot"
@@ -172,7 +178,7 @@ cd "$HOME/bimanual-robot"
 
 출력은 `exports/step`, `exports/stl`, `exports/manifest_inserts.json`이다.
 
-## 선정 방법
+## 과거 선정 시험 기록
 
 계산으로 고르지 않는다. 세 형상을 TPU 95A로 뽑아 같은 병으로 기울임 시험을 한다.
 

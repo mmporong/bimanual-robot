@@ -6,7 +6,7 @@
 
 - 시작: 2026-08-19
 - 현행 태스크 확정: 2026-09-07
-- 최종 문서 갱신: 2026-09-13
+- 최종 문서 갱신: 2026-09-17
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
 - 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
@@ -59,6 +59,8 @@ RGB-D 후보인 Astra S는 단독 POC 때 개발 노트북 USB에, 이동 탑재
 Pi에서 ROS 하드웨어가 점유한 USB-A는 1개이고 3개가 남아 있다.
 
 왼손은 SO-101 스톡 구동부를 유지하고 접촉 손가락을 **80 mm·끝단 립 3 mm TPU 95A FinRay 한 쌍**으로 교체하는 안으로 2026-09-16 확정했다. 출력 기준과 해시는 [`design/gripper/finray_80mm_lip3_selection.yaml`](design/gripper/finray_80mm_lip3_selection.yaml)에 있다. 장착·캘리브레이션·젖은 컵 미끄럼 시험 전이며, 출처 라이선스가 확인되지 않은 STL/G-code는 저장소에 포함하지 않는다.
+
+오른손은 **ggao50 순정 평면 죠를 홈·교체형 인서트 없이 사용**한다. 과거의 V홈·사다리꼴·평면 TPU 인서트는 선정안에서 제외했으며, 현행 출력 준비 도구는 죠에 인서트 볼트 구멍을 뚫지 않는다. 물병 파지는 순정 평면 죠 상태에서 먼저 검증한다.
 
 ## 현재 범위
 

@@ -19,7 +19,7 @@
 
 `third_party/so_arm_101`과 `meshes/so101`은 TheRobotStudio SO-ARM100/101의 Apache-2.0 형상이다. 관절 원점과 한계는 로컬 JD-AMR에서 사용한 SO-101 설명을 유지한다. 왼쪽 moving jaw도 같은 범위로 포함했다.
 
-오른쪽은 [ggao50 SO101-Parallel-Gripper](https://github.com/ggao50/SO101-Parallel-Gripper) 기준이다. 2026-09-08 확인 당시 라이선스 표기가 없어 원본 메시를 벤더링하지 않고, 공개 STL에서 측정한 치수로 만든 프로젝트 프록시를 `urdf/ggao50_gripper.xacro`에 둔다. 스트로크·작업공간·충돌 포락선 검토용이며 제조 원본과 같은 접촉면을 보장하지 않는다.
+오른쪽은 [ggao50 SO101-Parallel-Gripper](https://github.com/ggao50/SO101-Parallel-Gripper) 기준이다. 2026-09-08 확인 당시 라이선스 표기가 없어 원본 메시를 벤더링하지 않고, 공개 STL에서 측정한 치수로 만든 프로젝트 프록시를 `urdf/ggao50_gripper.xacro`에 둔다. 현행 프록시는 **순정 평면 죠를 홈·교체형 인서트 없이 사용**하는 구성이다. 스트로크·작업공간·충돌 포락선 검토용이며 제조 원본과 같은 접촉면을 보장하지 않는다.
 
 왼쪽 컵 오버캡은 아직 기본 URDF에 붙이지 않는다. 실물 죠와 컵을 재기 전 fit coupon 단계이기 때문이다. 생성기는 `design/gripper/generate_so101_cup_overcaps.py`다.
 

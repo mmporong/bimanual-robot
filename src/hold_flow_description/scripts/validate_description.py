@@ -180,6 +180,17 @@ def main() -> None:
     assert required_links <= link_names, sorted(required_links - link_names)
     assert required_joints <= joint_names, sorted(required_joints - joint_names)
 
+    for link_name in ("right_finger1_link", "right_finger2_link"):
+        link = root.find(f"link[@name='{link_name}']")
+        assert link is not None
+        material_names = {
+            material.attrib.get("name")
+            for material in link.findall("visual/material")
+        }
+        assert "gripper_insert" not in material_names, (
+            f"{link_name}에 폐기된 ggao50 인서트 형상이 남아 있음"
+        )
+
     wheel_origins = {}
     for name in ("left_wheel_joint", "right_wheel_joint"):
         joint = root.find(f"joint[@name='{name}']")
@@ -213,7 +224,8 @@ def main() -> None:
         "left_arm_base_xyz_from_base_footprint_m": [round(value, 6) for value in left_arm_xyz],
         "right_arm_base_xyz_from_base_footprint_m": [round(value, 6) for value in right_arm_xyz],
         "left_gripper": "stock_so101_rotating_jaw",
-        "right_gripper": "ggao50_parallel_proxy",
+        "right_gripper": "ggao50_parallel_proxy_unmodified_flat_jaws",
+        "right_gripper_insert": "none",
         "right_parallel_gripper_primary_stroke_m": 0.0333,
         "mimic_joints": [
             joint.attrib["name"] for joint in joints if joint.find("mimic") is not None
