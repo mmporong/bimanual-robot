@@ -306,6 +306,28 @@ python3 tools/cup_pick_dry_run.py \
 이 결과가 `ready_for_collision_review: true`여도 실행 승인이 아니다. 다음 게이트는
 URDF 충돌 검사, 현재 관절에서 pre-grasp까지의 보간 경로 검사, 실물 관절값 읽기 대조다.
 
+현재 왼팔 시작 자세는 엔코더를 읽어 LeRobot `degrees` 규약으로 변환하고 URDF hard limit와
+대조한다. 아래 도구는 현재 위치·토크 상태·전압·온도만 읽고 어떤 레지스터도 쓰지 않는다.
+
+```bash
+python3 tools/servo/export_current_joint_state.py \
+  --port /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B3E088747-if00 \
+  --output /tmp/holdflow_left_state.json \
+  --strict
+```
+
+IK 계획과 시작 상태가 모두 준비되면 최대 관절 간격 2도로 시작→pre-grasp→grasp를 보간한다.
+각 샘플에서 hard limit 여유, 좌우 팔 충돌, 왼팔 비인접 링크 자가충돌, 상판·카메라 마스트·
+LiDAR 구조물 충돌을 검사한다. 이 단계도 실제 팔을 움직이지 않는다.
+
+```bash
+python3 tools/audit_pick_trajectory.py \
+  --plan /tmp/holdflow_cup_pick.json \
+  --start-state /tmp/holdflow_left_state.json \
+  --output /tmp/holdflow_cup_pick_trajectory_audit.json \
+  --strict
+```
+
 ## 구현 상태
 
 기술 이름이 적혀 있어도 구현 완료를 뜻하지 않는다.

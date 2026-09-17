@@ -13,6 +13,10 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
+@unittest.skipUnless(
+    hasattr(MODULE.board(7, 5, 30.0, 22.0), "generateImage"),
+    "ChArUco board generation requires OpenCV >= 4.7; run with the lerobot environment",
+)
 class CameraCalibrationTest(unittest.TestCase):
     def test_generated_board_has_expected_size_and_detectable_corners(self):
         board = MODULE.board(7, 5, 30.0, 22.0)
