@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-17 | 상단 RGB 투명 컵 검출과 왼팔 자코비안 IK 드라이런 연결
+
+- 상단 RGB 최신 프레임에서 YOLO11n COCO `cup` 검출을 확인했다. 투명 컵 confidence는 0.812였고, 검출 상자의 바닥 중심을 작업대 평면 접점으로 사용한다.
+- 실측 대응점 네 개 이상을 클릭해 `base_footprint` 작업대 XY homography를 만드는 `workspace_plane_calibration.py`와, 검출 결과를 `left_cup_tcp` pre-grasp·grasp DLS IK로 연결하는 `cup_pick_dry_run.py`를 추가했다. 두 도구 모두 팔 명령을 보내지 않는다.
+- 기존 수치 IK에서 `target-current` residual Jacobian에 갱신 부호가 반대로 적용된 결함과, 공구축이 정반대여도 같은 방향으로 판정되던 축 오차 결함을 수정했다. FK로 만든 도달 가능 목표를 1 mm 이내로 복원하는 회귀시험을 추가했다.
+- 컵 접근은 손목 한계에 붙는 수직 top-down 대신 왼팔 베이스에서 컵 몸통으로 향하는 수평 접근으로 정했다. IK 결과가 5 mm를 넘거나 관절 한계 여유가 5도 미만이면 다음 충돌 검토 단계로 넘기지 않는다.
+- 검증: 신규 pytest 9개와 ChArUco unittest 2개 통과, URDF 58링크·57관절 정적 검사와 품질 감사 PASS. 실측 작업대 평면 보정값이 아직 없어 실제 컵 좌표와 관절 목표는 생성하지 않았고 실물 팔도 움직이지 않았다.
+- 현재 상단 RGB는 대시보드에서 online이며 왼손목 RGB는 USB 장치가 보이지 않아 offline이다.
+
 ## 2026-09-17 | ggao50 홈·교체형 인서트 폐기
 
 - 오른손 ggao50은 순정 평면 죠를 무가공 상태로 사용하고 V홈·사다리꼴·평면 교체형 인서트는 현행 구성에서 제외했다.

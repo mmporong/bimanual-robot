@@ -17,12 +17,15 @@
 - IL 실행 인계: [양팔 수집·비공개 Hub 업로드·다른 PC ACT 학습](docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)
 - 세션 인계: [양팔 로봇 프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md)
 
-## 다음 세션 최우선 작업 · 2026-09-14
+## 현재 최우선 작업 · 2026-09-17
 
-사용자 확정 순서는 **같은 모델의 다른 바퀴 모터 이식 → 기본 주행 검증 → SLAM → LiDAR·RGB-D 역할 분담 통합**이다.
-좌우 모터 ID·회전 방향·watchdog·직진/후진·제자리 회전·정지·오도메트리 부호를 먼저 확인한다.
-기본 주행 게이트를 통과하기 전에는 RGB-D/LiDAR SLAM을 시작하지 않는다. 이 항목은 다음 작업
-순서이며 모터 장착이나 실기체 주행 완료를 뜻하지 않는다. 실제 베이스·팔 이동은 별도 실행 요청 범위에서만 한다.
+현재 조작 lane은 **상단 RGB 컵 검출 → 작업대 평면 좌표 → 왼팔 DLS IK → 충돌·보간 경로 검토** 순서다.
+투명 컵 검출과 비동작 IK 도구는 구현됐고, 다음 게이트는 `base_footprint` 기준 작업대 대응점·높이와
+컵 높이를 실측해 평면 보정 파일을 만드는 것이다. 보정 전에는 픽셀을 임의의 로봇 좌표로 바꾸지 않는다.
+실제 팔 이동은 보정·FK·충돌 검사를 통과한 개별 자세를 보여준 뒤 별도 실행 요청 범위에서만 한다.
+
+베이스 lane의 순서는 **같은 모델의 다른 바퀴 모터 이식 → 기본 주행 검증 → SLAM → LiDAR·RGB-D 역할 분담 통합**으로 유지한다.
+기본 주행 게이트를 통과하기 전에는 RGB-D/LiDAR SLAM을 시작하지 않는다.
 
 - [모터 이식·기본 주행 → SLAM·RGB-D 통합 순서](docs/20260913_RGBD_SLAM_우선순위와_다음세션.md)
 - [기존 JD-AMR 이식 기준선과 하드웨어 확인 사항](docs/20260912_JDAMR_SLAM_실기체이식.md)
@@ -267,6 +270,42 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 
 대용량 영상·rosbag·모델은 Git에 커밋하지 않고 외부 저장 위치와 버전을 데이터 인덱스에 남긴다.
 
+## 상단 RGB 컵 파지 IK 드라이런
+
+현재 연결은 `상단 RGB → YOLO cup → 작업대 평면 좌표 → left_cup_tcp DLS IK`까지다.
+`tools/cup_pick_dry_run.py`에는 서보 쓰기 경로가 없으며, 작업대 보정 파일이 없으면
+픽셀을 임의 좌표로 바꾸지 않고 `plan_blocked`로 종료한다.
+
+먼저 `base_footprint` 기준으로 실측한 작업대 점을 최소 네 개 준비한다. 아래 숫자는
+형식 예시가 아니라 실제 로봇에서 측정한 값으로 바꿔야 한다. 명령에 적은 순서와 영상에서
+클릭하는 순서가 같아야 한다.
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/workspace_plane_calibration.py \
+  --base-point X1_M,Y1_M \
+  --base-point X2_M,Y2_M \
+  --base-point X3_M,Y3_M \
+  --base-point X4_M,Y4_M \
+  --surface-z-m TABLE_Z_M \
+  --cup-height-m CUP_HEIGHT_M
+```
+
+그다음 COCO `cup` 클래스가 있는 Ultralytics 모델을 명시해 검출과 IK를 실행한다.
+왼팔 베이스에서 컵 몸통으로 향하는 수평 접근을 사용한다. 출력은 pre-grasp·grasp 목표,
+관절각, FK 오차, 관절 한계 여유이며 실제 팔은 움직이지 않는다.
+
+```bash
+python3 tools/cup_pick_dry_run.py \
+  --model /absolute/path/to/yolo11n.pt \
+  --plan \
+  --annotated /tmp/holdflow_cup_pick.jpg \
+  --output /tmp/holdflow_cup_pick.json
+```
+
+이 결과가 `ready_for_collision_review: true`여도 실행 승인이 아니다. 다음 게이트는
+URDF 충돌 검사, 현재 관절에서 pre-grasp까지의 보간 경로 검사, 실물 관절값 읽기 대조다.
+
 ## 구현 상태
 
 기술 이름이 적혀 있어도 구현 완료를 뜻하지 않는다.
@@ -275,7 +314,7 @@ pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Moni
 |---|---|---|
 | 기구 | 상·하부 450×340 mm, 바퀴 포함 폭 540 mm, 실차 기하 중심거리 510 mm, 추가 적재 5 kg 수동 평지 주행 예비 통과, 완성 모델 명목 빈 질량 7.379 kg | 실제 차체·총질량, 전류·온도·전압 강하·연속 운전, 압출재·체결홀·평탄도 실측 |
 | URDF | 58링크/57관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
-| IK | 구형 역할의 solver와 검증 도구 존재, 결함 기록됨 | 왼팔 컵·오른팔 물통 기준 수정과 회귀검증 |
+| IK | 투명 컵 YOLO 검출, 평면 좌표 보정 도구, 왼팔 `left_cup_tcp` DLS 드라이런과 FK 회귀검증 | 실측 평면 보정, 충돌·보간 경로 검사, 건별 승인 실물 검증 |
 | ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
 | Nav2 | 설계·검증 항목 문서화 | 지도·station·반복 접근·장애물·도킹 실측 |
 | ACT | 리서치·데이터 계약 | 현행 물 서빙 시연·모델·rollout 없음 |
