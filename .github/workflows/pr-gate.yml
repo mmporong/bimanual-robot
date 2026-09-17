@@ -1,0 +1,83 @@
+name: PR gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262e
+        with:
+          fetch-depth: 0
+
+      - name: Python 3.12 준비
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: 검증 의존성 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liburdfdom-tools
+          python -m pip install --disable-pip-version-check \
+            jsonschema==4.23.0 numpy==2.2.3 pytest==8.3.5 PyYAML==6.0.2 xacro==2.1.1
+
+      - name: 변경 diff 형식 검사
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --check "$PR_BASE_SHA...$GITHUB_SHA"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && ! printf '%s' "$PUSH_BEFORE_SHA" | grep -Eq '^0+$'; then
+            git diff --check "$PUSH_BEFORE_SHA..$GITHUB_SHA"
+          else
+            git diff --check "$GITHUB_SHA^..$GITHUB_SHA"
+          fi
+
+      - name: YAML과 Python 구문 검사
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          import yaml
+
+          paths = subprocess.check_output(
+              ["git", "ls-files", "-z", "--", "*.yaml", "*.yml"]
+          ).split(b"\0")
+          for raw_path in paths:
+              if not raw_path:
+                  continue
+              path = Path(raw_path.decode())
+              with path.open(encoding="utf-8") as file:
+                  yaml.safe_load(file)
+              print("YAML OK:", path)
+          PY
+          python -m compileall -q data design src tools tests
+
+      - name: Markdown 로컬 링크 검사
+        run: |
+          python tools/ci/check_local_markdown_links.py
+          python tools/ci/sync_readme_status.py
+
+      - name: 단위·회귀 테스트
+        run: python -m pytest -q
+
+      - name: URDF·Xacro 계약 검사
+        run: python src/hold_flow_description/scripts/validate_description.py
