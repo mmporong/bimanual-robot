@@ -72,7 +72,7 @@ python3 servo_read.py
 | `servo_offset.py` | 지금 자세가 지정 값으로 읽히게 눈금 이동 | 아니오 | 필요 |
 | `servo_limits.py` | 각도 한계 변경 | 아니오 | 필요 |
 | `servo_goto.py` | 지정 위치로 이동 (델타·부하·정지·발산 감시) | **예** | 필요 |
-| `execute_safe_recovery.py` | URDF가 승인한 5축 복귀 목표를 2도 동기 waypoint로 실행 | **예** | 필요 |
+| `execute_safe_recovery.py` | 2도 충돌 감사 경로를 내부 속도 제한으로 동기 복귀 | **예** | 필요 |
 | `servo_home.py` | 지금 자세를 2047 로 — 범위가 0/4095 를 안 넘게 | 아니오 | 필요 |
 | `servo_record_ranges.py` | 손으로 훑는 동안 범위 기록 → 서보 한계 + lerobot JSON | 아니오 | 필요 |
 | `servo_check_calibration.py` | lerobot JSON 과 서보 EEPROM 대조, 범위 오염 검사 | 아니오 | 불필요 |

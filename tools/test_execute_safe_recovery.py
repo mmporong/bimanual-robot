@@ -28,6 +28,19 @@ def test_interpolation_limits_every_synchronized_step():
     assert waypoints[-1] == target
 
 
+def test_execution_defaults_to_one_internally_rate_limited_goal():
+    calibration = json.loads(MODULE.DEFAULT_CALIBRATION.read_text(encoding="utf-8"))
+    plan = {"start_joint_deg": [-0.4396, -106.7692, 96.8791, 80.9231, -88.044]}
+    state = {"position": [2040, 815, 2515, 2947, 1046], "torque": [0] * 5}
+    target = [2041, 955, 2375, 2835, 1168]
+    waypoints = MODULE.validate_start(plan, calibration, state, target, 12, 220)
+    assert len(waypoints) == 1
+    previous = state["position"]
+    for waypoint in waypoints:
+        assert max(abs(b - a) for a, b in zip(previous, waypoint)) <= 220
+        previous = waypoint
+
+
 def test_mock_execution_reaches_target_and_releases_torque(tmp_path):
     calibration = json.loads(MODULE.DEFAULT_CALIBRATION.read_text(encoding="utf-8"))
     start = [2040, 783, 2516, 2956, 1036]
@@ -36,7 +49,7 @@ def test_mock_execution_reaches_target_and_releases_torque(tmp_path):
     waypoints = MODULE.interpolate_raw(start, target, 23)
     result = MODULE.execute(bus, calibration, waypoints, 80, 5, 450, 55)
     assert result["completed"] is True
-    assert max(abs(a - b) for a, b in zip(result["final_raw"], target)) <= 8
+    assert max(abs(a - b) for a, b in zip(result["released_final_raw"], target)) <= 8
     assert all(bus.reg[int(calibration[name]["id"])][MODULE.A_TORQUE] == 0 for name in MODULE.JOINTS)
 
 
@@ -81,3 +94,33 @@ def test_goal_seed_write_failure_never_leaves_torque_enabled():
     else:
         raise AssertionError("goal seed 쓰기 실패가 무시됨")
     assert all(bus.reg[int(calibration[name]["id"])][MODULE.A_TORQUE] == 0 for name in MODULE.JOINTS)
+
+
+def test_single_temperature_spike_requires_confirmation():
+    class TemperatureBus:
+        def __init__(self):
+            self.values = {1: [85, 35], 2: [34, 34]}
+
+        def read(self, sid, address, size=1):
+            return self.values[sid].pop(0)
+
+    assert MODULE.confirmed_temperatures(TemperatureBus(), [1, 2], 55) == [35, 34]
+
+
+def test_torque_release_sag_is_not_reported_as_completed():
+    calibration = json.loads(MODULE.DEFAULT_CALIBRATION.read_text(encoding="utf-8"))
+    start = [2040, 900, 2500, 2900, 1100]
+    target = [2040, 980, 2420, 2820, 1180]
+
+    class SaggingBus(MODULE.MultiJointFakeBus):
+        def write(self, sid, address, value, size=1):
+            result = super().write(sid, address, value, size)
+            if address == MODULE.A_TORQUE and value == 0 and sid in (2, 3):
+                self.positions[sid] += 40
+            return result
+
+    bus = SaggingBus(calibration, start)
+    result = MODULE.execute(bus, calibration, [target], 80, 5, 450, 55)
+    assert result["target_reached_with_torque"] is True
+    assert result["persistent_after_torque_release"] is False
+    assert result["completed"] is False

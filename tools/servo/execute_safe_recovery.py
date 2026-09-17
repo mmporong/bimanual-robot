@@ -85,7 +85,8 @@ def read_all(bus, calibration: dict) -> dict[str, list[int]]:
 
 
 def validate_start(plan: dict, calibration: dict, state: dict, target_raw: list[int],
-                   start_tolerance_ticks: int, max_delta_ticks: int) -> list[list[int]]:
+                   start_tolerance_ticks: int, max_delta_ticks: int,
+                   max_waypoint_step_ticks: int = 220) -> list[list[int]]:
     if any(state["torque"]):
         raise RuntimeError("시작 전 모든 관절 Torque_Enable이 0이어야 합니다")
     expected = [
@@ -99,7 +100,7 @@ def validate_start(plan: dict, calibration: dict, state: dict, target_raw: list[
     delta = [target - actual for target, actual in zip(target_raw, state["position"])]
     if max(abs(value) for value in delta) > max_delta_ticks:
         raise RuntimeError(f"복귀 이동량이 상한 {max_delta_ticks} tick을 넘습니다: {delta}")
-    return interpolate_raw(state["position"], target_raw, max_step_ticks=23)
+    return interpolate_raw(state["position"], target_raw, max_step_ticks=max_waypoint_step_ticks)
 
 
 def release_and_restore(bus, ids: list[int], previous: list[tuple[int, int]]) -> None:
@@ -119,15 +120,28 @@ def require_write(bus, sid: int, address: int, value: int, size: int = 1) -> Non
         raise RuntimeError(f"ID {sid}: register {address} 쓰기 실패")
 
 
+def read_required(bus, sid: int, address: int, size: int = 1, retries: int = 3) -> int:
+    for _ in range(retries):
+        value = bus.read(sid, address, size)
+        if value is not None:
+            return int(value)
+    raise RuntimeError(f"ID {sid}: register {address} 읽기 실패")
+
+
+def confirmed_temperatures(bus, ids: list[int], limit: int) -> list[int]:
+    first = [read_required(bus, sid, A_TEMP) for sid in ids]
+    if not any(value > limit for value in first):
+        return first
+    return [read_required(bus, sid, A_TEMP) for sid in ids]
+
+
 def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acceleration: int,
-            load_limit: int, temperature_limit: int) -> dict:
+            load_limit: int, temperature_limit: int, arrival_tolerance_ticks: int = 15) -> dict:
     ids = [int(calibration[name]["id"]) for name in JOINTS]
-    previous = [
-        (int(bus.read(sid, A_SPEED, 2) or 0), int(bus.read(sid, A_ACCEL) or 0))
-        for sid in ids
-    ]
-    initial = [int(bus.read(sid, A_POS, 2)) for sid in ids]
+    previous = [(read_required(bus, sid, A_SPEED, 2), read_required(bus, sid, A_ACCEL)) for sid in ids]
+    initial = [read_required(bus, sid, A_POS, 2) for sid in ids]
     peak_load = [0] * len(ids)
+    loaded_final: list[int] | None = None
     try:
         for sid, position in zip(ids, initial):
             require_write(bus, sid, A_GOAL, position, 2)
@@ -135,20 +149,31 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
             require_write(bus, sid, A_SPEED, speed, 2)
         for sid in ids:
             require_write(bus, sid, A_TORQUE, 1)
+        time.sleep(0.05)
+        enabled = [read_required(bus, sid, A_TORQUE) for sid in ids]
+        if enabled != [1] * len(ids):
+            raise RuntimeError(f"토크 활성화 확인 실패: {enabled}")
 
         for waypoint_index, waypoint in enumerate(waypoints, start=1):
-            before = [int(bus.read(sid, A_POS, 2)) for sid in ids]
+            before = [read_required(bus, sid, A_POS, 2) for sid in ids]
             for sid, goal in zip(ids, waypoint):
                 require_write(bus, sid, A_GOAL, goal, 2)
+            written_goals = [read_required(bus, sid, A_GOAL, 2) for sid in ids]
+            if written_goals != waypoint:
+                raise RuntimeError(
+                    f"waypoint {waypoint_index}: 목표 레지스터 대조 실패, "
+                    f"expected={waypoint}, actual={written_goals}"
+                )
             initial_error = [abs(goal - value) for goal, value in zip(waypoint, before)]
-            deadline = time.monotonic() + 1.5
-            last_motion = time.monotonic()
+            budget = max(8.0, max(initial_error) / max(speed, 1) * 1.5 + 2.0)
+            deadline = time.monotonic() + budget
+            last_motion = [time.monotonic()] * len(ids)
             last = before
             while True:
                 time.sleep(0.03)
-                now = [int(bus.read(sid, A_POS, 2)) for sid in ids]
-                loads = [int(bus.read(sid, A_LOAD, 2) or 0) & 0x3FF for sid in ids]
-                temperatures = [int(bus.read(sid, A_TEMP) or 0) for sid in ids]
+                now = [read_required(bus, sid, A_POS, 2) for sid in ids]
+                loads = [read_required(bus, sid, A_LOAD, 2) & 0x3FF for sid in ids]
+                temperatures = confirmed_temperatures(bus, ids, temperature_limit)
                 peak_load = [max(old, new) for old, new in zip(peak_load, loads)]
                 errors = [abs(goal - value) for goal, value in zip(waypoint, now)]
                 if any(error > baseline + 10 for error, baseline in zip(errors, initial_error)):
@@ -160,19 +185,42 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
                     raise RuntimeError(f"waypoint {waypoint_index}: 부하 상한 초과 {loads}")
                 if max(temperatures) > temperature_limit:
                     raise RuntimeError(f"waypoint {waypoint_index}: 온도 상한 초과 {temperatures}")
-                if any(abs(a - b) > 2 for a, b in zip(now, last)):
-                    last_motion = time.monotonic()
-                    last = now
-                if max(errors) <= 8:
+                for index, (value, old) in enumerate(zip(now, last)):
+                    if abs(value - old) > 2:
+                        last_motion[index] = time.monotonic()
+                        last[index] = value
+                if max(errors) <= arrival_tolerance_ticks:
                     break
-                if time.monotonic() - last_motion > 0.5:
-                    raise RuntimeError(f"waypoint {waypoint_index}: 0.5초 스톨, position={now}")
+                stalled = [
+                    JOINTS[index]
+                    for index, error in enumerate(errors)
+                    if error > arrival_tolerance_ticks and time.monotonic() - last_motion[index] > 0.5
+                ]
+                if stalled:
+                    raise RuntimeError(
+                        f"waypoint {waypoint_index}: 0.5초 스톨 {stalled}, "
+                        f"position={now}, error={errors}, load={loads}"
+                    )
                 if time.monotonic() > deadline:
                     raise RuntimeError(f"waypoint {waypoint_index}: 도달 시간 초과, position={now}")
-        final = [int(bus.read(sid, A_POS, 2)) for sid in ids]
-        return {"completed": True, "final_raw": final, "peak_load": peak_load}
+        loaded_final = [read_required(bus, sid, A_POS, 2) for sid in ids]
     finally:
         release_and_restore(bus, ids, previous)
+    time.sleep(0.5)
+    released_final = [read_required(bus, sid, A_POS, 2) for sid in ids]
+    assert loaded_final is not None
+    loaded_error = [abs(goal - value) for goal, value in zip(waypoints[-1], loaded_final)]
+    released_error = [abs(goal - value) for goal, value in zip(waypoints[-1], released_final)]
+    persistent = max(released_error) <= arrival_tolerance_ticks
+    return {
+        "completed": persistent,
+        "target_reached_with_torque": max(loaded_error) <= arrival_tolerance_ticks,
+        "persistent_after_torque_release": persistent,
+        "loaded_final_raw": loaded_final,
+        "released_final_raw": released_final,
+        "released_target_error_ticks": released_error,
+        "peak_load": peak_load,
+    }
 
 
 class MultiJointFakeBus:
@@ -190,6 +238,8 @@ class MultiJointFakeBus:
                 delta = self.goals[sid] - self.positions[sid]
                 self.positions[sid] += max(-8, min(8, delta))
             return self.positions[sid]
+        if address == A_GOAL:
+            return self.goals[sid]
         return self.reg[sid].get(address, 0)
 
     def write(self, sid: int, address: int, value: int, size: int = 1):
@@ -212,8 +262,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--acceleration", type=int, default=5)
     parser.add_argument("--load-limit", type=int, default=450)
     parser.add_argument("--temperature-limit", type=int, default=55)
+    parser.add_argument("--arrival-tolerance-ticks", type=int, default=15,
+                        help="P게인 16의 목표 앞 정지를 허용하는 도달 오차(15 tick≈1.32도)")
     parser.add_argument("--start-tolerance-ticks", type=int, default=12)
     parser.add_argument("--max-delta-ticks", type=int, default=220)
+    parser.add_argument("--max-waypoint-step-ticks", type=int, default=220,
+                        help="최종 목표 간격 상한. 실제 연속 경로 감사 간격은 별도 2도")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--mock", action="store_true")
     return parser.parse_args()
@@ -231,7 +285,8 @@ def main() -> int:
     try:
         state = read_all(bus, calibration)
         waypoints = validate_start(
-            plan, calibration, state, target_raw, args.start_tolerance_ticks, args.max_delta_ticks
+            plan, calibration, state, target_raw, args.start_tolerance_ticks, args.max_delta_ticks,
+            args.max_waypoint_step_ticks,
         )
         preview = {
             "mode": "safe_recovery_execute" if args.execute else "safe_recovery_dry_run",
@@ -244,18 +299,19 @@ def main() -> int:
                 max(abs(b - a) for a, b in zip(previous, current))
                 for previous, current in zip([state["position"]] + waypoints[:-1], waypoints)
             ),
+            "arrival_tolerance_ticks": args.arrival_tolerance_ticks,
         }
         if not args.execute:
             print(json.dumps(preview, ensure_ascii=False, indent=2))
             return 0
         result = execute(
             bus, calibration, waypoints, args.speed, args.acceleration,
-            args.load_limit, args.temperature_limit,
+            args.load_limit, args.temperature_limit, args.arrival_tolerance_ticks,
         )
         preview.update(result)
         preview["motion_command_emitted"] = True
         print(json.dumps(preview, ensure_ascii=False, indent=2))
-        return 0
+        return 0 if result["completed"] else 3
     finally:
         bus.close()
 
