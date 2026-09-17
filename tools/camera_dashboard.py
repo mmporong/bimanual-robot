@@ -166,7 +166,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--wrist",
-        default="/dev/v4l/by-path/pci-0000:65:00.3-usb-0:2.2:1.0-video-index0",
+        default="/dev/v4l/by-path/pci-0000:65:00.3-usb-0:4:1.0-video-index0",
     )
     parser.add_argument("--http", type=int, default=8770)
     parser.add_argument("--width", type=int, default=640)

@@ -20,4 +20,4 @@ def test_dashboard_html_is_read_only_and_has_both_streams():
 def test_default_camera_paths_are_stable_by_path():
     source = MODULE_PATH.read_text(encoding="utf-8")
     assert "/dev/v4l/by-path/pci-0000:65:00.3-usb-0:2.1:1.0-video-index0" in source
-    assert "/dev/v4l/by-path/pci-0000:65:00.3-usb-0:2.2:1.0-video-index0" in source
+    assert "/dev/v4l/by-path/pci-0000:65:00.3-usb-0:4:1.0-video-index0" in source

@@ -2,8 +2,10 @@
 """검증된 SO-101 복귀 계획을 작은 동기 waypoint로 실행한다.
 
 기본은 실물 상태를 읽고 계획과 대조하는 dry-run이다. ``--execute``를 명시해야만
-목표 위치와 토크를 쓴다. 실행 중에는 부하·온도·스톨·계획 시작점 불일치를 감시하고,
-성공·실패와 관계없이 모든 관절 토크를 끈 뒤 기존 속도/가속도 값을 복원한다.
+목표 위치와 토크를 쓴다. 기본 실행은 부하·온도·스톨·계획 시작점 불일치를 감시하고
+끝에 토크를 해제한다. ``--position-only``는 부하·온도를 읽지 않으며,
+``--hold-torque-on-success``는 승인된 다음 연속 단계까지 성공 토크를 유지한다.
+실패·예외·인터럽트에서는 토크 해제 경로를 실행하고 기존 속도/가속도를 복원한다.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import signal
 import sys
 import time
 
@@ -64,31 +67,33 @@ def load_inputs(plan_path: Path, calibration_path: Path) -> tuple[dict, dict, li
     return plan, calibration, target_raw
 
 
-def read_all(bus, calibration: dict) -> dict[str, list[int]]:
+def read_all(bus, calibration: dict, position_only: bool = False) -> dict[str, list[int]]:
     values = {"position": [], "torque": [], "temperature": [], "load": []}
     for name in JOINTS:
         sid = int(calibration[name]["id"])
-        readings = (
-            bus.read(sid, A_POS, 2),
-            bus.read(sid, A_TORQUE),
-            bus.read(sid, A_TEMP),
-            bus.read(sid, A_LOAD, 2),
-        )
+        readings = (bus.read(sid, A_POS, 2), bus.read(sid, A_TORQUE))
         if any(value is None for value in readings):
             raise RuntimeError(f"{name}(ID {sid}) 상태 읽기 실패")
-        position, torque, temperature, load = readings
+        position, torque = readings
         values["position"].append(int(position))
         values["torque"].append(int(torque))
-        values["temperature"].append(int(temperature))
-        values["load"].append(int(load) & 0x3FF)
+        if not position_only:
+            temperature = bus.read(sid, A_TEMP)
+            load = bus.read(sid, A_LOAD, 2)
+            if temperature is None or load is None:
+                raise RuntimeError(f"{name}(ID {sid}) 상태 읽기 실패")
+            values["temperature"].append(int(temperature))
+            values["load"].append(int(load) & 0x3FF)
     return values
 
 
 def validate_start(plan: dict, calibration: dict, state: dict, target_raw: list[int],
                    start_tolerance_ticks: int, max_delta_ticks: int,
-                   max_waypoint_step_ticks: int = 220) -> list[list[int]]:
-    if any(state["torque"]):
-        raise RuntimeError("시작 전 모든 관절 Torque_Enable이 0이어야 합니다")
+                   max_waypoint_step_ticks: int = 220,
+                   allow_torque_enabled: bool = False) -> list[list[int]]:
+    torque = state["torque"]
+    if any(torque) and not (allow_torque_enabled and all(torque)):
+        raise RuntimeError("시작 토크는 전부 꺼져 있거나 승인된 연속 단계에서 전부 켜져 있어야 합니다")
     expected = [
         degrees_to_raw(plan["start_joint_deg"][index], calibration[name]["range_min"],
                        calibration[name]["range_max"])
@@ -136,12 +141,14 @@ def confirmed_temperatures(bus, ids: list[int], limit: int) -> list[int]:
 
 
 def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acceleration: int,
-            load_limit: int, temperature_limit: int, arrival_tolerance_ticks: int = 15) -> dict:
+            load_limit: int, temperature_limit: int, arrival_tolerance_ticks: int = 15,
+            hold_torque_on_success: bool = False, position_only: bool = False) -> dict:
     ids = [int(calibration[name]["id"]) for name in JOINTS]
     previous = [(read_required(bus, sid, A_SPEED, 2), read_required(bus, sid, A_ACCEL)) for sid in ids]
     initial = [read_required(bus, sid, A_POS, 2) for sid in ids]
-    peak_load = [0] * len(ids)
+    peak_load = None if position_only else [0] * len(ids)
     loaded_final: list[int] | None = None
+    reached = False
     try:
         for sid, position in zip(ids, initial):
             require_write(bus, sid, A_GOAL, position, 2)
@@ -172,18 +179,23 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
             while True:
                 time.sleep(0.03)
                 now = [read_required(bus, sid, A_POS, 2) for sid in ids]
-                loads = [read_required(bus, sid, A_LOAD, 2) & 0x3FF for sid in ids]
-                temperatures = confirmed_temperatures(bus, ids, temperature_limit)
-                peak_load = [max(old, new) for old, new in zip(peak_load, loads)]
+                loads = None if position_only else [
+                    read_required(bus, sid, A_LOAD, 2) & 0x3FF for sid in ids
+                ]
+                temperatures = None if position_only else confirmed_temperatures(
+                    bus, ids, temperature_limit
+                )
+                if loads is not None:
+                    peak_load = [max(old, new) for old, new in zip(peak_load, loads)]
                 errors = [abs(goal - value) for goal, value in zip(waypoint, now)]
                 if any(error > baseline + 10 for error, baseline in zip(errors, initial_error)):
                     raise RuntimeError(
                         f"waypoint {waypoint_index}: 목표에서 멀어짐, "
                         f"initial_error={initial_error}, error={errors}"
                     )
-                if max(loads) > load_limit:
+                if loads is not None and max(loads) > load_limit:
                     raise RuntimeError(f"waypoint {waypoint_index}: 부하 상한 초과 {loads}")
-                if max(temperatures) > temperature_limit:
+                if temperatures is not None and max(temperatures) > temperature_limit:
                     raise RuntimeError(f"waypoint {waypoint_index}: 온도 상한 초과 {temperatures}")
                 for index, (value, old) in enumerate(zip(now, last)):
                     if abs(value - old) > 2:
@@ -204,8 +216,33 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
                 if time.monotonic() > deadline:
                     raise RuntimeError(f"waypoint {waypoint_index}: 도달 시간 초과, position={now}")
         loaded_final = [read_required(bus, sid, A_POS, 2) for sid in ids]
-    finally:
+        loaded_error = [abs(goal - value) for goal, value in zip(waypoints[-1], loaded_final)]
+        reached = max(loaded_error) <= arrival_tolerance_ticks
+    except BaseException:
         release_and_restore(bus, ids, previous)
+        raise
+    if reached and hold_torque_on_success:
+        try:
+            for sid, (previous_speed, previous_accel) in zip(ids, previous):
+                require_write(bus, sid, A_SPEED, previous_speed, 2)
+                require_write(bus, sid, A_ACCEL, previous_accel)
+            held_torque = [read_required(bus, sid, A_TORQUE) for sid in ids]
+            if held_torque != [1] * len(ids):
+                raise RuntimeError(f"토크 유지 확인 실패: {held_torque}")
+        except BaseException:
+            release_and_restore(bus, ids, previous)
+            raise
+        return {
+            "completed": True,
+            "target_reached_with_torque": True,
+            "persistent_after_torque_release": None,
+            "torque_held": True,
+            "loaded_final_raw": loaded_final,
+            "released_final_raw": None,
+            "released_target_error_ticks": None,
+            "peak_load": peak_load,
+        }
+    release_and_restore(bus, ids, previous)
     time.sleep(0.5)
     released_final = [read_required(bus, sid, A_POS, 2) for sid in ids]
     assert loaded_final is not None
@@ -216,6 +253,7 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
         "completed": persistent,
         "target_reached_with_torque": max(loaded_error) <= arrival_tolerance_ticks,
         "persistent_after_torque_release": persistent,
+        "torque_held": False,
         "loaded_final_raw": loaded_final,
         "released_final_raw": released_final,
         "released_target_error_ticks": released_error,
@@ -269,6 +307,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-waypoint-step-ticks", type=int, default=220,
                         help="최종 목표 간격 상한. 실제 연속 경로 감사 간격은 별도 2도")
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--hold-torque-on-success",
+        action="store_true",
+        help="도착 성공 시 팔 토크를 유지한다. 실패 시에는 항상 토크를 해제한다",
+    )
+    parser.add_argument(
+        "--allow-torque-enabled",
+        action="store_true",
+        help="직전 연속 단계가 유지한 팔 토크 5개를 허용한다. 일부만 켜진 상태는 거부한다",
+    )
+    parser.add_argument("--position-only", action="store_true",
+                        help="부하·온도를 읽지 않고 위치·스톨만 감시한다")
     parser.add_argument("--mock", action="store_true")
     return parser.parse_args()
 
@@ -283,10 +333,10 @@ def main() -> int:
     ]
     bus = MultiJointFakeBus(calibration, expected_start) if args.mock else Bus(find_port(args.port))
     try:
-        state = read_all(bus, calibration)
+        state = read_all(bus, calibration, args.position_only)
         waypoints = validate_start(
             plan, calibration, state, target_raw, args.start_tolerance_ticks, args.max_delta_ticks,
-            args.max_waypoint_step_ticks,
+            args.max_waypoint_step_ticks, args.allow_torque_enabled,
         )
         preview = {
             "mode": "safe_recovery_execute" if args.execute else "safe_recovery_dry_run",
@@ -304,10 +354,26 @@ def main() -> int:
         if not args.execute:
             print(json.dumps(preview, ensure_ascii=False, indent=2))
             return 0
-        result = execute(
-            bus, calibration, waypoints, args.speed, args.acceleration,
-            args.load_limit, args.temperature_limit, args.arrival_tolerance_ticks,
-        )
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+        def interrupt_motion(signum, _frame):
+            raise KeyboardInterrupt(f"signal {signum}")
+
+        signal.signal(signal.SIGINT, interrupt_motion)
+        signal.signal(signal.SIGTERM, interrupt_motion)
+        try:
+            result = execute(
+                bus, calibration, waypoints, args.speed, args.acceleration,
+                args.load_limit, args.temperature_limit, args.arrival_tolerance_ticks,
+                args.hold_torque_on_success, args.position_only,
+            )
+        except KeyboardInterrupt as exc:
+            print(f"실행 중단: {exc}. 토크 해제 경로를 실행했습니다.", file=sys.stderr)
+            return 130
+        finally:
+            signal.signal(signal.SIGINT, previous_sigint)
+            signal.signal(signal.SIGTERM, previous_sigterm)
         preview.update(result)
         preview["motion_command_emitted"] = True
         print(json.dumps(preview, ensure_ascii=False, indent=2))

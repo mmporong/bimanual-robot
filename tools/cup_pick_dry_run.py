@@ -167,13 +167,15 @@ def joint_limit_margin_deg(chain: Chain, side: str, q: np.ndarray) -> float:
     return math.degrees(min(margins))
 
 
-def solve_pick_plan(detection: Detection, workspace: dict[str, Any]) -> dict[str, Any]:
-    base_xy = pixel_to_base_xy(detection.contact_px, workspace["homography"])
-    surface_z = float(workspace["surface_z_m"])
-    cup_height = float(workspace["cup_height_m"])
-    grasp_fraction = float(workspace.get("grasp_height_fraction", 0.55))
-    clearance = float(workspace.get("pregrasp_clearance_m", 0.060))
-    grasp = np.array([base_xy[0], base_xy[1], surface_z + cup_height * grasp_fraction])
+def solve_pick_plan_at_xy(
+    detection: Detection,
+    base_xy: np.ndarray,
+    surface_z: float,
+    grasp_height: float,
+    clearance: float,
+    approach_pitch_deg: float,
+) -> dict[str, Any]:
+    grasp = np.array([base_xy[0], base_xy[1], surface_z + grasp_height])
     # 왼팔 장착점에서 컵 몸통을 향하는 수평 접근이다. FinRay 손가락을 컵
     # 양옆으로 넣고 닫는 방식이며, 수직 top-down 자세처럼 wrist limit에 붙지 않는다.
     left_mount_xy = np.array([0.020, 0.170])
@@ -181,7 +183,13 @@ def solve_pick_plan(detection: Detection, workspace: dict[str, Any]) -> dict[str
     approach_norm = float(np.linalg.norm(approach_xy))
     if approach_norm < 1e-6:
         raise RuntimeError("컵 XY가 왼팔 베이스와 겹쳐 접근 방향을 정할 수 없습니다")
-    axis = np.array([approach_xy[0] / approach_norm, approach_xy[1] / approach_norm, 0.0])
+    horizontal = approach_xy / approach_norm
+    pitch = math.radians(approach_pitch_deg)
+    axis = np.array([
+        horizontal[0] * math.cos(pitch),
+        horizontal[1] * math.cos(pitch),
+        math.sin(pitch),
+    ])
     pregrasp = grasp - axis * clearance
 
     chain = Chain(URDF_PATH)
@@ -214,7 +222,9 @@ def solve_pick_plan(detection: Detection, workspace: dict[str, Any]) -> dict[str
         "motion_command_emitted": False,
         "detection": asdict(detection),
         "cup_floor_contact_base_xy_m": [round(float(value), 5) for value in base_xy],
-        "horizontal_approach_axis": [round(float(value), 5) for value in axis],
+        "approach_axis": [round(float(value), 5) for value in axis],
+        "approach_pitch_deg": approach_pitch_deg,
+        "grasp_height_above_table_m": grasp_height,
         "solver": "numerical_jacobian_damped_least_squares",
         "stages": stages,
         "ready_for_collision_review": ready,
@@ -223,6 +233,21 @@ def solve_pick_plan(detection: Detection, workspace: dict[str, Any]) -> dict[str
             f"min_margin={minimum_margin:.2f} deg"
         ],
     }
+
+
+def solve_pick_plan(detection: Detection, workspace: dict[str, Any]) -> dict[str, Any]:
+    base_xy = pixel_to_base_xy(detection.contact_px, workspace["homography"])
+    surface_z = float(workspace["surface_z_m"])
+    cup_height = float(workspace["cup_height_m"])
+    grasp_fraction = float(workspace.get("grasp_height_fraction", 0.55))
+    return solve_pick_plan_at_xy(
+        detection,
+        base_xy,
+        surface_z,
+        cup_height * grasp_fraction,
+        float(workspace.get("pregrasp_clearance_m", 0.060)),
+        float(workspace.get("approach_pitch_deg", 0.0)),
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -234,6 +259,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True, help="COCO cup 클래스가 있는 Ultralytics 모델")
     parser.add_argument("--confidence", type=float, default=0.40)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
+    parser.add_argument("--measured-forward-m", type=float,
+                        help="왼팔 장착축 기준 컵 전방 거리. workspace homography 대신 단일 실측 좌표 사용")
+    parser.add_argument("--measured-lateral-m", type=float, default=0.0,
+                        help="왼팔 장착축 기준 컵 좌우 거리(+는 URDF +Y)")
+    parser.add_argument("--table-surface-z-m", type=float, default=0.6931)
+    parser.add_argument("--grasp-height-above-table-m", type=float, default=0.070)
+    parser.add_argument("--approach-pitch-deg", type=float, default=-55.0,
+                        help="0은 수평, 음수는 컵을 향해 아래로 기울인 접근")
+    parser.add_argument("--pregrasp-clearance-m", type=float, default=0.060)
     parser.add_argument("--annotated", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
@@ -262,7 +296,27 @@ def main() -> int:
         exit_code = 2
     elif args.plan:
         try:
-            report = solve_pick_plan(detection, load_workspace(args.workspace))
+            if args.measured_forward_m is None:
+                report = solve_pick_plan(detection, load_workspace(args.workspace))
+            else:
+                left_mount_xy = np.array([0.020, 0.170])
+                base_xy = left_mount_xy + np.array(
+                    [args.measured_forward_m, args.measured_lateral_m]
+                )
+                report = solve_pick_plan_at_xy(
+                    detection,
+                    base_xy,
+                    args.table_surface_z_m,
+                    args.grasp_height_above_table_m,
+                    args.pregrasp_clearance_m,
+                    args.approach_pitch_deg,
+                )
+                report["coordinate_source"] = {
+                    "type": "single_measured_left_arm_relative",
+                    "forward_m": args.measured_forward_m,
+                    "lateral_m": args.measured_lateral_m,
+                    "repeatable_pixel_mapping_available": False,
+                }
             if not report["ready_for_collision_review"]:
                 exit_code = 2
         except RuntimeError as exc:

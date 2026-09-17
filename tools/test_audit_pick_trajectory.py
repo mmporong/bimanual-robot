@@ -98,3 +98,16 @@ def test_recovery_rejects_joint_margin_regression():
     recovery = MODULE.find_monotonic_recovery(samples)
     assert recovery["ready_for_explicit_motion_approval"] is False
     assert "여유 감소" in recovery["reason"]
+
+
+def test_clean_trajectory_is_continuous_path_ready():
+    plan = {
+        "motion_command_emitted": False,
+        "ready_for_collision_review": True,
+        "stages": {
+            "pregrasp": {"joint_deg": [0.0] * 5},
+            "grasp": {"joint_deg": [0.0] * 5},
+        },
+    }
+    report = MODULE.audit_trajectory(plan, [0.0] * 5, [0.0] * 5, 2.0, 5.0)
+    assert report["continuous_path_ready_for_preview"] is True

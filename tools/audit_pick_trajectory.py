@@ -272,6 +272,7 @@ def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: li
             findings.append({key: value for key, value in sample_report.items() if key != "violates"})
 
     recovery = find_monotonic_recovery(sample_reports)
+    continuous_ready = not findings or recovery["ready_for_explicit_motion_approval"]
 
     return {
         "mode": "trajectory_collision_audit_only",
@@ -279,6 +280,10 @@ def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: li
         "sample_count": len(samples),
         "start_joint_deg": [round(float(value), 4) for value in start],
         "right_joint_deg": [round(float(value), 4) for value in right],
+        "target_stages_joint_deg": {
+            "pregrasp": [round(float(value), 4) for value in pregrasp],
+            "grasp": [round(float(value), 4) for value in grasp],
+        },
         "max_joint_step_deg": max_step_deg,
         "minimum_required_joint_margin_deg": minimum_margin_deg,
         "minimum_observed_joint_margin_deg": round(worst_margin, 3),
@@ -291,6 +296,7 @@ def audit_trajectory(plan: dict[str, Any], start_deg: list[float], right_deg: li
         "failed_sample_count": len(findings),
         "failed_samples": findings,
         "trajectory_ready_for_preview": not findings,
+        "continuous_path_ready_for_preview": continuous_ready,
         "start_recovery": recovery,
     }
 
@@ -338,7 +344,7 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
     print(text, end="")
-    if args.strict and not report["trajectory_ready_for_preview"]:
+    if args.strict and not report.get("continuous_path_ready_for_preview", False):
         return 2
     return 0
 

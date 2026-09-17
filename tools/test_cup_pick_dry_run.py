@@ -109,3 +109,28 @@ def test_pick_plan_contains_pregrasp_and_grasp_without_motion(monkeypatch):
     assert set(result["stages"]) == {"pregrasp", "grasp"}
     assert result["motion_command_emitted"] is False
     assert result["solver"] == "numerical_jacobian_damped_least_squares"
+
+
+def test_measured_target_uses_tilted_axis_and_raises_pregrasp(monkeypatch):
+    captured = []
+
+    def fake_solver(_chain, _side, _frame, target, **kwargs):
+        captured.append((target.copy(), kwargs["axis_target"].copy()))
+        return np.zeros(len(MODULE.ARM_JOINTS)), 0.001
+
+    monkeypatch.setattr(MODULE, "solve_with_restarts", fake_solver)
+    detection = MODULE.Detection("cup", 0.9, [0, 0, 1, 1], [0.5, 0.5])
+    result = MODULE.solve_pick_plan_at_xy(
+        detection,
+        np.array([0.320, 0.170]),
+        0.6931,
+        0.070,
+        0.060,
+        -55.0,
+    )
+    pregrasp_target, axis = captured[0]
+    grasp_target, _ = captured[1]
+    assert pregrasp_target[0] < grasp_target[0]
+    assert pregrasp_target[2] > grasp_target[2]
+    assert axis[2] < 0.0
+    assert result["approach_pitch_deg"] == -55.0

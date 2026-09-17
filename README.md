@@ -61,7 +61,7 @@ RGB-D 후보인 Astra S는 단독 POC 때 개발 노트북 USB에, 이동 탑재
 현재 베이스 제어보드는 `/dev/ttyS0` 헤더 UART, G4 LiDAR는 `/dev/ttyUSB0` USB를 사용하므로
 Pi에서 ROS 하드웨어가 점유한 USB-A는 1개이고 3개가 남아 있다.
 
-왼손은 SO-101 스톡 구동부를 유지하고 접촉 손가락을 **80 mm·끝단 립 3 mm TPU 95A FinRay 한 쌍**으로 교체하는 안으로 2026-09-16 확정했다. 출력 기준과 해시는 [`design/gripper/finray_80mm_lip3_selection.yaml`](design/gripper/finray_80mm_lip3_selection.yaml)에 있다. 장착·캘리브레이션·젖은 컵 미끄럼 시험 전이며, 출처 라이선스가 확인되지 않은 STL/G-code는 저장소에 포함하지 않는다.
+왼손은 SO-101 스톡 구동부를 유지하고 접촉 손가락을 **80 mm·끝단 립 3 mm TPU 95A FinRay 한 쌍**으로 교체했다. 출력 기준과 해시는 [`design/gripper/finray_80mm_lip3_selection.yaml`](design/gripper/finray_80mm_lip3_selection.yaml)에 있다. 2026-09-17 실측 원시 끝점 `1414~2871`에서 양 끝 40 tick을 제외한 `1454~2831`을 ID 6 사용 범위로 저장했다. 첫 컵 접근에서는 계산된 TCP와 실제 손가락 중심이 맞지 않아 그리퍼가 컵을 감싸지 못했으므로 파지 성공으로 기록하지 않는다. 젖은 컵 미끄럼 시험도 아직 수행하지 않았다. 출처 라이선스가 확인되지 않은 STL/G-code는 저장소에 포함하지 않는다.
 
 오른손은 **ggao50 순정 평면 죠를 홈·교체형 인서트 없이 사용**한다. 과거의 V홈·사다리꼴·평면 TPU 인서트는 선정안에서 제외했으며, 현행 출력 준비 도구는 죠에 인서트 볼트 구멍을 뚫지 않는다. 물병 파지는 순정 평면 죠 상태에서 먼저 검증한다.
 
@@ -303,8 +303,29 @@ python3 tools/cup_pick_dry_run.py \
   --output /tmp/holdflow_cup_pick.json
 ```
 
+컵 중심을 왼팔 장착축에서 직접 잰 단일 시험에서는 homography 없이 그 좌표를 넣을 수 있다.
+아래 예시는 전방 300 mm, 좌우 0, 책상 위 파지 중심 70 mm, 아래로 55도 접근이다. 이 값은
+해당 위치 한 번에만 유효하며 컵을 옮긴 뒤 자동 좌표로 재사용할 수 없다.
+
+```bash
+python3 tools/cup_pick_dry_run.py \
+  --image /tmp/holdflow_top_visible_latest.jpg \
+  --model /absolute/path/to/yolo11n.pt \
+  --plan \
+  --measured-forward-m 0.300 \
+  --measured-lateral-m 0.0 \
+  --table-surface-z-m 0.6931 \
+  --grasp-height-above-table-m 0.070 \
+  --approach-pitch-deg -55 \
+  --output /tmp/holdflow_measured_cup_plan.json
+```
+
 이 결과가 `ready_for_collision_review: true`여도 실행 승인이 아니다. 다음 게이트는
 URDF 충돌 검사, 현재 관절에서 pre-grasp까지의 보간 경로 검사, 실물 관절값 읽기 대조다.
+2026-09-17 실물 시험에서는 위 단일 좌표로 관절 목표까지 도달했지만 FinRay 손가락 중심이
+컵 중심과 맞지 않아 파지에 실패했다. `0.300/0.0` 값을 성공 좌표로 재사용하지 않는다.
+다음 시험 전에 `left_cup_tcp`와 열린 두 손가락의 실제 중심 오프셋을 영상 또는 실측으로
+보정해야 한다.
 
 현재 왼팔 시작 자세는 엔코더를 읽어 LeRobot `degrees` 규약으로 변환하고 URDF hard limit와
 대조한다. 아래 도구는 현재 위치·토크 상태·전압·온도만 읽고 어떤 레지스터도 쓰지 않는다.
@@ -339,12 +360,16 @@ python3 tools/plan_safe_recovery.py \
   --strict
 ```
 
-복귀 실행기는 기본적으로 실물 상태만 읽는 dry-run이다. 계획 생성 뒤 자세가 12 tick 이상
-달라졌거나, 토크가 이미 켜져 있거나, 전체 이동이 220 tick을 넘으면 중단한다. 실행 시에도
-경로는 2도 간격으로 충돌 검사한다. 실물에는 검증된 최종 목표를 한 번 전달하고 STS3215의
-내부 속도 제한으로 같은 연속 경로를 따라가게 하며, 30 ms마다 관절별 부하·온도·스톨을 감시한다.
-전체 목표 차이는 220 tick으로 제한한다. P게인 16의 목표 앞 정지를 고려한 도달 허용치는 15 tick(약 1.32도)이며,
-성공·실패 뒤 항상 토크를 해제한다. `--execute`는 해당 팔 동작을 명시적으로 승인한 경우에만 붙인다.
+복귀 실행기는 기본적으로 실물 상태만 읽는 dry-run이다. 계획 생성 뒤 자세 차이·전체 이동량은
+각 명령의 상한으로 제한하고, 시작 토크는 기본적으로 모두 꺼진 상태만 허용한다. 충돌 감사의
+`--strict`는 처음부터 무위반인 경로뿐 아니라 기존 접촉이 새 충돌 없이 단조롭게 해소되는
+`continuous_path_ready_for_preview`도 통과시킨다. 실제 실행 간격과 도달 허용치는 서보 정지오차를
+고려해 별도로 지정할 수 있다. 기본 실행은 부하·온도·스톨을 감시하고 성공·실패 뒤 토크를
+해제한다. 사용자가 부하·온도 판독을 제외하도록 지정한 시험은 `--position-only`를 명시하며,
+이때도 위치 발산과 0.5초 스톨은 중단 조건이다. 승인된 연속 단계는
+`--hold-torque-on-success --allow-torque-enabled`로 성공 사이에만 토크를 이어 갈 수 있다.
+SIGINT·SIGTERM이나 실패 시에는 토크 해제 경로를 실행한다. `--execute`는 해당 팔 동작을
+명시적으로 승인한 경우에만 붙인다.
 
 중력으로 토크 해제 뒤 목표에서 15 tick 이상 처지면 복귀 완료로 판정하지 않는다. 이 경우
 복귀를 독립 동작으로 반복하지 않고, 승인된 실제 접근 궤적의 첫 구간으로 합쳐 토크를 연속

@@ -12,6 +12,7 @@
     python3 servo_goto.py --goal 3000 --execute
 """
 import argparse
+import signal
 import time
 
 from sts_bus import (Bus, FakeBus, A_MIN_ANGLE, A_MAX_ANGLE, A_TORQUE, A_ACCEL,
@@ -34,6 +35,10 @@ def main():
     ap.add_argument("--diverge-tol", type=int, default=15,
                     help="목표에서 이 카운트 이상 멀어지면 극성 반대로 보고 즉시 차단")
     ap.add_argument("--execute", action="store_true")
+    ap.add_argument("--hold-torque-on-success", action="store_true",
+                    help="목표 도달 시 구동을 유지한다. 실패 시에는 항상 해제한다")
+    ap.add_argument("--position-only", action="store_true",
+                    help="부하·온도를 읽지 않고 위치·스톨만 감시한다")
     ap.add_argument("--mock", action="store_true")
     ap.add_argument("--mock-wall", type=int, help="모의 하드 스톱 위치")
     args = ap.parse_args()
@@ -47,8 +52,10 @@ def main():
         return 1
     lo, hi = bus.read(sid, A_MIN_ANGLE, 2), bus.read(sid, A_MAX_ANGLE, 2)
     delta = args.goal - pos
+    temperature = None if args.position_only else bus.read(sid, A_TEMP)
+    temperature_text = "온도 미측정" if temperature is None else f"온도 {temperature}C"
     print(f"ID {sid}  현재 {pos}  목표 {args.goal}  델타 {delta:+d} "
-          f"({delta * 360 / RESOLUTION:+.1f}도)  한계 {lo}~{hi}  온도 {bus.read(sid, A_TEMP)}C")
+          f"({delta * 360 / RESOLUTION:+.1f}도)  한계 {lo}~{hi}  {temperature_text}")
 
     if lo is not None and hi is not None and not (lo <= args.goal <= hi):
         print("목표가 각도 한계 밖입니다. 한계를 먼저 확인하세요. 중단.")
@@ -60,12 +67,20 @@ def main():
         print("dry-run 으로 끝났습니다. 실물 적용은 --execute 입니다.")
         return 0
 
-    def restore_profile():
+    def require_write(address, value, size=1):
+        if not bus.write(sid, address, value, size):
+            raise RuntimeError(f"ID {sid}: register {address} 쓰기 실패")
+
+    def restore_profile(strict=False):
         # 시험용 속도·가속을 서보에 남기면 그 뒤 텔레옵이 그 속도로 기어간다 (2026-09-09)
         if prev_speed is not None:
-            bus.write(sid, A_SPEED, prev_speed, 2)
+            ok = bus.write(sid, A_SPEED, prev_speed, 2)
+            if strict and not ok:
+                raise RuntimeError("속도 프로파일 복원 실패")
         if prev_accel is not None:
-            bus.write(sid, A_ACCEL, prev_accel)
+            ok = bus.write(sid, A_ACCEL, prev_accel)
+            if strict and not ok:
+                raise RuntimeError("가속도 프로파일 복원 실패")
 
     def stop_and_release(where, why):
         if where is not None:
@@ -76,50 +91,72 @@ def main():
         print(f"  {why} -> 정지·구동해제. 위치 {bus.read(sid, A_POS, 2)}")
 
     prev_speed, prev_accel = bus.read(sid, A_SPEED, 2), bus.read(sid, A_ACCEL)   # 끝나면 되돌린다
-    bus.write(sid, A_GOAL, pos, 2)                 # 안전장치 1
-    bus.write(sid, A_ACCEL, 10)
-    bus.write(sid, A_SPEED, args.speed, 2)
-    bus.write(sid, A_TORQUE, 1)
-    time.sleep(0.05)
-    bus.write(sid, A_GOAL, args.goal, 2)
 
-    budget = max(8.0, abs(delta) / max(args.speed, 1) * 1.5 + 2.0)
-    start = time.time()
-    peak, last, moved_at = 0, pos, time.time()
-    err0 = abs(args.goal - pos)                    # 시작 오차
-    worst_err = err0
-    while time.time() - start < budget:
-        time.sleep(0.03)
-        now = bus.read(sid, A_POS, 2)
-        load = (bus.read(sid, A_LOAD, 2) or 0) & 0x3FF
-        if now is None:
-            continue
-        peak = max(peak, load)
-        err = abs(args.goal - now)
-        if abs(now - last) > STALL_TOL:
-            last, moved_at = now, time.time()
-        # 안전장치 5: 발산 — 목표에서 시작 오차보다 멀어지면 극성 반대. 즉시 차단
-        if err > err0 + args.diverge_tol:
-            stop_and_release(now, f"발산: 목표에서 멀어짐 (오차 {err0}->{err}). 모터-엔코더 극성 반대 의심")
-            return 4
-        worst_err = max(worst_err, err)
-        if load > args.load_limit:                 # 안전장치 3
-            stop_and_release(now, f"부하 {load} > {args.load_limit}")
-            return 2
-        if abs(now - args.goal) <= ARRIVE_TOL:
-            break
-        if time.time() - moved_at > STALL_SEC:     # 안전장치 4
-            stop_and_release(now, f"{STALL_SEC}s 동안 정지 (목표까지 {args.goal - now:+d} 남음)")
-            return 2
+    def release_on_signal(signum, _frame):
+        raise KeyboardInterrupt(f"signal {signum}")
 
-    bus.write(sid, A_TORQUE, 0)
-    restore_profile()
-    time.sleep(0.05)
-    final = bus.read(sid, A_POS, 2)
-    print(f"최종 {final}  오차 {final - args.goal:+d}  최대부하 {peak}  "
-          f"소요 {time.time() - start:.2f}s  구동 해제됨")
-    bus.close()
-    return 0 if abs(final - args.goal) <= 10 else 3
+    signal.signal(signal.SIGINT, release_on_signal)
+    signal.signal(signal.SIGTERM, release_on_signal)
+    try:
+        require_write(A_GOAL, pos, 2)                 # 안전장치 1
+        require_write(A_ACCEL, 10)
+        require_write(A_SPEED, args.speed, 2)
+        require_write(A_TORQUE, 1)
+        time.sleep(0.05)
+        require_write(A_GOAL, args.goal, 2)
+
+        budget = max(8.0, abs(delta) / max(args.speed, 1) * 1.5 + 2.0)
+        start = time.time()
+        peak, last, moved_at = None, pos, time.time()
+        err0 = abs(args.goal - pos)
+        while time.time() - start < budget:
+            time.sleep(0.03)
+            now = bus.read(sid, A_POS, 2)
+            load = None if args.position_only else (bus.read(sid, A_LOAD, 2) or 0) & 0x3FF
+            if now is None:
+                continue
+            if load is not None:
+                peak = load if peak is None else max(peak, load)
+            err = abs(args.goal - now)
+            if abs(now - last) > STALL_TOL:
+                last, moved_at = now, time.time()
+            if err > err0 + args.diverge_tol:
+                stop_and_release(now, f"발산: 목표에서 멀어짐 (오차 {err0}->{err}). 모터-엔코더 극성 반대 의심")
+                return 4
+            if load is not None and load > args.load_limit:
+                stop_and_release(now, f"부하 {load} > {args.load_limit}")
+                return 2
+            if abs(now - args.goal) <= ARRIVE_TOL:
+                break
+            if time.time() - moved_at > STALL_SEC:
+                stop_and_release(now, f"{STALL_SEC}s 동안 정지 (목표까지 {args.goal - now:+d} 남음)")
+                return 2
+
+        final = bus.read(sid, A_POS, 2)
+        arrived = final is not None and abs(final - args.goal) <= ARRIVE_TOL
+        if arrived and args.hold_torque_on_success:
+            restore_profile(strict=True)
+            torque = bus.read(sid, A_TORQUE)
+            if torque != 1:
+                raise RuntimeError(f"토크 유지 확인 실패: {torque}")
+            peak_text = "미측정" if peak is None else str(peak)
+            print(f"최종 {final}  오차 {final - args.goal:+d}  최대부하 {peak_text}  "
+                  f"소요 {time.time() - start:.2f}s  구동 유지=True")
+        else:
+            require_write(A_TORQUE, 0)
+            restore_profile(strict=True)
+            time.sleep(0.05)
+            final = bus.read(sid, A_POS, 2)
+            peak_text = "미측정" if peak is None else str(peak)
+            print(f"최종 {final}  오차 {final - args.goal:+d}  최대부하 {peak_text}  "
+                  f"소요 {time.time() - start:.2f}s  구동 해제됨")
+        bus.close()
+        return 0 if final is not None and abs(final - args.goal) <= 10 else 3
+    except BaseException:
+        current = bus.read(sid, A_POS, 2)
+        stop_and_release(current, "실행 예외")
+        bus.close()
+        raise
 
 
 if __name__ == "__main__":
