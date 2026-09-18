@@ -18,7 +18,8 @@ import traceback
 
 import numpy as np
 
-from workcell_preview_inputs import load_replay, materialize_urdf, sample_pose
+from workcell_preview_inputs import load_replay, materialize_urdf, sample_pose, _number_vector
+from workcell_envelopes import WorkcellEnvelopes
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_URDF = REPO_ROOT / "src/hold_flow_description/urdf/hold_flow.urdf"
@@ -47,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--urdf", type=Path, default=DEFAULT_URDF)
     parser.add_argument("--plan", type=Path)
+    parser.add_argument("--body-plan", type=Path, help="양팔 몸통 중간 수평 파지 후보 보고서")
     parser.add_argument("--state", type=Path, action="append", default=[])
     parser.add_argument("--original-base", action="store_true",
                         help="현행 하단 기록 보정 없이 기존 URDF 바퀴/캐스터 배치를 표시")
@@ -58,6 +60,8 @@ def parse_args() -> argparse.Namespace:
                         help="GUI 재생 시간. 0이면 창을 닫을 때까지 유지")
     parser.add_argument("--segment-seconds", type=float, default=4.0)
     args = parser.parse_args()
+    if args.body_plan and (args.plan or args.state):
+        parser.error("body-plan은 과거 plan/state 갤러리와 함께 사용하지 않습니다")
     if not math.isfinite(args.seconds) or args.seconds < 0:
         parser.error("seconds는 유한한 0 이상의 값이어야 합니다")
     if not math.isfinite(args.segment_seconds) or args.segment_seconds <= 0:
@@ -69,13 +73,47 @@ def parse_args() -> argparse.Namespace:
 
 def run(args: argparse.Namespace) -> None:
     replay = load_replay(args.plan, args.state)
+    scene = dict(SCENE_ASSUMPTIONS)
+    if args.body_plan:
+        body_path = args.body_plan.resolve(strict=True)
+        body_bytes = body_path.read_bytes()
+        body = json.loads(body_bytes.decode("utf-8"))
+        if body.get("schema") != "body_side_grasp_v1" or body.get("motion_command_emitted") is not False:
+            raise ValueError("몸통 측면 파지 비동작 보고서가 아닙니다")
+        if body.get("urdf_sha256") != hashlib.sha256(args.urdf.read_bytes()).hexdigest():
+            raise ValueError("몸통 파지 계획과 현재 URDF 해시가 다릅니다. 계획을 다시 생성하세요")
+        if not isinstance(body.get("scene"), dict) or not isinstance(body.get("sides"), dict):
+            raise ValueError("몸통 파지 보고서 scene/sides는 객체여야 합니다")
+        scene.update(body["scene"])
+        replay = {"poses": [], "source_files": [{"path": str(body_path),
+                  "sha256": hashlib.sha256(body_bytes).hexdigest()}],
+                  "limitations": ["양팔 수평 파지 후보 검토이며 닫기·들어올리기는 미검증"]}
+        for side in ("left", "right"):
+            if not isinstance(body["sides"].get(side), dict) or not isinstance(body["sides"][side].get("stages"), list):
+                raise ValueError("몸통 파지 보고서에 양팔 stages 배열이 필요합니다")
+            for candidate in body["sides"][side]["stages"]:
+                if not isinstance(candidate, dict) or not isinstance(candidate.get("name"), str) or not candidate["name"]:
+                    raise ValueError("몸통 파지 stage 객체에 이름이 필요합니다")
+                if "joint_deg" not in candidate:
+                    continue
+                if type(candidate.get("accepted")) is not bool:
+                    raise ValueError("몸통 파지 후보 accepted는 bool이어야 합니다")
+                _number_vector(candidate["joint_deg"], "몸통 파지 관절 후보")
+                replay["poses"].append({"name": f"{side}_{candidate['name']}",
+                    "left_joint_deg": candidate["joint_deg"] if side == "left" else [0,-68,92,-22,0],
+                    "right_joint_deg": candidate["joint_deg"] if side == "right" else [0,-68,92,-22,0],
+                    "ik_accepted": candidate["accepted"], "source_kind": "body_side_grasp_candidate"})
+        if not replay["poses"]:
+            raise ValueError("몸통 파지 보고서에 표시할 관절 후보가 없습니다")
+    checker = WorkcellEnvelopes(args.urdf, scene)
+    _number_vector(scene["right_parked_joint_deg"], "오른팔 대기 자세")
     source_hashes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                     for name in ["simulate_urdf_workcell.py", "workcell_preview_inputs.py"]}
+                     for name in ["simulate_urdf_workcell.py", "workcell_preview_inputs.py", "workcell_envelopes.py"]}
     output = args.output_dir.resolve()
     if output.exists():
         raise FileExistsError(f"새 출력 디렉터리를 지정하세요: {output}")
     if args.check_only:
-        print(json.dumps({"replay": replay, "scene": SCENE_ASSUMPTIONS,
+        print(json.dumps({"replay": replay, "scene": scene,
                           "hardware_accessed": False}, ensure_ascii=False, indent=2))
         return
     version = importlib.metadata.version("isaacsim")
@@ -156,24 +194,28 @@ def run(args: argparse.Namespace) -> None:
 
         UsdGeom.Xform.Define(stage, "/World/Workcell")
         cube("/World/Workcell/Floor", [0, 0, -0.025], [4, 4, 0.05], [0.22, 0.25, 0.29])
-        table_z = SCENE_ASSUMPTIONS["table_surface_z_m"]
-        table_x, table_y = SCENE_ASSUMPTIONS["table_center_xy_m"]
-        table_dx, table_dy = SCENE_ASSUMPTIONS["table_size_xy_m"]
+        table_z = scene["table_surface_z_m"]
+        table_x, table_y = scene["table_center_xy_m"]
+        table_dx, table_dy = scene["table_size_xy_m"]
         cube("/World/Workcell/Table", [table_x, table_y, table_z - 0.015],
              [table_dx, table_dy, .03], [.63, .68, .74])
         for i, x in enumerate([table_x-table_dx/2+.05, table_x+table_dx/2-.05]):
             for j, y in enumerate([table_y-table_dy/2+.07, table_y+table_dy/2-.07]):
                 cube(f"/World/Workcell/TableLeg_{i}_{j}", [x, y, (table_z-.03)/2],
                      [.035, .035, table_z-.03], [.25, .28, .32])
-        cup_x, cup_y = SCENE_ASSUMPTIONS["cup_center_xy_m"]
-        cup_r, cup_h = SCENE_ASSUMPTIONS["cup_radius_m"], SCENE_ASSUMPTIONS["cup_height_m"]
+        cup_x, cup_y = scene["cup_center_xy_m"]
+        cup_r, cup_h = scene["cup_radius_m"], scene["cup_height_m"]
         cylinder("/World/Workcell/Cup", [cup_x,cup_y,table_z+cup_h/2], cup_r,cup_h,[.2,.78,.9],.45)
         cylinder("/World/Workcell/CupRim", [cup_x,cup_y,table_z+cup_h], cup_r+.001,.006,[.55,.95,1])
-        bottle_x, bottle_y = SCENE_ASSUMPTIONS["bottle_center_xy_m"]
-        bottle_r, bottle_h = SCENE_ASSUMPTIONS["bottle_radius_m"], SCENE_ASSUMPTIONS["bottle_height_m"]
+        bottle_x, bottle_y = scene["bottle_center_xy_m"]
+        bottle_r, bottle_h = scene["bottle_radius_m"], scene["bottle_height_m"]
         cylinder("/World/Workcell/Bottle", [bottle_x,bottle_y,table_z+bottle_h/2], bottle_r,bottle_h,[.2,.65,.40],.8)
         cylinder("/World/Workcell/BottleNeck", [bottle_x,bottle_y,table_z+bottle_h+.018], .018,.035,[.2,.65,.40])
         cylinder("/World/Workcell/BottleCap", [bottle_x,bottle_y,table_z+bottle_h+.04], .02,.012,[.1,.2,.13])
+        for name, x, y, radius, height in (("Cup",cup_x,cup_y,cup_r,cup_h),
+                                           ("Bottle",bottle_x,bottle_y,bottle_r,bottle_h)):
+            cylinder(f"/World/Workcell/{name}MidHeight", [x,y,table_z+height/2],
+                     radius+.002,.003,[1,.25,.05], .8)
         # 위치 참고 선반. 하중 지지 구조·기존 실물 설치를 뜻하지 않는다.
         cube("/World/Workcell/ShelfProxy", [0,0,.50], [.25,.23,.012],[.12,.38,.50])
         sun = UsdLux.DistantLight.Define(stage, "/World/KeyLight")
@@ -191,19 +233,34 @@ def run(args: argparse.Namespace) -> None:
         if missing:
             raise RuntimeError(f"import된 DOF 누락: {sorted(missing)}")
         indices = [dof_names.index(f"left_{joint}") for joint in ARM_JOINTS]
+        right_indices = [dof_names.index(f"right_{joint}") for joint in ARM_JOINTS]
         q = np.zeros(len(dof_names), dtype=np.float32)
-        for name, deg in zip(ARM_JOINTS, SCENE_ASSUMPTIONS["right_parked_joint_deg"]):
+        for name, deg in zip(ARM_JOINTS, scene["right_parked_joint_deg"]):
             q[dof_names.index(f"right_{name}")] = np.deg2rad(deg)
-        q[dof_names.index("left_gripper")] = SCENE_ASSUMPTIONS["left_stock_gripper_rad"]
+        left_open = 1.0 if args.body_plan else scene["left_stock_gripper_rad"]
+        right_open = .0433 if args.body_plan else scene["right_gripper_open_m"]
+        q[dof_names.index("left_gripper")] = left_open
         for name in ["right_finger1_joint", "right_finger2_joint"]:
-            q[dof_names.index(name)] = SCENE_ASSUMPTIONS["right_gripper_open_m"]
+            q[dof_names.index(name)] = right_open
 
-        def apply_pose(degrees):
+        def apply_pose(degrees, right_degrees=None, accepted=True):
+            right_degrees = scene["right_parked_joint_deg"] if right_degrees is None else right_degrees
+            check = checker.check(degrees, right_degrees, left_open, right_open)
+            if not accepted or not check["clear"]:
+                robot.set_joint_positions(q)
+                robot.set_joint_velocities(np.zeros_like(q))
+                return {"applied": False, "ik_accepted": accepted, **check}
             q[indices] = np.radians(degrees)
+            q[right_indices] = np.radians(right_degrees)
             robot.set_joint_positions(q)
             robot.set_joint_velocities(np.zeros_like(q))
             robot.get_articulation_controller().apply_action(
                 ArticulationAction(joint_positions=q))
+            return {"applied": True, "ik_accepted": True, **check}
+
+        initial = apply_pose([0,-68,92,-22,0])
+        if not initial["applied"]:
+            raise RuntimeError(f"초기 대기 자세도 프리뷰 외곽 검사 미통과: {initial}")
 
         views = {
             "Overview": ([-1.6, 1.9, 1.50], [.22, 0, .55]),
@@ -217,7 +274,7 @@ def run(args: argparse.Namespace) -> None:
         for _ in range(4):
             app.update()
         view("Overview")
-        replay_state = {"playing": True, "selected": 0, "elapsed": 0.0}
+        replay_state = {"playing": False, "selected": 0, "elapsed": 0.0}
         label = None
         panel = None
         if not args.headless:
@@ -229,13 +286,16 @@ def run(args: argparse.Namespace) -> None:
                     ui.Label("BASE: original legacy" if args.original_base else
                              "BASE: 510 mm track / rear caster proxies", height=20)
                     ui.Label("KINEMATIC REPLAY: base fixed / contacts OFF", height=22)
-                    ui.Label("Pose gallery interpolation, NOT a recorded trajectory", height=20)
+                    ui.Label("MID-BODY SIDE GRASP" if args.body_plan else "LEGACY POSES / OVERLAP REVIEW", height=20)
+                    ui.Label("Red bands = body midpoint / no grasp success claim", height=20)
+                    ui.Label("Object/table/other-arm envelope overlap -> HOLD", height=20)
                     ui.Label("FinRay NOT modeled; stock left jaw proxy", height=20)
                     ui.Label("Depth/LiDAR are design placeholders, NOT RGB3 calibration", word_wrap=True, height=38)
                     ui.Label("Table, cup, bottle, shelf: ASSUMED dimensions", height=22)
                     label = ui.Label("Loading saved poses...", word_wrap=True, height=40)
                     def pause():
-                        replay_state["playing"] = not replay_state["playing"]
+                        if not args.body_plan:
+                            replay_state["playing"] = not replay_state["playing"]
                     with ui.HStack(height=28):
                         ui.Button("Play / Pause", clicked_fn=pause)
                         ui.Button("Next pose", clicked_fn=lambda: replay_state.update(
@@ -270,21 +330,42 @@ def run(args: argparse.Namespace) -> None:
             raise RuntimeError(f"완전한 PNG가 생성되지 않았습니다: {path}")
 
         evidence = []
+        last_applied_pose_name = "initial_nominal_envelope_checked"
         for index, pose in enumerate(replay["poses"]):
-            apply_pose(pose["left_joint_deg"])
+            result = apply_pose(pose["left_joint_deg"], pose.get("right_joint_deg"), pose.get("ik_accepted", True))
             for _ in range(12):
                 world.step(render=True)
-                apply_pose(pose["left_joint_deg"])
+                apply_pose(pose["left_joint_deg"], pose.get("right_joint_deg"), pose.get("ik_accepted", True))
             snapshot = output / f"pose_{index:02d}.png"
             capture_sync(snapshot)
-            observed = robot.get_joint_positions()[indices]
-            max_error = float(np.max(np.abs(observed-np.radians(pose["left_joint_deg"]))))
-            if not math.isfinite(max_error) or max_error > 1e-4:
+            observed = robot.get_joint_positions()
+            displayed_error = float(np.max(np.abs(observed-q)))
+            if not math.isfinite(displayed_error) or displayed_error > 1e-4:
+                raise RuntimeError(f"표시/유지 자세 불일치: {displayed_error} rad")
+            left_error = float(np.max(np.abs(observed[indices]-np.radians(pose["left_joint_deg"]))))
+            right_error = float(np.max(np.abs(observed[right_indices]-np.radians(
+                pose.get("right_joint_deg", scene["right_parked_joint_deg"])))))
+            max_error = max(left_error, right_error)
+            if result["applied"] and (not math.isfinite(max_error) or max_error > 1e-4):
                 raise RuntimeError(f"시뮬레이터 관절값 불일치: {max_error} rad")
+            if result["applied"]:
+                last_applied_pose_name = pose["name"]
             evidence.append({"pose": pose["name"], "image": snapshot.name,
-                             "max_pose_assignment_error_rad": max_error})
-            print(f"HOLD_FLOW_POSE_CAPTURED {pose['name']} {max_error:.8f} rad", flush=True)
-        apply_pose(replay["poses"][0]["left_joint_deg"])
+                             "candidate_check": result,
+                             "image_semantics": "candidate" if result["applied"] else "held_pose_not_failed_candidate",
+                             "displayed_pose_name": last_applied_pose_name,
+                             "displayed_state_error_rad": displayed_error,
+                             "per_arm_pose_assignment_error_rad": {"left": left_error, "right": right_error} if result["applied"] else None,
+                             "max_pose_assignment_error_rad": max_error if result["applied"] else None})
+            print(f"HOLD_FLOW_POSE_REVIEWED {pose['name']} applied={result['applied']}", flush=True)
+        first_accepted = next((i for i, item in enumerate(evidence)
+                               if item["candidate_check"]["applied"]), None)
+        if first_accepted is not None:
+            replay_state["selected"] = first_accepted
+            pose = replay["poses"][first_accepted]
+            apply_pose(pose["left_joint_deg"], pose.get("right_joint_deg"))
+        else:
+            apply_pose([0,-68,92,-22,0])
         world.step(render=True)
         scene_path = output / "workcell.usda"
         if not stage.GetRootLayer().Export(str(scene_path)):
@@ -301,13 +382,16 @@ def run(args: argparse.Namespace) -> None:
                           [str(item) for item in value] if isinstance(value, list) else value
                           for key, value in vars(args).items()},
             "motion_command_emitted": False, "source_urdf": provenance,
-            "replay": replay, "scene_assumptions": SCENE_ASSUMPTIONS,
+            "replay": replay, "scene_assumptions": scene,
+            "gripper_display_positions": {"left_gripper_rad": left_open, "right_fingers_m": right_open},
+            "object_overlap_check": "conservative_envelopes_not_physics",
             "articulation_root": str(root_path), "dof_names": dof_names,
             "collision_shapes_disabled_for_replay": disabled_collisions,
             "gravity_enabled_on_robot": False, "base_fixed": True,
             "physical_grasp_verified": False, "dynamic_stability_verified": False,
-            "collision_safety_verified": False, "joint_limits_validated": False,
-            "replay_semantics": "pose_gallery_interpolation_not_recorded_or_audited_trajectory",
+            "collision_safety_verified": False, "joint_limits_validated": True,
+            "joint_limits_scope": "displayed_arm_endpoints_only_not_complete_trajectory",
+            "replay_semantics": "guarded_endpoint_review_not_grasp_or_audited_trajectory",
             "saved_usd_reopened": True,
             "importer_warning": "massless URDF frames receive importer default inertia; not calibrated dynamics",
             "screenshots": evidence,
@@ -321,13 +405,18 @@ def run(args: argparse.Namespace) -> None:
             if replay_state["playing"]:
                 replay_state["elapsed"] += min(now-last, .1)
                 name, degrees = sample_pose(replay["poses"], replay_state["elapsed"], args.segment_seconds)
+                right_degrees, accepted = None, True
             else:
                 pose = replay["poses"][replay_state["selected"]]
                 name, degrees = pose["name"], pose["left_joint_deg"]
+                right_degrees, accepted = pose.get("right_joint_deg"), pose.get("ik_accepted", True)
             last = now
-            apply_pose(degrees)
+            result = apply_pose(degrees, right_degrees, accepted)
+            if not result["applied"]:
+                replay_state["playing"] = False
             if label is not None:
-                label.text = name
+                label.text = name + (" | candidate only" if result["applied"] else
+                                    " | HOLD: IK/overlap rejected; last accepted pose")
             world.step(render=True)
             time.sleep(.01)
         print("HOLD_FLOW_REPLAY_FINISHED", flush=True)
