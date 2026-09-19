@@ -20,6 +20,8 @@ import numpy as np
 
 from workcell_preview_inputs import load_replay, materialize_urdf, sample_pose, _number_vector
 from workcell_envelopes import WorkcellEnvelopes
+from workcell_preview_motion import build_demo, sample_demo, audit_demo
+from workcell_recording import PreviewRecording
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_URDF = REPO_ROOT / "src/hold_flow_description/urdf/hold_flow.urdf"
@@ -59,9 +61,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seconds", type=float, default=0.0,
                         help="GUI 재생 시간. 0이면 창을 닫을 때까지 유지")
     parser.add_argument("--segment-seconds", type=float, default=4.0)
+    parser.add_argument("--demo", action="store_true", help="리셋·양팔 빈손 방향 시연을 한 번 실행")
+    parser.add_argument("--record-demo", action="store_true", help="--demo 시연 viewport를 10fps PNG로 기록")
     args = parser.parse_args()
     if args.body_plan and (args.plan or args.state):
         parser.error("body-plan은 과거 plan/state 갤러리와 함께 사용하지 않습니다")
+    if args.record_demo and not args.demo:
+        parser.error("record-demo는 demo와 함께 사용합니다")
     if not math.isfinite(args.seconds) or args.seconds < 0:
         parser.error("seconds는 유한한 0 이상의 값이어야 합니다")
     if not math.isfinite(args.segment_seconds) or args.segment_seconds <= 0:
@@ -107,13 +113,22 @@ def run(args: argparse.Namespace) -> None:
             raise ValueError("몸통 파지 보고서에 표시할 관절 후보가 없습니다")
     checker = WorkcellEnvelopes(args.urdf, scene)
     _number_vector(scene["right_parked_joint_deg"], "오른팔 대기 자세")
+    demo_poses = build_demo(checker.chain)
+    home = demo_poses[0]
+    scene["right_parked_joint_deg"] = home["right_joint_deg"]
+    if args.body_plan:
+        for pose in replay["poses"]:
+            inactive = "right" if pose["name"].startswith("left_") else "left"
+            pose[f"{inactive}_joint_deg"] = home[f"{inactive}_joint_deg"]
     source_hashes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                     for name in ["simulate_urdf_workcell.py", "workcell_preview_inputs.py", "workcell_envelopes.py"]}
+                     for name in ["simulate_urdf_workcell.py", "workcell_preview_inputs.py", "workcell_envelopes.py",
+                                  "workcell_preview_motion.py", "workcell_recording.py"]}
     output = args.output_dir.resolve()
     if output.exists():
         raise FileExistsError(f"새 출력 디렉터리를 지정하세요: {output}")
     if args.check_only:
         print(json.dumps({"replay": replay, "scene": scene,
+                          "reset_pose": home,
                           "hardware_accessed": False}, ensure_ascii=False, indent=2))
         return
     version = importlib.metadata.version("isaacsim")
@@ -258,14 +273,24 @@ def run(args: argparse.Namespace) -> None:
                 ArticulationAction(joint_positions=q))
             return {"applied": True, "ik_accepted": True, **check}
 
-        initial = apply_pose([0,-68,92,-22,0])
+        initial = apply_pose(home["left_joint_deg"], home["right_joint_deg"])
         if not initial["applied"]:
             raise RuntimeError(f"초기 대기 자세도 프리뷰 외곽 검사 미통과: {initial}")
+        home_q = q.copy()
+        robot.set_joints_default_state(positions=home_q, velocities=np.zeros_like(q), efforts=np.zeros_like(q))
+        world.reset()
+        default_reset_error = float(np.max(np.abs(robot.get_joint_positions()-home_q)))
+        if not math.isfinite(default_reset_error) or default_reset_error > 1e-4:
+            raise RuntimeError(f"Isaac world.reset 기본 관절값 불일치: {default_reset_error}")
+        demo_audit = audit_demo(demo_poses, checker, left_open, right_open)
+        if getattr(args, "demo", False) and not demo_audit["passes"]:
+            raise RuntimeError(f"빈손 시연 경로 외곽 검사 실패: {demo_audit['failures'][:1]}")
 
         views = {
             "Overview": ([-1.6, 1.9, 1.50], [.22, 0, .55]),
             "Front": ([1.85, .01, 1.0], [.15,0,.60]),
             "Top": ([.25,.001,2.0],[.25,0,.60]),
+            "Hands": ([1.15,1.05,1.17],[.21,0,.87]),
         }
         def view(name):
             eye, target = views[name]
@@ -274,12 +299,47 @@ def run(args: argparse.Namespace) -> None:
         for _ in range(4):
             app.update()
         view("Overview")
-        replay_state = {"playing": False, "selected": 0, "elapsed": 0.0}
+        replay_state = {"playing": False, "selected": None, "elapsed": 0.0,
+                        "demo": False, "demo_paused": False, "demo_elapsed": 0.0,
+                        "demo_completed": False}
+        recording_enabled = bool(getattr(args, "record_demo", False))
+        recording: PreviewRecording | None = None
+
+        def finish_recording(reason: str, *, completed: bool = False,
+                             final_reset_error_rad: float | None = None) -> None:
+            nonlocal recording
+            if recording is not None:
+                recording.finish(completed=completed, reason=reason,
+                                 final_reset_error_rad=final_reset_error_rad)
+                recording = None
+
+        def reset_preview(reason="user_reset", finalize_recording=True):
+            if finalize_recording:
+                finish_recording(reason)
+            replay_state.update(playing=False, selected=None, elapsed=0.0,
+                                demo=False, demo_paused=False, demo_elapsed=0.0, demo_completed=False)
+            robot.post_reset()
+            return apply_pose(home["left_joint_deg"], home["right_joint_deg"])
+
+        def start_demo():
+            nonlocal recording
+            finish_recording("demo_restarted")
+            reset_preview(finalize_recording=False)
+            if demo_audit["passes"]:
+                replay_state["demo"] = True
+                if recording_enabled:
+                    recording = PreviewRecording(output)
+
+        def next_pose():
+            finish_recording("candidate_selected")
+            selected = replay_state["selected"]
+            replay_state.update(playing=False, demo=False,
+                                selected=0 if selected is None else (selected+1) % len(replay["poses"]))
         label = None
         panel = None
         if not args.headless:
             import omni.ui as ui
-            panel = ui.Window("HOLD THE FLOW - PREVIEW ONLY", width=410, height=375)
+            panel = ui.Window("HOLD THE FLOW - PREVIEW ONLY", width=440, height=480)
             with panel.frame:
                 with ui.VStack(spacing=5):
                     ui.Label("450 x 340 mm | SO101 x 2", height=22)
@@ -292,14 +352,19 @@ def run(args: argparse.Namespace) -> None:
                     ui.Label("FinRay NOT modeled; stock left jaw proxy", height=20)
                     ui.Label("Depth/LiDAR are design placeholders, NOT RGB3 calibration", word_wrap=True, height=38)
                     ui.Label("Table, cup, bottle, shelf: ASSUMED dimensions", height=22)
+                    ui.Label("DEMO: empty-hand orientation ONLY, NOT cup pick", height=22)
                     label = ui.Label("Loading saved poses...", word_wrap=True, height=40)
                     def pause():
-                        if not args.body_plan:
+                        if replay_state["demo"]:
+                            replay_state["demo_paused"] = not replay_state["demo_paused"]
+                        elif not args.body_plan:
                             replay_state["playing"] = not replay_state["playing"]
                     with ui.HStack(height=28):
+                        ui.Button("Reset", clicked_fn=reset_preview)
+                        ui.Button("Empty-hand check", clicked_fn=start_demo)
+                    with ui.HStack(height=28):
                         ui.Button("Play / Pause", clicked_fn=pause)
-                        ui.Button("Next pose", clicked_fn=lambda: replay_state.update(
-                            playing=False, selected=(replay_state["selected"]+1) % len(replay["poses"])))
+                        ui.Button("Next pose", clicked_fn=next_pose)
                     with ui.HStack(height=28):
                         for name in views:
                             ui.Button(name, clicked_fn=lambda name=name: view(name))
@@ -330,7 +395,13 @@ def run(args: argparse.Namespace) -> None:
             raise RuntimeError(f"완전한 PNG가 생성되지 않았습니다: {path}")
 
         evidence = []
-        last_applied_pose_name = "initial_nominal_envelope_checked"
+        for _ in range(8):
+            world.step(render=True)
+        view("Overview")
+        for _ in range(4):
+            app.update()
+        capture_sync(output / "reset.png")
+        last_applied_pose_name = "RESET"
         for index, pose in enumerate(replay["poses"]):
             result = apply_pose(pose["left_joint_deg"], pose.get("right_joint_deg"), pose.get("ik_accepted", True))
             for _ in range(12):
@@ -358,14 +429,7 @@ def run(args: argparse.Namespace) -> None:
                              "per_arm_pose_assignment_error_rad": {"left": left_error, "right": right_error} if result["applied"] else None,
                              "max_pose_assignment_error_rad": max_error if result["applied"] else None})
             print(f"HOLD_FLOW_POSE_REVIEWED {pose['name']} applied={result['applied']}", flush=True)
-        first_accepted = next((i for i, item in enumerate(evidence)
-                               if item["candidate_check"]["applied"]), None)
-        if first_accepted is not None:
-            replay_state["selected"] = first_accepted
-            pose = replay["poses"][first_accepted]
-            apply_pose(pose["left_joint_deg"], pose.get("right_joint_deg"))
-        else:
-            apply_pose([0,-68,92,-22,0])
+        reset_preview(reason="startup_gallery_finished")
         world.step(render=True)
         scene_path = output / "workcell.usda"
         if not stage.GetRootLayer().Export(str(scene_path)):
@@ -384,6 +448,10 @@ def run(args: argparse.Namespace) -> None:
             "motion_command_emitted": False, "source_urdf": provenance,
             "replay": replay, "scene_assumptions": scene,
             "gripper_display_positions": {"left_gripper_rad": left_open, "right_fingers_m": right_open},
+            "reset_pose": home, "world_reset_error_rad": default_reset_error,
+            "startup_selection": "RESET_not_first_accepted_candidate",
+            "empty_hand_demo": {"poses": demo_poses, "sampled_audit": demo_audit,
+                                "physical_motion": False, "grasp": False},
             "object_overlap_check": "conservative_envelopes_not_physics",
             "articulation_root": str(root_path), "dof_names": dof_names,
             "collision_shapes_disabled_for_replay": disabled_collisions,
@@ -398,11 +466,27 @@ def run(args: argparse.Namespace) -> None:
         }
         (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2,
                                                         allow_nan=False)+"\n", encoding="utf-8")
+        if panel is not None:
+            panel.visible = True
+            panel.dock_in_window("Stage", ui.DockPosition.SAME)
+            panel.set_active(True)
         print(f"HOLD_FLOW_SCENE_READY {output / 'manifest.json'}", flush=True)
+        if getattr(args, "demo", False):
+            view("Hands")
+            start_demo()
         start = last = time.monotonic()
         while app.is_running() and (args.seconds == 0 or time.monotonic()-start < args.seconds):
             now = time.monotonic()
-            if replay_state["playing"]:
+            tick_seconds = min(max(now-last, 0.0), .1)
+            demo_step = replay_state["demo"]
+            if demo_step:
+                pose = sample_demo(demo_poses, replay_state["demo_elapsed"], args.segment_seconds)
+                name, degrees = pose["name"], pose["left_joint_deg"]
+                right_degrees, accepted = pose["right_joint_deg"], True
+            elif replay_state["selected"] is None and not replay_state["playing"]:
+                name, degrees = "RESET", home["left_joint_deg"]
+                right_degrees, accepted = home["right_joint_deg"], True
+            elif replay_state["playing"]:
                 replay_state["elapsed"] += min(now-last, .1)
                 name, degrees = sample_pose(replay["poses"], replay_state["elapsed"], args.segment_seconds)
                 right_degrees, accepted = None, True
@@ -414,13 +498,44 @@ def run(args: argparse.Namespace) -> None:
             result = apply_pose(degrees, right_degrees, accepted)
             if not result["applied"]:
                 replay_state["playing"] = False
+                replay_state["demo_paused"] = True
+                finish_recording("apply_pose_rejected")
             if label is not None:
-                label.text = name + (" | candidate only" if result["applied"] else
-                                    " | HOLD: IK/overlap rejected; last accepted pose")
+                if not result["applied"]:
+                    label.text = name + " | HOLD: IK/overlap rejected; last accepted pose"
+                elif demo_step:
+                    label.text = name + " | EMPTY-HAND CHECK"
+                elif name == "RESET":
+                    label.text = "RESET | nominal simulation pose"
+                else:
+                    label.text = name + " | candidate only"
             world.step(render=True)
+            if demo_step:
+                observed_error = float(np.max(np.abs(robot.get_joint_positions()-q)))
+                if not math.isfinite(observed_error) or observed_error > 1e-4:
+                    raise RuntimeError(f"시연 관절 배치 불일치: {observed_error}")
+                if recording is not None:
+                    capture_sync(recording.frame_path())
+                    recording.add_frame({"time_s": replay_state["demo_elapsed"], "phase": name,
+                                         "pose_error_rad": observed_error, "applied": result["applied"]})
+                if pose["done"] and result["applied"]:
+                    reset_preview(finalize_recording=False)
+                    replay_state["demo_completed"] = True
+                    reset_error = float(np.max(np.abs(robot.get_joint_positions()-home_q)))
+                    capture_sync(output / "reset_after_demo.png")
+                    finish_recording("demo_completed", completed=True,
+                                     final_reset_error_rad=reset_error)
+                    print(f"HOLD_FLOW_DEMO_FINISHED reset_error={reset_error}", flush=True)
+                elif not replay_state["demo_paused"] and result["applied"]:
+                    replay_state["demo_elapsed"] += .1 if recording is not None else tick_seconds
+                if recording is not None:
+                    time.sleep(max(0, .1-(time.monotonic()-now)))
             time.sleep(.01)
+        finish_recording("time_limit" if args.seconds else "window_closed")
         print("HOLD_FLOW_REPLAY_FINISHED", flush=True)
-    except BaseException:
+    except BaseException as exc:
+        if "finish_recording" in locals():
+            finish_recording(f"exception:{type(exc).__name__}")
         traceback.print_exc()
         print("HOLD_FLOW_SCENE_FAILED", flush=True)
         # Kit의 fast shutdown이 예외를 exit 0으로 숨기지 않게 반환 코드를 설정한다.
