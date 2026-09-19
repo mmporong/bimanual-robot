@@ -15,6 +15,7 @@ from plan_body_side_grasp import (
 )
 from workcell_preview_inputs import materialize_urdf
 from workcell_preview_motion import build_demo
+from cup_contact_recovery import validate_recovery
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config/simulation/cup_contact_experiment.json"
@@ -24,6 +25,9 @@ def load_config(path=DEFAULT_CONFIG):
     config = json.loads(Path(path).read_text())
     if config.get("schema") != "cup_contact_experiment_v1":
         raise ValueError("지원하지 않는 접촉 실험 설정")
+    if "recovery" not in config:
+        config["recovery"] = json.loads(DEFAULT_CONFIG.read_text())["recovery"]
+    validate_recovery(config["recovery"])
     for key in ("table_center_m", "table_size_m", "cup_center_m", "pad_size_m",
                 "fixed_pad_center_tool_m", "moving_pad_center_jaw_m", "contact_center_tool_m",
                 "cup_spawn_offset_m"):
@@ -135,7 +139,7 @@ class ContactChain(Chain):
         return transforms
 
 
-def make_plan(model: Path, config):
+def make_plan(model: Path, config, start_joint_deg=None):
     chain = ContactChain(model)
     home = build_demo(Chain(model))[0]
     center = np.asarray(config["cup_center_m"])
@@ -147,7 +151,13 @@ def make_plan(model: Path, config):
         ("APPROACH", center, 2.0),
         ("LIFT", center + [0, 0, config["lift_distance_m"]], 3.0),
     ]
-    seed = np.radians(home["left_joint_deg"])
+    start = home["left_joint_deg"] if start_joint_deg is None else start_joint_deg
+    if np.asarray(start).shape != (5,) or not np.isfinite(start).all():
+        raise ValueError("시작 관절은 유한한 5축 각도여야 합니다")
+    start = np.asarray(start, dtype=float).tolist()
+    if start_joint_deg is not None:
+        targets = targets[1:]
+    seed = np.radians(start)
     stages = []
     for name, target, duration_s in targets:
         seed = solve_horizontal_endpoint(chain, "left", target, seed, restarts=1, iterations=240)
@@ -158,7 +168,7 @@ def make_plan(model: Path, config):
         stages.append({"name": name, "joint_deg": np.degrees(seed).tolist(), "target_m": target.tolist(),
                        "duration_s": duration_s, "measurement": measured})
     grasp = stages[-2]
-    poses = [{"name": "RESET", "joint_deg": home["left_joint_deg"], "duration_s": 1.0}, *stages[:-1],
+    poses = [{"name": "RESET", "joint_deg": list(start), "duration_s": 1.0}, *stages[:-1],
              {"name": "CLOSE", "joint_deg": grasp["joint_deg"], "duration_s": 2.0},
              {"name": "CONTACT_HOLD", "joint_deg": grasp["joint_deg"], "duration_s": 1.0}, stages[-1],
              {"name": "LIFT_HOLD", "joint_deg": stages[-1]["joint_deg"], "duration_s": 2.0}]

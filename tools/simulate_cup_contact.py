@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import hashlib
 import importlib.metadata
 import json
@@ -20,6 +21,7 @@ import numpy as np
 from cup_contact_model import (DEFAULT_CONFIG, Chain, load_config, prepare_model,
                                make_plan, sample_plan, evaluate_lift, ready_to_lift, preclose_failure)
 from workcell_preview_inputs import ARM_JOINTS
+from cup_contact_recovery import retreat_plan, recovery_failure, observe_stationary_cup
 
 
 def run(args):
@@ -28,6 +30,8 @@ def run(args):
         config["cup_mass_kg"] = args.cup_mass_kg
     if args.spawn_y_offset_mm is not None:
         config["cup_spawn_offset_m"][1] = args.spawn_y_offset_mm / 1000
+    if args.spawn_x_offset_mm is not None:
+        config["cup_spawn_offset_m"][0] = args.spawn_x_offset_mm / 1000
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
     model, provenance = prepare_model(output, config)
@@ -35,7 +39,9 @@ def run(args):
     fk = Chain(model)
     manifest = {"config": config, "model": provenance, "plan": plan,
                 "tool_sha256": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                                for name in ("simulate_cup_contact.py", "cup_contact_model.py")},
+                                for name in ("simulate_cup_contact.py", "cup_contact_model.py", "cup_contact_recovery.py")},
+                "recovery_enabled": args.recover,
+                "observation_source": "simulator_ground_truth_not_rgb",
                 "hardware_accessed": False, "mode": "rigid_proxy_contact_experiment"}
     (output / "plan.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+"\n")
     if args.plan_only:
@@ -50,11 +56,18 @@ def run(args):
                          "renderer": "RayTracedLighting", "anti_aliasing": 0,
                          "multi_gpu": False, "sync_loads": True, "fast_shutdown": True})
     samples = []
+    events = []
+    attempt = 0
+    attempt_start = 0
+    evaluation_config = copy.deepcopy(config)
     result = evaluate_lift(samples, config, False, "initializing")
 
     def save_result():
         temporary = output / "result.json.tmp"
-        temporary.write_text(json.dumps({**result, "samples": samples}, indent=2,
+        temporary.write_text(json.dumps({**result, "samples": samples, "events": events,
+                                         "retry_count": attempt, "recovery_enabled": args.recover,
+                                         "evaluation_center_m": evaluation_config["cup_center_m"],
+                                         "observation_source": "simulator_ground_truth_not_rgb"}, indent=2,
                                          allow_nan=False)+"\n")
         temporary.replace(output / "result.json")
     save_result()
@@ -182,6 +195,7 @@ def run(args):
                     ui.Label("Automatic cup approach / close / lift")
                     ui.Label("IK, no IL dataset | hardware OFF")
                     ui.Label("GRAVITY + CONTACTS ON | no cup attachment")
+                    ui.Label(f"Recovery: {args.recover} | simulator coordinates, NOT RGB")
                     ui.Label("Assumed rigid pads, NOT calibrated FinRay", word_wrap=True)
                     label = ui.Label("Initializing", word_wrap=True)
             panel.dock_in_window("Stage", ui.DockPosition.SAME)
@@ -221,18 +235,22 @@ def run(args):
             panel.set_active(True)
         print(f"CUP_CONTACT_READY {output}", flush=True)
         elapsed_s = 0.
+        plan_elapsed_s = 0.
+        active_plan = plan
+        recovering = False
+        attempt_reference_m = observed_start_m.copy()
         index = 0
         phase = None
         reason = "window_closed"
         completed = False
         while app.is_running():
-            command = sample_plan(plan, elapsed_s)
+            command = sample_plan(active_plan, plan_elapsed_s)
             if command["phase"] != phase:
-                if command["phase"] == "LIFT" and not ready_to_lift(samples, config):
+                if command["phase"] == "LIFT" and not ready_to_lift(samples[attempt_start:], evaluation_config):
                     reason = "sustained_midbody_bilateral_contact_not_observed"
                     break
                 phase = command["phase"]
-                result = evaluate_lift(samples, config, False, f"running:{phase}")
+                result = evaluate_lift(samples[attempt_start:], evaluation_config, False, f"running:{phase}")
                 save_result()
                 print(f"CUP_PHASE {phase}", flush=True)
             q[left_indices] = np.radians(command["joint_deg"])
@@ -255,7 +273,7 @@ def run(args):
             if not np.isfinite([*position, *force, *actual_q, *contact_center_m, cup_tilt_deg]).all():
                 reason = "nonfinite_physics_state"
                 break
-            sample = {"time_s": elapsed_s, "phase": phase, "cup_position_m": position.tolist(),
+            sample = {"time_s": elapsed_s, "phase": phase, "attempt": attempt, "cup_position_m": position.tolist(),
                       "contact_force_n": force.tolist(), "arm_error_rad": error_rad,
                       "gripper_actual_rad": float(actual_q[gripper_index]),
                       "left_joint_actual_rad": actual_q[left_indices].tolist(),
@@ -264,38 +282,87 @@ def run(args):
                       "contact_center_error_m": float(np.linalg.norm(contact_center_m-position)),
                       "cup_tilt_deg": cup_tilt_deg,
                       "cup_displacement_from_start_m": float(np.linalg.norm(position[:2]-observed_start_m[:2])),
+                      "cup_displacement_from_observation_m": float(np.linalg.norm(position[:2]-attempt_reference_m[:2])),
                       "physics_time_s": world.current_time}
             samples.append(sample)
             if label is not None:
-                label.text = f"{phase}\nCup rise: {(position[2]-config['cup_center_m'][2])*1000:.1f} mm\nContact: {force.round(2)} N"
+                label.text = f"{phase} | retry {attempt}\nCup rise: {(position[2]-config['cup_center_m'][2])*1000:.1f} mm\nContact: {force.round(2)} N"
             if index % 12 == 0 and args.record:
                 snapshot(output / "frames" / f"frame_{index//12:04d}.png")
-            early_failure = preclose_failure(sample, config)
-            if early_failure:
-                reason = early_failure
-                break
             if error_rad > config["maximum_tracking_error_rad"]:
                 reason = "arm_tracking_error"
                 break
+            if recovering:
+                failure = recovery_failure(sample, observed_start_m, config)
+                if failure:
+                    reason = failure
+                    break
+                if command["done"]:
+                    try:
+                        center = observe_stationary_cup(samples, config)
+                        evaluation_config["cup_center_m"] = center
+                        next_plan = make_plan(model, evaluation_config, np.degrees(actual_q[left_indices]))
+                    except ValueError as exc:
+                        reason = f"recovery_replan_rejected:{exc}"
+                        break
+                    attempt += 1
+                    attempt_start = len(samples)
+                    attempt_reference_m = np.asarray(center)
+                    events.append({"type": "replanned", "time_s": elapsed_s, "attempt": attempt,
+                                   "observation_source": "simulator_ground_truth_not_rgb",
+                                   "observed_center_m": center, "plan": next_plan})
+                    active_plan, recovering = next_plan, False
+                    plan_elapsed_s = 0.
+                    phase = None
+                    elapsed_s += dt_s
+                    index += 1
+                    continue
+            else:
+                check = {**sample, "cup_displacement_from_start_m": sample["cup_displacement_from_observation_m"]}
+                early_failure = preclose_failure(check, config)
+                if early_failure:
+                    events.append({"type": "preclose_failure", "time_s": elapsed_s, "attempt": attempt,
+                                   "failure_code": early_failure, "sample_index": len(samples)-1})
+                    if not args.recover or attempt >= config["recovery"]["max_retries"]:
+                        reason = early_failure if not args.recover else "recovery_retry_limit"
+                        break
+                    failure = recovery_failure(sample, observed_start_m, config)
+                    if failure:
+                        reason = failure
+                        break
+                    try:
+                        active_plan = retreat_plan(samples[attempt_start:], config)
+                    except ValueError:
+                        reason = "recovery_no_retreat_history"
+                        break
+                    recovering = True
+                    events.append({"type": "retreat_started", "time_s": elapsed_s, "attempt": attempt,
+                                   "plan": active_plan})
+                    plan_elapsed_s = 0.
+                    phase = None
+                    elapsed_s += dt_s
+                    index += 1
+                    continue
             if command["done"]:
                 completed, reason = True, "sequence_finished"
                 break
             elapsed_s += dt_s
+            plan_elapsed_s += dt_s
             index += 1
-        result = evaluate_lift(samples, config, completed, reason)
+        result = evaluate_lift(samples[attempt_start:], evaluation_config, completed, reason)
         save_result()
         snapshot(output / "final.png")
         print(f"CUP_CONTACT_RESULT {json.dumps(result)}", flush=True)
         if label is not None:
-            label.text = f"{reason} | FROZEN RESULT\nRigid-proxy lift PASS: {result['rigid_proxy_lift_pass']}\nNOT real FinRay validation"
+            label.text = f"{reason} | FROZEN RESULT\nRigid-proxy lift PASS: {result['rigid_proxy_lift_pass']} | retry {attempt}\nNOT real FinRay validation"
         if args.stay_open:
             while app.is_running():
                 world.render()
                 time.sleep(.01)
     except BaseException as exc:
-        result = evaluate_lift(samples, config, False, f"exception:{type(exc).__name__}")
-        save_result()
         traceback.print_exc()
+        result = evaluate_lift(samples[attempt_start:], evaluation_config, False, f"exception:{type(exc).__name__}")
+        save_result()
         app._app.post_quit(1)
         raise
     finally:
@@ -314,6 +381,8 @@ if __name__ == "__main__":
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--cup-mass-kg", type=float, help="질량 민감도 시험용 가정값")
     parser.add_argument("--spawn-y-offset-mm", type=float, help="계획 좌표를 유지한 채 초기 물체 위치만 오차 주입")
+    parser.add_argument("--spawn-x-offset-mm", type=float, help="초기 물체 전후 위치 오차")
+    parser.add_argument("--recover", action="store_true", help="시뮬레이터 정답 좌표로 제한된 접촉 복구 시험")
     args = parser.parse_args()
     if args.headless and args.stay_open:
         parser.error("headless + stay-open은 허용하지 않습니다")
@@ -321,4 +390,6 @@ if __name__ == "__main__":
         parser.error("cup-mass-kg은 유한한 양수여야 합니다")
     if args.spawn_y_offset_mm is not None and not math.isfinite(args.spawn_y_offset_mm):
         parser.error("spawn-y-offset-mm는 유한한 숫자여야 합니다")
+    if args.spawn_x_offset_mm is not None and not math.isfinite(args.spawn_x_offset_mm):
+        parser.error("spawn-x-offset-mm는 유한한 숫자여야 합니다")
     run(args)

@@ -29,6 +29,17 @@
   "maximum_cup_tilt_deg": 15.0,
   "maximum_preclose_displacement_m": 0.003,
   "minimum_contact_force_n": 0.02,
+  "recovery": {
+    "max_retries": 1,
+    "reverse_sample_interval_s": 0.1,
+    "reverse_time_scale": 1.5,
+    "observation_duration_s": 0.5,
+    "maximum_observation_motion_m": 0.001,
+    "maximum_recovery_displacement_m": 0.03,
+    "maximum_recovery_force_n": 2.0,
+    "maximum_observation_tilt_deg": 3.0,
+    "maximum_observation_height_error_m": 0.003
+  },
   "notes": [
     "All mount offsets, mass, friction and gains are experimental assumptions, not measured TPU properties.",
     "Cup/table positions differ from the previous preview: changes are explicit and cannot be used as real camera coordinates.",
