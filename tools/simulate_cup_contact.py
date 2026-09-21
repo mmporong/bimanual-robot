@@ -22,6 +22,7 @@ from cup_contact_model import (DEFAULT_CONFIG, Chain, load_config, prepare_model
                                make_plan, sample_plan, evaluate_lift, ready_to_lift, preclose_failure)
 from workcell_preview_inputs import ARM_JOINTS
 from cup_contact_recovery import retreat_plan, recovery_failure, observe_stationary_cup
+from cup_contact_place import evaluate_placement, touchdown_plan, placement_gate_failure, lowering_failure
 
 
 def run(args):
@@ -35,12 +36,13 @@ def run(args):
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
     model, provenance = prepare_model(output, config)
-    plan = make_plan(model, config)
+    plan = make_plan(model, config, place=args.place)
     fk = Chain(model)
     manifest = {"config": config, "model": provenance, "plan": plan,
                 "tool_sha256": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                                for name in ("simulate_cup_contact.py", "cup_contact_model.py", "cup_contact_recovery.py")},
+                                for name in ("simulate_cup_contact.py", "cup_contact_model.py", "cup_contact_recovery.py", "cup_contact_place.py")},
                 "recovery_enabled": args.recover,
+                "placement_enabled": args.place,
                 "observation_source": "simulator_ground_truth_not_rgb",
                 "hardware_accessed": False, "mode": "rigid_proxy_contact_experiment"}
     (output / "plan.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+"\n")
@@ -60,7 +62,18 @@ def run(args):
     attempt = 0
     attempt_start = 0
     evaluation_config = copy.deepcopy(config)
-    result = evaluate_lift(samples, config, False, "initializing")
+    def evaluate(completed, reason):
+        current = samples[attempt_start:]
+        outcome = evaluate_lift(current, evaluation_config, completed, reason)
+        lift_pass = evaluate_lift(current, evaluation_config, True, reason)["rigid_proxy_lift_pass"]
+        touchdown_observed = any(e["type"] == "touchdown" and e["attempt"] == attempt for e in events)
+        place_pass = evaluate_placement(current, evaluation_config, completed, lift_pass, touchdown_observed) if args.place else False
+        return {**outcome, "lift_stage_pass": lift_pass, "placement_enabled": args.place,
+                "touchdown_observed": touchdown_observed,
+                "rigid_proxy_place_pass": place_pass,
+                "task_pass": place_pass if args.place else outcome["rigid_proxy_lift_pass"]}
+
+    result = evaluate(False, "initializing")
 
     def save_result():
         temporary = output / "result.json.tmp"
@@ -88,6 +101,7 @@ def run(args):
         dt_s = config["physics_dt_s"]
         world = World(stage_units_in_meters=1.0, physics_dt=dt_s, rendering_dt=1/30)
         world.get_physics_context().set_solver_type("TGS")
+        world.get_physics_context().set_gravity(-config["placement"]["gravity_m_s2"])
         stage = omni.usd.get_context().get_stage()
         ok, importer = omni.kit.commands.execute("URDFCreateImportConfig")
         if not ok:
@@ -159,7 +173,7 @@ def run(args):
         UsdGeom.Xformable(sun).AddRotateXYZOp().Set(Gf.Vec3f(-30,-45,0))
         UsdLux.DomeLight.Define(stage, "/World/Fill").CreateIntensityAttr(500)
         robot = world.scene.add(SingleArticulation(prim_path=root, name="robot"))
-        filters = [rigid_links["left_gripper_link"], rigid_links["left_moving_jaw_link"]]
+        filters = [rigid_links["left_gripper_link"], rigid_links["left_moving_jaw_link"], "/World/Table"]
         cup_view = world.scene.add(RigidPrim("/World/Cup", name="cup_contacts",
             contact_filter_prim_paths_expr=filters, max_contact_count=128))
         world.reset()
@@ -196,6 +210,7 @@ def run(args):
                     ui.Label("IK, no IL dataset | hardware OFF")
                     ui.Label("GRAVITY + CONTACTS ON | no cup attachment")
                     ui.Label(f"Recovery: {args.recover} | simulator coordinates, NOT RGB")
+                    ui.Label(f"Place on table and release: {args.place}")
                     ui.Label("Assumed rigid pads, NOT calibrated FinRay", word_wrap=True)
                     label = ui.Label("Initializing", word_wrap=True)
             panel.dock_in_window("Stage", ui.DockPosition.SAME)
@@ -249,8 +264,15 @@ def run(args):
                 if command["phase"] == "LIFT" and not ready_to_lift(samples[attempt_start:], evaluation_config):
                     reason = "sustained_midbody_bilateral_contact_not_observed"
                     break
+                if args.place:
+                    gates = evaluate(True, "placement_gate")
+                    failure = placement_gate_failure(command["phase"], samples[attempt_start:], evaluation_config,
+                                                     gates["lift_stage_pass"], gates["touchdown_observed"])
+                    if failure:
+                        reason = failure
+                        break
                 phase = command["phase"]
-                result = evaluate_lift(samples[attempt_start:], evaluation_config, False, f"running:{phase}")
+                result = evaluate(False, f"running:{phase}")
                 save_result()
                 print(f"CUP_PHASE {phase}", flush=True)
             q[left_indices] = np.radians(command["joint_deg"])
@@ -266,15 +288,19 @@ def run(args):
             position, orientation = positions[0], orientations[0]
             cup_tilt_deg = float(np.degrees(np.arccos(np.clip(
                 1-2*(orientation[1]**2+orientation[2]**2), -1., 1.))))
-            force = np.linalg.norm(cup_view.get_contact_force_matrix(dt=dt_s)[0], axis=1)
+            force_vectors = cup_view.get_contact_force_matrix(dt=dt_s)[0]
+            force = np.linalg.norm(force_vectors[:2], axis=1)
+            table_force_n = float(force_vectors[2, 2])
             actual_q = robot.get_joint_positions()
             error_rad = float(np.max(np.abs(actual_q[left_indices]-q[left_indices])))
             contact_center_m = fk.transforms(dict(zip(names, actual_q)))["left_contact_center"][:3, 3]
-            if not np.isfinite([*position, *force, *actual_q, *contact_center_m, cup_tilt_deg]).all():
+            if not np.isfinite([*position, *force, table_force_n, *actual_q, *contact_center_m, cup_tilt_deg]).all():
                 reason = "nonfinite_physics_state"
                 break
             sample = {"time_s": elapsed_s, "phase": phase, "attempt": attempt, "cup_position_m": position.tolist(),
                       "contact_force_n": force.tolist(), "arm_error_rad": error_rad,
+                      "table_contact_force_world_n": force_vectors[2].tolist(),
+                      "table_support_force_n": table_force_n,
                       "gripper_actual_rad": float(actual_q[gripper_index]),
                       "left_joint_actual_rad": actual_q[left_indices].tolist(),
                       "contact_center_m": contact_center_m.tolist(),
@@ -292,6 +318,13 @@ def run(args):
             if error_rad > config["maximum_tracking_error_rad"]:
                 reason = "arm_tracking_error"
                 break
+            failure = lowering_failure(sample, config)
+            if failure:
+                reason = failure
+                break
+            if phase in {"WITHDRAW", "CLEAR_ABOVE", "PLACE_HOLD"} and max(force) >= config["minimum_contact_force_n"]:
+                reason = "post_release_hand_contact"
+                break
             if recovering:
                 failure = recovery_failure(sample, observed_start_m, config)
                 if failure:
@@ -301,7 +334,7 @@ def run(args):
                     try:
                         center = observe_stationary_cup(samples, config)
                         evaluation_config["cup_center_m"] = center
-                        next_plan = make_plan(model, evaluation_config, np.degrees(actual_q[left_indices]))
+                        next_plan = make_plan(model, evaluation_config, np.degrees(actual_q[left_indices]), place=args.place)
                     except ValueError as exc:
                         reason = f"recovery_replan_rejected:{exc}"
                         break
@@ -343,30 +376,42 @@ def run(args):
                     elapsed_s += dt_s
                     index += 1
                     continue
+            if phase == "LOWER" and table_force_n >= (
+                    config["cup_mass_kg"]*config["placement"]["gravity_m_s2"]
+                    *config["placement"]["minimum_support_weight_ratio"]):
+                active_plan = touchdown_plan(active_plan, actual_q[left_indices])
+                events.append({"type": "touchdown", "time_s": elapsed_s, "attempt": attempt,
+                               "table_support_force_n": table_force_n,
+                               "cup_position_m": position.tolist(), "plan": active_plan})
+                plan_elapsed_s = 0.
+                phase = None
+                elapsed_s += dt_s
+                index += 1
+                continue
             if command["done"]:
                 completed, reason = True, "sequence_finished"
                 break
             elapsed_s += dt_s
             plan_elapsed_s += dt_s
             index += 1
-        result = evaluate_lift(samples[attempt_start:], evaluation_config, completed, reason)
+        result = evaluate(completed, reason)
         save_result()
         snapshot(output / "final.png")
         print(f"CUP_CONTACT_RESULT {json.dumps(result)}", flush=True)
         if label is not None:
-            label.text = f"{reason} | FROZEN RESULT\nRigid-proxy lift PASS: {result['rigid_proxy_lift_pass']} | retry {attempt}\nNOT real FinRay validation"
+            label.text = f"{reason} | FROZEN RESULT\nTask PASS: {result['task_pass']} | retry {attempt}\nLift: {result['lift_stage_pass']} | place: {result['rigid_proxy_place_pass']}\nNOT real FinRay validation"
         if args.stay_open:
             while app.is_running():
                 world.render()
                 time.sleep(.01)
     except BaseException as exc:
         traceback.print_exc()
-        result = evaluate_lift(samples[attempt_start:], evaluation_config, False, f"exception:{type(exc).__name__}")
+        result = evaluate(False, f"exception:{type(exc).__name__}")
         save_result()
         app._app.post_quit(1)
         raise
     finally:
-        if not result["rigid_proxy_lift_pass"]:
+        if not result["task_pass"]:
             app._app.post_quit(2)
         app.close()
 
@@ -383,6 +428,7 @@ if __name__ == "__main__":
     parser.add_argument("--spawn-y-offset-mm", type=float, help="계획 좌표를 유지한 채 초기 물체 위치만 오차 주입")
     parser.add_argument("--spawn-x-offset-mm", type=float, help="초기 물체 전후 위치 오차")
     parser.add_argument("--recover", action="store_true", help="시뮬레이터 정답 좌표로 제한된 접촉 복구 시험")
+    parser.add_argument("--place", action="store_true", help="상승 검증 뒤 같은 책상에 내려놓고 손 분리까지 검사")
     args = parser.parse_args()
     if args.headless and args.stay_open:
         parser.error("headless + stay-open은 허용하지 않습니다")

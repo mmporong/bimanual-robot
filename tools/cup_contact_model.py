@@ -16,6 +16,7 @@ from plan_body_side_grasp import (
 from workcell_preview_inputs import materialize_urdf
 from workcell_preview_motion import build_demo
 from cup_contact_recovery import validate_recovery
+from cup_contact_place import validate_placement
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config/simulation/cup_contact_experiment.json"
@@ -28,6 +29,9 @@ def load_config(path=DEFAULT_CONFIG):
     if "recovery" not in config:
         config["recovery"] = json.loads(DEFAULT_CONFIG.read_text())["recovery"]
     validate_recovery(config["recovery"])
+    if "placement" not in config:
+        config["placement"] = json.loads(DEFAULT_CONFIG.read_text())["placement"]
+    validate_placement(config["placement"])
     for key in ("table_center_m", "table_size_m", "cup_center_m", "pad_size_m",
                 "fixed_pad_center_tool_m", "moving_pad_center_jaw_m", "contact_center_tool_m",
                 "cup_spawn_offset_m"):
@@ -139,7 +143,7 @@ class ContactChain(Chain):
         return transforms
 
 
-def make_plan(model: Path, config, start_joint_deg=None):
+def make_plan(model: Path, config, start_joint_deg=None, place=False):
     chain = ContactChain(model)
     home = build_demo(Chain(model))[0]
     center = np.asarray(config["cup_center_m"])
@@ -175,7 +179,40 @@ def make_plan(model: Path, config, start_joint_deg=None):
     for pose in poses:
         pose["gripper_rad"] = config["gripper_close_rad"] if pose["name"] in {
             "CLOSE", "CONTACT_HOLD", "LIFT", "LIFT_HOLD"} else config["gripper_open_rad"]
+    if place:
+        lower_target = center + [0, 0, -config["placement"]["lowering_offset_m"]]
+        lower = solve_horizontal_endpoint(chain, "left", lower_target, seed, restarts=1, iterations=240)
+        measured = measure_stage(chain, "left", lower, lower_target, np.array([1, 0, 0]))
+        reasons = validate_measurement(measured)
+        if reasons:
+            raise ValueError(f"LOWER IK 미통과: {reasons}")
+        lower_pose = {"joint_deg": np.degrees(lower).tolist(), "target_m": lower_target.tolist(),
+                      "measurement": measured, "gripper_rad": config["gripper_close_rad"]}
+        retreat_stages = []
+        retreat_seed = lower
+        for name, target in (
+            ("WITHDRAW", center + [-config["placement"]["withdraw_distance_m"], 0, 0]),
+            ("CLEAR_ABOVE", center + [-config["placement"]["withdraw_distance_m"], 0,
+                                      config["placement"]["clearance_height_m"]]),
+        ):
+            retreat_seed = solve_horizontal_endpoint(chain, "left", target, retreat_seed, restarts=1, iterations=240)
+            measured = measure_stage(chain, "left", retreat_seed, target, np.array([1, 0, 0]))
+            reasons = validate_measurement(measured)
+            if reasons:
+                raise ValueError(f"{name} IK 미통과: {reasons}")
+            retreat_stages.append({"name": name, "joint_deg": np.degrees(retreat_seed).tolist(),
+                                   "target_m": target.tolist(), "measurement": measured,
+                                   "duration_s": 2.0, "gripper_rad": config["gripper_open_rad"]})
+        poses.extend([
+            {**lower_pose, "name": "LOWER", "duration_s": 3.0},
+            {**lower_pose, "name": "TABLE_SETTLE", "duration_s": 1.0},
+            {**lower_pose, "name": "OPEN", "duration_s": 2.0, "gripper_rad": config["gripper_open_rad"]},
+            {**lower_pose, "name": "RELEASE_HOLD", "duration_s": 1.0, "gripper_rad": config["gripper_open_rad"]},
+            *retreat_stages,
+            {**retreat_stages[-1], "name": "PLACE_HOLD", "duration_s": 2.0},
+        ])
     return {"poses": poses, "right_parked_deg": home["right_joint_deg"],
+            "placement_enabled": place,
             "hardware_accessed": False, "il_dataset_used": False, "tcp_frame": "left_contact_center",
             "continuous_collision_validated": False, "model_calibrated": False}
 

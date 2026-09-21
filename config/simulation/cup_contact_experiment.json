@@ -29,6 +29,19 @@
   "maximum_cup_tilt_deg": 15.0,
   "maximum_preclose_displacement_m": 0.003,
   "minimum_contact_force_n": 0.02,
+  "placement": {
+    "lowering_offset_m": 0.002,
+    "withdraw_distance_m": 0.065,
+    "clearance_height_m": 0.08,
+    "maximum_height_error_m": 0.003,
+    "maximum_tilt_deg": 3.0,
+    "maximum_lateral_error_m": 0.02,
+    "maximum_window_motion_m": 0.001,
+    "minimum_support_weight_ratio": 0.4,
+    "minimum_hand_clearance_m": 0.06,
+    "gripper_open_tolerance_rad": 0.05,
+    "gravity_m_s2": 9.81
+  },
   "recovery": {
     "max_retries": 1,
     "reverse_sample_interval_s": 0.1,
