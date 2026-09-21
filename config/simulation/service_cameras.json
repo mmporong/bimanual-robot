@@ -1,0 +1,13 @@
+{
+  "status": "presentation_views_not_sensor_calibration",
+  "wide": {
+    "eye_m": [0.85, -5.5, 4.3],
+    "target_m": [-1.0, -1.0, 0.55],
+    "focal_length_mm": 16.0
+  },
+  "pour_detail": {
+    "eye_offset_from_cup_m": [0.55, 0.45, 0.42],
+    "target_offset_from_cup_m": [0.0, 0.0, 0.065],
+    "focal_length_mm": 35.0
+  }
+}

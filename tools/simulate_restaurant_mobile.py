@@ -53,7 +53,7 @@ def run(args):
     fk = Chain(args.source_dir / "replacement_hypothesis.urdf")
     place_config = {**source["left_config"], "cup_center_m": [-2.14, -2.42, .78]}
     from isaacsim import SimulationApp
-    app = SimulationApp({"headless": args.headless, "width": 1280, "height": 900,
+    app = SimulationApp({"headless": args.headless, "width": 1600 if water_service else 1280, "height": 900,
                          "renderer": "RayTracedLighting", "anti_aliasing": 0,
                          "multi_gpu": False, "fast_shutdown": True})
     samples = []
@@ -70,8 +70,10 @@ def run(args):
             Path(__file__).resolve().parents[1]/"src/hold_flow_description/scripts/solve_task_poses.py"]}
     if water_service:
         for name in ("water_service_mission.py", "tray_transfer_plan.py", "raised_tray_transfer.py",
-                     "search_tray_mounts.py"):
+                     "search_tray_mounts.py", "service_camera_views.py"):
             result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+        camera_config = Path(__file__).resolve().parents[1]/"config/simulation/service_cameras.json"
+        result["input_sha256"][str(camera_config)] = hashlib.sha256(camera_config.read_bytes()).hexdigest()
     if args.mode == "static-pose-probe":
         result["input_sha256"][str(args.pose_probes)] = hashlib.sha256(args.pose_probes.read_bytes()).hexdigest()
         result["tool_sha256"]["tray_pose_probe.py"] = hashlib.sha256(Path(__file__).with_name("tray_pose_probe.py").read_bytes()).hexdigest()

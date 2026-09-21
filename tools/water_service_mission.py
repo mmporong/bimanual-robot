@@ -5,6 +5,7 @@ import asyncio
 import copy
 import json
 import math
+from pathlib import Path
 import time
 
 import numpy as np
@@ -165,6 +166,12 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     from isaacsim.core.utils.viewports import set_camera_view
     from omni.kit.viewport.utility import get_active_viewport, capture_viewport_to_file
     from tray_transfer_plan import build_tray_transfer
+    from service_camera_views import camera_views
+    from pxr import UsdGeom
+
+    camera_config = json.loads((Path(__file__).resolve().parents[1]/"config/simulation/service_cameras.json").read_text())
+    camera_frames = []
+    detail_count = 0
 
     dt = 1/120
     if "raised_tray" in source:
@@ -226,6 +233,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     started = time.monotonic()
     if args.record:
         (output/"frames").mkdir()
+        (output/"detail_frames").mkdir()
 
     async def capture(path):
         await capture_viewport_to_file(get_active_viewport(), str(path)).wait_for_result()
@@ -239,6 +247,18 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             future.cancel()
             raise TimeoutError("water service capture timed out")
         future.result()
+
+    def capture_camera(view, name, path):
+        camera_path = "/PresentationCameras/"+name
+        camera = UsdGeom.Camera.Define(world.stage, camera_path)
+        camera.CreateFocalLengthAttr(view["focal_length_mm"])
+        camera.CreateClippingRangeAttr((.01, 100.))
+        set_camera_view(np.array(view["eye_m"]), np.array(view["target_m"]), camera_prim_path=camera_path)
+        get_active_viewport().camera_path = camera_path
+        # Drain the render pipeline after switching cameras without a physics step.
+        for _ in range(3):
+            world.render()
+        snapshot(path)
 
     def support_config(center, edge_supported=False):
         surface = transfer["tray_surface_z_m"] if state == "DEPOSIT" else left["table_surface_z_m"]
@@ -356,9 +376,15 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         if tick % 60 == 0:
             world.render()
             if args.record:
-                focus = np.array([position[0]+.15, position[1], .7])
-                set_camera_view(focus+[-1.4, -1.6, 1.1], focus)
-                snapshot(output/"frames"/f"{frame_count:06d}.png")
+                views = camera_views(camera_config, state, phase, cp)
+                capture_camera(views["wide"], "wide", output/"frames"/f"{frame_count:06d}.png")
+                record = {"frame": frame_count, "time_s": t, "state": state, "phase": phase, "views": views}
+                if "pour_detail" in views:
+                    capture_camera(views["pour_detail"], "pour_detail", output/"detail_frames"/f"{detail_count:06d}.png")
+                    record["detail_frame"] = detail_count
+                    detail_count += 1
+                camera_frames.append(record)
+                (output/"camera_frames.json").write_text(json.dumps(camera_frames, indent=2)+"\n")
                 frame_count += 1
         if not np.isfinite([*actual, *position, *orientation, *cf, *bf, *ground_forces, environment_force, self_force]).all():
             reason = "nonfinite_observation"
@@ -490,6 +516,9 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             window = []
     controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
     if args.record:
+        get_active_viewport().camera_path = "/PresentationCameras/wide"
+        for _ in range(3):
+            world.render()
         snapshot(output/"final.png")
     sequence_pass = complete and ground_window_verified(samples[20:])
     return {"task_pass": bool(sequence_pass and center_verified), "sequence_pass": sequence_pass,
@@ -508,5 +537,6 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         "initialization_observation": initialization, "pregrasp_baseline": baseline,
         "received_particles": received, "maximum_transit_particle_loss": maximum_transit_spill,
         "maximum_environment_force_n": maximum_environment, "maximum_self_force_n": maximum_self,
-        "frame_count": frame_count, "recording_fps": 2, "tray_center_m": transfer["tray_center_m"],
+        "frame_count": frame_count, "recording_fps": 2, "detail_frame_count": detail_count,
+        "camera_recording": "fixed_wide_with_synchronous_pour_detail", "tray_center_m": transfer["tray_center_m"],
         "observation_source": "simulator_ground_truth", "model_calibrated": False}
