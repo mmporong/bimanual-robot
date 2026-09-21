@@ -37,9 +37,10 @@ def run(args):
     output.mkdir(parents=True, exist_ok=False)
     shutil.copy2(Path(__file__), output/"executed_runner.py")
     source = json.loads((args.source_dir / "plan.json").read_text())
-    service = args.mode in {"service", "pick-only"}
+    water_service = args.mode == "water-service"
+    service = args.mode in {"service", "pick-only", "water-service"}
     pick_plan = {"poses": source["plan"]["poses"][:9]}
-    placement_poses = [p for p in source["plan"]["poses"] if p["name"] in {
+    placement_poses = [p.copy() for p in source["plan"]["poses"] if p["name"] in {
         "LEFT_LOWER", "LEFT_TABLE_SETTLE", "LEFT_OPEN", "LEFT_RELEASE_HOLD",
         "LEFT_WITHDRAW", "LEFT_CLEAR_ABOVE", "LEFT_PLACE_HOLD"}]
     # Keep the unused right arm parked throughout this transport-only experiment.
@@ -65,6 +66,9 @@ def run(args):
         for path in [args.source_dir/"plan.json", args.source_dir/"replacement_hypothesis.urdf",
             args.source_dir/"scene.usda", Path(__file__).resolve().parents[1]/"config/simulation/restaurant_layout.json",
             Path(__file__).resolve().parents[1]/"src/hold_flow_description/scripts/solve_task_poses.py"]}
+    if water_service:
+        for name in ("water_service_mission.py", "tray_transfer_plan.py"):
+            result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
     try:
         import omni.kit.app
         import omni.kit.commands
@@ -177,6 +181,11 @@ def run(args):
         ground = world.scene.add(RigidPrim([rigid[n] for n in body_names], name="ground_contacts",
             contact_filter_prim_paths_expr=[["/Restaurant/Floor"] for _ in body_names],
             max_contact_count=4096))
+        water_scene = None
+        if water_service:
+            from water_service_mission import setup_water_scene
+            water_scene = setup_water_scene(stage, world, context, source, args.source_dir,
+                rigid, furniture, materials, cup_view, cup_filters)
         world.reset()
         names = list(robot.dof_names)
         wheels = np.array([names.index(n) for n in ("left_wheel_joint", "right_wheel_joint")])
@@ -209,6 +218,12 @@ def run(args):
         controller.set_max_efforts(effort)
         set_camera_view(np.array([-3.5, -2., 1.9]), np.array([-1.6, 0., .7]))
         stage.GetRootLayer().Export(str(output/"scene.usda"))
+        if water_service:
+            from water_service_mission import execute_water_service
+            result.update(execute_water_service(args, source, water_scene, world, robot, controller,
+                names, q, wheels, arm_indices, rigid, body_names, furniture, contact, ground, output))
+            samples = result.pop("samples")
+            return 0 if result["task_pass"] else 1
         path = [[-2., 0.], [-1.5, 0.]]
         state = "PICK" if service else "DRIVE"
         state_start = 2.
@@ -448,5 +463,5 @@ if __name__ == "__main__":
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--duration", type=float, default=25.)
-    parser.add_argument("--mode", choices=("drive-smoke", "collision-probe", "service", "pick-only"), default="drive-smoke")
+    parser.add_argument("--mode", choices=("drive-smoke", "collision-probe", "service", "pick-only", "water-service"), default="drive-smoke")
     raise SystemExit(run(parser.parse_args()))

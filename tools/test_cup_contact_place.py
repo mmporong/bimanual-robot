@@ -61,6 +61,22 @@ def test_support_is_required_before_open_even_at_correct_height():
     assert not supported_window(samples, config, "TABLE_SETTLE", .5)
 
 
+def test_edge_support_is_opt_in_and_does_not_certify_upright_release():
+    config = load_config()
+    tilted = {**config, "edge_support_radius_m": .028,
+              "placement": {**config["placement"], "maximum_tilt_deg": 15.}}
+    samples = settled_samples(config, "TABLE_SETTLE", .5)
+    for sample in samples:
+        sample["cup_tilt_deg"] = 13.
+        sample["cup_position_m"][2] = (config["table_surface_z_m"]
+            +config["cup_height_m"]/2*np.cos(np.radians(13))+.028*np.sin(np.radians(13)))
+    assert supported_window(samples, tilted, "TABLE_SETTLE", .5)
+    assert not supported_window(samples, config, "TABLE_SETTLE", .5)
+    assert not supported_window(samples, {**tilted, "edge_support_radius_m": float("nan")}, "TABLE_SETTLE", .5)
+    samples[-1]["table_support_force_n"] = 0.
+    assert not supported_window(samples, tilted, "TABLE_SETTLE", .5)
+
+
 def test_stable_released_clear_cup_and_successful_lift_required():
     config = load_config()
     samples = settled_samples(config)

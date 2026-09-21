@@ -25,6 +25,9 @@ def supported_window(samples, config, phase, duration_s, released=False, clear=F
     if len(window) != count or any(s["phase"] != phase for s in window):
         return False
     limits = config["placement"]
+    radius = config.get("edge_support_radius_m")
+    if radius is not None and (not isinstance(radius, (float, int)) or not math.isfinite(radius) or radius <= 0):
+        return False
     minimum_support_n = config["cup_mass_kg"]*limits["gravity_m_s2"]*limits["minimum_support_weight_ratio"]
     positions = np.asarray([s["cup_position_m"] for s in window])
     if not np.isfinite(positions).all():
@@ -41,6 +44,10 @@ def supported_window(samples, config, phase, duration_s, released=False, clear=F
             return False
         position = np.asarray(sample["cup_position_m"])
         expected_z_m = config["table_surface_z_m"]+config["cup_height_m"]/2
+        if radius is not None:
+            tilt = math.radians(sample["cup_tilt_deg"])
+            expected_z_m = (config["table_surface_z_m"]+config["cup_height_m"]/2*math.cos(tilt)
+                            +radius*math.sin(tilt))
         if (abs(position[2]-expected_z_m) > limits["maximum_height_error_m"]
                 or np.linalg.norm(position[:2]-center[:2]) > limits["maximum_lateral_error_m"]
                 or sample["cup_tilt_deg"] > limits["maximum_tilt_deg"]
