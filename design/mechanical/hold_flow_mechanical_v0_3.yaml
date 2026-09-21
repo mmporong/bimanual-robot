@@ -171,7 +171,10 @@ right_parallel_gripper:
   urdf_proxy_mass: 0.159
   mass_status: published_value_is_approximate_proxy_is_nominal_until_weighed
   urdf_geometry: project_authored_dimensional_proxy
-  proxy_scope: rail_connector_racks_jaws_and_contact_inserts
+  contact_surface: upstream_flat_jaws_without_groove_or_replaceable_insert
+  selected_insert: none
+  jaw_modification: none
+  proxy_scope: rail_connector_racks_and_unmodified_flat_jaws
   exact_mesh_gate: author_license_permission_or_user_local_nonredistributed_asset
   simulation_joint:
     type: dual_prismatic_mimic

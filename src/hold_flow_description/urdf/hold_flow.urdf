@@ -1548,18 +1548,11 @@
       </geometry>
       <material name="ggao50_printed"/>
     </visual>
-    <!-- 교체형 인서트. 135도 V홈 기준 두께 12.2 mm -->
-    <visual>
-      <origin rpy="0 0 0" xyz="0.0061 -0.030 0"/>
-      <geometry>
-        <box size="0.0122 0.060 0.050"/>
-      </geometry>
-      <material name="gripper_insert"/>
-    </visual>
+    <!-- 현행 실물은 홈·교체형 인서트 없이 순정 평면 죠를 쓴다. -->
     <collision>
-      <origin rpy="0 0 0" xyz="0.002 -0.024 0"/>
+      <origin rpy="0 0 0" xyz="-0.006 -0.030 0"/>
       <geometry>
-        <box size="0.031 0.072 0.050"/>
+        <box size="0.018 0.060 0.050"/>
       </geometry>
     </collision>
   </link>
@@ -1595,18 +1588,11 @@
       </geometry>
       <material name="ggao50_printed"/>
     </visual>
-    <!-- 교체형 인서트. 135도 V홈 기준 두께 12.2 mm -->
-    <visual>
-      <origin rpy="0 0 0" xyz="-0.0061 -0.030 0"/>
-      <geometry>
-        <box size="0.0122 0.060 0.050"/>
-      </geometry>
-      <material name="gripper_insert"/>
-    </visual>
+    <!-- 현행 실물은 홈·교체형 인서트 없이 순정 평면 죠를 쓴다. -->
     <collision>
-      <origin rpy="0 0 0" xyz="-0.002 -0.024 0"/>
+      <origin rpy="0 0 0" xyz="0.006 -0.030 0"/>
       <geometry>
-        <box size="0.031 0.072 0.050"/>
+        <box size="0.018 0.060 0.050"/>
       </geometry>
     </collision>
   </link>
