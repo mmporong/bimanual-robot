@@ -4,11 +4,11 @@ import math
 import numpy as np
 
 
-def validate_placement(config):
+def validate_placement(config, gripper_unit="rad"):
     required = {"lowering_offset_m", "maximum_height_error_m", "maximum_tilt_deg",
                 "withdraw_distance_m", "clearance_height_m",
                 "maximum_lateral_error_m", "maximum_window_motion_m", "minimum_support_weight_ratio",
-                "minimum_hand_clearance_m", "gripper_open_tolerance_rad", "gravity_m_s2"}
+                "minimum_hand_clearance_m", f"gripper_open_tolerance_{gripper_unit}", "gravity_m_s2"}
     if not isinstance(config, dict) or required - config.keys():
         raise ValueError("placement 설정의 필수 항목 누락")
     for key in required:
@@ -32,10 +32,11 @@ def supported_window(samples, config, phase, duration_s, released=False, clear=F
     if np.max(np.linalg.norm(positions-positions[0], axis=1)) > limits["maximum_window_motion_m"]:
         return False
     center = np.asarray(config["cup_center_m"])
+    unit = config.get("gripper_unit", "rad")
     for sample in window:
         numbers = [sample["table_support_force_n"], sample["cup_tilt_deg"],
                    *sample["contact_force_n"], sample["contact_center_error_m"],
-                   sample["gripper_actual_rad"], sample["arm_error_rad"]]
+                   sample[f"gripper_actual_{unit}"], sample["arm_error_rad"]]
         if not np.isfinite(numbers).all():
             return False
         position = np.asarray(sample["cup_position_m"])
@@ -47,7 +48,7 @@ def supported_window(samples, config, phase, duration_s, released=False, clear=F
                 or sample["arm_error_rad"] > config["maximum_tracking_error_rad"]):
             return False
         if released and (max(sample["contact_force_n"]) >= config["minimum_contact_force_n"]
-                         or sample["gripper_actual_rad"] < config["gripper_open_rad"]-limits["gripper_open_tolerance_rad"]):
+                         or sample[f"gripper_actual_{unit}"] < config[f"gripper_open_{unit}"]-limits[f"gripper_open_tolerance_{unit}"]):
             return False
         if clear and sample["contact_center_error_m"] < limits["minimum_hand_clearance_m"]:
             return False

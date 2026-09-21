@@ -20,37 +20,55 @@ from cup_contact_place import validate_placement
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config/simulation/cup_contact_experiment.json"
+SIDE = "left"
+OBJECT_LABEL = "Cup"
+CONTACT_FRAME = "left_contact_center"
+FINGER_LINKS = ("left_gripper_link", "left_moving_jaw_link")
+GRIPPER_JOINTS = ("left_gripper",)
+GRIPPER_KEY = "gripper_rad"
+GRIPPER_UNIT = "rad"
 
 
 def load_config(path=DEFAULT_CONFIG):
     config = json.loads(Path(path).read_text())
-    if config.get("schema") != "cup_contact_experiment_v1":
+    if config.get("schema") != "cup_contact_experiment_v1" or config.get("gripper_unit", "rad") != "rad":
         raise ValueError("지원하지 않는 접촉 실험 설정")
     if "recovery" not in config:
         config["recovery"] = json.loads(DEFAULT_CONFIG.read_text())["recovery"]
     validate_recovery(config["recovery"])
     if "placement" not in config:
         config["placement"] = json.loads(DEFAULT_CONFIG.read_text())["placement"]
-    validate_placement(config["placement"])
-    for key in ("table_center_m", "table_size_m", "cup_center_m", "pad_size_m",
-                "fixed_pad_center_tool_m", "moving_pad_center_jaw_m", "contact_center_tool_m",
-                "cup_spawn_offset_m"):
+    return validate_config(config)
+
+
+def validate_config(config):
+    unit = config.get("gripper_unit", "rad")
+    if unit not in {"rad", "m"}:
+        raise ValueError("그리퍼 단위는 rad 또는 m이어야 합니다")
+    validate_placement(config["placement"], unit)
+    vectors = ["table_center_m", "table_size_m", "cup_center_m", "contact_center_tool_m", "cup_spawn_offset_m"]
+    if unit == "rad":
+        vectors += ["pad_size_m", "fixed_pad_center_tool_m", "moving_pad_center_jaw_m"]
+    for key in vectors:
         value = np.asarray(config[key], dtype=float)
         if value.shape != (3,) or not np.isfinite(value).all():
             raise ValueError(f"{key}: 유한한 3벡터 필요")
         if "size" in key and np.any(value <= 0):
             raise ValueError(f"{key}: 크기는 양수")
-    for key in ("cup_radius_m", "cup_height_m", "cup_mass_kg", "moving_pad_mass_kg",
+    positive = ["cup_radius_m", "cup_height_m", "cup_mass_kg",
                 "physics_dt_s", "lift_distance_m", "minimum_lift_m", "maximum_tracking_error_rad",
-                "minimum_contact_force_n", "gripper_max_effort_nm", "maximum_midbody_height_error_m",
+                "minimum_contact_force_n", "maximum_midbody_height_error_m",
                 "maximum_contact_center_error_m", "maximum_cup_lateral_drift_m", "maximum_cup_tilt_deg",
-                "maximum_preclose_displacement_m"):
+                "maximum_preclose_displacement_m"]
+    positive += ["moving_pad_mass_kg", "gripper_max_effort_nm"] if unit == "rad" else ["gripper_max_effort_n", "gripper_kp", "gripper_kd"]
+    for key in positive:
         if type(config[key]) not in (int, float) or not math.isfinite(config[key]) or config[key] <= 0:
             raise ValueError(f"{key}: 유한한 양수 필요")
-    for key in ("friction", "gripper_open_rad", "gripper_close_rad", "table_surface_z_m"):
+    for key in ("friction", f"gripper_open_{unit}", f"gripper_close_{unit}", "table_surface_z_m"):
         if type(config[key]) not in (int, float) or not math.isfinite(config[key]) or config[key] < 0:
             raise ValueError(f"{key}: 유한한 음이 아닌 값 필요")
-    if not config["gripper_close_rad"] < config["gripper_open_rad"] <= 1.74533:
+    lower, upper = (0., 1.74533) if unit == "rad" else (.010, .0433)
+    if not lower <= config[f"gripper_close_{unit}"] < config[f"gripper_open_{unit}"] <= upper:
         raise ValueError("그리퍼 열림/닫힘 범위 오류")
     if not 0 < config["minimum_lift_m"] <= config["lift_distance_m"]:
         raise ValueError("상승 판정 임계값 오류")
@@ -143,19 +161,25 @@ class ContactChain(Chain):
         return transforms
 
 
-def make_plan(model: Path, config, start_joint_deg=None, place=False):
-    chain = ContactChain(model)
+def make_plan(model: Path, config, start_joint_deg=None, place=False, *, side="left", chain_factory=ContactChain):
+    chain = chain_factory(model)
     home = build_demo(Chain(model))[0]
     center = np.asarray(config["cup_center_m"])
+    gripper_key = "gripper_rad" if side == "left" else "gripper_m"
+    unit = "rad" if side == "left" else "m"
+    open_position = config[f"gripper_open_{unit}"]
+    close_position = config[f"gripper_close_{unit}"]
+    approach = config.get("approach", {"reorient_backoff_m": .07, "reorient_height_m": .13,
+                                      "pregrasp_backoff_m": .025, "pregrasp_height_m": .08})
     # 작업대 가정 위치에 대한 경로이며 카메라 검출 결과가 아니다.
     targets = [
-        ("REORIENT_ABOVE", center + [-.07, 0, .13], 3.0),
-        ("PREGRASP_ABOVE", center + [-.025, 0, .08], 2.0),
-        ("ALIGN_MIDDLE", center + [-.025, 0, 0], 2.0),
+        ("REORIENT_ABOVE", center + [-approach["reorient_backoff_m"], 0, approach["reorient_height_m"]], 3.0),
+        ("PREGRASP_ABOVE", center + [-approach["pregrasp_backoff_m"], 0, approach["pregrasp_height_m"]], 2.0),
+        ("ALIGN_MIDDLE", center + [-approach["pregrasp_backoff_m"], 0, 0], 2.0),
         ("APPROACH", center, 2.0),
         ("LIFT", center + [0, 0, config["lift_distance_m"]], 3.0),
     ]
-    start = home["left_joint_deg"] if start_joint_deg is None else start_joint_deg
+    start = home[f"{side}_joint_deg"] if start_joint_deg is None else start_joint_deg
     if np.asarray(start).shape != (5,) or not np.isfinite(start).all():
         raise ValueError("시작 관절은 유한한 5축 각도여야 합니다")
     start = np.asarray(start, dtype=float).tolist()
@@ -164,8 +188,8 @@ def make_plan(model: Path, config, start_joint_deg=None, place=False):
     seed = np.radians(start)
     stages = []
     for name, target, duration_s in targets:
-        seed = solve_horizontal_endpoint(chain, "left", target, seed, restarts=1, iterations=240)
-        measured = measure_stage(chain, "left", seed, target, np.array([1, 0, 0]))
+        seed = solve_horizontal_endpoint(chain, side, target, seed, restarts=1, iterations=240)
+        measured = measure_stage(chain, side, seed, target, np.array([1, 0, 0]))
         reasons = validate_measurement(measured)
         if reasons:
             raise ValueError(f"{name} IK 미통과: {reasons}")
@@ -177,17 +201,17 @@ def make_plan(model: Path, config, start_joint_deg=None, place=False):
              {"name": "CONTACT_HOLD", "joint_deg": grasp["joint_deg"], "duration_s": 1.0}, stages[-1],
              {"name": "LIFT_HOLD", "joint_deg": stages[-1]["joint_deg"], "duration_s": 2.0}]
     for pose in poses:
-        pose["gripper_rad"] = config["gripper_close_rad"] if pose["name"] in {
-            "CLOSE", "CONTACT_HOLD", "LIFT", "LIFT_HOLD"} else config["gripper_open_rad"]
+        pose[gripper_key] = close_position if pose["name"] in {
+            "CLOSE", "CONTACT_HOLD", "LIFT", "LIFT_HOLD"} else open_position
     if place:
         lower_target = center + [0, 0, -config["placement"]["lowering_offset_m"]]
-        lower = solve_horizontal_endpoint(chain, "left", lower_target, seed, restarts=1, iterations=240)
-        measured = measure_stage(chain, "left", lower, lower_target, np.array([1, 0, 0]))
+        lower = solve_horizontal_endpoint(chain, side, lower_target, seed, restarts=1, iterations=240)
+        measured = measure_stage(chain, side, lower, lower_target, np.array([1, 0, 0]))
         reasons = validate_measurement(measured)
         if reasons:
             raise ValueError(f"LOWER IK 미통과: {reasons}")
         lower_pose = {"joint_deg": np.degrees(lower).tolist(), "target_m": lower_target.tolist(),
-                      "measurement": measured, "gripper_rad": config["gripper_close_rad"]}
+                      "measurement": measured, gripper_key: close_position}
         retreat_stages = []
         retreat_seed = lower
         for name, target in (
@@ -195,29 +219,31 @@ def make_plan(model: Path, config, start_joint_deg=None, place=False):
             ("CLEAR_ABOVE", center + [-config["placement"]["withdraw_distance_m"], 0,
                                       config["placement"]["clearance_height_m"]]),
         ):
-            retreat_seed = solve_horizontal_endpoint(chain, "left", target, retreat_seed, restarts=1, iterations=240)
-            measured = measure_stage(chain, "left", retreat_seed, target, np.array([1, 0, 0]))
+            retreat_seed = solve_horizontal_endpoint(chain, side, target, retreat_seed, restarts=1, iterations=240)
+            measured = measure_stage(chain, side, retreat_seed, target, np.array([1, 0, 0]))
             reasons = validate_measurement(measured)
             if reasons:
                 raise ValueError(f"{name} IK 미통과: {reasons}")
             retreat_stages.append({"name": name, "joint_deg": np.degrees(retreat_seed).tolist(),
                                    "target_m": target.tolist(), "measurement": measured,
-                                   "duration_s": 2.0, "gripper_rad": config["gripper_open_rad"]})
+                                   "duration_s": 2.0, gripper_key: open_position})
         poses.extend([
             {**lower_pose, "name": "LOWER", "duration_s": 3.0},
             {**lower_pose, "name": "TABLE_SETTLE", "duration_s": 1.0},
-            {**lower_pose, "name": "OPEN", "duration_s": 2.0, "gripper_rad": config["gripper_open_rad"]},
-            {**lower_pose, "name": "RELEASE_HOLD", "duration_s": 1.0, "gripper_rad": config["gripper_open_rad"]},
+            {**lower_pose, "name": "OPEN", "duration_s": 2.0, gripper_key: open_position},
+            {**lower_pose, "name": "RELEASE_HOLD", "duration_s": 1.0, gripper_key: open_position},
             *retreat_stages,
             {**retreat_stages[-1], "name": "PLACE_HOLD", "duration_s": 2.0},
         ])
     return {"poses": poses, "right_parked_deg": home["right_joint_deg"],
+            "parked_joint_deg": home["right_joint_deg" if side == "left" else "left_joint_deg"],
+            "active_side": side, "gripper_unit": unit,
             "placement_enabled": place,
-            "hardware_accessed": False, "il_dataset_used": False, "tcp_frame": "left_contact_center",
+            "hardware_accessed": False, "il_dataset_used": False, "tcp_frame": f"{side}_contact_center",
             "continuous_collision_validated": False, "model_calibrated": False}
 
 
-def sample_plan(plan, elapsed_s):
+def sample_plan(plan, elapsed_s, gripper_key="gripper_rad"):
     if not math.isfinite(elapsed_s) or elapsed_s < 0:
         raise ValueError("경과 시간 오류")
     poses = plan["poses"]
@@ -228,11 +254,11 @@ def sample_plan(plan, elapsed_s):
             weight = t*t*(3-2*t)
             return {"phase": pose["name"], "done": False,
                     "joint_deg": (np.array(previous["joint_deg"])*(1-weight)+np.array(pose["joint_deg"])*weight).tolist(),
-                    "gripper_rad": previous["gripper_rad"]*(1-weight)+pose["gripper_rad"]*weight}
+                    gripper_key: previous[gripper_key]*(1-weight)+pose[gripper_key]*weight}
         elapsed_s -= pose["duration_s"]
         previous = pose
     return {"phase": previous["name"], "joint_deg": previous["joint_deg"],
-            "gripper_rad": previous["gripper_rad"], "done": True}
+            gripper_key: previous[gripper_key], "done": True}
 
 
 def evaluate_lift(samples, config, completed, reason):
