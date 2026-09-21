@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-09-21 | PR #42 CI Xacro 의존성 오류 수정
+
+- GitHub PR gate의 `test_calculation_and_isaac_static_contract_pass` 실패를 확인했다. CI와 같은 pip Xacro 2.1.1 환경에서 `ament_index_python` 누락을 재현했다.
+- 패키지 내부 Xacro include 6개를 파일 기준 상대경로로 변경했다. ROS 패키지 검색을 차단하고 임시 작업 디렉터리에서 확장해 기존 URDF와 비교하는 회귀 테스트를 추가했다.
+- Python 3.12에서 테스트 69개 PASS. Markdown 로컬 링크 85개 파일, README 자동 요약, Python 구문, URDF·Xacro 계약과 저장된 URDF 일치 검사를 통과했다.
+- 실물 로봇 명령은 실행하지 않았다. PR 브랜치 반영 후 GitHub 검사 결과는 해당 PR에서 확인한다.
+
 ## 2026-09-16 | 하단 차체 추가 적재 5 kg 예비 주행·RGB-D 연결 경로 확정
 
 - 현재 하단 차체에 5 kg을 추가 적재하고 웹 수동 조종기로 실내 평지 주행을 수행했다. 사용자 관찰상 주행이 완료됐고 눈에 띄는 속도 저하는 없었다.

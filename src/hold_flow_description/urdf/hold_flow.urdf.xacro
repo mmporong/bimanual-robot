@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <robot name="hold_flow" xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:include filename="$(find hold_flow_description)/urdf/materials.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/mobile_base.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/sensors.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/third_party/so_arm_101/so101_arm.urdf.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/so101_stock_gripper.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/ggao50_gripper.xacro"/>
+  <xacro:include filename="materials.xacro"/>
+  <xacro:include filename="mobile_base.xacro"/>
+  <xacro:include filename="sensors.xacro"/>
+  <xacro:include filename="../third_party/so_arm_101/so101_arm.urdf.xacro"/>
+  <xacro:include filename="so101_stock_gripper.xacro"/>
+  <xacro:include filename="ggao50_gripper.xacro"/>
 
   <xacro:hold_flow_mobile_base/>
   <xacro:hold_flow_sensors/>

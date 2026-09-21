@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,26 @@ SO101_LICENSE = REPO_ROOT / "src/hold_flow_description/third_party/so_arm_101/LI
 
 
 class MechanicalV03Test(unittest.TestCase):
+    def test_xacro_expands_without_ros_package_index(self) -> None:
+        script = """
+import sys
+import xacro
+
+# ROS가 설치된 개발 PC에서도 CI의 누락된 의존성을 재현한다.
+sys.modules['ament_index_python'] = None
+sys.modules['ament_index_python.packages'] = None
+print(xacro.process_file(sys.argv[1]).toxml())
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(URDF_PATH.with_suffix(".urdf.xacro"))],
+                cwd=directory, check=True, capture_output=True, text=True,
+            )
+        self.assertEqual(
+            ET.canonicalize(result.stdout, strip_text=True),
+            ET.canonicalize(URDF_PATH.read_text(encoding="utf-8"), strip_text=True),
+        )
+
     def test_design_spec_has_requested_geometry(self) -> None:
         spec = yaml.safe_load(SPEC_PATH.read_text(encoding="utf-8"))
         self.assertEqual(spec["chassis"]["tabletop_footprint"], [340.0, 450.0])
