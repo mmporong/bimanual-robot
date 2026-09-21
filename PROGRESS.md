@@ -4,6 +4,11 @@
 
 ---
 
+## 2026-09-21 | 관제 관리 원본을 robot-dashboard로 이관
+
+- 사용자가 승인한 오늘 화이트 화면을 `mmporong/robot-dashboard/projects/ammr-live/`의 기본 관제로 옮긴다. 기존 작업 리포의 미커밋 팔·SLAM 파일은 보존하며 별도 worktree에서 이관한다.
+- `tools/ammr_dashboard/`는 기준 커밋 `43d4afc`의 보존본으로 남기고 이후 수정·배포 위치를 README에 명시했다. 주행·센서·로봇 제어 코드는 이관 대상으로 확대하지 않는다.
+
 ## 2026-09-21 | 읽기 전용 화이트 관제·Pi 자원·ROS 역할 표시
 
 - `tools/ammr_dashboard/`에 CPU·메모리·온도·스로틀링·디스크·프로세스·서비스 상태를 추가했다. 상태 수집은 HTTP 요청과 분리한 캐시 방식이며, host 2초·graph 5초·preview 최대 3fps로 제한한다.

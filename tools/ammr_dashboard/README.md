@@ -1,5 +1,13 @@
 # AMMR 읽기 전용 관제
 
+## 관리 원본 이전
+
+2026-09-21 승인 화면부터 대시보드 관리 원본은
+[`mmporong/robot-dashboard`의 `projects/ammr-live/`](https://github.com/mmporong/robot-dashboard/tree/main/projects/ammr-live)다.
+화면·수집기 수정과 배포는 그 저장소에서 진행한다. 이 디렉터리는 이관 기준 커밋
+`43d4afc`의 보존본이며 새 기본 화면을 만드는 경로로 사용하지 않는다.
+기존 설치에 관한 아래 설명은 이관 전 기록이다. 새 실행·업데이트 절차는 관리 원본의 README를 따른다.
+
 파이 자원, RGB-D·LiDAR, ROS 그래프, 지도·위치·계획 경로, 주행 차단 근거를 보는
 화이트톤 화면이다. 주행 명령 API, ROS 명령 publisher, 제어 service client는 없다.
 대시보드 실행이 카메라나 주행 서비스를 자동으로 시작하지 않는다.
