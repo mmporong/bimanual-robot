@@ -28,6 +28,18 @@ def test_effective_config_fingerprint_rejects_nonfinite():
         effective_config_sha256({"mass": float("nan")})
 
 
+def test_combined_materialized_model_preserves_left_contact(tmp_path):
+    import cup_contact_model as cup
+    left, _ = cup.prepare_model(tmp_path, cup.load_config())
+    source_bytes = left.read_bytes()
+    config = bottle.load_config(cup.ROOT / "config/simulation/bottle_replacement_experiment.json")
+    model, provenance = bottle.prepare_model(tmp_path, config, source=left, source_is_materialized=True)
+    assert left.read_bytes() == source_bytes
+    assert ET.parse(model).find("./link[@name='left_contact_center']") is not None
+    assert ET.parse(model).find("./link[@name='right_contact_center']") is not None
+    assert provenance["source"]["sha256"] == hashlib.sha256(source_bytes).hexdigest()
+
+
 def test_stock_collision_matches_visual_and_source_is_preserved(tmp_path):
     before = URDF_PATH.read_bytes()
     model, evidence = bottle.prepare_model(tmp_path, bottle.load_config())

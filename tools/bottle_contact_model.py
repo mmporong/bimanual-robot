@@ -51,11 +51,21 @@ def load_config(path=DEFAULT_CONFIG):
     return config
 
 
-def prepare_model(output, config, source=common.URDF_PATH):
+def prepare_model(output, config, source=common.URDF_PATH, *, source_is_materialized=False):
     replacement = config.get("assembly_hypothesis") is not None
     target = output / ("replacement_hypothesis.urdf" if replacement else "stock_ggao_contact_proxy.urdf")
-    source_info = materialize_urdf(source, target,
-        base_contract=common.ROOT / "config/navigation/jdamr_migration.json")
+    if source_is_materialized:
+        source_tree = ET.parse(source)
+        for mesh in source_tree.findall(".//mesh"):
+            path = Path(mesh.get("filename", ""))
+            if not path.is_absolute() or not path.is_file():
+                raise ValueError("결합 모델에는 존재하는 절대 메쉬 경로가 필요합니다")
+        source_info = {"materialized_source": str(source),
+                       "sha256": hashlib.sha256(Path(source).read_bytes()).hexdigest()}
+        source_tree.write(target, encoding="utf-8", xml_declaration=True)
+    else:
+        source_info = materialize_urdf(source, target,
+            base_contract=common.ROOT / "config/navigation/jdamr_migration.json")
     tree = ET.parse(target)
     root = tree.getroot()
     # 원본 관성·관절 한계·좌표계를 유지하고, 로그 사본의 충돌 박스만 시각 박스에 맞춘다.
