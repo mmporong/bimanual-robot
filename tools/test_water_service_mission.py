@@ -1,6 +1,46 @@
 import copy
 
-from water_service_mission import deck_transport_failure, regrasp_lift_verified, central_region_verified
+from water_service_mission import (
+    deck_transport_failure, regrasp_lift_verified, central_region_verified,
+    support_config_for_surface,
+    raised_support_contact_failure,
+    anchor_release_to_touchdown,
+)
+
+
+def test_withdraw_starts_from_observed_touchdown_not_overtravel():
+    from bimanual_pour_plan import sample_plan
+    import numpy as np
+    def pose(name, left):
+        return {"name": name, "duration_s": 1., "left_joint_deg": left,
+                "right_joint_deg": [0.]*5, "left_gripper_rad": 1., "right_gripper_m": .04}
+    plan = {"poses": [pose("TRAY_RELEASE_HOLD", [-1.]*5), pose("TRAY_WITHDRAW", [10.]*5)]}
+    anchor_release_to_touchdown(plan, np.radians([1., 2., 3., 4., 5.]))
+    command = sample_plan(plan, 1.+1e-9)
+    assert np.allclose(command["left_joint_deg"], [1., 2., 3., 4., 5.])
+
+
+def test_raised_deposit_and_guest_table_use_different_surface_heights():
+    left = {"table_surface_z_m": .72, "placement": {"maximum_tilt_deg": 3.}}
+    raised = support_config_for_surface(left, [0., 0., .94], .88)
+    guest = support_config_for_surface(left, [-2.14, -2.42, .78], .72)
+    assert raised["table_surface_z_m"] == .88
+    assert guest["table_surface_z_m"] == .72
+    assert left["table_surface_z_m"] == .72
+    assert raised["placement"]["maximum_tilt_deg"] == 3.
+
+
+def test_raised_top_side_and_early_contacts_are_not_support():
+    for state, phase, force, center in (
+        ("DEPOSIT", "MOVE_ABOVE", [0., 0., 1.], [0., 0., .94]),
+        ("DEPOSIT", "LOWER", [1., 0., 0.], [0., 0., .94]),
+        ("DEPOSIT", "LOWER", [0., 0., 1.], [.06, 0., .94]),
+        ("DEPOSIT", "LOWER", [0., 0., 1.], [0., 0., .84]),
+    ):
+        assert raised_support_contact_failure(state, phase, force, center, 0., .88)
+    assert raised_support_contact_failure("DEPOSIT", "LOWER", [0., 0., 1.], [0., 0., .94], 0., .88) is None
+    assert raised_support_contact_failure("NAVIGATE", "NAVIGATE", [0., 0., 1.], [0., 0., .94], 0., .88) is None
+    assert raised_support_contact_failure("NAVIGATE", "NAVIGATE", [0., 0., float("nan")], [0., 0., .94], 0., .88)
 
 
 def observation():

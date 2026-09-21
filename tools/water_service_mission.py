@@ -25,6 +25,39 @@ KITCHEN = "/Restaurant/Kitchen/PourWorktop"
 GUEST = "/Restaurant/Dining/table_1/Top"
 
 
+def support_config_for_surface(left, center, surface_z_m, edge_radius_m=None):
+    config = {**left, "cup_center_m": list(center), "table_surface_z_m": float(surface_z_m)}
+    if edge_radius_m is not None:
+        config["edge_support_radius_m"] = edge_radius_m
+        config["placement"] = {**left["placement"], "maximum_tilt_deg": 15.}
+    return config
+
+
+def anchor_release_to_touchdown(plan, joint_actual_rad):
+    joints_deg = np.degrees(np.asarray(joint_actual_rad, dtype=float))
+    if joints_deg.shape != (5,) or not np.isfinite(joints_deg).all():
+        raise ValueError("finite five-joint touchdown required")
+    for pose in plan["poses"]:
+        if any(pose["name"].endswith(s) for s in ("TABLE_SETTLE", "OPEN", "RELEASE_HOLD")):
+            pose["left_joint_deg"] = joints_deg.tolist()
+
+
+def raised_support_contact_failure(state, phase, force_n, cup_center, cup_tilt_deg, surface_z):
+    if not np.isfinite([*force_n, *cup_center, cup_tilt_deg, surface_z]).all():
+        return "nonfinite_raised_support_observation"
+    if np.linalg.norm(force_n) < .02:
+        return None
+    allowed = (state in {"BACKOUT", "NAVIGATE", "DOCK", "SETTLE_BASE", "REGRASP"}
+               or state == "DEPOSIT" and phase in {
+                   "LOWER", "TABLE_SETTLE", "OPEN", "RELEASE_HOLD", "WITHDRAW",
+                   "CLEAR_ABOVE", "FRONT_CLEAR", "PARK", "PLACE_HOLD"})
+    bottom = cup_center[2]-.06*math.cos(math.radians(cup_tilt_deg))
+    if (not allowed or np.linalg.norm(cup_center[:2]) > .02
+            or abs(bottom-surface_z) > .004 or force_n[2] <= 0):
+        return "unexpected_raised_support_contact"
+    return None
+
+
 def deck_transport_failure(sample, tray_center):
     """A released cup must be supported by the plate, not a hidden attachment."""
     values = [*sample["cup_relative_base_m"], *sample["cup_hand_n"],
@@ -134,7 +167,11 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     from tray_transfer_plan import build_tray_transfer
 
     dt = 1/120
-    transfer = build_tray_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
+    if "raised_tray" in source:
+        from raised_tray_transfer import build_raised_transfer
+        transfer = build_raised_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
+    else:
+        transfer = build_tray_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
     (output/"transfer_plan.json").write_text(json.dumps(transfer, indent=2)+"\n")
     all_poses = source["plan"]["poses"]
     end = next(i for i, p in enumerate(all_poses) if p["name"] == "RIGHT_PLACE_HOLD")+1
@@ -157,6 +194,8 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     right_grip = [names.index(n) for n in ("right_finger1_joint", "right_finger2_joint")]
     cup_filters = scene["cup_filters"]
     deck_indices = [cup_filters.index(rigid[n]) for n in DECK_LINKS]
+    if "raised_tray" in source:
+        deck_indices = [cup_filters.index(rigid["central_tray_top_link"])]
     allowed_cup = {0, 1, cup_filters.index(KITCHEN), cup_filters.index(GUEST), *deck_indices}
     forbidden_cup = [i for i in range(len(cup_filters)) if i not in allowed_cup]
     layout = load_layout()
@@ -166,6 +205,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     state, state_start = "POUR", 2.
     state_phase = None
     events, samples, window = [], [], []
+    touchdown_events = []
     previous_state = None
     touchdown = {}
     received = None
@@ -201,11 +241,9 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         future.result()
 
     def support_config(center, edge_supported=False):
-        config = {**left, "cup_center_m": list(center)}
-        if edge_supported:
-            config["edge_support_radius_m"] = source["experiment"]["cup_radius_profile_m"][0][1]
-            config["placement"] = {**left["placement"], "maximum_tilt_deg": 15.}
-        return config
+        surface = transfer["tray_surface_z_m"] if state == "DEPOSIT" else left["table_surface_z_m"]
+        radius = source["experiment"]["cup_radius_profile_m"][0][1] if edge_supported else None
+        return support_config_for_surface(left, center, surface, radius)
 
     for tick in range(round(args.duration/dt)):
         t = tick*dt
@@ -331,11 +369,21 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         if max(cf[forbidden_cup], default=0.) > .05 or max(bf[3:], default=0.) > .05:
             reason = "container_nonfinger_collision"
             break
+        if state == "DEPOSIT" and local_phase in {"WITHDRAW", "CLEAR_ABOVE", "FRONT_CLEAR", "PARK", "PLACE_HOLD"} and max(cf[:2]) >= .02:
+            reason = "cup_recontact_after_release"
+            break
+        if "raised_tray" in source:
+            support_failure = raised_support_contact_failure(
+                state, local_phase, cup_force[deck_indices].sum(axis=0),
+                relative_cp, tilt, transfer["tray_surface_z_m"])
+            if support_failure:
+                reason = support_failure
+                break
         if tracking > .15 or tilt > 15 or last["tilt_deg"] > 1.:
             reason = "arm_tracking_or_container_base_tilt"
             break
         early = preclose_violation(last, baseline) if state == "POUR" and baseline is not None else None
-        if state == "REGRASP" and local_phase in {"REGRASP_START", "PREGRASP", "REAPPROACH"}:
+        if state == "REGRASP" and local_phase in {"START", "REGRASP_START", "RETURN_ABOVE", "PREGRASP_ABOVE", "PREGRASP", "REAPPROACH"}:
             early = preclose_violation({**last, "phase": "LEFT_APPROACH"}, regrasp_baseline)
         if early:
             reason = early
@@ -371,8 +419,11 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             touchdown.setdefault((state, "right"), actual[idx["right"]].copy())
         if state in {"DEPOSIT", "SERVE"} and local_phase == "LOWER":
             support = deck_support if state == "DEPOSIT" else guest_support
-            if support > left["cup_mass_kg"]*9.81*.4:
-                touchdown.setdefault((state, "left"), actual[idx["left"]].copy())
+            if support > left["cup_mass_kg"]*9.81*.4 and (state, "left") not in touchdown:
+                touchdown[(state, "left")] = actual[idx["left"]].copy()
+                anchor_release_to_touchdown(plans[state], touchdown[(state, "left")])
+                touchdown_events.append({"state": state, "time_s": t,
+                                         "joint_deg": np.degrees(touchdown[(state, "left")]).tolist()})
         transit = state in {"BACKOUT", "NAVIGATE", "DOCK", "SETTLE_BASE"}
         if transit:
             maximum_transit_spill = max(maximum_transit_spill, received-counts["cup"])
@@ -453,6 +504,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         "simulated_s": tick*dt, "elapsed_wall_s": time.monotonic()-started,
         "ground_verified": ground_window_verified(samples[20:]), "final_state": state,
         "events": events, "samples": samples, "final_observation": last,
+        "touchdown_events": touchdown_events,
         "initialization_observation": initialization, "pregrasp_baseline": baseline,
         "received_particles": received, "maximum_transit_particle_loss": maximum_transit_spill,
         "maximum_environment_force_n": maximum_environment, "maximum_self_force_n": maximum_self,

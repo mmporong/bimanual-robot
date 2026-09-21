@@ -33,12 +33,14 @@ def record_failure(result, exc):
 
 
 def run(args):
+    if args.mode == "static-pose-probe" and args.pose_probes is None:
+        raise ValueError("static-pose-probe requires --pose-probes")
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
     shutil.copy2(Path(__file__), output/"executed_runner.py")
     source = json.loads((args.source_dir / "plan.json").read_text())
     water_service = args.mode == "water-service"
-    service = args.mode in {"service", "pick-only", "water-service"}
+    service = args.mode in {"service", "pick-only", "water-service", "released-cup-probe"}
     pick_plan = {"poses": source["plan"]["poses"][:9]}
     placement_poses = [p.copy() for p in source["plan"]["poses"] if p["name"] in {
         "LEFT_LOWER", "LEFT_TABLE_SETTLE", "LEFT_OPEN", "LEFT_RELEASE_HOLD",
@@ -67,7 +69,14 @@ def run(args):
             args.source_dir/"scene.usda", Path(__file__).resolve().parents[1]/"config/simulation/restaurant_layout.json",
             Path(__file__).resolve().parents[1]/"src/hold_flow_description/scripts/solve_task_poses.py"]}
     if water_service:
-        for name in ("water_service_mission.py", "tray_transfer_plan.py"):
+        for name in ("water_service_mission.py", "tray_transfer_plan.py", "raised_tray_transfer.py",
+                     "search_tray_mounts.py"):
+            result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+    if args.mode == "static-pose-probe":
+        result["input_sha256"][str(args.pose_probes)] = hashlib.sha256(args.pose_probes.read_bytes()).hexdigest()
+        result["tool_sha256"]["tray_pose_probe.py"] = hashlib.sha256(Path(__file__).with_name("tray_pose_probe.py").read_bytes()).hexdigest()
+    if args.mode == "released-cup-probe":
+        for name in ("released_cup_probe.py", "raised_tray_transfer.py", "search_tray_mounts.py"):
             result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
     try:
         import omni.kit.app
@@ -218,6 +227,17 @@ def run(args):
         controller.set_max_efforts(effort)
         set_camera_view(np.array([-3.5, -2., 1.9]), np.array([-1.6, 0., .7]))
         stage.GetRootLayer().Export(str(output/"scene.usda"))
+        if args.mode == "static-pose-probe":
+            from tray_pose_probe import run_probes
+            result.update(run_probes(args, world, robot, controller, names, q, wheels, arm_indices,
+                body_names, rigid, furniture, contact, ground, output))
+            return 0 if result["task_pass"] else 1
+        if args.mode == "released-cup-probe":
+            from released_cup_probe import run_probe
+            result.update(run_probe(args, source, world, robot, controller, names, q, wheels,
+                arm_indices, body_names, rigid, furniture, contact, ground, cup_view, cup_filters, output))
+            samples = result.pop("samples")
+            return 0 if result["task_pass"] else 1
         if water_service:
             from water_service_mission import execute_water_service
             result.update(execute_water_service(args, source, water_scene, world, robot, controller,
@@ -463,5 +483,6 @@ if __name__ == "__main__":
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--duration", type=float, default=25.)
-    parser.add_argument("--mode", choices=("drive-smoke", "collision-probe", "service", "pick-only", "water-service"), default="drive-smoke")
+    parser.add_argument("--pose-probes", type=Path)
+    parser.add_argument("--mode", choices=("drive-smoke", "collision-probe", "service", "pick-only", "water-service", "static-pose-probe", "released-cup-probe"), default="drive-smoke")
     raise SystemExit(run(parser.parse_args()))

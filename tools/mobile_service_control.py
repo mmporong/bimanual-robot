@@ -157,16 +157,16 @@ def follow_path(
         # A pose regulator completes the manoeuvre without leaving an offset
         # equal to axle_offset at the requested chassis-centre goal.
         if position_error < 0.18 or final_axle_error < 0.18 or len(path) == 1:
-            if final_axle_error < 0.005:
-                linear = 0.0
-                angular = 1.5 * yaw_error
-            else:
-                bearing = math.atan2(float(final_axle[1] - axle_xy[1]),
-                                     float(final_axle[0] - axle_xy[0]))
-                alpha = _wrap_angle(bearing - yaw)
-                beta = _wrap_angle(goal_yaw - yaw - alpha)
-                linear = 0.9 * final_axle_error * math.cos(alpha)
-                angular = 1.8 * alpha - 0.55 * beta
+            delta = final_axle - axle_xy
+            bearing = math.atan2(float(delta[1]), float(delta[0]))
+            alpha = _wrap_angle(bearing - yaw)
+            beta = _wrap_angle(goal_yaw - yaw - alpha)
+            linear = 0.9 * float(delta @ heading)
+            # Fade the ill-conditioned bearing term near the axle target.
+            # A hard 5 mm switch can alternate opposite turns under wheel lag.
+            bearing_weight = final_axle_error**2 / (final_axle_error**2 + .01**2)
+            angular = (bearing_weight * (1.8 * alpha - 0.55 * beta)
+                       + (1.0 - bearing_weight) * 1.5 * yaw_error)
         else:
             lookahead = min(0.15, max(0.08, 0.08 + 0.20 * position_error))
             target, _ = _lookahead_target(axle_path, axle_xy, lookahead)

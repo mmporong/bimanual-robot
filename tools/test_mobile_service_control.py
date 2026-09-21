@@ -92,3 +92,42 @@ def test_kinematic_simulation_converges_through_ninety_degree_curve():
     assert command["arrived"] is True
     assert pose[:2] == pytest.approx(path[-1], abs=0.015)
     assert pose[2] == pytest.approx(math.pi / 2.0, abs=0.02)
+
+
+def test_final_axle_five_mm_boundary_does_not_reverse_turn():
+    # Regression for the polar/yaw-only switch: identical bearing, 20 um apart.
+    goal = np.array([-1.55, -2.25])
+    yaw = 1.87124
+    heading = np.array([math.cos(yaw), math.sin(yaw)])
+    delta_direction = np.array([-0.0025, 0.00435])
+    delta_direction /= np.linalg.norm(delta_direction)
+    commands = []
+    for distance in np.r_[np.linspace(.004, .006, 21), .00499, .00501]:
+        axle = goal + np.array([-.105, 0.]) - distance * delta_direction
+        pose = [*(axle - .105 * heading), yaw]
+        commands.append(MODULE.follow_path(pose, [goal], math.pi))
+    assert all(c["angular_rad_s"] > 0 for c in commands)
+    assert abs(commands[-2]["angular_rad_s"] - commands[-1]["angular_rad_s"]) < .002
+
+
+@pytest.mark.parametrize("lag_s,gains", [(.0, (1., 1.)), (.2, (.9, 1.1)), (.5, (.85, 1.15))])
+def test_final_alignment_converges_with_wheel_lag_and_asymmetry(lag_s, gains):
+    # Synthetic actuator perturbations around the observed failed alignment pose.
+    pose = np.array([-1.62143, -2.35465, 1.87124])
+    goal = np.array([-1.55, -2.25])
+    actual_wheels = np.zeros(2)
+    dt = .02
+    for _ in range(750):
+        command = MODULE.follow_path(pose, [goal], math.pi)
+        if command["arrived"]:
+            break
+        target = np.array([command["left_rad_s"], command["right_rad_s"]]) * gains
+        actual_wheels += min(1., dt / max(lag_s, dt)) * (target - actual_wheels)
+        linear = .0329 * actual_wheels.mean()
+        angular = .0329 * (actual_wheels[1] - actual_wheels[0]) / .510
+        yaw = pose[2]
+        pose[0] += dt * (linear * math.cos(yaw) + .105 * angular * math.sin(yaw))
+        pose[1] += dt * (linear * math.sin(yaw) - .105 * angular * math.cos(yaw))
+        pose[2] = math.atan2(math.sin(yaw + angular * dt), math.cos(yaw + angular * dt))
+    assert command["arrived"]
+    assert np.linalg.norm(pose[:2] - goal) <= MODULE.FINAL_POSITION_TOLERANCE_M
