@@ -12,7 +12,8 @@ def test_all_service_legs_have_clearance_and_no_corner_cutting():
     grid=occupancy(layout,layout["planning_radius_m"])
     xmin,_,ymin,_=layout["room_bounds_m"]
     res=layout["map_resolution_m"]
-    for target in ("table_1","table_2"):
+    assert len(layout["tables"]) == 4
+    for target in (table["id"] for table in layout["tables"]):
         for start,goal in (("dock","kitchen"),("kitchen",target),(target,"dock")):
             path=np.asarray(plan_route(layout,start,goal))
             cells=np.floor((path-[xmin,ymin])/res).astype(int)
@@ -40,16 +41,26 @@ def test_closed_corridor_is_rejected():
 def test_export_map_is_uninflated_and_claims_only_route_planning(tmp_path):
     layout=load_layout()
     report=export_navigation(layout,tmp_path)
-    assert len(report["routes"]) == 6
+    assert len(report["routes"]) == 12
+    assert {r["goal"] for r in report["routes"] if r["start"] == "kitchen"} == {t["id"] for t in layout["tables"]}
     assert not report["nav2_executed"] and not report["base_physics_verified"]
     raw=(tmp_path/"restaurant.pgm").read_bytes()
-    header=b"P5\n120 140\n255\n"
+    header=b"P5\n170 140\n255\n"
     assert raw.startswith(header)
-    values=np.frombuffer(raw[len(header):],dtype=np.uint8).reshape(140,120)
+    values=np.frombuffer(raw[len(header):],dtype=np.uint8).reshape(140,170)
     assert np.array_equal(values==0,occupancy(layout)[::-1])
     saved=json.loads((tmp_path/"routes.json").read_text())
     assert saved == report
-    assert len(saved["routes"]) == 6
+    assert len(saved["routes"]) == 12
+
+
+def test_missing_table_waypoint_rejected(tmp_path):
+    layout=load_layout()
+    del layout["waypoints"]["table_4"]
+    path=tmp_path/"missing.json"
+    path.write_text(json.dumps(layout))
+    with pytest.raises(ValueError):
+        load_layout(path)
 
 
 def test_waypoint_nan_rejected(tmp_path):

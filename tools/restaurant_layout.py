@@ -24,6 +24,11 @@ def load_layout(path=DEFAULT_LAYOUT):
     for name, pose in layout["waypoints"].items():
         if len(pose) != 3 or not np.isfinite(pose).all():
             raise ValueError("정차 위치 오류: "+name)
+    table_ids=[table["id"] for table in layout["tables"]]
+    if (not table_ids or len(table_ids) != len(set(table_ids))
+            or {"dock","kitchen"}.intersection(table_ids)
+            or not set(table_ids).issubset(layout["waypoints"])):
+        raise ValueError("테이블 ID 중복 또는 접근 목표 누락")
     for _, center, size in obstacle_boxes(layout):
         if len(center) != 2 or len(size) != 2 or not np.isfinite([*center,*size]).all() or min(size) <= 0:
             raise ValueError("장애물 크기 오류")
@@ -101,7 +106,7 @@ def export_navigation(layout, output):
     xmin,_,ymin,_ = layout["room_bounds_m"]
     (output/"restaurant.yaml").write_text(f"image: restaurant.pgm\nmode: trinary\nresolution: {layout['map_resolution_m']}\norigin: [{xmin}, {ymin}, 0.0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n")
     routes = []
-    for target in ("table_1","table_2"):
+    for target in (table["id"] for table in layout["tables"]):
         for start,end in (("dock","kitchen"),("kitchen",target),(target,"dock")):
             path = plan_route(layout,start,end)
             routes.append({"start":start,"goal":end,"path_xy_m":path,
