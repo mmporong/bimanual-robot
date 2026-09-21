@@ -4,6 +4,8 @@
   "additional_outward_mount_m": 0.008,
   "mount_reason": "Separate the nominal connector box from the original wrist mesh; an additional adapter/standoff hypothesis, not an observed hardware dimension",
   "wall_m": 0.003,
+  "cup_radius_profile_m": [[-0.06, 0.028], [-0.02, 0.035], [0.02, 0.035], [0.06, 0.045]],
+  "cup_pregrasp_backoff_m": 0.075,
   "bottle_body_height_m": 0.15,
   "bottle_shoulder_height_m": 0.03,
   "bottle_neck_height_m": 0.02,

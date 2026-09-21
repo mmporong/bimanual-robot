@@ -15,6 +15,8 @@ from pour_geometry import contained_mask, initial_liquid, liquid_counts, evaluat
     ("pour_azimuth_deg", 320), ("bottle_approach_right_offset_m", 0),
     ("right_pick_ik_seed_joint_deg", [0, 1]),
     ("right_pick_ik_seed_joint_deg", [0, 0, 0, 0, float("nan")]),
+    ("cup_radius_profile_m", [[.06,.045],[-.06,.028]]),
+    ("cup_radius_profile_m", [[-.06,.002],[.06,.045]]),
     ("mouth_height_schedule", [[0,1.1],[100,.99]]),
     ("bottle_neck_outer_radius_m", .005), ("initial_fill_height_m", .2),
 ])
@@ -118,6 +120,15 @@ def test_fluid_initialization_inside_bottle():
     assert contained_mask(points, [.39, -.17, .82], [1, 0, 0, 0], .03, .2).all()
 
 
+def test_flared_cup_contains_wide_rim_but_not_below_narrow_bottom():
+    from cup_contact_model import ROOT
+    from pour_geometry import load_experiment
+    profile = load_experiment(ROOT / "config/simulation/bimanual_pour_experiment.json")["cup_radius_profile_m"]
+    points = [[.039,0,.055],[.039,0,0],[.030,0,-.055],[0,0,.061]]
+    assert contained_mask(points,[0,0,0],[1,0,0,0],.035,.12,cup_profile=profile).tolist() == [True,False,False,False]
+    assert contained_mask([[0,-.055,.039]],[0,0,0],[2**-.5,2**-.5,0,0],.035,.12,cup_profile=profile)[0]
+
+
 def test_rotated_container_and_outside_classification():
     points = np.array([[0, 0, 0], [.04, 0, 0], [0, 0, .2]])
     config = {"cup_radius_m": .03, "cup_height_m": .2}
@@ -130,6 +141,17 @@ def test_empty_or_nonfinite_does_not_pass():
     assert not evaluate_pour([], 0, True)["task_pass"]
     with pytest.raises(ValueError):
         contained_mask([[0,0,0]], [0,0,0], [0,0,0,0], .03,.2)
+
+
+@pytest.mark.parametrize("side,kind",[("LEFT","cup"),("RIGHT","bottle")])
+def test_preclose_contact_and_movement_rejected(side,kind):
+    from pour_geometry import preclose_violation
+    initial={kind+"_position_m":[.39,0,.8]}
+    sample={"phase":side+"_ALIGN_MIDDLE",kind+"_hand_n":[0,0],**initial}
+    assert preclose_violation(sample,initial) is None
+    assert preclose_violation({**sample,kind+"_hand_n":[.03,0]},initial) == "premature_hand_contact:"+kind
+    assert preclose_violation({**sample,kind+"_position_m":[.395,0,.8]},initial) == "container_displaced_before_close:"+kind
+    assert preclose_violation({**sample,"phase":side+"_CLOSE",kind+"_hand_n":[1,1]},initial) is None
 
 
 def test_success_requires_liquid_release_and_support():
@@ -151,6 +173,8 @@ def test_success_requires_liquid_release_and_support():
     samples += [{**s, "phase": "POUR_HOLD","bottle_tilt_deg":100.,"cup_hand_n":[1,1],"bottle_hand_n":[1,1]}]*120 + [s]*120
     samples = [{**sample,"time_s":index/120} for index,sample in enumerate(samples)]
     assert evaluate_pour(samples,100,True)["task_pass"]
+    premature={**start,"phase":"LEFT_ALIGN_MIDDLE","cup_hand_n":[.03,0],"time_s":0}
+    assert not evaluate_pour([premature]+samples,100,True)["task_pass"]
     reversed_direction = [{**x,"bottle_orientation_wxyz":[np.cos(np.radians(50)), np.sin(np.radians(50)), 0, 0]} for x in samples]
     assert not evaluate_pour(reversed_direction,100,True)["task_pass"]
     assert not evaluate_pour(reversed_direction,100,True)["inward_pour_direction"]

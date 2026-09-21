@@ -12,7 +12,7 @@ import time
 import numpy as np
 import cup_contact_model as cup_model
 import bottle_contact_model as bottle_model
-from pour_geometry import initial_liquid, liquid_counts, quaternion_matrix, evaluate_pour, minimum_jaw_gap, load_experiment, mount_clearance_evidence, inward_pour_direction
+from pour_geometry import initial_liquid, liquid_counts, quaternion_matrix, evaluate_pour, minimum_jaw_gap, load_experiment, mount_clearance_evidence, inward_pour_direction, preclose_violation
 from workcell_preview_inputs import ARM_JOINTS
 
 
@@ -31,6 +31,14 @@ def run(args):
     right["assembly_hypothesis"]["mount_xyz_m"][2] -= experiment["additional_outward_mount_m"]
     right["container_profile"] = {k:experiment[k] for k in ("wall_m","bottle_body_height_m","bottle_neck_height_m","bottle_neck_outer_radius_m")}
     left["container_wall_m"] = experiment["wall_m"]
+    left["cup_radius_profile_m"] = experiment["cup_radius_profile_m"]
+    left["approach"] = {"reorient_backoff_m":.07,"reorient_height_m":.13,
+                        "pregrasp_backoff_m":experiment["cup_pregrasp_backoff_m"],"pregrasp_height_m":.08}
+    cup_profile = np.asarray(left["cup_radius_profile_m"])
+    if not np.allclose(cup_profile[[0,-1],0], [-left["cup_height_m"]/2,left["cup_height_m"]/2]):
+        raise ValueError("컵 높이와 반경 프로파일 높이 불일치")
+    if not np.isclose(np.interp(0,cup_profile[:,0],cup_profile[:,1]),left["cup_radius_m"]):
+        raise ValueError("파지 중심 반경은 기존 IK 파지 반경과 같아야 함")
     left_model, left_source = cup_model.prepare_model(output, left)
     model, right_source = bottle_model.prepare_model(output, right, source=left_model, source_is_materialized=True)
     if args.settle_only:
@@ -177,7 +185,7 @@ def run(args):
             api.CreateSolverVelocityIterationCountAttr(4)
             radius, height, wall, count = config["cup_radius_m"],config["cup_height_m"],experiment["wall_m"],32
             base = UsdGeom.Cylinder.Define(stage,path+"/Bottom")
-            base.CreateRadiusAttr(radius)
+            base.CreateRadiusAttr(cup_profile[0,1] if name == "Cup" else radius)
             base.CreateHeightAttr(wall)
             base.AddTranslateOp().Set(Gf.Vec3d(0,0,-height/2+wall/2))
             base.CreateDisplayColorAttr([Gf.Vec3f(*color)])
@@ -185,6 +193,27 @@ def run(args):
             body_height = experiment["bottle_body_height_m"] if name == "Bottle" else height
             for i in range(count):
                 angle = 2*np.pi*i/count
+                if name == "Cup":
+                    for band, (lower, upper) in enumerate(zip(cup_profile,cup_profile[1:])):
+                        points = []
+                        for z, outer_radius in (lower, upper):
+                            for r in (outer_radius-wall, outer_radius):
+                                for edge in (-1,1):
+                                    a = angle+edge*np.pi/count*1.02
+                                    points.append(Gf.Vec3f(float(r*np.cos(a)),float(r*np.sin(a)),float(z)))
+                        segment = UsdGeom.Mesh.Define(stage,path+f"/Wall{i}_Band{band}")
+                        segment.CreatePointsAttr(points)
+                        segment.CreateFaceVertexCountsAttr([4]*6)
+                        segment.CreateFaceVertexIndicesAttr([0,1,3,2,4,6,7,5,0,4,5,1,2,3,7,6,0,2,6,4,1,5,7,3])
+                        segment.CreateSubdivisionSchemeAttr("none")
+                        segment.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+                        UsdPhysics.CollisionAPI.Apply(segment.GetPrim())
+                        UsdPhysics.MeshCollisionAPI.Apply(segment.GetPrim()).CreateApproximationAttr("convexHull")
+                        collision = PhysxSchema.PhysxCollisionAPI.Apply(segment.GetPrim())
+                        collision.CreateContactOffsetAttr(.001)
+                        collision.CreateRestOffsetAttr(0.)
+                        UsdShade.MaterialBindingAPI.Apply(segment.GetPrim()).Bind(material,UsdShade.Tokens.weakerThanDescendants,"physics")
+                    continue
                 center = [(radius-wall/2)*np.cos(angle),(radius-wall/2)*np.sin(angle),(body_height-height)/2]
                 box(path+f"/Wall{i}",center,[wall,2*radius*np.tan(np.pi/count)*1.03,body_height],color,np.degrees(angle))
                 if name == "Bottle":
@@ -356,6 +385,10 @@ def run(args):
                     freezes[side] = actual[indices[side]].copy()
                     events.append({"type":"touchdown","side":side,"time_s":tick*dt})
             samples.append(sample)
+            early_failure=preclose_violation(sample,samples[0])
+            if early_failure:
+                reason=early_failure
+                break
             bottle_mouth = poses["bottle"][0]+quaternion_matrix(poses["bottle"][1]) @ [0,0,right["cup_height_m"]/2]
             cup_rim = poses["cup"][0]+quaternion_matrix(poses["cup"][1]) @ [0,0,left["cup_height_m"]/2]
             sample["mouth_relative_to_cup_rim_m"] = (bottle_mouth-cup_rim).tolist()

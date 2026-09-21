@@ -13,7 +13,7 @@ def load_experiment(path):
         raise ValueError("물붓기 설정 스키마 오류")
     positive = ("wall_m","bottle_body_height_m","bottle_shoulder_height_m","bottle_neck_height_m",
                 "bottle_neck_outer_radius_m","particle_spacing_m","initial_fill_height_m","fluid_density_kg_m3","clear_bottle_mouth_z_m","pour_joint_speed_rad_s","pour_hold_s",
-                "bottle_approach_right_offset_m")
+                "bottle_approach_right_offset_m", "cup_pregrasp_backoff_m")
     for key in positive:
         value = config[key]
         if type(value) not in (float,int) or not np.isfinite(value) or value <= 0:
@@ -45,6 +45,11 @@ def load_experiment(path):
         raise ValueError("병목 내부 폭에 비해 입자가 큼")
     if config["initial_fill_height_m"] >= config["bottle_body_height_m"]-config["wall_m"]:
         raise ValueError("초기 유체가 병 몸통 밖에 있음")
+    profile = np.asarray(config["cup_radius_profile_m"], dtype=float)
+    if (profile.ndim != 2 or profile.shape[1] != 2 or len(profile) < 2
+            or not np.isfinite(profile).all() or np.any(np.diff(profile[:,0]) <= 0)
+            or np.any(profile[:,1] <= config["wall_m"])):
+        raise ValueError("컵 높이별 반경 오류")
     return config
 
 
@@ -132,13 +137,16 @@ def mount_clearance_evidence(model):
             "physical_calibration":False,"full_robot_collision_certificate":False}
 
 
-def contained_mask(points, position, orientation, radius, height, wall=.003, bottle_profile=False):
+def contained_mask(points, position, orientation, radius, height, wall=.003, bottle_profile=False, cup_profile=None):
     local = (np.asarray(points)-position) @ quaternion_matrix(orientation)
     if bottle_profile:
         wall = bottle_profile["wall_m"]
         neck_inner = bottle_profile["bottle_neck_outer_radius_m"]-wall
         inner_radius = np.interp(local[:,2],[-height/2,-height/2+bottle_profile["bottle_body_height_m"],
             height/2-bottle_profile["bottle_neck_height_m"],height/2],[radius-wall,radius-wall,neck_inner,neck_inner])
+    elif cup_profile is not None:
+        profile = np.asarray(cup_profile, dtype=float)
+        inner_radius = np.interp(local[:,2], profile[:,0], profile[:,1])-wall
     else:
         inner_radius = radius-wall
     return ((np.linalg.norm(local[:, :2], axis=1) < inner_radius)
@@ -165,7 +173,8 @@ def liquid_counts(points, cup_pose, bottle_pose, cup_config, bottle_config):
     def inside(pose, config):
         return contained_mask(points, *pose, config["cup_radius_m"], config["cup_height_m"],
                               wall=config.get("container_wall_m",.003),
-                              bottle_profile=config.get("container_profile",False))
+                              bottle_profile=config.get("container_profile",False),
+                              cup_profile=config.get("cup_radius_profile_m"))
     cup = inside(cup_pose, cup_config)
     bottle = inside(bottle_pose, bottle_config)
     return {"cup": int(cup.sum()), "bottle": int(bottle.sum()),
@@ -207,6 +216,23 @@ def inward_pour_direction(sample):
                     and bottle_position[1] < cup_position[1])
     except (KeyError, ValueError, TypeError):
         return False
+
+
+def preclose_violation(sample, initial):
+    """닫기 전 손가락 접촉과 용기 XY 이동을 검출한다. 단위 N, m."""
+    stages={"RESET","REORIENT_ABOVE","PREGRASP_ABOVE","ALIGN_MIDDLE","APPROACH"}
+    for side,kind in (("LEFT","cup"),("RIGHT","bottle")):
+        if sample["phase"] not in {side+"_"+stage for stage in stages}:
+            continue
+        force=np.asarray(sample[kind+"_hand_n"],dtype=float)
+        displacement=np.asarray(sample[kind+"_position_m"])-initial[kind+"_position_m"]
+        if not np.isfinite(force).all() or not np.isfinite(displacement).all():
+            return "nonfinite_preclose_observation:"+kind
+        if np.max(force) >= .02:
+            return "premature_hand_contact:"+kind
+        if np.linalg.norm(displacement[:2]) > .003:
+            return "container_displaced_before_close:"+kind
+    return None
 
 
 def evaluate_pour(samples, particle_count, completed):
@@ -267,13 +293,15 @@ def evaluate_pour(samples, particle_count, completed):
                 and s[kind+"_grasp_rotation_error_deg"] < 15 for kind in ("cup","bottle"))
         for s in pouring)
     inward_direction = len(pouring) == 120 and all(inward_pour_direction(s) for s in pouring)
-    passed = completed and received >= .5 and outside <= .05 and supported and released and returned and opened and settled and count_valid and lift_seen and initially_in_bottle and actual_pour and transfer_during_pour and grasp_continuity and pose_coupled_transfer and inward_direction
+    preclose_clear=not any(preclose_violation(s,samples[0]) for s in samples)
+    passed = completed and received >= .5 and outside <= .05 and supported and released and returned and opened and settled and count_valid and lift_seen and initially_in_bottle and actual_pour and transfer_during_pour and grasp_continuity and pose_coupled_transfer and inward_direction and preclose_clear
     return {"task_pass": bool(passed), "received_fraction_min": received,
             "outside_fraction_max": outside, "supported": supported, "released": released,
             "returned_upright": returned,
             "final_xy_error_from_initial_m":placement_xy_error,
             "grippers_open":opened,"settled":settled,"actual_pour_pose":actual_pour,
             "inward_pour_direction":inward_direction,
+            "preclose_clear":preclose_clear,
             "particle_count_conserved": count_valid, "both_lifted": lift_seen,
             "transfer_during_pour": bool(transfer_during_pour),
             "pose_coupled_transfer":bool(pose_coupled_transfer),
