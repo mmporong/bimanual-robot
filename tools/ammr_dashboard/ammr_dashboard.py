@@ -37,6 +37,13 @@ def finite(value):
     return number if math.isfinite(number) else None
 
 
+def finite_argument(value):
+    number = finite(value)
+    if number is None:
+        raise argparse.ArgumentTypeError("유한한 숫자가 필요합니다")
+    return number
+
+
 def rolling_fps(timestamps):
     if len(timestamps) < 2:
         return 0.0
@@ -45,29 +52,36 @@ def rolling_fps(timestamps):
 
 
 def scan_summary(ranges, angle_min, angle_increment, range_min, range_max,
-                 max_points=240):
-    """LaserScan을 방향별 최소거리와 화면용 XY 점으로 줄인다."""
+                 max_points=240, yaw_deg=0.0, x_m=0.0, y_m=0.0):
+    """LaserScan을 표시 프레임 XY로 변환해 방향별로 요약한다."""
+    transform = [finite(value) for value in (yaw_deg, x_m, y_m)]
+    if any(value is None for value in transform):
+        raise ValueError("스캔 변환값은 유한한 숫자여야 합니다")
+    yaw, offset_x, offset_y = math.radians(transform[0]), transform[1], transform[2]
+    cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
     valid = []
     for index, raw in enumerate(ranges):
         distance = finite(raw)
         if distance is None or distance < range_min or distance > range_max:
             continue
         angle = angle_min + index * angle_increment
-        valid.append((angle, distance))
+        scan_x, scan_y = distance * math.cos(angle), distance * math.sin(angle)
+        x = cos_yaw * scan_x - sin_yaw * scan_y + offset_x
+        y = sin_yaw * scan_x + cos_yaw * scan_y + offset_y
+        valid.append((math.atan2(y, x), math.hypot(x, y), x, y))
 
     def sector(center_deg, half_deg):
         center = math.radians(center_deg)
         half = math.radians(half_deg)
-        values = [distance for angle, distance in valid
+        values = [distance for angle, distance, _x, _y in valid
                   if abs(math.atan2(math.sin(angle - center),
                                     math.cos(angle - center))) <= half]
         return None if not values else round(min(values), 3)
 
     stride = max(1, math.ceil(len(valid) / max_points))
-    points = [[round(distance * math.cos(angle), 3),
-               round(distance * math.sin(angle), 3)]
-              for angle, distance in valid[::stride]][:max_points]
-    distances = [distance for _, distance in valid]
+    points = [[round(x, 3), round(y, 3)]
+              for _angle, _distance, x, y in valid[::stride]][:max_points]
+    distances = [distance for _angle, distance, _x, _y in valid]
     return {
         "valid_points": len(valid),
         "min_m": None if not distances else round(min(distances), 3),
@@ -136,7 +150,8 @@ def image_to_bgr(msg):
 
 
 class TelemetryStore:
-    def __init__(self, clock=time.monotonic):
+    def __init__(self, clock=time.monotonic, scan_yaw_deg=0.0, scan_x_m=0.0,
+                 scan_y_m=0.0, scan_display_frame="laser_link"):
         self.clock = clock
         self.lock = threading.Lock()
         self.frame_ready = {"depth": threading.Condition(self.lock),
@@ -146,11 +161,16 @@ class TelemetryStore:
         self.last_render_at = {"depth": 0.0, "color": 0.0}
         self.times = {"depth": deque(maxlen=90), "color": deque(maxlen=90),
                       "scan": deque(maxlen=90)}
+        self.scan_transform = {
+            "yaw_deg": scan_yaw_deg, "x_m": scan_x_m, "y_m": scan_y_m,
+            "display_frame": scan_display_frame,
+        }
         self.state = {
             "started_at": self.clock(),
             "depth": {"topic": None, "error": None},
             "color": {"topic": None, "error": None},
-            "lidar": {"topic": "/scan"},
+            "lidar": {"topic": "/scan", **self.scan_transform},
+            "depth_navigation": {"topic": "/depth_navigation/status"},
             "motion": {"odom": None, "cmd": None, "requested_cmd": None},
             "battery": None,
             "imu": None,
@@ -218,12 +238,34 @@ class TelemetryStore:
     def update_scan(self, msg):
         now = self._stamp("scan")
         summary = scan_summary(msg.ranges, msg.angle_min, msg.angle_increment,
-                               msg.range_min, msg.range_max)
+                               msg.range_min, msg.range_max,
+                               yaw_deg=self.scan_transform["yaw_deg"],
+                               x_m=self.scan_transform["x_m"],
+                               y_m=self.scan_transform["y_m"])
         with self.lock:
             self.state["lidar"] = {
                 **summary, "topic": "/scan", "observed_at": now,
                 "fps": round(rolling_fps(self.times["scan"]), 1),
+                **self.scan_transform,
             }
+
+    def update_depth_navigation(self, msg):
+        try:
+            payload = json.loads(msg.data)
+            if not isinstance(payload, dict):
+                raise ValueError("JSON object가 아님")
+            json.dumps(payload, allow_nan=False)
+            source_age = payload.pop("age_s", None)
+            state = {**payload, "topic": "/depth_navigation/status",
+                     "observed_at": self.clock(), "error": None}
+            if source_age is not None:
+                state["source_age_s"] = source_age
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            state = {"topic": "/depth_navigation/status",
+                     "observed_at": self.clock(),
+                     "error": f"{type(exc).__name__}: {exc}"}
+        with self.lock:
+            self.state["depth_navigation"] = state
 
     def update_motion(self, key, linear, angular, **extra):
         with self.lock:
@@ -269,7 +311,8 @@ class TelemetryStore:
             "uptime_s": round(now - result.pop("started_at"), 1),
             "ros_domain_id": os.environ.get("ROS_DOMAIN_ID"),
         }
-        for group in ("depth", "color", "lidar", "battery", "imu"):
+        for group in ("depth", "color", "lidar", "battery", "imu",
+                      "depth_navigation"):
             item = result.get(group)
             if item:
                 observed = item.pop("observed_at", None)
@@ -382,6 +425,7 @@ def build_node(store, depth_topic, color_topic):
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import BatteryState, Image, Imu, LaserScan
+    from std_msgs.msg import String
 
     class DashboardNode(Node):
         def __init__(self):
@@ -404,6 +448,8 @@ def build_node(store, depth_topic, color_topic):
                                      store.update_battery, qos_profile_sensor_data)
             self.create_subscription(Imu, "/imu/data_raw", store.update_imu,
                                      qos_profile_sensor_data)
+            self.create_subscription(String, "/depth_navigation/status",
+                                     store.update_depth_navigation, 10)
             self.create_timer(1.0, lambda: store.update_graph(self))
 
         def odom(self, msg):
@@ -434,10 +480,17 @@ def main():
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--depth-topic", default="/camera/depth/image_raw")
     parser.add_argument("--color-topic", default="/camera/color/image_raw")
+    parser.add_argument("--scan-yaw-deg", type=finite_argument, default=0.0)
+    parser.add_argument("--scan-x-m", type=finite_argument, default=0.0)
+    parser.add_argument("--scan-y-m", type=finite_argument, default=0.0)
+    parser.add_argument("--scan-display-frame", default="laser_link")
     args = parser.parse_args()
 
     import rclpy
-    store = TelemetryStore()
+    store = TelemetryStore(scan_yaw_deg=args.scan_yaw_deg,
+                           scan_x_m=args.scan_x_m,
+                           scan_y_m=args.scan_y_m,
+                           scan_display_frame=args.scan_display_frame)
     node = build_node(store, args.depth_topic, args.color_topic)
     server = ThreadingHTTPServer((args.bind, args.port), make_handler(store))
     server.daemon_threads = True

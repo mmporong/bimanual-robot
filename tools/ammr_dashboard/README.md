@@ -20,10 +20,28 @@ python3 $HOME/bimanual-robot/tools/ammr_dashboard/ammr_dashboard.py --port 8090
 - Astra S: `/camera/depth/image_raw`, `/camera/color/image_raw`
 - LiDAR: `/scan`
 - 베이스: `/odom`, `/cmd_vel`, `/cmd_vel_smoothed`
-- 상태: `/battery_state`, `/imu/data_raw`
+- 상태: `/battery_state`, `/imu/data_raw`, `/depth_navigation/status` (JSON String)
 
 카메라 드라이버가 다른 네임스페이스를 쓰면 `--depth-topic`, `--color-topic`으로
 바꾼다. `/health`는 Depth와 LiDAR가 모두 2초 이내에 들어오면 HTTP 200을 반환한다.
+
+LiDAR 표시 기준은 기본 `laser_link`이며, 스캔을 다른 프레임의 원점과
+방향으로 보려면 변환을 명시한다. 예를 들어 `laser_link -> base_footprint`
+변환이 yaw 180°, x -0.010 m, y 0 m인 역방향 장착은 다음과 같다.
+
+```bash
+python3 $HOME/bimanual-robot/tools/ammr_dashboard/ammr_dashboard.py --port 8090 \
+  --scan-yaw-deg 180 --scan-x-m -0.010 --scan-y-m 0 \
+  --scan-display-frame base_footprint
+```
+
+이 변환은 각 스캔 점의 측정 원점과 표시 방향을 바꾸는 것이다. 라이다 거리에서
+차체 외곽을 빼는 여유거리 계산은 하지 않는다. 변환 숫자는 유한한 값만
+받으며 `NaN`, `inf`는 실행 시 거부한다.
+
+`/depth_navigation/status`의 `age_s`는 상태 발행자가 계산한 원본 경과 시간이므로
+API에서 `source_age_s`로 보존한다. API의 `age_s`는 대시보드가 해당 상태
+메시지를 수신한 뒤 흐른 시간이며, 2초 이상이면 `live: false`다.
 
 ## 검증
 

@@ -27,7 +27,9 @@
     .panel { overflow:hidden } .layout > .panel:last-child { display:flex; flex-direction:column }
     .head { padding:11px 14px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line) }
     .head h2 { font-size:12px; text-transform:uppercase; letter-spacing:.11em; margin:0 }
-    .status { color:var(--muted); font-size:11px } .camera { position:relative; background:#06080c; aspect-ratio:16/9; min-height:340px; display:grid; place-items:center }
+    .status { color:var(--muted); font-size:11px } .camera-grid { display:grid; grid-template-columns:1fr 1fr; background:#06080c }
+    .camera { position:relative; background:#06080c; aspect-ratio:4/3; min-height:250px; display:grid; place-items:center; overflow:hidden }
+    .camera + .camera { border-left:1px solid var(--line) } .feed-label { position:absolute; top:8px; left:10px; z-index:1; padding:3px 7px; border-radius:5px; background:#080b10c9; color:var(--muted); font-size:10px; letter-spacing:.08em }
     .camera img { width:100%; height:100%; object-fit:contain; display:block }
     .camera .no-feed { position:absolute; color:var(--muted); text-align:center } .camera img[src] + .no-feed { display:none }
     .crosshair { position:absolute; inset:50% auto auto 50%; width:24px; height:24px; transform:translate(-50%,-50%); opacity:.45; pointer-events:none }
@@ -45,8 +47,9 @@
     .detail:last-child { border:0 } .detail strong { display:block; font-size:14px; margin-top:3px; font-variant-numeric:tabular-nums }
     .health-list { padding:8px 14px } .health { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #202a37 }
     .health:last-child { border:0 } .badge { color:var(--muted) } .badge.ok { color:var(--green) } .badge.warn { color:var(--amber) }
+    .note { padding:8px 12px; color:var(--muted); font-size:11px; border-top:1px solid var(--line) }
     @media(max-width:980px){ .metrics{grid-template-columns:repeat(3,1fr)} .layout,.bottom{grid-template-columns:1fr} .camera{min-height:0} }
-    @media(max-width:600px){ header{padding:0 13px}.sub{display:none}main{padding:10px}.metrics{grid-template-columns:repeat(2,1fr)}.details{grid-template-columns:repeat(2,1fr)}.detail:nth-child(2){border-right:0}.camera-footer{grid-template-columns:repeat(2,1fr)} }
+    @media(max-width:600px){ header{padding:0 13px}.sub{display:none}main{padding:10px}.metrics{grid-template-columns:repeat(2,1fr)}.details{grid-template-columns:repeat(2,1fr)}.detail:nth-child(2){border-right:0}.camera-footer{grid-template-columns:repeat(2,1fr)}.camera-grid{grid-template-columns:1fr}.camera + .camera{border-left:0;border-top:1px solid var(--line)} }
   </style>
 </head>
 <body>
@@ -57,7 +60,7 @@
 <main>
   <section class="metrics">
     <div class="metric"><div class="label">전방 장애물</div><div class="value" id="front">—<span class="unit">m</span></div></div>
-    <div class="metric"><div class="label">Depth 중심</div><div class="value" id="center">—<span class="unit">m</span></div></div>
+    <div class="metric"><div class="label">화면 중앙 깊이</div><div class="value" id="center">—<span class="unit">m</span></div></div>
     <div class="metric"><div class="label">주행 속도</div><div class="value" id="speed">—<span class="unit">m/s</span></div></div>
     <div class="metric"><div class="label">회전 속도</div><div class="value" id="turn">—<span class="unit">rad/s</span></div></div>
     <div class="metric"><div class="label">배터리 전압</div><div class="value" id="battery">—<span class="unit">V</span></div></div>
@@ -66,8 +69,11 @@
 
   <section class="layout">
     <article class="panel">
-      <div class="head"><h2>Astra S / Depth Camera</h2><span class="status" id="depth-topic">토픽 대기</span></div>
-      <div class="camera"><img id="depth-feed" alt="Astra S 실시간 깊이 영상"><div class="no-feed">깊이 프레임을 기다리는 중입니다</div><i class="crosshair"></i></div>
+      <div class="head"><h2>Astra S / RGB + Depth</h2><span class="status" id="depth-topic">토픽 대기</span></div>
+      <div class="camera-grid">
+        <div class="camera"><span class="feed-label">RGB</span><img id="color-feed" alt="Astra S RGB 영상"><div class="no-feed">RGB 프레임을 기다리는 중입니다</div><i class="crosshair"></i></div>
+        <div class="camera"><span class="feed-label">DEPTH</span><img id="depth-feed" alt="Astra S 실시간 깊이 영상"><div class="no-feed">깊이 프레임을 기다리는 중입니다</div><i class="crosshair"></i></div>
+      </div>
       <div class="camera-footer">
         <div><span class="label">Frame rate</span><strong id="depth-fps">—</strong></div>
         <div><span class="label">Valid depth</span><strong id="valid-depth">—</strong></div>
@@ -79,6 +85,7 @@
       <div class="head"><h2>LiDAR / Local Scan</h2><span class="status" id="lidar-meta">토픽 대기</span></div>
       <canvas id="radar" aria-label="LiDAR 실시간 거리 관측"></canvas>
       <div class="scan-row"><div><span class="label">Left</span><strong id="left">—</strong></div><div><span class="label">Front</span><strong id="front-small">—</strong></div><div><span class="label">Right</span><strong id="right">—</strong></div></div>
+      <div class="note" id="scan-frame">표시 원점 대기 · 차체 외곽 여유거리가 아닙니다</div>
     </article>
   </section>
 
@@ -92,6 +99,8 @@
     <article class="panel"><div class="head"><h2>Onboard Health</h2><span class="status" id="domain">Domain —</span></div><div class="health-list">
       <div class="health"><span>Depth camera</span><span id="depth-health" class="badge">WAIT</span></div>
       <div class="health"><span>2D LiDAR</span><span id="lidar-health" class="badge">WAIT</span></div>
+      <div class="health"><span>Depth navigation</span><span id="nav-health" class="badge">WAIT</span></div>
+      <div class="health"><span>Navigation state / processing</span><span id="nav-state" class="badge">—</span></div>
       <div class="health"><span>Pi CPU / Memory / Load</span><span id="compute" class="badge">—</span></div>
     </div></article>
   </section>
@@ -99,7 +108,8 @@
 <script>
   const $=id=>document.getElementById(id), fmt=(v,d=2)=>v==null?'—':Number(v).toFixed(d);
   const withUnit=(id,v,u,d=2)=>$(id).innerHTML=`${fmt(v,d)}<span class="unit">${u}</span>`;
-  function status(id, live){ const e=$(id); e.textContent=live?'LIVE':'STALE'; e.className='badge '+(live?'ok':'warn'); }
+  function sensorStatus(id, live){ const e=$(id); e.textContent=live?'LIVE':'STALE'; e.className='badge '+(live?'ok':'warn'); }
+  function navigationStatus(id, live, healthy){ const e=$(id); e.textContent=live?(healthy?'HEALTHY':'DEGRADED'):'STALE'; e.className='badge '+(live&&healthy?'ok':'warn'); }
   function drawRadar(points=[]){ const c=$('radar'),box=c.getBoundingClientRect(),dpr=devicePixelRatio||1,w=Math.round(box.width*dpr),h=Math.round(box.height*dpr);
     if(c.width!==w||c.height!==h){c.width=w;c.height=h} const x=c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0); x.clearRect(0,0,box.width,box.height);
     const cx=box.width/2,cy=box.height*.78,scale=Math.min(box.width*.45,box.height*.7)/3;
@@ -107,15 +117,17 @@
     x.beginPath();x.moveTo(cx,cy);x.lineTo(cx,cy-3*scale);x.strokeStyle='#40546b';x.stroke();
     x.fillStyle='#4de3e6'; for(const [px,py] of points){const sx=cx-py*scale,sy=cy-px*scale;if(sy>8&&sy<cy+8){x.fillRect(sx-1.4,sy-1.4,2.8,2.8)}}
     x.fillStyle='#5c8dff';x.beginPath();x.moveTo(cx,cy-13);x.lineTo(cx-8,cy+7);x.lineTo(cx+8,cy+7);x.closePath();x.fill(); }
-  async function refresh(){ try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw Error(r.status);const s=await r.json(),d=s.depth||{},l=s.lidar||{},o=s.motion?.odom||{},b=s.battery||{},i=s.imu||{},sys=s.system||{};
+  async function refresh(){ try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw Error(r.status);const s=await r.json(),d=s.depth||{},l=s.lidar||{},n=s.depth_navigation||{},o=s.motion?.odom||{},b=s.battery||{},i=s.imu||{},sys=s.system||{};
       const live=[d.live,l.live].filter(Boolean).length;$('system-dot').classList.toggle('ok',live===2);$('system-state').textContent=live===2?'센서 정상':'센서 확인';$('sensor-count').innerHTML=`${live}/2<span class="unit">LIVE</span>`;
       withUnit('front',l.front_m,'m');withUnit('center',d.center_m,'m');withUnit('speed',o.linear_mps,'m/s',3);withUnit('turn',o.angular_rps,'rad/s',3);withUnit('battery',b.voltage_v,'V',1);
       $('depth-topic').textContent=d.topic?`${d.topic} · ${fmt(d.age_s,1)}s`:'토픽 대기';$('depth-fps').textContent=d.fps==null?'—':`${fmt(d.fps,1)} fps`;$('valid-depth').textContent=d.valid_pct==null?'—':`${fmt(d.valid_pct,1)}%`;$('nearest').textContent=d.nearest_m==null?'—':`${fmt(d.nearest_m)} m`;$('resolution').textContent=d.width?`${d.width} × ${d.height}`:'—';
       $('lidar-meta').textContent=l.fps==null?'토픽 대기':`${fmt(l.fps,1)} fps · ${l.valid_points} pts`;for(const [id,v] of [['left',l.left_m],['front-small',l.front_m],['right',l.right_m]])$(id).textContent=v==null?'—':`${fmt(v)} m`;
+      $('scan-frame').textContent=`${l.display_frame||'—'} 원점 · yaw ${fmt(l.yaw_deg,1)}° · x ${fmt(l.x_m,3)} m · y ${fmt(l.y_m,3)} m · 차체 외곽 여유거리가 아님`;
       $('pose').textContent=o.x_m==null?'—':`${fmt(o.x_m)} / ${fmt(o.y_m)} m`;$('heading').textContent=o.yaw_deg==null?'—':`${fmt(o.yaw_deg,1)}°`;$('imu').textContent=i.angular_z_rps==null?'—':`${fmt(i.angular_z_rps,3)} rad/s`;$('graph').textContent=`${s.graph?.nodes||0} nodes · ${s.graph?.topics||0} topics`;
-      $('domain').textContent=`ROS Domain ${s.server?.ros_domain_id??'—'}`;$('compute').textContent=`${fmt(sys.cpu_temp_c,1)}°C · ${fmt(sys.memory_pct,0)}% · ${fmt(sys.load_1m,2)}`;status('depth-health',d.live);status('lidar-health',l.live);drawRadar(l.points_xy_m||[]);
-      if(!$('depth-feed').src)$('depth-feed').src='/stream/depth.mjpg';
-    }catch(e){$('system-state').textContent='서버 연결 끊김';$('system-dot').classList.remove('ok')} }
+      $('domain').textContent=`ROS Domain ${s.server?.ros_domain_id??'—'}`;$('compute').textContent=`${fmt(sys.cpu_temp_c,1)}°C · ${fmt(sys.memory_pct,0)}% · ${fmt(sys.load_1m,2)}`;sensorStatus('depth-health',d.live);sensorStatus('lidar-health',l.live);navigationStatus('nav-health',n.live,n.healthy===true&&!n.error);$('nav-state').textContent=n.error?'JSON ERROR':`${n.state??'—'} · ${n.processing_ms==null?'—':fmt(n.processing_ms,1)+' ms'}`;drawRadar(l.points_xy_m||[]);
+      if(d.live){if(!$('depth-feed').src)$('depth-feed').src='/stream/depth.mjpg'}else $('depth-feed').removeAttribute('src');
+      const color=s.color||{};if(color.live){if(!$('color-feed').src)$('color-feed').src='/stream/color.mjpg'}else $('color-feed').removeAttribute('src');
+    }catch(e){$('system-state').textContent='서버 연결 끊김';$('system-dot').classList.remove('ok');$('sensor-count').innerHTML='—/2<span class="unit">LIVE</span>';sensorStatus('depth-health',false);sensorStatus('lidar-health',false);navigationStatus('nav-health',false,false);$('depth-feed').removeAttribute('src');$('color-feed').removeAttribute('src')} }
   setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString('en-GB',{hour12:false})},1000);setInterval(refresh,500);refresh();drawRadar([]);
 </script>
 </body></html>
