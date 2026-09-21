@@ -43,9 +43,13 @@ def anchor_release_to_touchdown(plan, joint_actual_rad):
             pose["left_joint_deg"] = joints_deg.tolist()
 
 
-def raised_support_contact_failure(state, phase, force_n, cup_center, cup_tilt_deg, surface_z):
+def support_contact_failure(state, phase, force_n, cup_center, cup_tilt_deg, surface_z,
+                            target_xy_m=(0., 0.)):
     if not np.isfinite([*force_n, *cup_center, cup_tilt_deg, surface_z]).all():
-        return "nonfinite_raised_support_observation"
+        return "nonfinite_support_observation"
+    target_xy = np.asarray(target_xy_m, dtype=float)
+    if target_xy.shape != (2,) or not np.isfinite(target_xy).all():
+        return "nonfinite_support_observation"
     if np.linalg.norm(force_n) < .02:
         return None
     allowed = (state in {"BACKOUT", "NAVIGATE", "DOCK", "SETTLE_BASE", "REGRASP"}
@@ -53,10 +57,31 @@ def raised_support_contact_failure(state, phase, force_n, cup_center, cup_tilt_d
                    "LOWER", "TABLE_SETTLE", "OPEN", "RELEASE_HOLD", "WITHDRAW",
                    "CLEAR_ABOVE", "FRONT_CLEAR", "PARK", "PLACE_HOLD"})
     bottom = cup_center[2]-.06*math.cos(math.radians(cup_tilt_deg))
-    if (not allowed or np.linalg.norm(cup_center[:2]) > .02
+    if (not allowed or np.linalg.norm(np.asarray(cup_center[:2])-target_xy) > .02
             or abs(bottom-surface_z) > .004 or force_n[2] <= 0):
-        return "unexpected_raised_support_contact"
+        return "unexpected_support_contact"
     return None
+
+
+def raised_support_contact_failure(state, phase, force_n, cup_center, cup_tilt_deg, surface_z):
+    """Backward-compatible origin-centered raised-support contract."""
+    failure = support_contact_failure(
+        state, phase, force_n, cup_center, cup_tilt_deg, surface_z)
+    return ({"nonfinite_support_observation": "nonfinite_raised_support_observation",
+             "unexpected_support_contact": "unexpected_raised_support_contact"}.get(failure, failure))
+
+
+def support_contacts_failure(state, phase, forces_n, cup_center, tilt_deg, surface_z, target_xy_m):
+    for force_n in forces_n:
+        failure = support_contact_failure(state, phase, force_n, cup_center, tilt_deg, surface_z, target_xy_m)
+        if failure:
+            return failure
+    return None
+
+
+def cup_tilt_exceeded(source, tilt_deg):
+    limit_deg = 2. if "plate_transfer" in source else 15.
+    return not math.isfinite(tilt_deg) or abs(tilt_deg) > limit_deg
 
 
 def deck_transport_failure(sample, tray_center):
@@ -81,12 +106,61 @@ def regrasp_lift_verified(samples, duration_steps=120):
         and s["cup_tilt_deg"] < 5. for s in window)
 
 
-def central_region_verified(samples, duration_steps=120):
+def placement_region_verified(samples, target_xy_m=(0., 0.), duration_steps=120):
+    target_xy = np.asarray(target_xy_m, dtype=float)
+    if target_xy.shape != (2,) or not np.isfinite(target_xy).all():
+        return False
     window = samples[-duration_steps:]
     return len(window) == duration_steps and all(
         s["phase"] == "PLACE_HOLD"
         and np.isfinite(s["cup_relative_base_m"]).all()
-        and np.linalg.norm(s["cup_relative_base_m"][:2]) <= .02 for s in window)
+        and np.linalg.norm(np.asarray(s["cup_relative_base_m"][:2])-target_xy) <= .02
+        for s in window)
+
+
+def central_region_verified(samples, duration_steps=120):
+    return placement_region_verified(samples, duration_steps=duration_steps)
+
+
+def build_service_transfer(model, source):
+    variants = [name for name in ("raised_tray", "plate_transfer") if name in source]
+    if len(variants) > 1:
+        raise ValueError("raised_tray and plate_transfer are mutually exclusive")
+    if variants == ["raised_tray"]:
+        from raised_tray_transfer import build_raised_transfer
+        return build_raised_transfer(model, source)
+    if variants == ["plate_transfer"]:
+        from raised_tray_transfer import build_plate_transfer
+        return build_plate_transfer(model, source)
+    from tray_transfer_plan import build_tray_transfer
+    return build_tray_transfer(model, source)
+
+
+def transfer_support_links(source):
+    if "raised_tray" in source:
+        return ("central_tray_top_link",)
+    return DECK_LINKS
+
+
+def summed_support_force(contact_force_matrix, support_indices):
+    forces = np.asarray(contact_force_matrix, dtype=float)
+    indices = list(support_indices)
+    if forces.ndim != 2 or forces.shape[1] != 3 or not indices:
+        raise ValueError("support contacts require a nonempty Nx3 force matrix selection")
+    selected = forces[indices]
+    if not np.isfinite(selected).all():
+        raise ValueError("support contact force must be finite")
+    return selected.sum(axis=0)
+
+
+def placement_requirement_fields(source, verified):
+    plate_transfer = "plate_transfer" in source
+    return {
+        "center_requirement_pass": bool(verified and not plate_transfer),
+        "placement_requirement_pass": bool(verified),
+        "placement_requirement_contract": ("selected_plate_target_xy_within_20mm"
+            if plate_transfer else "origin_center_xy_within_20mm"),
+    }
 
 
 def setup_water_scene(stage, world, context, source, source_dir, rigid, furniture,
@@ -165,7 +239,6 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     from isaacsim.core.utils.types import ArticulationAction
     from isaacsim.core.utils.viewports import set_camera_view
     from omni.kit.viewport.utility import get_active_viewport, capture_viewport_to_file
-    from tray_transfer_plan import build_tray_transfer
     from service_camera_views import camera_views
     from pxr import UsdGeom
 
@@ -174,11 +247,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     detail_count = 0
 
     dt = 1/120
-    if "raised_tray" in source:
-        from raised_tray_transfer import build_raised_transfer
-        transfer = build_raised_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
-    else:
-        transfer = build_tray_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
+    transfer = build_service_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
     (output/"transfer_plan.json").write_text(json.dumps(transfer, indent=2)+"\n")
     all_poses = source["plan"]["poses"]
     end = next(i for i, p in enumerate(all_poses) if p["name"] == "RIGHT_PLACE_HOLD")+1
@@ -200,9 +269,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     left_grip = names.index("left_gripper")
     right_grip = [names.index(n) for n in ("right_finger1_joint", "right_finger2_joint")]
     cup_filters = scene["cup_filters"]
-    deck_indices = [cup_filters.index(rigid[n]) for n in DECK_LINKS]
-    if "raised_tray" in source:
-        deck_indices = [cup_filters.index(rigid["central_tray_top_link"])]
+    deck_indices = [cup_filters.index(rigid[n]) for n in transfer_support_links(source)]
     allowed_cup = {0, 1, cup_filters.index(KITCHEN), cup_filters.index(GUEST), *deck_indices}
     forbidden_cup = [i for i in range(len(cup_filters)) if i not in allowed_cup]
     layout = load_layout()
@@ -216,7 +283,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     previous_state = None
     touchdown = {}
     received = None
-    center_verified = False
+    placement_verified = False
     baseline = None
     initialization = None
     regrasp_baseline = None
@@ -332,7 +399,8 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         bottle_force = scene["bottle"].get_contact_force_matrix(dt=dt)[0]
         cf, bf = np.linalg.norm(cup_force, axis=-1), np.linalg.norm(bottle_force, axis=-1)
         counts = liquid_counts(np.asarray(scene["fluid"].GetPointsAttr().Get()), poses["cup"], poses["bottle"], left, right)
-        deck_support = float(cup_force[deck_indices, 2].sum())
+        deck_force = summed_support_force(cup_force, deck_indices)
+        deck_support = float(deck_force[2])
         guest_support = float(cup_force[cup_filters.index(GUEST), 2])
         tcp = rotation @ transforms["left_contact_center"][:3, 3]+position
         relative_cp = rotation.T @ (cp-position)
@@ -398,14 +466,14 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         if state == "DEPOSIT" and local_phase in {"WITHDRAW", "CLEAR_ABOVE", "FRONT_CLEAR", "PARK", "PLACE_HOLD"} and max(cf[:2]) >= .02:
             reason = "cup_recontact_after_release"
             break
-        if "raised_tray" in source:
-            support_failure = raised_support_contact_failure(
-                state, local_phase, cup_force[deck_indices].sum(axis=0),
-                relative_cp, tilt, transfer["tray_surface_z_m"])
+        if "raised_tray" in source or "plate_transfer" in source:
+            support_failure = support_contacts_failure(
+                state, local_phase, cup_force[deck_indices], relative_cp, tilt,
+                transfer["tray_surface_z_m"], transfer.get("tray_target_xy_m", (0., 0.)))
             if support_failure:
                 reason = support_failure
                 break
-        if tracking > .15 or tilt > 15 or last["tilt_deg"] > 1.:
+        if tracking > .15 or cup_tilt_exceeded(source, tilt) or last["tilt_deg"] > 1.:
             reason = "arm_tracking_or_container_base_tilt"
             break
         early = preclose_violation(last, baseline) if state == "POUR" and baseline is not None else None
@@ -457,9 +525,9 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             if failure:
                 reason = failure
                 break
-            if np.linalg.norm(relative_cp[:2]) > .02:
-                center_verified = False
-                reason = "cup_outside_central_plate_region"
+            if np.linalg.norm(relative_cp[:2]-transfer.get("tray_target_xy_m", (0., 0.))) > .02:
+                placement_verified = False
+                reason = "cup_outside_selected_plate_region"
                 break
         if received is not None and counts["cup"] < math.ceil(received*.98):
             reason = "water_lost_after_pour"
@@ -482,9 +550,10 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             if not supported_window(window, support_config(transfer["tray_center_m"]), "PLACE_HOLD", 1., released=True, clear=True):
                 reason = "deck_deposit_not_verified"
                 break
-            center_verified = central_region_verified(window)
-            if not center_verified:
-                reason = "central_plate_deposit_not_verified"
+            placement_verified = placement_region_verified(
+                window, transfer.get("tray_target_xy_m", (0., 0.)))
+            if not placement_verified:
+                reason = "selected_plate_deposit_not_verified"
                 break
             next_state = "BACKOUT"
         elif state == "BACKOUT" and position[0] <= -.70:
@@ -521,9 +590,10 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             world.render()
         snapshot(output/"final.png")
     sequence_pass = complete and ground_window_verified(samples[20:])
-    return {"task_pass": bool(sequence_pass and center_verified), "sequence_pass": sequence_pass,
-        "center_requirement_pass": center_verified,
-        "failure": "tray_target_not_central" if sequence_pass and not center_verified else reason,
+    requirement = placement_requirement_fields(source, placement_verified)
+    return {"task_pass": bool(sequence_pass and placement_verified), "sequence_pass": sequence_pass,
+        **requirement,
+        "failure": "tray_target_placement_not_verified" if sequence_pass and not placement_verified else reason,
         "water_pour_included": True, "deck_transport_included": True, "regrasp_included": True,
         "water_pour_completed": received is not None,
         "deck_transport_completed": any(e["state"] == "REGRASP" for e in events),
@@ -539,4 +609,5 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         "maximum_environment_force_n": maximum_environment, "maximum_self_force_n": maximum_self,
         "frame_count": frame_count, "recording_fps": 2, "detail_frame_count": detail_count,
         "camera_recording": "fixed_wide_with_synchronous_pour_detail", "tray_center_m": transfer["tray_center_m"],
+        "tray_target_xy_m": transfer.get("tray_target_xy_m", [0., 0.]),
         "observation_source": "simulator_ground_truth", "model_calibrated": False}

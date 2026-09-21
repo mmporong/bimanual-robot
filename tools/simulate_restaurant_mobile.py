@@ -78,7 +78,8 @@ def run(args):
         result["input_sha256"][str(args.pose_probes)] = hashlib.sha256(args.pose_probes.read_bytes()).hexdigest()
         result["tool_sha256"]["tray_pose_probe.py"] = hashlib.sha256(Path(__file__).with_name("tray_pose_probe.py").read_bytes()).hexdigest()
     if args.mode == "released-cup-probe":
-        for name in ("released_cup_probe.py", "raised_tray_transfer.py", "search_tray_mounts.py"):
+        for name in ("released_cup_probe.py", "water_service_mission.py", "tray_transfer_plan.py",
+                     "raised_tray_transfer.py", "search_tray_mounts.py"):
             result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
     try:
         import omni.kit.app

@@ -6,9 +6,9 @@ import math
 import numpy as np
 
 from bimanual_pour_plan import sample_plan
-from raised_tray_transfer import build_raised_transfer
 from mobile_service_model import ground_collision
 from pour_geometry import quaternion_matrix
+from water_service_mission import build_service_transfer, summed_support_force, transfer_support_links
 from workcell_preview_inputs import ARM_JOINTS
 
 
@@ -22,7 +22,7 @@ def run_probe(args, source, world, robot, controller, names, q, wheels, arm_indi
     from isaacsim.core.utils.types import ArticulationAction
     from isaacsim.core.utils.viewports import set_camera_view
 
-    transfer = build_raised_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
+    transfer = build_service_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
     deposit = transfer["deposit_plan"]["poses"]
     regrasp = transfer["regrasp_plan"]["poses"]
     nominal = next(p for p in regrasp if p["name"] == "TRAY_REAPPROACH")
@@ -41,8 +41,8 @@ def run_probe(args, source, world, robot, controller, names, q, wheels, arm_indi
     robot.set_angular_velocity(np.zeros(3))
     cup.set_world_poses(positions=np.array([transfer["tray_center_m"]]), orientations=np.array([[1., 0., 0., 0.]]))
     cup.set_velocities(np.zeros((1, 6)))
-    support_id = cup_filters.index(rigid["central_tray_top_link"])
-    forbidden = [i for i in range(len(cup_filters)) if i not in {0, 1, support_id}]
+    support_ids = [cup_filters.index(rigid[name]) for name in transfer_support_links(source)]
+    forbidden = [i for i in range(len(cup_filters)) if i not in {0, 1, *support_ids}]
     baseline = None
     samples = []
     completed = False
@@ -61,7 +61,9 @@ def run_probe(args, source, world, robot, controller, names, q, wheels, arm_indi
         controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
         world.step(render=args.record and tick % 60 == 0)
         cp, cq = cup.get_world_poses()
-        cf = np.linalg.norm(cup.get_contact_force_matrix(dt=dt)[0], axis=-1)
+        cup_force = cup.get_contact_force_matrix(dt=dt)[0]
+        cf = np.linalg.norm(cup_force, axis=-1)
+        support_force = summed_support_force(cup_force, support_ids)
         rf = np.linalg.norm(contact.get_contact_force_matrix(dt=dt), axis=-1)
         gf = np.linalg.norm(ground.get_contact_force_matrix(dt=dt), axis=-1).sum(axis=-1)
         actual = robot.get_joint_positions()
@@ -70,7 +72,7 @@ def run_probe(args, source, world, robot, controller, names, q, wheels, arm_indi
         error = arm_tracking_error_rad(actual, q, ids)
         sample = {"time_s": t, "phase": phase, "cup_position_m": cp[0].tolist(),
                   "cup_tilt_deg": tilt, "hand_force_n": cf[:2].tolist(),
-                  "support_force_n": float(cf[support_id]), "arm_error_rad": error,
+                  "support_force_n": float(support_force[2]), "arm_error_rad": error,
                   "gripper_actual_rad": float(actual[names.index("left_gripper")])}
         filters = furniture+list(rigid.values())
         sample["collision_pairs"] = [[body_names[i], filters[j], float(rf[i, j])]
@@ -100,7 +102,8 @@ def run_probe(args, source, world, robot, controller, names, q, wheels, arm_indi
             if max(cf[:2]) >= .02 or np.linalg.norm(cp[0]-baseline) > .003:
                 reason = "released_cup_contact_or_motion"
                 break
-        held = phase == "TRAY_LIFT_HOLD" and min(cf[:2]) >= .02 and cf[support_id] < .02 and cp[0][2] > .81
+        held = (phase == "TRAY_LIFT_HOLD" and min(cf[:2]) >= .02
+                and max(cf[support_ids], default=0.) < .02 and cp[0][2] > .81)
         held_steps = held_steps+1 if held else 0
         if command["done"]:
             completed = held_steps >= 120
