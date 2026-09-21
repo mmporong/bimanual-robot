@@ -44,12 +44,21 @@ def run(args, backend=cup_contact_model):
     model, provenance = backend.prepare_model(output, config)
     plan = backend.make_plan(model, config, place=args.place)
     fk = Chain(model)
+    source_config_sha256 = hashlib.sha256(args.config.read_bytes()).hexdigest()
+    runtime_overrides = {key: value for key, value in {
+        "object_mass_kg": args.cup_mass_kg,
+        "spawn_y_offset_mm": args.spawn_y_offset_mm,
+        "spawn_x_offset_mm": args.spawn_x_offset_mm,
+    }.items() if value is not None}
     manifest = {"config": config, "model": provenance, "plan": plan,
                 "tool_sha256": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                                 for name in dict.fromkeys(("simulate_cup_contact.py", "cup_contact_model.py", "cup_contact_recovery.py", "cup_contact_place.py",
                                                           "plan_body_side_grasp.py", "workcell_preview_inputs.py", "workcell_preview_motion.py",
                                                           f"simulate_{object_label.lower()}_contact.py", Path(backend.__file__).name))},
-                "config_sha256": hashlib.sha256(args.config.read_bytes()).hexdigest(),
+                "config_sha256": source_config_sha256,
+                "source_config_sha256": source_config_sha256,
+                "effective_config_sha256": cup_contact_model.effective_config_sha256(config),
+                "runtime_overrides": runtime_overrides,
                 "active_side": side, "object_kind": object_label.lower(), "gripper_unit": unit,
                 "recovery_enabled": args.recover,
                 "placement_enabled": args.place,
@@ -79,6 +88,8 @@ def run(args, backend=cup_contact_model):
         touchdown_observed = any(e["type"] == "touchdown" and e["attempt"] == attempt for e in events)
         place_pass = evaluate_placement(current, evaluation_config, completed, lift_pass, touchdown_observed) if args.place else False
         return {**outcome, "object_kind": object_label.lower(), "physical_grasp_verified": False,
+                "assembly_mode": provenance.get("assembly_mode", "left_contact_proxy"),
+                "model_calibrated": False,
                 "lift_stage_pass": lift_pass, "placement_enabled": args.place,
                 "touchdown_observed": touchdown_observed,
                 "rigid_proxy_place_pass": place_pass,
@@ -125,6 +136,7 @@ def run(args, backend=cup_contact_model):
         importer.set_import_inertia_tensor(True)
         importer.set_self_collision(False)
         importer.set_collision_from_visuals(False)
+        importer.set_convex_decomp(config["mesh_collision_mode"] == "convexDecomposition")
         importer.set_parse_mimic(False)
         ok, root = omni.kit.commands.execute("URDFParseAndImportFile", urdf_path=str(model),
                                             import_config=importer, get_articulation_root=True)

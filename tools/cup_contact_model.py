@@ -29,6 +29,12 @@ GRIPPER_KEY = "gripper_rad"
 GRIPPER_UNIT = "rad"
 
 
+def effective_config_sha256(config):
+    """기본값 보완·CLI 적용 후 설정의 순서 독립적인 지문."""
+    canonical = json.dumps(config, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def load_config(path=DEFAULT_CONFIG):
     config = json.loads(Path(path).read_text())
     if config.get("schema") != "cup_contact_experiment_v1" or config.get("gripper_unit", "rad") != "rad":
@@ -42,6 +48,9 @@ def load_config(path=DEFAULT_CONFIG):
 
 
 def validate_config(config):
+    config.setdefault("mesh_collision_mode", "convexHull")
+    if config["mesh_collision_mode"] not in {"convexHull", "convexDecomposition"}:
+        raise ValueError("지원하지 않는 메쉬 충돌 근사")
     unit = config.get("gripper_unit", "rad")
     if unit not in {"rad", "m"}:
         raise ValueError("그리퍼 단위는 rad 또는 m이어야 합니다")

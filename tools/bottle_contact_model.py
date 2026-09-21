@@ -8,8 +8,11 @@ import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+import numpy as np
+
 import cup_contact_model as common
 from workcell_preview_inputs import materialize_urdf
+from solve_task_poses import rpy_matrix
 
 DEFAULT_CONFIG = common.ROOT / "config/simulation/bottle_contact_experiment.json"
 SIDE = "right"
@@ -33,13 +36,24 @@ def load_config(path=DEFAULT_CONFIG):
         if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"approach.{key}: 유한한 양수 필요")
     common.validate_config(config)
+    assembly = config.get("assembly_hypothesis")
+    if assembly is not None:
+        if not isinstance(assembly, dict) or assembly.get("mode") != "replacement_proxy":
+            raise ValueError("지원하지 않는 조립 가설")
+        for key in ("mount_xyz_m", "mount_rpy_rad", "servo_center_base_m", "servo_size_base_m"):
+            value = np.asarray(assembly[key], dtype=float)
+            if value.shape != (3,) or not np.isfinite(value).all():
+                raise ValueError(f"assembly.{key}: 유한한 3벡터 필요")
+            if key == "servo_size_base_m" and np.any(value <= 0):
+                raise ValueError("서보 가정 크기는 양수여야 합니다")
     if config["cup_radius_m"] >= config["gripper_open_m"]:
         raise ValueError("병 반지름이 순정 죠의 열림 간격보다 작아야 합니다")
     return config
 
 
 def prepare_model(output, config, source=common.URDF_PATH):
-    target = output / "stock_ggao_contact_proxy.urdf"
+    replacement = config.get("assembly_hypothesis") is not None
+    target = output / ("replacement_hypothesis.urdf" if replacement else "stock_ggao_contact_proxy.urdf")
     source_info = materialize_urdf(source, target,
         base_contract=common.ROOT / "config/navigation/jdamr_migration.json")
     tree = ET.parse(target)
@@ -56,6 +70,8 @@ def prepare_model(output, config, source=common.URDF_PATH):
             collision = ET.SubElement(link, "collision")
             for tag in ("origin", "geometry"):
                 collision.append(copy.deepcopy(common._required(visual, tag)))
+    if config.get("assembly_hypothesis") is not None:
+        apply_replacement_hypothesis(root, config["assembly_hypothesis"])
     ET.SubElement(root, "link", name=CONTACT_FRAME)
     joint = ET.SubElement(root, "joint", name=CONTACT_FRAME+"_joint", type="fixed")
     ET.SubElement(joint, "parent", link="right_tool0")
@@ -63,9 +79,42 @@ def prepare_model(output, config, source=common.URDF_PATH):
     ET.SubElement(joint, "origin", xyz=" ".join(map(str, config["contact_center_tool_m"])), rpy="0 0 0")
     ET.indent(root)
     tree.write(target, encoding="utf-8", xml_declaration=True)
-    return target, {"source": source_info, "proxy_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-                    "status": "project_stock_flat_jaw_boxes_not_calibrated_stl",
+    return target, {"source": source_info, "proxy_file": target.name,
+                    "proxy_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                    "status": "replacement_hypothesis_uncalibrated" if replacement else "project_stock_flat_jaw_boxes_not_calibrated_stl",
+                    "assembly_mode": "replacement_hypothesis_proxy" if replacement else "legacy_overlay",
                     "pads_added": False, "grooves_added": False, "tape_added": False}
+
+
+def apply_replacement_hypothesis(root, assembly):
+    """교체 조립 가설의 로그 사본만 변경. 실물 장착 확정값으로 사용하지 않는다."""
+    mount = common._required(root, "./joint[@name='right_gripper_mount_joint']/origin")
+    mount.set("xyz", " ".join(map(str, assembly["mount_xyz_m"])))
+    mount.set("rpy", " ".join(map(str, assembly["mount_rpy_rad"])))
+    link = common._required(root, "./link[@name='right_gripper_link']")
+    for tag in ("visual", "collision"):
+        for element in list(link.findall(tag)):
+            link.remove(element)
+    # 기존 조립체를 지운 자리에 서보 몸체를 남긴다. 빈 공간으로 만들어 통과시키지 않는다.
+    rotation = rpy_matrix(*assembly["mount_rpy_rad"])
+    center = np.asarray(assembly["mount_xyz_m"])+rotation @ assembly["servo_center_base_m"]
+    for tag in ("visual", "collision"):
+        element = ET.SubElement(link, tag, name="nominal_replacement_servo")
+        ET.SubElement(element, "origin", xyz=" ".join(map(str, center)),
+                      rpy=" ".join(map(str, assembly["mount_rpy_rad"])))
+        ET.SubElement(ET.SubElement(element, "geometry"), "box", size=" ".join(map(str, assembly["servo_size_base_m"])))
+        if tag == "visual":
+            ET.SubElement(ET.SubElement(element, "material", name="nominal_servo"), "color", rgba="0.2 0.2 0.23 1")
+    inertial = common._required(link, "inertial")
+    common._required(inertial, "origin").set("xyz", " ".join(map(str, center)))
+    common._required(inertial, "origin").set("rpy", "0 0 0")
+    mass = float(common._required(inertial, "mass").get("value"))
+    sx, sy, sz = assembly["servo_size_base_m"]
+    tensor = rotation @ np.diag([mass*(sy*sy+sz*sz)/12, mass*(sx*sx+sz*sz)/12,
+                                mass*(sx*sx+sy*sy)/12]) @ rotation.T
+    inertia = common._required(inertial, "inertia")
+    for key, row, col in (("ixx", 0, 0), ("iyy", 1, 1), ("izz", 2, 2), ("ixy", 0, 1), ("ixz", 0, 2), ("iyz", 1, 2)):
+        inertia.set(key, str(tensor[row, col]))
 
 
 class ContactChain(common.Chain):
