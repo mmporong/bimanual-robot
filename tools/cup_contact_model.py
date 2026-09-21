@@ -170,7 +170,8 @@ class ContactChain(Chain):
         return transforms
 
 
-def make_plan(model: Path, config, start_joint_deg=None, place=False, *, side="left", chain_factory=ContactChain):
+def make_plan(model: Path, config, start_joint_deg=None, place=False, *, side="left", chain_factory=ContactChain,
+              ik_seed_joint_deg=None):
     chain = chain_factory(model)
     home = build_demo(Chain(model))[0]
     center = np.asarray(config["cup_center_m"])
@@ -194,7 +195,10 @@ def make_plan(model: Path, config, start_joint_deg=None, place=False, *, side="l
     start = np.asarray(start, dtype=float).tolist()
     if start_joint_deg is not None:
         targets = targets[1:]
-    seed = np.radians(start)
+    seed_degrees = start if ik_seed_joint_deg is None else ik_seed_joint_deg
+    if np.asarray(seed_degrees).shape != (5,) or not np.isfinite(seed_degrees).all():
+        raise ValueError("IK 초기값은 유한한 5축 각도여야 합니다")
+    seed = np.radians(seed_degrees)
     stages = []
     for name, target, duration_s in targets:
         seed = solve_horizontal_endpoint(chain, side, target, seed, restarts=1, iterations=240)

@@ -12,7 +12,7 @@ import time
 import numpy as np
 import cup_contact_model as cup_model
 import bottle_contact_model as bottle_model
-from pour_geometry import initial_liquid, liquid_counts, quaternion_matrix, evaluate_pour, minimum_jaw_gap, load_experiment, mount_clearance_evidence
+from pour_geometry import initial_liquid, liquid_counts, quaternion_matrix, evaluate_pour, minimum_jaw_gap, load_experiment, mount_clearance_evidence, inward_pour_direction
 from workcell_preview_inputs import ARM_JOINTS
 
 
@@ -359,6 +359,10 @@ def run(args):
             bottle_mouth = poses["bottle"][0]+quaternion_matrix(poses["bottle"][1]) @ [0,0,right["cup_height_m"]/2]
             cup_rim = poses["cup"][0]+quaternion_matrix(poses["cup"][1]) @ [0,0,left["cup_height_m"]/2]
             sample["mouth_relative_to_cup_rim_m"] = (bottle_mouth-cup_rim).tolist()
+            if (phase.startswith("POUR_TILT") or phase in {"POUR_HOLD", "POUR_RETURN"}) and sample["bottle_tilt_deg"] >= 15:
+                if not inward_pour_direction(sample):
+                    reason = "bottle_pour_direction_outside_inward_corridor"
+                    break
             if tick%120 == 0:
                 (output/"live.json").write_text(json.dumps(sample,indent=2)+"\n")
             if args.record and tick%12 == 0:

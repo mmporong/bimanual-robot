@@ -12,7 +12,8 @@ def load_experiment(path):
     if config.get("schema") != "bimanual_pour_experiment_v1":
         raise ValueError("물붓기 설정 스키마 오류")
     positive = ("wall_m","bottle_body_height_m","bottle_shoulder_height_m","bottle_neck_height_m",
-                "bottle_neck_outer_radius_m","particle_spacing_m","initial_fill_height_m","fluid_density_kg_m3","clear_bottle_mouth_z_m","pour_joint_speed_rad_s","pour_hold_s")
+                "bottle_neck_outer_radius_m","particle_spacing_m","initial_fill_height_m","fluid_density_kg_m3","clear_bottle_mouth_z_m","pour_joint_speed_rad_s","pour_hold_s",
+                "bottle_approach_right_offset_m")
     for key in positive:
         value = config[key]
         if type(value) not in (float,int) or not np.isfinite(value) or value <= 0:
@@ -24,8 +25,11 @@ def load_experiment(path):
     for key in ("additional_outward_mount_m", "pour_tilt_deg", "pour_azimuth_deg"):
         if type(config[key]) not in (float, int) or not np.isfinite(config[key]):
             raise ValueError("유한한 수 필요: "+key)
-    if not 0 <= config["pour_azimuth_deg"] < 360:
-        raise ValueError("붓기 방위각 범위 오류")
+    if not 60 <= config["pour_azimuth_deg"] <= 120:
+        raise ValueError("붓기 방향은 로봇 오른쪽에서 왼쪽(+Y)이어야 함")
+    seed = np.asarray(config["right_pick_ik_seed_joint_deg"], dtype=float)
+    if seed.shape != (5,) or not np.isfinite(seed).all():
+        raise ValueError("오른손 파지 IK 초기값 오류")
     if not 0 <= config["additional_outward_mount_m"] <= .02 or not 90 <= config["pour_tilt_deg"] <= 110:
         raise ValueError("장착 가설 또는 붓기 각도 범위 오류")
     if config["pour_tilt_deg"] % 5 != 0:
@@ -185,6 +189,26 @@ def maximum_contact_loss_s(samples, kind):
     return longest
 
 
+def inward_pour_direction(sample):
+    """실제 병 축이 왼쪽을 향하고 몸통이 컵 오른쪽에 있는지 검사한다.
+
+    로봇 기준 X 전방, Y 왼쪽, Z 위. 화면의 시계 방향과 무관하다.
+    """
+    try:
+        axis = quaternion_matrix(sample["bottle_orientation_wxyz"])[:, 2]
+        cup_position = np.asarray(sample["cup_position_m"], dtype=float)
+        bottle_position = np.asarray(sample["bottle_position_m"], dtype=float)
+        if cup_position.shape != (3,) or bottle_position.shape != (3,):
+            return False
+        if not np.isfinite([*cup_position, *bottle_position]).all():
+            return False
+        # +Y 중심 ±30도 방위각. 몸통 중심은 컵 중심보다 오른쪽에 남긴다.
+        return bool(axis[1] > 0 and abs(axis[0]) <= axis[1]*np.tan(np.radians(30))
+                    and bottle_position[1] < cup_position[1])
+    except (KeyError, ValueError, TypeError):
+        return False
+
+
 def evaluate_pour(samples, particle_count, completed):
     """컵 내부 잔류와 양팔 복귀·분리를 함께 판정한다. 누락은 실패다."""
     terminal = [s for s in samples if s["phase"] == "FINAL_HOLD"][-120:]
@@ -218,6 +242,7 @@ def evaluate_pour(samples, particle_count, completed):
     def valid_transfer_pose(s):
         return ((s["phase"].startswith("POUR_TILT") or s["phase"] == "POUR_HOLD")
             and 90 <= s["bottle_tilt_deg"] <= 110 and s["cup_tilt_deg"] < 5
+            and inward_pour_direction(s)
             and np.linalg.norm(s["mouth_relative_to_cup_rim_m"][:2]) < .027
             and .015 < s["mouth_relative_to_cup_rim_m"][2] < .08)
     valid_indices = [i for i,s in enumerate(samples) if valid_transfer_pose(s)]
@@ -241,12 +266,14 @@ def evaluate_pour(samples, particle_count, completed):
         and all(min(s[kind+"_hand_n"]) >= .02 and s[kind+"_grasp_slip_m"] < .02
                 and s[kind+"_grasp_rotation_error_deg"] < 15 for kind in ("cup","bottle"))
         for s in pouring)
-    passed = completed and received >= .5 and outside <= .05 and supported and released and returned and opened and settled and count_valid and lift_seen and initially_in_bottle and actual_pour and transfer_during_pour and grasp_continuity and pose_coupled_transfer
+    inward_direction = len(pouring) == 120 and all(inward_pour_direction(s) for s in pouring)
+    passed = completed and received >= .5 and outside <= .05 and supported and released and returned and opened and settled and count_valid and lift_seen and initially_in_bottle and actual_pour and transfer_during_pour and grasp_continuity and pose_coupled_transfer and inward_direction
     return {"task_pass": bool(passed), "received_fraction_min": received,
             "outside_fraction_max": outside, "supported": supported, "released": released,
             "returned_upright": returned,
             "final_xy_error_from_initial_m":placement_xy_error,
             "grippers_open":opened,"settled":settled,"actual_pour_pose":actual_pour,
+            "inward_pour_direction":inward_direction,
             "particle_count_conserved": count_valid, "both_lifted": lift_seen,
             "transfer_during_pour": bool(transfer_during_pour),
             "pose_coupled_transfer":bool(pose_coupled_transfer),

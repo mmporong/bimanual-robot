@@ -15,9 +15,11 @@
   "bottle_mouth_target_m": [0.40, 0.00, 0.90],
   "clear_bottle_mouth_z_m": 1.10,
   "pour_tilt_deg": 105.0,
-  "pour_azimuth_deg": 320.0,
+  "pour_azimuth_deg": 100.0,
+  "right_pick_ik_seed_joint_deg": [0, -10, 45, -35, -87],
+  "bottle_approach_right_offset_m": 0.10,
   "pour_joint_speed_rad_s": 0.5,
   "pour_hold_s": 20.0,
-  "mouth_height_schedule": [[0, 1.10], [20, 1.10], [40, 1.08], [60, 1.03], [80, 0.96], [100, 0.90], [105, 0.90]],
+  "mouth_height_schedule": [[0, 1.10], [40, 1.08], [80, 0.96], [105, 0.90]],
   "notes": ["All vessel dimensions and assembly transforms are assumptions.", "No hardware access or physical pour certification."]
 }

@@ -12,6 +12,9 @@ from pour_geometry import contained_mask, initial_liquid, liquid_counts, evaluat
     ("pour_tilt_deg", 102),
     ("pour_azimuth_deg", float("nan")), ("pour_azimuth_deg", True),
     ("pour_azimuth_deg", "320"), ("pour_azimuth_deg", 360),
+    ("pour_azimuth_deg", 320), ("bottle_approach_right_offset_m", 0),
+    ("right_pick_ik_seed_joint_deg", [0, 1]),
+    ("right_pick_ik_seed_joint_deg", [0, 0, 0, 0, float("nan")]),
     ("mouth_height_schedule", [[0,1.1],[100,.99]]),
     ("bottle_neck_outer_radius_m", .005), ("initial_fill_height_m", .2),
 ])
@@ -136,7 +139,8 @@ def test_success_requires_liquid_release_and_support():
          "left_gripper_actual_rad":1.,"right_gripper_actual_m":[.0433,.0433],
          "cup_position_m":[.39,.17,.78],"bottle_position_m":[.39,-.17,.82],
          "mouth_relative_to_cup_rim_m":[0,0,.04],"cup_grasp_slip_m":0.,"bottle_grasp_slip_m":0.,
-         "cup_grasp_rotation_error_deg":0.,"bottle_grasp_rotation_error_deg":0.}
+         "cup_grasp_rotation_error_deg":0.,"bottle_grasp_rotation_error_deg":0.,
+         "bottle_orientation_wxyz":[np.cos(np.radians(50)), -np.sin(np.radians(50)), 0, 0]}
     s.update(cup_holding_expected=False,bottle_holding_expected=False)
     start = {**s, "phase": "RESET", "liquid": {"cup":0,"bottle":100,"outside":0,"overlap":0,"total":100}}
     samples = [start]
@@ -147,6 +151,9 @@ def test_success_requires_liquid_release_and_support():
     samples += [{**s, "phase": "POUR_HOLD","bottle_tilt_deg":100.,"cup_hand_n":[1,1],"bottle_hand_n":[1,1]}]*120 + [s]*120
     samples = [{**sample,"time_s":index/120} for index,sample in enumerate(samples)]
     assert evaluate_pour(samples,100,True)["task_pass"]
+    reversed_direction = [{**x,"bottle_orientation_wxyz":[np.cos(np.radians(50)), np.sin(np.radians(50)), 0, 0]} for x in samples]
+    assert not evaluate_pour(reversed_direction,100,True)["task_pass"]
+    assert not evaluate_pour(reversed_direction,100,True)["inward_pour_direction"]
     assert not evaluate_pour(samples,100,False)["task_pass"]
     assert not evaluate_pour([{**x,"cup_hand_n":[1,0]} for x in samples],100,True)["task_pass"]
     assert not evaluate_pour([{**x,"liquid":{**x["liquid"],"cup":0}} for x in samples],100,True)["task_pass"]

@@ -60,7 +60,7 @@ def _axis_error_deg(actual, desired):
 
 
 def _solve_pour_mouth(chain, mouth_target_m, tilt_deg, local_axis, seed_q, half_height_m):
-    """입구 xyz + 수직축 기울기를 구속하고 방위각은 연속성 비용으로만 유도한다."""
+    """입구 xyz·기울기·왼쪽 방향 범위를 구속하고 범위 안에서 연속성을 유도한다."""
     target = np.asarray(mouth_target_m, dtype=float)
     angle = math.radians(tilt_deg)
     azimuth = math.radians(EXPERIMENT["pour_azimuth_deg"])
@@ -73,8 +73,9 @@ def _solve_pour_mouth(chain, mouth_target_m, tilt_deg, local_axis, seed_q, half_
         transform = chain.transforms(base_positions("right", q))["right_tool0"]
         actual_axis = transform[:3, :3] @ local_axis
         mouth = transform[:3, 3] + half_height_m*actual_axis
+        inward_violation = max(0., abs(actual_axis[0])-actual_axis[1]*math.tan(math.radians(30)))
         return np.r_[(mouth-target)*10., actual_axis[2]-desired[2],
-                     (actual_axis[:2]-desired[:2])*.005, (q-seed_q)*.0002]
+                     inward_violation*5., (actual_axis[:2]-desired[:2])*.01, (q-seed_q)*.01]
 
     q = np.clip(seed_q, lower, upper)
     damping = 1e-3
@@ -101,11 +102,15 @@ def _solve_pour_mouth(chain, mouth_target_m, tilt_deg, local_axis, seed_q, half_
     mouth = transform[:3,3]+half_height_m*actual_axis
     position_error_mm = float(np.linalg.norm(mouth-target)*1000)
     tilt_error_deg = abs(math.degrees(math.acos(float(np.clip(actual_axis[2],-1.,1.))))-tilt_deg)
-    if position_error_mm > POUR_POSITION_LIMIT_MM or tilt_error_deg > POUR_AXIS_LIMIT_DEG:
-        raise ValueError(f"병 입구/기울기 IK 미통과: {position_error_mm} mm, {tilt_error_deg} deg")
+    axis_error_deg = _axis_error_deg(actual_axis, desired)
+    inward = (tilt_deg == 0 or (actual_axis[1] > 0 and
+              abs(actual_axis[0]) <= actual_axis[1]*math.tan(math.radians(30))))
+    if position_error_mm > POUR_POSITION_LIMIT_MM or tilt_error_deg > POUR_AXIS_LIMIT_DEG or not inward:
+        raise ValueError(f"병 입구/방향 IK 미통과: {position_error_mm} mm, {axis_error_deg} deg")
     return q, {"target_m":target.tolist(),"desired_bottle_axis":desired.tolist(),
                "actual_bottle_axis":actual_axis.tolist(),"position_error_mm":position_error_mm,
-               "tilt_error_deg":tilt_error_deg,"azimuth_is_soft_preference":True}
+               "tilt_error_deg":tilt_error_deg,"axis_error_deg":axis_error_deg,
+               "azimuth_is_soft_preference":True,"inward_direction_required":True}
 
 
 def _prefix_pickup(poses, prefix, fixed_other, left_open, right_open):
@@ -125,7 +130,13 @@ def build_plan(model, left_config, right_config):
     chain = BimanualContactChain(Path(model), left_config, right_config)
     factory = lambda _path: chain
     left_plan = cup.make_plan(model, left_config, place=True, side="left", chain_factory=factory)
-    right_plan = cup.make_plan(model, right_config, place=True, side="right", chain_factory=factory)
+    right_plan = cup.make_plan(model, right_config, place=True, side="right", chain_factory=factory,
+                               ik_seed_joint_deg=EXPERIMENT["right_pick_ik_seed_joint_deg"])
+    # 시뮬레이션 초기 주차 자세도 같은 손목 분기로 둔다. 실행 중 순간이동은 하지 않는다.
+    right_plan["poses"][0]["joint_deg"][-1] = EXPERIMENT["right_pick_ik_seed_joint_deg"][-1]
+    for previous, pose in zip(right_plan["poses"], right_plan["poses"][1:]):
+        travel = np.max(np.abs(np.radians(np.asarray(pose["joint_deg"])-previous["joint_deg"])))
+        pose["duration_s"] = max(pose["duration_s"], 1.5*travel/EXPERIMENT["pour_joint_speed_rad_s"])
     left_lift_index = next(i for i, pose in enumerate(left_plan["poses"]) if pose["name"] == "LIFT_HOLD")
     right_lift_index = next(i for i, pose in enumerate(right_plan["poses"]) if pose["name"] == "LIFT_HOLD")
     left_pick = left_plan["poses"][:left_lift_index + 1]
@@ -171,6 +182,8 @@ def build_plan(model, left_config, right_config):
     poses.append(_pose("POUR_CLEAR_BOTTLE",3.,left_work,clear_right,left_close,right_close,measurement=clear_measurement))
     for index, angle_deg in enumerate(np.arange(0.,POUR_TILT_DEG+1,5.)):
         mouth_target = BOTTLE_MOUTH_TARGET_M.copy()
+        # X 전방 / Y 왼쪽: 병 입구는 오른쪽 대기점에서 컵으로 접근한다.
+        mouth_target[1] -= EXPERIMENT["bottle_approach_right_offset_m"]*(1-angle_deg/POUR_TILT_DEG)
         schedule = np.asarray(EXPERIMENT["mouth_height_schedule"])
         mouth_target[2] = np.interp(angle_deg, schedule[:,0], schedule[:,1])
         right_seed, measurement = _solve_pour_mouth(
