@@ -33,6 +33,8 @@ def record_failure(result, exc):
 
 
 def run(args):
+    if getattr(args, 'cinematic', False) and (args.mode != 'water-service' or args.record):
+        raise ValueError('--cinematic requires water-service and replaces --record')
     if args.mode == "static-pose-probe" and args.pose_probes is None:
         raise ValueError("static-pose-probe requires --pose-probes")
     output = args.output_dir.resolve()
@@ -53,7 +55,8 @@ def run(args):
     fk = Chain(args.source_dir / "replacement_hypothesis.urdf")
     place_config = {**source["left_config"], "cup_center_m": [-2.14, -2.42, .78]}
     from isaacsim import SimulationApp
-    app = SimulationApp({"headless": args.headless, "width": 1600 if water_service else 1280, "height": 900,
+    cinematic = getattr(args, 'cinematic', False)
+    app = SimulationApp({"headless": args.headless, "width": 1920 if cinematic else (1600 if water_service else 1280), "height": 1080 if cinematic else 900,
                          "renderer": "RayTracedLighting", "anti_aliasing": 0,
                          "multi_gpu": False, "fast_shutdown": True})
     samples = []
@@ -74,6 +77,10 @@ def run(args):
             result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
         camera_config = Path(__file__).resolve().parents[1]/"config/simulation/service_cameras.json"
         result["input_sha256"][str(camera_config)] = hashlib.sha256(camera_config.read_bytes()).hexdigest()
+    if cinematic:
+        result['tool_sha256']['service_cinematic.py'] = hashlib.sha256(Path(__file__).with_name('service_cinematic.py').read_bytes()).hexdigest()
+        cinematic_config = Path(__file__).resolve().parents[1]/'config/simulation/service_cinematic.json'
+        result['input_sha256'][str(cinematic_config)] = hashlib.sha256(cinematic_config.read_bytes()).hexdigest()
     if args.mode == "static-pose-probe":
         result["input_sha256"][str(args.pose_probes)] = hashlib.sha256(args.pose_probes.read_bytes()).hexdigest()
         result["tool_sha256"]["tray_pose_probe.py"] = hashlib.sha256(Path(__file__).with_name("tray_pose_probe.py").read_bytes()).hexdigest()
@@ -467,6 +474,12 @@ def run(args):
         traceback.print_exc()
         record_failure(result, exc)
     finally:
+        recorder = getattr(args, '_cinematic_recorder', None)
+        if recorder is not None:
+            try:
+                recorder.close()
+            except Exception as exc:
+                record_failure(result, exc)
         result["samples"] = samples
         (output/"result.json").write_text(json.dumps(result, indent=2)+"\n")
         print(json.dumps({k: v for k, v in result.items() if k != "samples"}), flush=True)
@@ -485,6 +498,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--record", action="store_true")
+    parser.add_argument("--cinematic", action="store_true", help="1080p24 editorial camera capture; no physics changes")
     parser.add_argument("--duration", type=float, default=25.)
     parser.add_argument("--pose-probes", type=Path)
     parser.add_argument("--mode", choices=("drive-smoke", "collision-probe", "service", "pick-only", "water-service", "static-pose-probe", "released-cup-probe"), default="drive-smoke")

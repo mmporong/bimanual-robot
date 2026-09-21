@@ -1,0 +1,27 @@
+{
+  "schema": "service_cinematic_v1",
+  "status": "editorial_camera_design_not_sensor_calibration",
+  "reference_run": "plate_service02",
+  "fps": 24,
+  "width": 1920,
+  "height": 1080,
+  "horizontal_aperture_mm": 36,
+  "shots": [
+    {"id":"01_hero","start_s":0,"end_s":8,"speed":2,"anchor":"base","eye_start_m":[-1.65,-1.65,1.45],"eye_end_m":[-1.4,-1.5,1.35],"target_offset_m":[0.1,0,0.65],"focal_start_mm":32,"focal_end_mm":34,"title":"한 잔의 물, 테이블까지","subtitle":"HOLD FLOW · 양팔 물 서빙 로봇"},
+    {"id":"02_cup","start_s":8,"end_s":18,"speed":2,"anchor":"cup","eye_start_m":[0.5,0.6,0.34],"eye_end_m":[0.4,0.55,0.30],"target_offset_m":[-0.03,0,0.035],"focal_start_mm":36,"focal_end_mm":40,"title":"컵을 잡다","subtitle":"컵의 몸통으로 접근하는 왼손"},
+    {"id":"03_bottle","start_s":18,"end_s":38,"speed":5,"anchor":"bottle","eye_start_m":[0.45,-0.65,0.40],"eye_end_m":[0.42,-0.55,0.36],"target_offset_m":[-0.04,0,0.01],"focal_start_mm":34,"focal_end_mm":38,"title":"병을 들어 올리다","subtitle":"컵과 병을 나누어 다루는 두 팔"},
+    {"id":"04_pair","start_s":38,"end_s":50,"speed":4,"anchor":"base","eye_start_m":[0.85,0.8,1.35],"eye_end_m":[0.80,0.70,1.28],"target_offset_m":[0.32,0,0.88],"focal_start_mm":30,"focal_end_mm":32,"title":"두 팔이 만나는 순간","subtitle":"컵 입구 위로 병을 옮깁니다"},
+    {"id":"05_pour","start_s":50,"end_s":60,"speed":2,"anchor":"cup","eye_start_m":[0.55,0.45,0.42],"eye_end_m":[0.49,0.40,0.38],"target_offset_m":[0,0,0.075],"focal_start_mm":48,"focal_end_mm":51,"title":"물을 따르다","subtitle":"컵 입구와 병 주둥이를 가까이"},
+    {"id":"06_flow","start_s":60,"end_s":80,"speed":4,"anchor":"cup","eye_start_m":[0.49,0.40,0.38],"eye_end_m":[0.53,0.31,0.37],"target_offset_m":[0,0,0.065],"focal_start_mm":51,"focal_end_mm":51,"title":"컵 안으로 흐르는 물","subtitle":"물 입자까지 포함한 물리 시뮬레이션"},
+    {"id":"07_return","start_s":80,"end_s":103,"speed":8,"anchor":"base","eye_start_m":[0.8,0.75,1.32],"eye_end_m":[0.85,0.85,1.40],"target_offset_m":[0.30,0,0.88],"focal_start_mm":32,"focal_end_mm":30,"title":"다음 동작을 준비하다","subtitle":"컵은 유지하고, 병은 제자리로"},
+    {"id":"08_clear","start_s":103,"end_s":128,"speed":8,"anchor":"base","eye_start_m":[-0.9,-1.0,1.35],"eye_end_m":[-0.75,-0.9,1.30],"target_offset_m":[0.18,0,0.82],"focal_start_mm":34,"focal_end_mm":36,"title":"상판을 비우다","subtitle":"병을 놓고 오른팔을 물립니다"},
+    {"id":"09_deposit","start_s":128,"end_s":140,"speed":2,"anchor":"base","eye_start_m":[0.66,0.64,1.24],"eye_end_m":[0.60,0.56,1.20],"target_offset_m":[0.13,-0.05,0.80],"focal_start_mm":38,"focal_end_mm":40,"title":"상판에 내려놓다","subtitle":"높은 받침 없이, 두 팔 사이에"},
+    {"id":"10_release","start_s":140,"end_s":158,"speed":6,"anchor":"base","eye_start_m":[0.60,0.56,1.20],"eye_end_m":[0.72,0.68,1.30],"target_offset_m":[0.13,-0.05,0.82],"focal_start_mm":40,"focal_end_mm":34,"title":"손을 떼고, 이동 준비","subtitle":"상판이 컵을 지지합니다"},
+    {"id":"11_depart","start_s":158,"end_s":172,"speed":4,"anchor":"base","eye_start_m":[-1.55,-1.55,1.40],"eye_end_m":[-1.65,-1.30,1.35],"target_offset_m":[0,0,0.65],"focal_start_mm":32,"focal_end_mm":32,"title":"테이블로 출발","subtitle":"컵을 상판에 올린 채 이동합니다"},
+    {"id":"12_travel","start_s":172,"end_s":215,"speed":8,"anchor":"base","eye_start_m":[-0.9,-1.6,1.35],"eye_end_m":[0.85,-1.55,1.40],"target_offset_m":[0,0,0.64],"focal_start_mm":30,"focal_end_mm":30,"title":"공간을 지나, 손님 곁으로","subtitle":"이동 중에도 컵은 상판 위에"},
+    {"id":"13_arrive","start_s":215,"end_s":239,"speed":6,"anchor":"base","eye_start_m":[0.95,0.8,1.40],"eye_end_m":[0.85,0.65,1.30],"target_offset_m":[-0.20,0,0.67],"focal_start_mm":27,"focal_end_mm":28,"title":"테이블 앞에 멈추다","subtitle":"주행을 마치고 팔 동작으로 전환"},
+    {"id":"14_regrasp","start_s":239,"end_s":259,"speed":4,"anchor":"cup","eye_start_m":[0.25,0.72,0.52],"eye_end_m":[0.18,0.65,0.45],"target_offset_m":[0,0,0.045],"focal_start_mm":37,"focal_end_mm":40,"title":"다시, 컵을 잡다","subtitle":"상판에서 손님 테이블로"},
+    {"id":"15_lift","start_s":259,"end_s":269,"speed":2,"anchor":"cup","eye_start_m":[0.18,0.65,0.45],"eye_end_m":[0.1,0.75,0.48],"target_offset_m":[0,0,0.04],"focal_start_mm":40,"focal_end_mm":36,"title":"손님에게 한 걸음 더","subtitle":"물을 담은 컵을 들어 옮깁니다"},
+    {"id":"16_serve","start_s":269,"end_s":420,"speed":2,"anchor":"cup","motion_duration_s":14,"eye_start_m":[0.10,0.75,0.48],"eye_end_m":[0.12,1.05,0.65],"target_offset_m":[0.02,0,0.04],"focal_start_mm":36,"focal_end_mm":32,"title":"한 잔의 서빙, 완료","subtitle":"테이블에 놓고 손을 물립니다"}
+  ]
+}

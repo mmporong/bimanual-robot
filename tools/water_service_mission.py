@@ -245,6 +245,12 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     camera_config = json.loads((Path(__file__).resolve().parents[1]/"config/simulation/service_cameras.json").read_text())
     camera_frames = []
     detail_count = 0
+    cinema = None
+    if getattr(args, 'cinematic', False):
+        from service_cinematic import CinematicRecorder, cinematic_frame, png_complete
+        cinema_config = json.loads((Path(__file__).resolve().parents[1]/'config/simulation/service_cinematic.json').read_text())
+        cinema = CinematicRecorder(output, cinema_config)
+        args._cinematic_recorder = cinema
 
     dt = 1/120
     transfer = build_service_transfer(args.source_dir/"replacement_hypothesis.urdf", source)
@@ -314,11 +320,20 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             future.cancel()
             raise TimeoutError("water service capture timed out")
         future.result()
+        if cinema is not None:
+            # Capture completion schedules an asynchronous PNG writer; await its complete file.
+            while not png_complete(path) and time.monotonic() < deadline:
+                world.render()
+            if not png_complete(path):
+                raise TimeoutError('cinematic PNG write did not finish')
 
     def capture_camera(view, name, path):
         camera_path = "/PresentationCameras/"+name
         camera = UsdGeom.Camera.Define(world.stage, camera_path)
         camera.CreateFocalLengthAttr(view["focal_length_mm"])
+        if 'horizontal_aperture_mm' in view:
+            camera.CreateHorizontalApertureAttr(view['horizontal_aperture_mm'])
+            camera.CreateVerticalApertureAttr(view['horizontal_aperture_mm']*9/16)
         camera.CreateClippingRangeAttr((.01, 100.))
         set_camera_view(np.array(view["eye_m"]), np.array(view["target_m"]), camera_prim_path=camera_path)
         get_active_viewport().camera_path = camera_path
@@ -454,6 +469,11 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
                 camera_frames.append(record)
                 (output/"camera_frames.json").write_text(json.dumps(camera_frames, indent=2)+"\n")
                 frame_count += 1
+        if cinema is not None:
+            cinematic = cinematic_frame(cinema_config, tick, {'base': position, 'cup': cp, 'bottle': bp})
+            if cinematic is not None:
+                cinematic.update(state=state, phase=phase)
+                cinema.record(cinematic, capture_camera)
         if not np.isfinite([*actual, *position, *orientation, *cf, *bf, *ground_forces, environment_force, self_force]).all():
             reason = "nonfinite_observation"
             break
@@ -584,13 +604,18 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             touchdown = {}
             window = []
     controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
-    if args.record:
-        get_active_viewport().camera_path = "/PresentationCameras/wide"
+    if args.record or cinema is not None:
+        get_active_viewport().camera_path = "/PresentationCameras/cinematic" if cinema is not None else "/PresentationCameras/wide"
         for _ in range(3):
             world.render()
         snapshot(output/"final.png")
     sequence_pass = complete and ground_window_verified(samples[20:])
     requirement = placement_requirement_fields(source, placement_verified)
+    if cinema is not None:
+        try:
+            cinema.close()
+        finally:
+            args._cinematic_recorder = None
     return {"task_pass": bool(sequence_pass and placement_verified), "sequence_pass": sequence_pass,
         **requirement,
         "failure": "tray_target_placement_not_verified" if sequence_pass and not placement_verified else reason,
@@ -608,6 +633,8 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         "received_particles": received, "maximum_transit_particle_loss": maximum_transit_spill,
         "maximum_environment_force_n": maximum_environment, "maximum_self_force_n": maximum_self,
         "frame_count": frame_count, "recording_fps": 2, "detail_frame_count": detail_count,
-        "camera_recording": "fixed_wide_with_synchronous_pour_detail", "tray_center_m": transfer["tray_center_m"],
+        "cinematic_frame_count": len(cinema.frames) if cinema is not None else 0,
+        "cinematic_fps": cinema_config['fps'] if cinema is not None else None,
+        "camera_recording": "cinematic_native_frames_edited_speed" if cinema is not None else "fixed_wide_with_synchronous_pour_detail", "tray_center_m": transfer["tray_center_m"],
         "tray_target_xy_m": transfer.get("tray_target_xy_m", [0., 0.]),
         "observation_source": "simulator_ground_truth", "model_calibrated": False}
