@@ -5,7 +5,7 @@ package_name = "hold_flow_mission"
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.2.0",
     packages=find_packages(exclude=["test"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -15,12 +15,13 @@ setup(
     zip_safe=True,
     maintainer="mmporong",
     maintainer_email="mmporong@users.noreply.github.com",
-    description="Manipulation Action adapter and simulation-only mock server",
+    description="Manipulation Action adapter and simulation-only execution servers",
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
             "manipulation_action_client = hold_flow_mission.action_client:main",
             "mock_manipulation_server = hold_flow_mission.mock_action_server:main",
+            "planned_artifact_server = hold_flow_mission.planned_artifact_server:main",
         ],
     },
 )

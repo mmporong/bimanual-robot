@@ -14,7 +14,12 @@ import threading
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from service_execution_backend import CommandBackend, ImmediateBackend, Ros2ManipulationBackend
+from service_execution_backend import (
+    CommandBackend,
+    ImmediateBackend,
+    Ros2ManipulationBackend,
+    Ros2PlannedArtifactBackend,
+)
 from service_mission_control import DryRunRuntime, MissionController
 from service_order_store import ServiceOrderStore
 
@@ -350,9 +355,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--battery-percent", type=float, default=100.0)
     parser.add_argument(
         "--backend",
-        choices=("immediate", "ros2-mock"),
+        choices=("immediate", "ros2-mock", "ros2-planned-artifact"),
         default="immediate",
-        help="manipulation execution backend; ros2-mock never accesses hardware",
+        help="manipulation backend; ROS modes are simulation-only and never access hardware",
     )
     parser.add_argument("--manipulation-timeout-s", type=float, default=30.0)
     return parser.parse_args(argv)
@@ -369,6 +374,8 @@ def main(argv: list[str] | None = None) -> int:
     backend: CommandBackend
     if args.backend == "ros2-mock":
         backend = Ros2ManipulationBackend(timeout_sec=args.manipulation_timeout_s)
+    elif args.backend == "ros2-planned-artifact":
+        backend = Ros2PlannedArtifactBackend(timeout_sec=args.manipulation_timeout_s)
     else:
         backend = ImmediateBackend()
     app = ServiceApplication(

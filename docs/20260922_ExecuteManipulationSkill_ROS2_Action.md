@@ -146,6 +146,7 @@ client를 연결해 다음 세 경로를 확인했다.
 |---|---|---|
 | `immediate` | 즉시 성공 mock | 즉시 성공 mock |
 | `ros2-mock` | 즉시 성공 mock | `/execute_manipulation_skill` 결과 대기 |
+| `ros2-planned-artifact` | 즉시 성공 mock | 해시 검증 Isaac Sim 산출물의 phase 판정 |
 
 `ros2-mock` 통합 시험에서 냉수 주문 한 건이 9개 조작 Action을 모두 `SUCCEEDED`로 마치고,
 손님 테이블 서빙 뒤 충전소로 복귀해 `IDLE_AT_DOCK`에 도달했다. Action 실행 중 웹에서 주문을
@@ -156,14 +157,57 @@ mock phase 지연보다 짧은 0.03초 timeout 시험에서는 `ALIGN_KITCHEN`�
 끝났다. 관제 설정의 재시도 횟수를 소진한 뒤 주문은 `ALIGN_KITCHEN:TIMEOUT`으로 실패했고 두
 Action 결과가 SQLite command payload에 각각 남았다.
 
-## 7. 다음 연결
+## 7. PLANNED 산출물 Action backend
+
+`planned_artifact_server`는 성공한 Isaac Sim `result.json`을 읽고 다음 항목을 다시 검사한다.
+
+- `task_pass`, 연속 sequence, 지면 접촉, 물붓기·상판 운반·재파지 성공
+- 숨은 물체 고정과 실물 접근을 사용하지 않았다는 기록
+- 실행 당시 모든 도구와 입력 파일의 SHA-256
+- 9개 조작 phase에 대응하는 simulator sample
+
+현재 코드와 해시가 일치하는 `cinematic_wide01/result.json`으로 1번 테이블 냉수 주문을 시험했다.
+9개 조작 Action이 같은 artifact SHA를 SQLite에 남기고 주문 성공·충전소 복귀까지 끝났다.
+2번 테이블 요청은 지원 범위 밖이므로 두 번 재시도 후
+`ALIGN_KITCHEN:ARTIFACT_TABLE_UNSUPPORTED`로 실패했다.
+
+이 backend는 기록된 성공 근거를 관제 계약으로 재생한다. Isaac Sim을 새로 실행하거나 물리 상태를
+이어 가지 않는다. 현재 `water_service_mission.py`는 전체 미션을 한 프로세스에서 실행하므로,
+phase마다 새로 실행하면 같은 물 서빙을 반복하게 된다. 다음 구현은 Isaac 월드를 한 번만 만들고
+Action phase 사이에서 상태를 보존하는 장기 실행 executor다.
+
+```bash
+cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ARTIFACT_ROOT="/data/$USER/robot-artifacts"
+
+ros2 run hold_flow_mission planned_artifact_server --ros-args \
+  -p result_path:="$ARTIFACT_ROOT/restaurant/cinematic_wide01/result.json" \
+  -p repo_root:="$HOME/bimanual-robot"
+```
+
+별도 터미널에서 관제를 시작한다.
+
+```bash
+cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+/usr/bin/python3.12 tools/service_order_server.py \
+  --backend ros2-planned-artifact \
+  --port 8767 \
+  --state-dir "$HOME/.local/state/bimanual-robot/planned-artifact"
+```
+
+## 8. 다음 연결
 
 1. 완료: 웹 관제 runtime이 조작 Action 결과를 기다리고 성공일 때만 다음 phase로 전이한다.
 2. 완료: `ABORTED`, `CANCELED`, timeout과 `superseded`를 SQLite command payload에 저장한다.
-3. 검증된 `water_service_mission.py` phase를 첫 PLANNED backend로 연결한다.
-4. 취소 요청을 PLANNED·ACT executor와 이후 hardware bridge까지 전달한다.
-5. ACT backend와 checkpoint loader를 추가해 같은 Action 계약으로 세 전략을 비교한다.
+3. 완료: 검증된 `water_service_mission.py` 결과를 해시·phase 근거가 있는 PLANNED 산출물 backend로 연결했다.
+4. Isaac 월드를 한 번만 띄우고 phase 사이의 물리 상태를 유지하는 PLANNED executor를 만든다.
+5. 취소 요청을 PLANNED·ACT executor와 이후 hardware bridge까지 전달한다.
+6. ACT backend와 checkpoint loader를 추가해 같은 Action 계약으로 세 전략을 비교한다.
 
-현재는 한 관제 명령을 한 phase Action으로 바꾸고 웹 관제에서 결과를 소비하는 데까지 구현됐다.
-여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만 실제 PLANNED↔ACT lease 전환 실행기는
-아직 없다.
+현재는 한 관제 명령을 한 phase Action으로 바꾸고 mock 또는 검증 산출물 결과를 소비한다.
+여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만, 실시간 PLANNED executor와
+PLANNED↔ACT lease 전환 실행기는 아직 없다.

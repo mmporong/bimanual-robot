@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-22 | 검증된 PLANNED 산출물 Action backend
+
+- `planned_artifact_server`를 추가했다. 성공한 Isaac Sim `result.json`의 도구·입력 SHA-256, 전체 성공 조건, 9개 조작 phase 표본을 다시 검사한다.
+- 관제의 `ros2-planned-artifact` 모드는 phase마다 같은 검증 산출물의 판정을 Action으로 받고 결과와 artifact SHA를 SQLite에 저장한다. 시뮬레이터나 실물에는 접속하지 않는다.
+- 현재 코드 해시와 일치하는 `cinematic_wide01` 근거로 1번 테이블 냉수 주문을 통과했다. 9개 조작 Action 뒤 주문 성공, 충전소 복귀, `IDLE_AT_DOCK`까지 확인했다.
+- 검증 범위 밖인 2번 테이블 요청은 두 번 재시도한 뒤 `ALIGN_KITCHEN:ARTIFACT_TABLE_UNSUPPORTED`로 실패했다. generic Goal 거부 대신 실패 원인을 Action Result와 SQLite에 보존한다.
+- 다음 4B 단계는 `water_service_mission.py`를 장기 실행 executor로 분리해 Isaac 월드를 한 번만 만들고 phase 사이의 물리 상태를 유지하는 작업이다.
+
 ## 2026-09-22 | 웹 관제와 ROS 2 조작 Action 연결
 
 - `service_order_server.py`에 선택형 `ros2-mock` backend를 추가했다. 기본 `immediate` 모드는 유지하며, `ros2-mock`에서는 조작 phase만 `/execute_manipulation_skill` 결과를 기다린다. 주행·충전은 아직 immediate mock이다.

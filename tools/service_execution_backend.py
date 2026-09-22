@@ -168,3 +168,18 @@ class Ros2ManipulationBackend:
         self._client.destroy_node()
         if self._context.ok():
             self._context.shutdown()
+
+
+class Ros2PlannedArtifactBackend(Ros2ManipulationBackend):
+    """Labels the shared Action client as verified artifact replay."""
+
+    mode = "ros2_planned_artifact_replay"
+
+    def info(self) -> dict:
+        info = super().info()
+        info.update({
+            "mode": self.mode,
+            "manipulation": "/execute_manipulation_skill (artifact replay)",
+            "simulator_accessed": False,
+        })
+        return info
