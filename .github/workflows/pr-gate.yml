@@ -35,7 +35,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y liburdfdom-tools
           python -m pip install --disable-pip-version-check \
-            jsonschema==4.23.0 numpy==2.2.3 pytest==8.3.5 PyYAML==6.0.2 xacro==2.1.1
+            jsonschema==4.23.0 numpy==2.2.3 \
+            opencv-contrib-python-headless==4.11.0.86 \
+            pytest==8.3.5 PyYAML==6.0.2 vtk==9.4.2 xacro==2.1.1
 
       - name: 변경 diff 형식 검사
         env:
