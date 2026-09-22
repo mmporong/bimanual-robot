@@ -176,8 +176,8 @@ def solve_pick_plan_at_xy(
     approach_pitch_deg: float,
 ) -> dict[str, Any]:
     grasp = np.array([base_xy[0], base_xy[1], surface_z + grasp_height])
-    # 왼팔 장착점에서 컵 몸통을 향하는 수평 접근이다. FinRay 손가락을 컵
-    # 양옆으로 넣고 닫는 방식이며, 수직 top-down 자세처럼 wrist limit에 붙지 않는다.
+    # 왼팔 장착점에서 컵 몸통을 향하는 수평 접근이다. 순정 죠를 컵 양옆으로
+    # 넣고 닫는 방식이며, 수직 top-down 자세처럼 wrist limit에 붙지 않는다.
     left_mount_xy = np.array([0.020, 0.170])
     approach_xy = base_xy - left_mount_xy
     approach_norm = float(np.linalg.norm(approach_xy))

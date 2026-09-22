@@ -104,7 +104,7 @@ def write_report(plan_path: Path, state_paths: list[Path], image_paths: list[Pat
         "hardware_accessed": False, "motion_command_emitted": False,
         "stage": stage, "states": rows, "manifest": manifest,
         "limitations": [
-            "현행 stock jaw 프록시 FK이며 FinRay 실물 TCP 측정이 아니다",
+            "현행 stock jaw FK이며 순정 죠 실물 TCP·ID 6 재캘리브레이션 측정이 아니다",
             "사진과 관절값의 시간 동기화는 미확인이다",
             "카메라 외부 보정값이 없어 사진에 TCP를 투영하지 않는다",
             "이미지 손상·가림은 수동 검토하며 파지 성공을 자동 판정하지 않는다",

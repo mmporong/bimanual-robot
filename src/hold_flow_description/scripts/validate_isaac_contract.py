@@ -91,6 +91,17 @@ def main() -> None:
     if mimic != ["right_finger2_joint"]:
         issues.append(f"mimic 관절 집합 불일치: {mimic}")
 
+    expected_left_gripper = "stock_so101_rotating_jaw_without_tpu_attachment"
+    configured_left_gripper = spec["arm_mounts"]["left"]["gripper"]
+    if configured_left_gripper != expected_left_gripper:
+        issues.append(
+            f"왼손 기계 사양={configured_left_gripper}, expected={expected_left_gripper}"
+        )
+    if spec["left_cup_gripper"]["selected_attachment"] is not None:
+        issues.append("왼손 순정 죠에 추가 부착물이 선택됨")
+    if spec["provenance"]["left_finray_fingers_historical"]["current_build_use"]:
+        issues.append("과거 FinRay 후보가 현행 빌드로 설정됨")
+
     right_proxy_links = ("right_gripper_base_link", "right_finger1_link", "right_finger2_link")
     right_proxy_mass = sum(
         float(links[name].find("inertial/mass").attrib["value"])
@@ -141,6 +152,8 @@ def main() -> None:
             [joint for joint in joints.values() if joint.attrib["type"] in axis_joint_types]
         ),
         "mimic_joints": mimic,
+        "left_gripper": configured_left_gripper,
+        "left_gripper_attachment": spec["left_cup_gripper"]["selected_attachment"],
         "right_gripper_proxy_mass_kg": right_proxy_mass,
         "frame_columns": frame_columns,
         "tabletop_panels": tabletop_panels,

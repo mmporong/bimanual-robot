@@ -1,7 +1,7 @@
 schema_version: "0.3"
 design_id: hold_flow_mechanical_v0_3
 status: simulation_model_ready_physical_measurements_pending
-revision: 2026-09-10_full_size_upper_frame_split_printed_deck
+revision: 2026-09-22_left_stock_so101_gripper_selected
 units:
   length: mm
   mass: kg
@@ -34,12 +34,15 @@ provenance:
     checked_commit: b0614b72c62e3891b1f7faa8b06c6eb3d490a9c2
     upstream_license_status: no_license_file_found_on_2026_09_08
     redistribution_policy: do_not_vendor_upstream_meshes_use_project_authored_proxy
-  left_finray_fingers:
+  left_finray_fingers_historical:
     local_selection_manifest: design/gripper/finray_80mm_lip3_selection.yaml
     source_file_sha256: 93d2fd90adc2b6b045f3cca8f153ed68d5431e301bcc370924c75d72f82b6373
     upstream_source_status: exact_url_not_recorded
     upstream_license_status: not_verified
     redistribution_policy: do_not_vendor_mesh_or_gcode_until_license_is_verified
+    current_build_use: false
+    superseded_date: 2026-09-22
+    superseded_by: stock_so101_rotating_jaw
 
 chassis:
   # 실제 하부 프로파일 외곽은 폭(y) 450 mm × 전후(x) 340 mm다.
@@ -134,7 +137,7 @@ arm_mounts:
   left:
     xyz: [20.0, 170.0, 726.0]
     rpy: [0.0, 0.0, 0.0]
-    gripper: stock_so101_actuator_with_finray_80mm_lip3_tpu_fingers
+    gripper: stock_so101_rotating_jaw_without_tpu_attachment
   right:
     xyz: [20.0, -170.0, 726.0]
     rpy: [0.0, 0.0, 0.0]
@@ -149,17 +152,18 @@ arm_mounts:
 
 left_cup_gripper:
   p0_actuator: stock_so101_rotating_jaw
-  selected_attachment: finray_80mm_lip3_reinforced_pair
-  selection_manifest: design/gripper/finray_80mm_lip3_selection.yaml
-  finger_length: 80.0
-  tip_lip: 3.0
-  material: TPU_95A
-  retention: compliant_finray_body_plus_tip_lip
-  status: selected_for_left_hand_physical_print_fit_and_wet_cup_tests_pending
-  superseded_candidate: independent_strap_mount_concave_jaw_overcaps
+  selected_attachment: null
+  selected_geometry: upstream_stock_so101_rotating_jaw
+  material: upstream_stock_print_material_not_verified
+  retention: stock_jaw_contact_only
+  status: selected_for_current_build_physical_recalibration_and_cup_tests_pending
+  superseded_candidates:
+    - finray_80mm_lip3_reinforced_pair
+    - independent_strap_mount_concave_jaw_overcaps
+  calibration_status: finray_era_id6_range_must_not_be_reused_as_stock_calibration
   measurement_gates:
-    - printed_pair_mass
-    - so101_mount_fit_and_full_open_close_clearance
+    - stock_jaw_mount_and_full_open_close_clearance
+    - id6_stock_jaw_recalibration
     - actual_cup_outer_diameter_and_taper
     - wet_surface_retention_and_slip_test
 

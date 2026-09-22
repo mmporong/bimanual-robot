@@ -2,7 +2,8 @@
 <!--
   SO-101 기본 회전식 죠. 관절 원점·축·한계·관성은 로컬 JD-AMR 실기 URDF에서
   가져왔고, moving_jaw_so101_v1.stl은 TheRobotStudio SO-ARM100/101의
-  Apache-2.0 형상이다. 컵 오버캡은 실물 맞춤 전이라 기본 URDF에는 붙이지 않는다.
+  Apache-2.0 형상이다. 2026-09-22 현행 왼손은 이 순정 죠를 사용하며 TPU FinRay와
+  컵 오버캡은 기본 URDF에 붙이지 않는다.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:property name="stock_cup_tcp_offset" value="0 0 0"/>

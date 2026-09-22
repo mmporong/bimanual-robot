@@ -18,7 +18,7 @@
     <origin xyz="0.020 -0.170 0.6931" rpy="0 0 0"/>
   </xacro:so101_arm>
 
-  <!-- P0: 왼팔은 기본 SO-101 죠, 오른팔은 ggao50 평행 그리퍼 프록시다. -->
+  <!-- 현행: 왼팔은 TPU 부착물 없는 SO-101 순정 죠, 오른팔은 ggao50 평행 그리퍼 프록시다. -->
   <xacro:so101_stock_gripper prefix="left_" parent="left_gripper_link"/>
   <xacro:ggao50_gripper prefix="right_" parent="right_gripper_link"/>
 </robot>

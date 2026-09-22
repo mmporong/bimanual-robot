@@ -1,6 +1,6 @@
 # 양팔 IL 데이터 수집·Hugging Face 업로드·다른 PC 학습 인계
 
-작성 기준일: 2026-09-11
+작성 기준일: 2026-09-11, 왼손 구성 갱신: 2026-09-22
 
 대상 저장소: `~/bimanual-robot`
 
@@ -163,7 +163,9 @@ python -m pip install -e ".[core_scripts,feetech]" jsonschema
 
 ### 3.3 양팔 그리퍼 패치
 
-현행 하드웨어는 왼팔 스톡 SO-101 구동부에 80 mm·립 3 mm TPU 95A FinRay 손가락 두 개를 장착하는 구성이고, 오른팔은 ggao50 평행그리퍼다. 왼팔은 손가락 형상만 바뀌므로 스톡 구동부의 LeRobot 보호 설정을 유지한다. 오른팔은 LeRobot 기본
+현행 하드웨어는 왼팔 SO-101 순정 회전식 죠와 오른팔 ggao50 평행그리퍼다. 왼팔에는 TPU
+FinRay·패드·오버캡을 장착하지 않는다. 왼팔은 LeRobot 기본 보호 설정을 유지하되,
+FinRay 장착 당시 캘리브레이션 범위를 사용하지 않고 순정 죠 장착 후 다시 기록한다. 오른팔은 LeRobot 기본
 그리퍼 보호값으로 닫히지 않을 수 있고, 양팔 wrapper는 좌우 `gripper_protection` 설정을
 전달하도록 패치해야 한다.
 
@@ -322,6 +324,10 @@ export RIGHT_LEADER_PORT="<오른쪽 리더 by-id>"
 
 양팔 수집은 단일팔 JSON이 아니라 다음 네 파일을 사용한다.
 
+> 2026-09-22 현재 왼팔 순정 죠의 새 ID 6 범위는 아직 기록하지 않았다.
+> `bi_follower/arms_left.json`이 EEPROM과 일치하더라도 FinRay 장착 당시 값의 일치일 수 있으므로
+> 왼팔 순정 죠 재캘리브레이션을 마치기 전에는 아래 일치 결과를 수집 시작 조건으로 사용하지 않는다.
+
 ```text
 ~/bimanual-robot/calibration/bi_follower/arms_left.json
 ~/bimanual-robot/calibration/bi_follower/arms_right.json
@@ -347,7 +353,7 @@ cd "$HOME/bimanual-robot/tools/servo"
   --json "$HOME/bimanual-robot/calibration/bi_leader/arms_right.json"
 ```
 
-네 개가 모두 `결과: 일치`여야 한다. 불일치가 나면 `c`를 눌러 즉석 재캘리브레이션하지 않는다.
+순정 죠 재캘리브레이션을 완료한 뒤 네 개가 모두 `결과: 일치`여야 한다. 불일치가 나면 `c`를 눌러 즉석 재캘리브레이션하지 않는다.
 이 검사는 offset·min·max·현재 위치만 대조하며 Phase는 검사하지 않는다. 오른쪽 follower의
 ggao50 그리퍼(ID 6)는 다음 읽기 전용 검사를 별도로 통과해야 한다.
 
@@ -440,7 +446,7 @@ AI는 다음 필드가 실제 값으로 채워지고 commit SHA가 정해지기 
 - 팔 작업 반경에 사람, 케이블, 컵, 물통 외 장애물이 없다.
 - 전원을 즉시 끌 담당자가 팔 옆에 있다.
 - 두 리더 팔과 팔로워 팔의 시작 자세가 비슷하고 그리퍼는 열려 있다.
-- 왼팔 스톡 구동부+FinRay 손가락에만 `gripper_protection=true`를 사용한다. 장착 뒤 캘리브레이션 범위는 다시 기록한다.
+- 왼팔 SO-101 순정 죠에 `gripper_protection=true`를 사용한다. 순정 죠 장착 뒤 캘리브레이션 범위를 다시 기록한다.
 - 오른팔 ggao50에는 `gripper_protection=true`를 넣지 않는다.
 - 종료 시 토크가 풀려 팔이 떨어질 수 있으므로 받침 위치가 준비됐다.
 
