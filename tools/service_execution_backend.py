@@ -183,3 +183,19 @@ class Ros2PlannedArtifactBackend(Ros2ManipulationBackend):
             "simulator_accessed": False,
         })
         return info
+
+
+class Ros2PlannedSessionBackend(Ros2ManipulationBackend):
+    """Labels the shared Action client as a persistent executor session."""
+
+    mode = "ros2_planned_session"
+
+    def info(self) -> dict:
+        info = super().info()
+        info.update({
+            "mode": self.mode,
+            "manipulation": "/execute_manipulation_skill (persistent IPC session)",
+            "executor_transport": "unix_socket_json",
+            "hardware_accessed": False,
+        })
+        return info

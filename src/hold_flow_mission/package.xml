@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>hold_flow_mission</name>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <description>HOLD THE FLOW 미션 계층의 조작 Action adapter와 simulation 실행기</description>
   <maintainer email="mmporong@users.noreply.github.com">mmporong</maintainer>
   <license>Apache-2.0</license>

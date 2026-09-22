@@ -19,6 +19,7 @@ from service_execution_backend import (
     ImmediateBackend,
     Ros2ManipulationBackend,
     Ros2PlannedArtifactBackend,
+    Ros2PlannedSessionBackend,
 )
 from service_mission_control import DryRunRuntime, MissionController
 from service_order_store import ServiceOrderStore
@@ -355,7 +356,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--battery-percent", type=float, default=100.0)
     parser.add_argument(
         "--backend",
-        choices=("immediate", "ros2-mock", "ros2-planned-artifact"),
+        choices=("immediate", "ros2-mock", "ros2-planned-artifact", "ros2-planned-session"),
         default="immediate",
         help="manipulation backend; ROS modes are simulation-only and never access hardware",
     )
@@ -376,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
         backend = Ros2ManipulationBackend(timeout_sec=args.manipulation_timeout_s)
     elif args.backend == "ros2-planned-artifact":
         backend = Ros2PlannedArtifactBackend(timeout_sec=args.manipulation_timeout_s)
+    elif args.backend == "ros2-planned-session":
+        backend = Ros2PlannedSessionBackend(timeout_sec=args.manipulation_timeout_s)
     else:
         backend = ImmediateBackend()
     app = ServiceApplication(

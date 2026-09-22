@@ -5,7 +5,7 @@ package_name = "hold_flow_mission"
 
 setup(
     name=package_name,
-    version="0.2.0",
+    version="0.3.0",
     packages=find_packages(exclude=["test"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -22,6 +22,7 @@ setup(
             "manipulation_action_client = hold_flow_mission.action_client:main",
             "mock_manipulation_server = hold_flow_mission.mock_action_server:main",
             "planned_artifact_server = hold_flow_mission.planned_artifact_server:main",
+            "planned_ipc_server = hold_flow_mission.planned_ipc_server:main",
         ],
     },
 )

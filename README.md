@@ -56,6 +56,10 @@ Isaac Sim·실물에 접속하지 않는다. 식당 지도·현재 경로·미�
 `ros2-planned-artifact` 모드는 성공한 Isaac Sim `result.json`의 도구·입력 SHA-256과 phase 증거를
 다시 검사해 Action 결과로 돌려준다. 현재 검증 범위는 1번 테이블 냉수 한 건이다. 이 모드는
 시뮬레이터를 새로 실행하지 않는 근거 재생이며, 장기 실행 Isaac phase executor와 구분한다.
+Isaac Sim Python 3.11과 ROS 2 Jazzy Python 3.12의 ABI가 달라 한 프로세스에 넣을 수 없었다.
+`ros2-planned-session`은 ROS Action 서버와 장기 실행 executor를 Unix socket JSON으로 나눈다.
+현재 반대편은 phase 순서·중복·취소·timeout을 검사하는 상태 보존 mock이며, Isaac 물리는 아직
+연결하지 않았다.
 높은 중앙 받침 없이 **기존 450×340 mm 상판의 양팔 사이에 컵을 놓고 운반하는 경로**를 검증했다.
 가구·팔·컵·바닥 접촉을 검사하고, 테이블 지지와 그리퍼 열림·손 이격까지 확인한다.
 주행은 시뮬레이터 좌표를 사용하는 A*·차동구동 추종이며 Nav2·ROS Behavior Tree는 아직 아니다.
@@ -521,10 +525,10 @@ python3 tools/servo/execute_safe_recovery.py \
 | URDF | 58링크/57관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
 | IK | 투명 컵 검출, 평면 보정 도구, 왼팔 DLS·FK 시험, 충돌 감사, 저장 자세 비교·시간 동기 오프라인 스케줄 | 실측 평면/TCP, 실제 구동 경로의 시간 동기·추종 검증. 기존 실행기는 동기 추종 보증 없음 |
 | 웹·Mission 관제 | 4테이블 주문, 큐·배터리, SQLite 복구, 선택형 ROS 2 조작 mock·취소 전파 | 인증·무선 fault-injection·다중 로봇 배차·실제 backend |
-| ROS 2 실행 | `hold_flow_description`, `hold_flow_interfaces`, `hold_flow_mission` 패키지와 조작 Action mock | web·navigation·perception·motion·safety·hardware·logging 패키지, mission의 실제 backend |
+| ROS 2 실행 | description·interfaces·mission 패키지, 조작 Action, Python 3.11↔3.12 Unix socket 경계 | navigation·perception·motion·safety·hardware·logging 패키지, Isaac executor 연결 |
 | Nav2 | JD-AMR 선행 기체에 지도 종속 station·박스 대기·home 자세 복귀 구현, 로컬 시험 통과 | 새 지도 생성, station 교시, 실차 왕복·장애물·실제 도킹 실측 |
 | ACT | 리서치·데이터 계약 | 현행 물 서빙 시연·모델·rollout 없음 |
-| PLANNED/ACT/HYBRID | 주문 관제와 Action 연결, mock 전체 주문·취소·timeout, 해시 검증 PLANNED 산출물 재생 | 장기 실행 Isaac PLANNED executor·ACT backend·lease 전환 테스트 |
+| PLANNED/ACT/HYBRID | Action 관제, 해시 검증 산출물 재생, 상태 보존 PLANNED IPC mock | IPC 반대편 Isaac executor·ACT backend·lease 전환 테스트 |
 | YOLO 물 양 | segmentation·보정 방식 결정 | 카메라 POC·라벨·보정표·실시간 판정 |
 | 무선 | Pi↔노트북 책임과 프로토콜 후보 문서화 | 실제 지연·드랍·두절·재연결·watchdog 검증 |
 | Raspberry Pi 5 | 후순위 전환안: Nav2·센서·베이스·안전은 Pi 5, ACT·고부하 비전은 노트북 GPU | 부하·온도·무선 지연 측정 후 전환 |
@@ -541,7 +545,7 @@ python3 tools/servo/execute_safe_recovery.py \
 1. 완료: 웹 주문·큐·배터리 분기와 PLANNED_ALL 명령의 CPU dry-run을 연결했다.
 2. 완료: `ExecuteManipulationSkill` 요청·결과·취소·timeout 계약과 simulation mock을 ROS 2 Action으로 검증했다.
 3. 완료: 선택형 `ros2-mock`에서 웹 관제 `manipulate` 명령을 Action 결과 대기로 교체하고 SQLite 기록·웹 취소 전파를 검증했다.
-4. 진행: 4A 해시 검증 PLANNED 산출물 재생을 연결했다. 4B는 Isaac 월드를 한 번만 띄워 phase를 이어 실행하는 executor다.
+4. 진행: 4A 산출물 재생과 4B.1 상태 보존 IPC mock을 연결했다. 4B.2는 IPC 상태기계를 Isaac 실행 루프에 연결한다.
 5. phase 표시 smoke 시연과 ACT 과적합 기준선을 만든다.
 6. ACT_ALL과 로컬 ACT checkpoint를 만든다.
 7. 같은 protocol로 PLANNED_ALL·ACT_ALL·HYBRID를 비교한다.

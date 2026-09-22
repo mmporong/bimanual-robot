@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-22 | PLANNED executor Python ABI 분리와 상태 보존 IPC
+
+- Isaac Sim 5.1 환경은 Python 3.11, ROS 2 Jazzy `rclpy`는 Python 3.12 확장이라 같은 프로세스에서 로드할 수 없음을 재현했다. 두 runtime을 Unix socket JSON 계약 `planned_executor_ipc_v1`으로 분리했다.
+- ROS Action 쪽 `planned_ipc_server`와 Python 3.11에서 실행되는 `planned_executor_ipc_mock.py`를 추가했다. mock은 `mission_id`별 다음 phase, request ID 멱등성, 단일 실행, 취소와 timeout을 유지한다.
+- 웹 관제 `ros2-planned-session`에서 1번 테이블 냉수 주문이 9개 조작 phase를 같은 session으로 통과하고 충전소에 복귀했다. SQLite에는 phase별 Action 결과가 남았다.
+- Action 실행 중 웹 취소가 executor session까지 전달됐다. executor·Action·주문이 `CANCELED`로 끝났고 관제 취소 뒤 온 결과는 `superseded=true`로 저장됐다.
+- 현재 executor는 `simulator_accessed=false`인 상태기계 mock이다. 다음 단계는 `water_service_mission.py`를 phase 경계에서 멈추고 재개하도록 분리해 같은 socket 계약 뒤에 연결하는 것이다.
+
 ## 2026-09-22 | 검증된 PLANNED 산출물 Action backend
 
 - `planned_artifact_server`를 추가했다. 성공한 Isaac Sim `result.json`의 도구·입력 SHA-256, 전체 성공 조건, 9개 조작 phase 표본을 다시 검사한다.

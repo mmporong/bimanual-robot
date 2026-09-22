@@ -147,6 +147,7 @@ client를 연결해 다음 세 경로를 확인했다.
 | `immediate` | 즉시 성공 mock | 즉시 성공 mock |
 | `ros2-mock` | 즉시 성공 mock | `/execute_manipulation_skill` 결과 대기 |
 | `ros2-planned-artifact` | 즉시 성공 mock | 해시 검증 Isaac Sim 산출물의 phase 판정 |
+| `ros2-planned-session` | 즉시 성공 mock | Unix socket의 상태 보존 executor session |
 
 `ros2-mock` 통합 시험에서 냉수 주문 한 건이 9개 조작 Action을 모두 `SUCCEEDED`로 마치고,
 손님 테이블 서빙 뒤 충전소로 복귀해 `IDLE_AT_DOCK`에 도달했다. Action 실행 중 웹에서 주문을
@@ -199,15 +200,67 @@ source install/setup.bash
   --state-dir "$HOME/.local/state/bimanual-robot/planned-artifact"
 ```
 
-## 8. 다음 연결
+## 8. Python ABI 분리와 상태 보존 executor IPC
+
+로컬 Isaac Sim 5.1 환경은 Python 3.11이고 ROS 2 Jazzy의 `rclpy` 확장은 Python 3.12용이다.
+Isaac Python에서 `rclpy`를 로드하면 `_rclpy_pybind11` ABI 오류가 발생한다. 한 프로세스에 두
+runtime을 억지로 넣지 않고 다음처럼 분리했다.
+
+```text
+웹 관제 (Python 3.12)
+  -> ExecuteManipulationSkill Action
+  -> planned_ipc_server (Python 3.12 / rclpy)
+  -> Unix socket · planned_executor_ipc_v1
+  -> 장기 실행 executor (Python 3.11 / Isaac Sim)
+```
+
+현재 executor 쪽은 `planned_executor_ipc_mock.py`다. 같은 `mission_id`에서 9개 phase의 순서를
+기억하고, 중복 request ID는 같은 결과를 반환하며, 동시 요청·범위 밖 테이블·온수·timeout을
+실패 코드로 돌려준다. 웹 취소는 별도 socket 연결로 실행 중 session에 전달된다.
+
+세 터미널에서 아래 순서로 실행한다.
+
+```bash
+cd "$HOME/bimanual-robot"
+PYTHONPATH="$HOME/bimanual-robot/src/hold_flow_mission" \
+  "/data/$USER/conda-envs/leisaac/bin/python" \
+  tools/planned_executor_ipc_mock.py \
+  --socket /tmp/hold-flow-planned-executor.sock
+```
+
+```bash
+cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run hold_flow_mission planned_ipc_server --ros-args \
+  -p socket_path:=/tmp/hold-flow-planned-executor.sock
+```
+
+```bash
+cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+/usr/bin/python3.12 tools/service_order_server.py \
+  --backend ros2-planned-session \
+  --port 8768 \
+  --state-dir "$HOME/.local/state/bimanual-robot/planned-session"
+```
+
+1번 테이블 냉수 주문에서 9개 phase가 한 session으로 완료되고 충전소까지 복귀했다. 실행 중
+취소는 executor의 `CANCELED`, Action의 `CANCELED`, 관제 주문의 `CANCELED`로 이어졌고 늦게 온
+결과는 `superseded=true`로 SQLite에 저장됐다. 이 검증에서 executor의
+`simulator_accessed`는 false다.
+
+## 9. 다음 연결
 
 1. 완료: 웹 관제 runtime이 조작 Action 결과를 기다리고 성공일 때만 다음 phase로 전이한다.
 2. 완료: `ABORTED`, `CANCELED`, timeout과 `superseded`를 SQLite command payload에 저장한다.
 3. 완료: 검증된 `water_service_mission.py` 결과를 해시·phase 근거가 있는 PLANNED 산출물 backend로 연결했다.
-4. Isaac 월드를 한 번만 띄우고 phase 사이의 물리 상태를 유지하는 PLANNED executor를 만든다.
-5. 취소 요청을 PLANNED·ACT executor와 이후 hardware bridge까지 전달한다.
-6. ACT backend와 checkpoint loader를 추가해 같은 Action 계약으로 세 전략을 비교한다.
+4. 완료: Python ABI를 분리한 Unix socket 계약에서 phase 순서·중복·취소·timeout과 session 유지를 검증했다.
+5. `water_service_mission.py` 루프를 phase 경계에서 멈추고 재개해 IPC session과 Isaac 월드를 연결한다.
+6. 취소 요청을 Isaac PLANNED executor와 이후 ACT·hardware bridge까지 전달한다.
+7. ACT backend와 checkpoint loader를 추가해 같은 Action 계약으로 세 전략을 비교한다.
 
-현재는 한 관제 명령을 한 phase Action으로 바꾸고 mock 또는 검증 산출물 결과를 소비한다.
-여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만, 실시간 PLANNED executor와
+현재는 한 관제 명령을 한 phase Action으로 바꾸고 mock·검증 산출물·상태 보존 IPC mock 결과를
+소비한다. 여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만, IPC 반대편의 Isaac executor와
 PLANNED↔ACT lease 전환 실행기는 아직 없다.
