@@ -4,14 +4,16 @@
 [2026-09-07 물 서빙 로봇 회의 결정](../docs/20260907_물서빙로봇_회의결정과_실행범위.md)을
 따른다. 과거 붓기안의 MoveIt·로드셀 중심 구조는 현행 구현 기준이 아니다.
 
-현재 실제 ROS 2 패키지는 `hold_flow_description`뿐이다. 아래 나머지 패키지는 책임과
-인터페이스를 먼저 고정한 **구현 예정 경계**이며, 빈 패키지를 완료물처럼 만들지 않는다.
+현재 실제 ROS 2 패키지는 `hold_flow_description`, `hold_flow_interfaces`, `hold_flow_mission`이다.
+`hold_flow_mission`은 조작 Action 계약·관제 명령 adapter·시뮬레이션 mock까지만 구현됐다. 아래
+나머지 패키지는 책임과 인터페이스를 먼저 고정한 **구현 예정 경계**이며, 빈 패키지를 완료물처럼
+만들지 않는다.
 
 ## 패키지별 언어와 책임
 
 | 패키지 | 상태 | 주 언어·기술 | 현행 책임 | 착수 조건 |
 |---|---|---|---|---|
-| `hold_flow_interfaces` | 예정 | ROS IDL | 미션·정렬·policy·물 양·로그 계약 | policy 번호·상태명 확정 |
+| `hold_flow_interfaces` | 조작 Action v0.1 | ROS IDL | `ExecuteManipulationSkill` 계약. 나머지 인터페이스 예정 | 전체 Mission·정렬·물 양 계약 확정 |
 | `hold_flow_description` | v0.3 정적 검증 완료 | xacro·YAML·URDF | 300 mm·720 mm 모바일 베이스, 혼합 그리퍼 SO-101×2, Astra S·LDS-03 TF | 실측값 반영과 Isaac 동역학 검증 |
 | `hold_flow_bringup` | 예정 | Python·YAML | 실물/sim launch profile, lifecycle 실행 순서 | 첫 실행 패키지와 함께 |
 | `hold_flow_web` | 예정 | FastAPI·HTML·JavaScript·rclpy | 웹 요청 검증, `ServeDrink` Action client | 요청 JSON 계약 |
@@ -21,7 +23,7 @@
 | `hold_flow_safety` | 예정 | C++·rclcpp·tf2 | command lease, 관절 delta, timeout, 정지 | 첫 실물 명령 전에 |
 | `hold_flow_hardware` | 예정 | Python→C++ 선택·LeRobot·serial | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 | 포트·서보 변종 감사 |
 | `hold_flow_learning` | 예정 | Python·LeRobot 0.6.1·PyTorch·ACT | phase 표시 수집, ACT_ALL·로컬 ACT, rollout, 실패/HIL 데이터 | phase·backend 계약·데이터 게이트 |
-| `hold_flow_mission` | 예정 | Python·rclpy | 웹→이동→조작→서빙→도킹 상태기계 | Action mock 통과 |
+| `hold_flow_mission` | 조작 mock v0.1 | Python·rclpy | 관제 `manipulate` 변환, Action 성공·취소·timeout mock | 웹 runtime 연결과 PLANNED backend |
 | `hold_flow_logging` | 예정 | Python·rosbag2·JSON·Parquet | request ID로 미션·episode·실패 연결 | 인터페이스와 함께 |
 | `hold_flow_isaac` | importer·정적 계약 존재 | Python·USD·Isaac Sim 6.0·ROS 2 Bridge | v0.3 URDF→USD, Nav2·양팔·센서 SIL, sim/real gap | Isaac 장비에서 USD·접촉·gain 검증 |
 

@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-22 | ExecuteManipulationSkill ROS 2 Action·mock backend
+
+- `hold_flow_interfaces`에 `ExecuteManipulationSkill.action`을 추가했다. request·mission·order·skill ID, 전략, phase별 backend·checkpoint, timeout을 Goal로 받고 현재 phase를 feedback으로 보낸다. Result에는 성공·취소·timeout, 실패 phase/code, 시작·종료 시각과 사람 개입 횟수를 남긴다.
+- `hold_flow_mission`에 ROS import가 없는 계약 검증 계층, 관제 `manipulate` 명령 adapter, simulation mock Action server와 CLI client를 추가했다. mock은 `dry_run=true`만 받고 모터·카메라·Isaac Sim에 접근하지 않는다.
+- ROS 2 Jazzy에서 IDL 생성과 두 패키지 빌드를 통과했다. Action 왕복 결과는 정상 `SUCCEEDED`, 0.03초 제한 `TIMEOUT/ABORTED`, 실행 중 취소 `CANCELED`로 분리됐고 세 경우 모두 요청·미션·주문 ID와 phase/backend를 보존했다.
+- 계약 단위 테스트 7개와 `colcon test`를 통과했다. 현재는 웹 관제 명령을 수동 client로 보내는 경계까지이며 웹 runtime 대기·실제 PLANNED/ACT 실행기·취소의 hardware bridge 전파는 남아 있다.
+- 계약과 재현 명령: [ExecuteManipulationSkill ROS 2 Action 계약과 mock 검증](docs/20260922_ExecuteManipulationSkill_ROS2_Action.md)
+
 ## 2026-09-22 | 웹 주문·Mission Queue·배터리 관제 dry-run
 
 - 4개 테이블의 냉수·온수 주문을 받는 CPU 전용 관제 상태기계를 추가했다. 주문 ID 멱등 처리, 우선순위 큐, 한 개의 활성 Mission, phase 재시도·실패 종료를 검사한다.

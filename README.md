@@ -46,6 +46,11 @@
 Isaac Sim·실물에 접속하지 않는다. 식당 지도·현재 경로·미션 phase·주문 이력 화면과 SQLite
 영속 저장을 제공하며, 서버 재시작 때 활성 주문과 큐를 복구한다. 실행법과 API는
 [웹 주문·Mission Queue·배터리 관제 dry-run](docs/20260922_웹주문_미션관제_dry-run.md)에 정리했다.
+조작 backend의 다음 경계인 `ExecuteManipulationSkill` ROS 2 Action도 추가했다. 현재 관제
+`manipulate` 명령을 한 phase Goal로 바꾸고, simulation mock에서 성공·취소·timeout을 실제 Action
+상태와 Result로 구분한다. `dry_run=false`는 거부하며 아직 웹 runtime이나 팔 실행기에는 연결하지
+않았다. 계약·빌드·검증법은
+[ExecuteManipulationSkill ROS 2 Action 계약과 mock 검증](docs/20260922_ExecuteManipulationSkill_ROS2_Action.md)에 있다.
 높은 중앙 받침 없이 **기존 450×340 mm 상판의 양팔 사이에 컵을 놓고 운반하는 경로**를 검증했다.
 가구·팔·컵·바닥 접촉을 검사하고, 테이블 지지와 그리퍼 열림·손 이격까지 확인한다.
 주행은 시뮬레이터 좌표를 사용하는 A*·차동구동 추종이며 Nav2·ROS Behavior Tree는 아직 아니다.
@@ -511,10 +516,10 @@ python3 tools/servo/execute_safe_recovery.py \
 | URDF | 58링크/57관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
 | IK | 투명 컵 검출, 평면 보정 도구, 왼팔 DLS·FK 시험, 충돌 감사, 저장 자세 비교·시간 동기 오프라인 스케줄 | 실측 평면/TCP, 실제 구동 경로의 시간 동기·추종 검증. 기존 실행기는 동기 추종 보증 없음 |
 | 웹·Mission 관제 | 4테이블 냉수·온수 주문, 운영 화면, 멱등 ID, 우선순위 큐, 단일 활성 Mission, 배터리 분기, SQLite 재시작 복구 | 인증·무선 fault-injection·다중 로봇 배차·실제 backend |
-| ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
+| ROS 2 실행 | `hold_flow_description`, `hold_flow_interfaces`, `hold_flow_mission` 패키지와 조작 Action mock | web·navigation·perception·motion·safety·hardware·logging 패키지, mission의 실제 backend |
 | Nav2 | JD-AMR 선행 기체에 지도 종속 station·박스 대기·home 자세 복귀 구현, 로컬 시험 통과 | 새 지도 생성, station 교시, 실차 왕복·장애물·실제 도킹 실측 |
 | ACT | 리서치·데이터 계약 | 현행 물 서빙 시연·모델·rollout 없음 |
-| PLANNED/ACT/HYBRID | 주문 관제 phase와 PLANNED_ALL 명령 dry-run 구현 | `ExecuteManipulationSkill` Action·실제 backend·전환 테스트 |
+| PLANNED/ACT/HYBRID | 주문 관제 phase, `ExecuteManipulationSkill` Action, PLANNED_ALL mock 성공·취소·timeout | 웹 runtime 연결·실제 PLANNED/ACT backend·lease 전환 테스트 |
 | YOLO 물 양 | segmentation·보정 방식 결정 | 카메라 POC·라벨·보정표·실시간 판정 |
 | 무선 | Pi↔노트북 책임과 프로토콜 후보 문서화 | 실제 지연·드랍·두절·재연결·watchdog 검증 |
 | Raspberry Pi 5 | 후순위 전환안: Nav2·센서·베이스·안전은 Pi 5, ACT·고부하 비전은 노트북 GPU | 부하·온도·무선 지연 측정 후 전환 |
@@ -529,8 +534,8 @@ python3 tools/servo/execute_safe_recovery.py \
 ### 바로 구현할 순서
 
 1. 완료: 웹 주문·큐·배터리 분기와 PLANNED_ALL 명령의 CPU dry-run을 연결했다.
-2. `ExecuteManipulationSkill` 요청·결과·취소·timeout 계약을 ROS 2 Action으로 확정한다.
-3. Nav2·정렬·조작을 mock Action부터 실제 backend로 하나씩 교체한다.
+2. 완료: `ExecuteManipulationSkill` 요청·결과·취소·timeout 계약과 simulation mock을 ROS 2 Action으로 검증했다.
+3. 웹 관제의 `manipulate` 즉시 성공 경로를 Action client로 교체하고, 기존 검증 phase를 PLANNED backend에 연결한다.
 4. phase 표시 smoke 시연과 ACT 과적합 기준선을 만든다.
 5. ACT_ALL과 로컬 ACT checkpoint를 만든다.
 6. 같은 protocol로 PLANNED_ALL·ACT_ALL·HYBRID를 비교한다.
