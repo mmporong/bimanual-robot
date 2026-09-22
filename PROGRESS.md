@@ -9,8 +9,9 @@
 - 4개 테이블의 냉수·온수 주문을 받는 CPU 전용 관제 상태기계를 추가했다. 주문 ID 멱등 처리, 우선순위 큐, 한 개의 활성 Mission, phase 재시도·실패 종료를 검사한다.
 - 현재 위치→주방→손님 테이블→충전소 경로와 조작 명목 소비량을 합산해 다음 주문 수행 여부를 정한다. 배터리가 충분하면 손님 테이블에서 다음 주방 Mission을 시작하고, 부족하면 충전소 복귀·충전 뒤 재개한다.
 - 기존 4테이블 지도와 팽창 A*를 navigation command에 재사용했다. `navigate`, `manipulate`, `charge` 명령은 이후 Nav2·`ExecuteManipulationSkill`·도크 backend가 받을 계약이며 현재는 즉시 성공 dry-run이다.
-- 로컬 HTTP API와 주문 화면을 추가했다. 화면에서 냉수·온수와 테이블을 선택하고 현재 phase, 배터리, 큐, 이벤트를 확인한다. 상태는 JSON과 JSONL로 저장한다.
-- 이 구현은 실물·ROS 2·카메라·Isaac Sim에 접속하지 않는다. 인증·TLS·DB·다중 로봇 배차·무선 복구·실제 충전 확인도 남아 있다.
+- 로컬 HTTP API와 운영형 주문 화면을 추가했다. 4테이블 식당 지도, 현재 이동 경로, 11개 phase, 냉수·온수 주문, 큐, 누적 이력과 이벤트를 한 화면에서 확인한다.
+- 주문·이벤트·실행 명령·최신 snapshot을 SQLite에 저장한다. 기본 경로는 `$HOME/.local/state/bimanual-robot/service-order-server/`이며 서버 재시작 뒤 활성 주문, phase, 배터리와 큐를 복구한다. JSON과 JSONL은 확인용으로 함께 남긴다.
+- 이 구현은 실물·ROS 2·카메라·Isaac Sim에 접속하지 않는다. 인증·TLS·다중 로봇 배차·무선 복구·실제 충전 확인도 남아 있다.
 - 실행법과 다음 adapter 경계: [웹 주문·Mission Queue·배터리 관제 dry-run](docs/20260922_웹주문_미션관제_dry-run.md)
 
 ## 2026-09-22 | 차체 완성 전 지도·박스 station·충전소 왕복 기준선

@@ -174,6 +174,94 @@ class MissionController:
         self.events: list[dict] = []
         self._record("CONTROLLER_STARTED")
 
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot: dict,
+        *,
+        config: dict | None = None,
+        layout: dict | None = None,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> "MissionController":
+        """Restore a validated controller snapshot after a server restart."""
+        if not isinstance(snapshot, dict) or snapshot.get("schema") != "service_mission_snapshot_v1":
+            raise ValueError("service mission snapshot schema mismatch")
+        battery_percent = _finite_number(snapshot.get("battery_percent"), "battery_percent")
+        controller = cls(
+            config=config,
+            layout=layout,
+            battery_percent=battery_percent,
+            clock=clock,
+        )
+        raw_orders = snapshot.get("orders")
+        if not isinstance(raw_orders, list):
+            raise ValueError("snapshot orders must be a list")
+        restored: dict[str, ServiceOrder] = {}
+        sequences: set[int] = set()
+        for raw in raw_orders:
+            if not isinstance(raw, dict):
+                raise ValueError("snapshot order must be an object")
+            try:
+                order = ServiceOrder(**raw)
+            except TypeError as exc:
+                raise ValueError("snapshot order fields are invalid") from exc
+            if not ORDER_ID_PATTERN.fullmatch(order.order_id) or order.order_id in restored:
+                raise ValueError("snapshot order_id is invalid or duplicated")
+            if order.table_id not in controller.table_ids or order.drink not in DRINKS:
+                raise ValueError("snapshot order destination or drink is invalid")
+            if order.state not in ORDER_STATES:
+                raise ValueError("snapshot order state is invalid")
+            if isinstance(order.priority, bool) or not isinstance(order.priority, int) or not 0 <= order.priority <= 9:
+                raise ValueError("snapshot order priority is invalid")
+            if isinstance(order.sequence, bool) or not isinstance(order.sequence, int) or order.sequence < 1:
+                raise ValueError("snapshot order sequence is invalid")
+            if order.sequence in sequences:
+                raise ValueError("snapshot order sequence is duplicated")
+            _parse_timestamp(order.created_at)
+            if order.completed_at is not None:
+                _parse_timestamp(order.completed_at)
+            restored[order.order_id] = order
+            sequences.add(order.sequence)
+
+        phase = snapshot.get("phase")
+        valid_phases = set(SERVICE_PHASES) | SYSTEM_PHASES
+        if phase not in valid_phases:
+            raise ValueError("snapshot phase is invalid")
+        current_location = snapshot.get("current_location")
+        if current_location not in controller.layout["waypoints"]:
+            raise ValueError("snapshot current_location is invalid")
+        active_order_id = snapshot.get("active_order_id")
+        running_order_ids = [order.order_id for order in restored.values() if order.state == "RUNNING"]
+        if active_order_id is not None:
+            active = restored.get(active_order_id)
+            if (active is None or active.state != "RUNNING" or phase not in SERVICE_PHASES
+                    or running_order_ids != [active_order_id]):
+                raise ValueError("snapshot active order is inconsistent")
+        elif phase in SERVICE_PHASES or running_order_ids:
+            raise ValueError("snapshot service phase requires an active order")
+        phase_attempt = snapshot.get("phase_attempt")
+        if isinstance(phase_attempt, bool) or not isinstance(phase_attempt, int) or phase_attempt < 0:
+            raise ValueError("snapshot phase_attempt is invalid")
+        raw_events = snapshot.get("events", [])
+        if not isinstance(raw_events, list) or not all(isinstance(event, dict) for event in raw_events):
+            raise ValueError("snapshot events must be a list of objects")
+        event_sequences = [event.get("sequence_number") for event in raw_events]
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 1 for value in event_sequences):
+            raise ValueError("snapshot event sequence is invalid")
+        if event_sequences != sorted(set(event_sequences)):
+            raise ValueError("snapshot event sequence is duplicated or unordered")
+
+        controller.orders = restored
+        controller.sequence = max(sequences, default=0)
+        controller.event_sequence = max(event_sequences, default=0)
+        controller.active_order_id = active_order_id
+        controller.phase = phase
+        controller.phase_attempt = phase_attempt
+        controller.current_location = current_location
+        controller.events = raw_events[-controller.config["event_history_limit"] :]
+        controller._record("CONTROLLER_RESTORED")
+        return controller
+
     @property
     def active_order(self) -> ServiceOrder | None:
         return self.orders.get(self.active_order_id) if self.active_order_id else None

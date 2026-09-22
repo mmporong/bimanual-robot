@@ -43,7 +43,8 @@
 웹에서 4개 테이블의 냉수·온수 주문을 넣는 CPU 관제 dry-run도 추가했다. 주문 ID 중복 방지,
 우선순위 큐, 한 개의 활성 Mission, phase 재시도·실패 종료, 연속 주문 시 충전소 생략,
 배터리 부족 시 충전 선행을 검사한다. 현재 backend는 명령을 즉시 성공 처리하며 Nav2·ROS 2·
-Isaac Sim·실물에 접속하지 않는다. 실행법과 API는
+Isaac Sim·실물에 접속하지 않는다. 식당 지도·현재 경로·미션 phase·주문 이력 화면과 SQLite
+영속 저장을 제공하며, 서버 재시작 때 활성 주문과 큐를 복구한다. 실행법과 API는
 [웹 주문·Mission Queue·배터리 관제 dry-run](docs/20260922_웹주문_미션관제_dry-run.md)에 정리했다.
 높은 중앙 받침 없이 **기존 450×340 mm 상판의 양팔 사이에 컵을 놓고 운반하는 경로**를 검증했다.
 가구·팔·컵·바닥 접촉을 검사하고, 테이블 지지와 그리퍼 열림·손 이격까지 확인한다.
@@ -509,7 +510,7 @@ python3 tools/servo/execute_safe_recovery.py \
 | 기구 | 상·하부 450×340 mm, 바퀴 포함 폭 540 mm, 실차 기하 중심거리 510 mm, 추가 적재 5 kg 수동 평지 주행 예비 통과, 완성 모델 명목 빈 질량 7.379 kg | 실제 차체·총질량, 전류·온도·전압 강하·연속 운전, 압출재·체결홀·평탄도 실측 |
 | URDF | 58링크/57관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
 | IK | 투명 컵 검출, 평면 보정 도구, 왼팔 DLS·FK 시험, 충돌 감사, 저장 자세 비교·시간 동기 오프라인 스케줄 | 실측 평면/TCP, 실제 구동 경로의 시간 동기·추종 검증. 기존 실행기는 동기 추종 보증 없음 |
-| 웹·Mission 관제 | 4테이블 냉수·온수 주문, 멱등 주문 ID, 우선순위 큐, 단일 활성 Mission, 배터리 분기 CPU dry-run | 인증·무선 복구·영속 DB·다중 로봇 배차·실제 backend |
+| 웹·Mission 관제 | 4테이블 냉수·온수 주문, 운영 화면, 멱등 ID, 우선순위 큐, 단일 활성 Mission, 배터리 분기, SQLite 재시작 복구 | 인증·무선 fault-injection·다중 로봇 배차·실제 backend |
 | ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
 | Nav2 | JD-AMR 선행 기체에 지도 종속 station·박스 대기·home 자세 복귀 구현, 로컬 시험 통과 | 새 지도 생성, station 교시, 실차 왕복·장애물·실제 도킹 실측 |
 | ACT | 리서치·데이터 계약 | 현행 물 서빙 시연·모델·rollout 없음 |
