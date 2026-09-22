@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HOLD THE FLOW 관제</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f4f5f0;
+      --ink: #18231f;
+      --muted: #65716b;
+      --line: #cbd1cb;
+      --water: #1769e0;
+      --water-soft: #dcecff;
+      --hot: #c75531;
+      --hot-soft: #f7dfd7;
+      --ok: #267455;
+      --warn: #d08b27;
+      --fail: #b83f43;
+      --panel: #ffffff;
+      --shadow: 0 18px 48px rgba(24, 35, 31, .09);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(rgba(24,35,31,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(24,35,31,.035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 24px 24px;
+      color: var(--ink);
+      font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      min-height: 100vh;
+    }
+    button { font: inherit; }
+    .shell { max-width: 1480px; margin: 0 auto; padding: 28px; }
+    header {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 24px; margin-bottom: 22px;
+    }
+    h1 { font-size: clamp(30px, 4vw, 58px); line-height: .95; letter-spacing: -.055em; margin: 0; }
+    .sub { max-width: 520px; margin: 12px 0 0; color: var(--muted); line-height: 1.55; }
+    .mode {
+      padding: 10px 13px; background: var(--ink); color: white;
+      font-size: 13px; white-space: nowrap;
+    }
+    .grid { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(480px, 1.7fr); gap: 20px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .order-panel { padding: 22px; align-self: start; }
+    h2 { font-size: 17px; margin: 0 0 16px; letter-spacing: -.02em; }
+    .drink-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+    .drink-switch button, .table-button {
+      border: 1px solid var(--line); background: white; color: var(--ink); cursor: pointer;
+    }
+    .drink-switch button { padding: 13px 10px; }
+    .drink-switch button[aria-pressed="true"][data-drink="COLD_WATER"] { background: var(--water-soft); border-color: var(--water); color: #0b4cae; }
+    .drink-switch button[aria-pressed="true"][data-drink="HOT_WATER"] { background: var(--hot-soft); border-color: var(--hot); color: #8a321c; }
+    .tables { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .table-button { min-height: 86px; text-align: left; padding: 14px; position: relative; }
+    .table-button span { display: block; color: var(--muted); font-size: 12px; margin-top: 5px; }
+    .table-button:hover { border-color: var(--ink); }
+    button:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
+    .notice { min-height: 45px; margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .notice.error { color: var(--fail); }
+    .operations { display: grid; gap: 20px; }
+    .status { display: grid; grid-template-columns: 1.3fr .7fr; }
+    .mission { padding: 24px; border-right: 1px solid var(--line); }
+    .phase { font-size: clamp(24px, 3vw, 42px); font-weight: 750; letter-spacing: -.045em; margin: 4px 0 8px; word-break: break-word; }
+    .mission-meta { color: var(--muted); line-height: 1.6; font-size: 14px; }
+    .battery { padding: 24px; display: flex; flex-direction: column; justify-content: space-between; }
+    .battery-value { font-size: 42px; font-weight: 750; letter-spacing: -.05em; }
+    .battery-track { height: 9px; background: #e5e8e4; overflow: hidden; margin-top: 10px; }
+    .battery-fill { height: 100%; background: var(--ok); transition: width .25s linear; }
+    .route-rail { padding: 22px 24px 25px; overflow-x: auto; }
+    .rail { min-width: 800px; display: grid; grid-template-columns: repeat(6, 1fr); align-items: start; position: relative; }
+    .rail::before { content: ""; position: absolute; top: 15px; left: 8%; right: 8%; height: 2px; background: var(--line); }
+    .rail-step { position: relative; text-align: center; color: var(--muted); font-size: 12px; }
+    .rail-dot { width: 30px; height: 30px; border: 2px solid var(--line); background: white; border-radius: 50%; margin: 0 auto 9px; position: relative; z-index: 1; }
+    .rail-step.active { color: var(--ink); font-weight: 700; }
+    .rail-step.active .rail-dot { border-color: var(--water); background: var(--water); box-shadow: 0 0 0 5px var(--water-soft); }
+    .rail-step.done .rail-dot { border-color: var(--ok); background: var(--ok); }
+    .lower { display: grid; grid-template-columns: 1fr 1.1fr; gap: 20px; }
+    .list-panel { padding: 20px; min-height: 290px; }
+    .queue-list, .event-list { display: grid; gap: 8px; max-height: 300px; overflow: auto; }
+    .ticket { border-left: 4px solid var(--water); background: #f7f9f7; padding: 11px 12px; font-size: 13px; }
+    .ticket.hot { border-left-color: var(--hot); }
+    .ticket strong { display: block; margin-bottom: 4px; }
+    .ticket small { color: var(--muted); }
+    .event { display: grid; grid-template-columns: 58px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid #e7e9e6; font-size: 12px; }
+    .event code { color: var(--muted); font-family: ui-monospace, SFMono-Regular, monospace; }
+    .empty { color: var(--muted); font-size: 13px; padding: 18px 0; }
+    @media (max-width: 900px) {
+      .shell { padding: 18px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .grid, .lower { grid-template-columns: 1fr; }
+      .status { grid-template-columns: 1fr; }
+      .mission { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+    @media (prefers-reduced-motion: reduce) { .battery-fill { transition: none; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1>HOLD THE FLOW</h1>
+        <p class="sub">테이블 주문을 Mission Queue로 바꾸고, 주방 준비부터 배달과 충전 복귀까지 한 화면에서 확인합니다.</p>
+      </div>
+      <div class="mode">시뮬레이션 dry-run · 실물 미접속</div>
+    </header>
+    <section class="grid">
+      <aside class="panel order-panel">
+        <h2>음료를 선택하세요</h2>
+        <div class="drink-switch">
+          <button type="button" data-drink="COLD_WATER" aria-pressed="true">냉수</button>
+          <button type="button" data-drink="HOT_WATER" aria-pressed="false">온수</button>
+        </div>
+        <h2>어느 테이블로 보낼까요?</h2>
+        <div class="tables">
+          <button class="table-button" data-table="table_1">1번 테이블<span>남동 구역</span></button>
+          <button class="table-button" data-table="table_2">2번 테이블<span>북동 구역</span></button>
+          <button class="table-button" data-table="table_3">3번 테이블<span>남서 구역</span></button>
+          <button class="table-button" data-table="table_4">4번 테이블<span>북서 구역</span></button>
+        </div>
+        <p id="notice" class="notice">테이블을 누르면 주문이 큐에 추가됩니다.</p>
+      </aside>
+      <div class="operations">
+        <section class="panel status">
+          <div class="mission">
+            <h2>현재 임무</h2>
+            <div id="phase" class="phase">상태 확인 중</div>
+            <div id="mission-meta" class="mission-meta">관제 서버에 연결하고 있습니다.</div>
+          </div>
+          <div class="battery">
+            <h2>배터리</h2>
+            <div>
+              <div id="battery-value" class="battery-value">--%</div>
+              <div class="battery-track"><div id="battery-fill" class="battery-fill"></div></div>
+            </div>
+          </div>
+        </section>
+        <section class="panel route-rail">
+          <h2>서비스 흐름</h2>
+          <div class="rail">
+            <div class="rail-step" data-stage="DOCK"><div class="rail-dot"></div>충전소</div>
+            <div class="rail-step" data-stage="KITCHEN"><div class="rail-dot"></div>주방 이동</div>
+            <div class="rail-step" data-stage="GRASP"><div class="rail-dot"></div>컵·병 파지</div>
+            <div class="rail-step" data-stage="POUR"><div class="rail-dot"></div>물붓기</div>
+            <div class="rail-step" data-stage="TABLE"><div class="rail-dot"></div>테이블 이동</div>
+            <div class="rail-step" data-stage="SERVE"><div class="rail-dot"></div>배치</div>
+          </div>
+        </section>
+        <div class="lower">
+          <section class="panel list-panel">
+            <h2>주문 큐</h2>
+            <div id="queue" class="queue-list"><div class="empty">대기 주문이 없습니다.</div></div>
+          </section>
+          <section class="panel list-panel">
+            <h2>최근 이벤트</h2>
+            <div id="events" class="event-list"><div class="empty">이벤트를 기다리고 있습니다.</div></div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    let selectedDrink = "COLD_WATER";
+    const notice = document.querySelector("#notice");
+    const phaseNames = {
+      IDLE_AT_DOCK: "충전소 대기", NAVIGATE_KITCHEN: "주방으로 이동",
+      ALIGN_KITCHEN: "주방 작업대 정렬", GRASP_CUP: "컵 파지",
+      GRASP_BOTTLE: "물병 파지", POUR: "컵에 물붓기",
+      RETURN_BOTTLE: "물병 원위치", PLACE_DECK: "컵 상판 적재",
+      NAVIGATE_TABLE: "손님 테이블로 이동", ALIGN_TABLE: "테이블 정렬",
+      REGRASP_CUP: "컵 재파지", SERVE: "컵 내려놓기",
+      NAVIGATE_DOCK: "충전소로 복귀", CHARGING: "충전 중"
+    };
+    const stageForPhase = phase => {
+      if (["IDLE_AT_DOCK", "NAVIGATE_DOCK", "CHARGING"].includes(phase)) return "DOCK";
+      if (["NAVIGATE_KITCHEN", "ALIGN_KITCHEN"].includes(phase)) return "KITCHEN";
+      if (["GRASP_CUP", "GRASP_BOTTLE"].includes(phase)) return "GRASP";
+      if (["POUR", "RETURN_BOTTLE", "PLACE_DECK"].includes(phase)) return "POUR";
+      if (["NAVIGATE_TABLE", "ALIGN_TABLE", "REGRASP_CUP"].includes(phase)) return "TABLE";
+      return "SERVE";
+    };
+    document.querySelectorAll("[data-drink]").forEach(button => button.addEventListener("click", () => {
+      selectedDrink = button.dataset.drink;
+      document.querySelectorAll("[data-drink]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+    }));
+    document.querySelectorAll("[data-table]").forEach(button => button.addEventListener("click", async () => {
+      const label = selectedDrink === "COLD_WATER" ? "냉수" : "온수";
+      const order = {
+        order_id: `WEB-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        table_id: button.dataset.table,
+        drink: selectedDrink,
+        priority: 0
+      };
+      try {
+        const response = await fetch("/api/orders", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(order)});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || data.error);
+        notice.className = "notice";
+        notice.textContent = `${button.textContent.trim()} ${label} 주문을 등록했습니다.`;
+        render(data.state);
+      } catch (error) {
+        notice.className = "notice error";
+        notice.textContent = `주문을 등록하지 못했습니다: ${error.message}`;
+      }
+    }));
+    function render(state) {
+      document.querySelector("#phase").textContent = phaseNames[state.phase] || state.phase;
+      const active = state.orders.find(order => order.order_id === state.active_order_id);
+      document.querySelector("#mission-meta").textContent = active
+        ? `${active.order_id} · ${active.table_id.replace("table_", "")}번 테이블 · ${active.drink === "COLD_WATER" ? "냉수" : "온수"} · ${state.current_location}`
+        : `현재 위치 ${state.current_location} · 대기 ${state.queue.length}건`;
+      const battery = Math.max(0, Math.min(100, state.battery_percent));
+      document.querySelector("#battery-value").textContent = `${battery.toFixed(1)}%`;
+      document.querySelector("#battery-fill").style.width = `${battery}%`;
+      document.querySelector("#battery-fill").style.background = battery < 25 ? "var(--fail)" : battery < 45 ? "var(--warn)" : "var(--ok)";
+      const activeStage = stageForPhase(state.phase);
+      const stages = ["DOCK", "KITCHEN", "GRASP", "POUR", "TABLE", "SERVE"];
+      const activeIndex = stages.indexOf(activeStage);
+      document.querySelectorAll(".rail-step").forEach((step, index) => {
+        step.classList.toggle("active", index === activeIndex);
+        step.classList.toggle("done", Boolean(active) && index < activeIndex);
+      });
+      const queuedOrders = state.queue.map(id => state.orders.find(order => order.order_id === id));
+      document.querySelector("#queue").innerHTML = queuedOrders.length ? queuedOrders.map(order => `
+        <div class="ticket ${order.drink === "HOT_WATER" ? "hot" : ""}">
+          <strong>${order.table_id.replace("table_", "")}번 테이블 · ${order.drink === "COLD_WATER" ? "냉수" : "온수"}</strong>
+          <small>${order.order_id} / 우선순위 ${order.priority}</small>
+        </div>`).join("") : '<div class="empty">대기 주문이 없습니다.</div>';
+      const events = state.events.slice(-12).reverse();
+      document.querySelector("#events").innerHTML = events.length ? events.map(event => `
+        <div class="event"><code>#${event.sequence_number}</code><span>${event.kind}<br><code>${event.phase}</code></span></div>`).join("") : '<div class="empty">이벤트를 기다리고 있습니다.</div>';
+    }
+    async function refresh() {
+      try {
+        const response = await fetch("/api/state", {cache: "no-store"});
+        if (!response.ok) throw new Error("관제 상태 응답 오류");
+        render(await response.json());
+      } catch (error) {
+        notice.className = "notice error";
+        notice.textContent = error.message;
+      }
+    }
+    refresh();
+    setInterval(refresh, 600);
+  </script>
+</body>
+</html>
