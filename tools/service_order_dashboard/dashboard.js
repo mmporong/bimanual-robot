@@ -153,6 +153,9 @@
     text("storage-backend", persistence.enabled ? `SQLite schema v${persistence.schema_version}` : "비활성"); text("storage-path", persistence.database_path || "—");
     text("command-name", data.command?.name || "—");
     const modeLabels = {ros2_manipulation_mock: "ROS 2 조작 mock", ros2_planned_artifact_replay: "PLANNED 산출물 재생", ros2_planned_session: "PLANNED 세션", simulation_dry_run: "CPU dry-run"};
+    if (backend.executor_kind === "isaac_physics") {
+      modeLabels.ros2_planned_session = "Isaac 물리 실행 · 충전소/충전 mock";
+    }
     text("mode-badge", modeLabels[backend.mode] || backend.mode || "모드 미확인");
     text("execution-backend", backend.active_goal ? `${backend.mode} · Action 실행 중` : backend.mode || "—");
     text("backend-result", result ? (result.success ? `성공 · ${result.adapter}` : `실패 · ${result.failure_code || result.adapter}`) : "실행 기록 없음");

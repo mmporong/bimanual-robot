@@ -75,6 +75,8 @@ class ServiceApplication:
             return
         self.state_dir.mkdir(parents=True, exist_ok=True)
         snapshot = self.controller.snapshot()
+        snapshot['execution_backend'] = self.backend.info()
+        snapshot['simulator_accessed'] = snapshot['execution_backend'].get('simulator_accessed', False)
         if self.store is not None:
             self.store.persist(snapshot, command)
         temporary = self.state_dir / "snapshot.json.tmp"
@@ -101,6 +103,7 @@ class ServiceApplication:
                 "waypoints": self.controller.layout["waypoints"],
             }
             snapshot["execution_backend"] = self.backend.info()
+            snapshot['simulator_accessed'] = snapshot['execution_backend'].get('simulator_accessed', False)
             snapshot["last_backend_result"] = self.last_backend_result
             return snapshot
 
@@ -151,6 +154,8 @@ class ServiceApplication:
             }
 
     def step(self, *, success: bool = True, failure: str | None = None) -> dict:
+        if self.backend.mode == 'ros2_planned_session':
+            raise BackendBusyError('manual phase advance is disabled for persistent executor sessions')
         if not self.execution_lock.acquire(blocking=False):
             raise BackendBusyError("a backend command is already running")
         try:
@@ -391,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     worker = threading.Thread(target=auto_step, args=(app, args.auto_step_s, stop), daemon=True)
     worker.start()
     print(f"service order dashboard: http://{args.host}:{server.server_port}", flush=True)
-    print(f"mode: {backend.mode} (no robot, camera, or Isaac Sim access)", flush=True)
+    print(f"mode: {backend.mode} (hardware disabled; simulator access depends on backend)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

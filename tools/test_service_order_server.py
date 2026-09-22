@@ -11,6 +11,7 @@ import pytest
 from service_mission_control import MissionController
 from service_execution_backend import BackendResult, ImmediateBackend, Ros2ManipulationBackend
 from service_order_server import (
+    BackendBusyError,
     DASHBOARD_JS,
     INDEX,
     ServiceApplication,
@@ -175,6 +176,32 @@ class FailureBackend(ImmediateBackend):
         if command["kind"] == "manipulate":
             return BackendResult(False, "POSE_TOLERANCE", self.mode)
         return BackendResult(True, adapter=self.mode)
+
+
+def test_persistent_executor_cannot_be_advanced_by_manual_step(tmp_path):
+    backend = ImmediateBackend()
+    backend.mode = 'ros2_planned_session'
+    app = ServiceApplication(MissionController(), tmp_path, backend)
+    try:
+        with pytest.raises(BackendBusyError, match='manual phase advance'):
+            app.step()
+        assert app.controller.phase == 'IDLE_AT_DOCK'
+    finally:
+        app.close()
+
+
+def test_executor_observation_is_retained_in_status_and_snapshot(tmp_path):
+    class ObservedBackend(ImmediateBackend):
+        def info(self):
+            return {**super().info(), 'simulator_accessed': True, 'executor_kind': 'isaac_physics'}
+    app = ServiceApplication(MissionController(), tmp_path, ObservedBackend())
+    try:
+        assert app.state()['simulator_accessed'] is True
+        saved = json.loads((tmp_path / 'snapshot.json').read_text())
+        assert saved['simulator_accessed'] is True
+        assert saved['execution_backend']['executor_kind'] == 'isaac_physics'
+    finally:
+        app.close()
 
 
 def test_backend_result_controls_phase_and_is_persisted(tmp_path):

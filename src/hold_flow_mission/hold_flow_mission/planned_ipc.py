@@ -105,6 +105,13 @@ def execute_phase(
             raise PlannedIpcError("IPC_PROTOCOL_ERROR", f"executor response lacks {key}")
     if not isinstance(response["success"], bool):
         raise PlannedIpcError("IPC_PROTOCOL_ERROR", "executor success must be boolean")
+    if response.get('success') and response.get('executor_kind') == 'isaac_physics':
+        expected = {'request_id': request_id, 'mission_id': mission_id,
+                    'order_id': order_id, 'completed_phase': phase_id}
+        if any(response.get(key) != value for key, value in expected.items()):
+            raise PlannedIpcError('IPC_RESULT_ID_MISMATCH', 'physics result identity differs from request')
+        if response.get('simulator_accessed') is not True or response.get('hardware_accessed') is not False:
+            raise PlannedIpcError('IPC_PROTOCOL_ERROR', 'physics result provenance is invalid')
     return response
 
 

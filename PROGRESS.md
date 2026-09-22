@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-09-22 | 웹 주문과 단일 Isaac 월드의 phase별 물리 실행 연결
+
+- `simulate_restaurant_mobile.py --executor-socket`으로 같은 Isaac 월드에서 조작 9단계를 요청별로 실행한다. 단계 사이에는 물리 시간을 멈추고, 컵·병·물 입자 상태를 유지한다. socket thread는 요청을 받고 시뮬레이션 thread만 PhysX를 갱신한다.
+- 완료 phase의 실관측을 ROS Action `message`와 웹 SQLite command에 함께 저장한다. 최종 성공은 전체 판정과 `result.json` 저장 뒤 반환하며, 증거 저장 실패도 Action·프로세스 실패로 처리한다.
+- 실제 executor는 한 world에 한 mission만 허용한다. 요청 ID와 payload를 대조하고, 다른 executor의 socket을 덮어쓰지 않는다. timeout·취소의 최초 원인을 보존하며 중단 뒤 같은 world를 재개하지 않는다.
+- 관제의 수동 phase 전진을 session backend에서 차단했다. 첫 executor 결과 뒤 화면·상태 파일에서 실제 Isaac 실행과 mock을 구분한다.
+- 검증 범위는 과거 접촉 프록시를 이용한 1번 테이블 냉수 주문이다. `ALIGN_TABLE`에 주방 이탈·바퀴 주행·테이블 접근이 임시로 포함된다. 충전소 출발·복귀·충전, 여러 테이블·병 선택, 반복 주문의 물리 reset, 최신 순정 그리퍼의 물리 검증은 남아 있다.
+- 코드·문서 독립 검토에서 차단 이슈 없음. 관련 테스트 89개, Python 구문·미사용 이름 검사, JavaScript 구문 검사, Markdown 링크 검사를 통과했다.
+- 실제 웹 주문 `ISAAC-PHASE-004`가 9개 조작 Action과 전체 물리 판정을 통과했다. `ipc_phase04/result.json`은 `task_pass=true`, `failure=water_served`, 시뮬레이션 282.942초·벽시계 841.484초를 기록했다. 물 입자 918개 중 컵 642개·병 275개·외부 1개, 운반 중 추가 손실 0개, 검사 대상 환경·자가충돌 최대 접촉력 0 N, 접지 검사 PASS다. 입력·도구 SHA-256도 현재 파일과 일치한다.
+- 근거는 로컬 `/data/$USER/robot-artifacts/restaurant/ipc_phase04/`의 `result.json`, `executor_phases.jsonl`, `web_orders.sqlite3`, `execution.log`에 보존했다. 실물·학습 정책은 사용하지 않았으며 액체 입자 수는 실물 용량 측정을 뜻하지 않는다.
+- 앞선 `ipc_phase01`에서는 컵·병 파지 뒤 웹 취소를 보내 54.267초 시점 `POUR`의 `CANCELED`, `stop_confirmed=true`를 확인했다. 초기화 중 코드 보완으로 중단한 `ipc_phase02`와 기존 socket 재사용을 거부한 `ipc_phase03`은 성공 근거에 넣지 않는다.
+
 ## 2026-09-22 | PLANNED executor Python ABI 분리와 상태 보존 IPC
 
 - Isaac Sim 5.1 환경은 Python 3.11, ROS 2 Jazzy `rclpy`는 Python 3.12 확장이라 같은 프로세스에서 로드할 수 없음을 재현했다. 두 runtime을 Unix socket JSON 계약 `planned_executor_ipc_v1`으로 분리했다.

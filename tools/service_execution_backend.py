@@ -8,6 +8,7 @@ remain explicit immediate mocks until their adapters are implemented.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 import math
 from typing import Protocol
 
@@ -190,6 +191,17 @@ class Ros2PlannedSessionBackend(Ros2ManipulationBackend):
 
     mode = "ros2_planned_session"
 
+    def execute(self, command: dict, *, mission_id: str | None, phase_attempt: int) -> BackendResult:
+        result = super().execute(command, mission_id=mission_id, phase_attempt=phase_attempt)
+        if result.action_result:
+            try:
+                evidence = json.loads(result.action_result.get('message', ''))
+            except (TypeError, ValueError):
+                evidence = None
+            if isinstance(evidence, dict):
+                self._executor_evidence = evidence
+        return result
+
     def info(self) -> dict:
         info = super().info()
         info.update({
@@ -197,5 +209,8 @@ class Ros2PlannedSessionBackend(Ros2ManipulationBackend):
             "manipulation": "/execute_manipulation_skill (persistent IPC session)",
             "executor_transport": "unix_socket_json",
             "hardware_accessed": False,
+            "simulator_accessed": getattr(self, '_executor_evidence', {}).get('simulator_accessed'),
+            "executor_kind": getattr(self, '_executor_evidence', {}).get('executor_kind', 'unconfirmed'),
+            "scope": "table_1 cold water; dock navigation and charging are mocks",
         })
         return info

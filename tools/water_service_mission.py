@@ -347,6 +347,10 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         radius = source["experiment"]["cup_radius_profile_m"][0][1] if edge_supported else None
         return support_config_for_surface(left, center, surface, radius)
 
+    executor = getattr(args, '_phase_executor', None)
+    if executor is not None:
+        from isaac_phase_executor import phase_for_tick
+
     for tick in range(round(args.duration/dt)):
         t = tick*dt
         position, orientation = robot.get_world_pose()
@@ -373,6 +377,23 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             path = route if state == "NAVIGATE" else [[-1.75, -2.25]]
             nav = follow_path([*position[:2], yaw], path, math.pi)
             velocities = [nav["left_rad_s"], nav["right_rad_s"]]
+
+        if executor is not None:
+            requested_phase = phase_for_tick(state, phase, t)
+            boundary_failure = ''
+            if requested_phase != executor.running_phase:
+                if executor.running_phase == 'GRASP_CUP' and not lift_verified['cup']:
+                    boundary_failure = 'cup_lift_not_verified'
+                elif executor.running_phase == 'GRASP_BOTTLE' and not lift_verified['bottle']:
+                    boundary_failure = 'bottle_lift_not_verified'
+                elif executor.running_phase == 'POUR' and (
+                        last['liquid']['cup'] < math.ceil(count*.60)
+                        or last['liquid']['outside'] > math.floor(count*.05)):
+                    boundary_failure = 'pour_delivery_not_verified'
+            stop = executor.checkpoint(requested_phase, last, boundary_failure=boundary_failure)
+            if stop:
+                reason = stop
+                break
 
         if previous_state != state:
             events.append({"state": state, "time_s": t})

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
@@ -57,10 +58,11 @@ class PlannedIpcServer(Node):
     def cancel_callback(self, goal_handle: object) -> CancelResponse:
         mission_id = str(goal_handle.request.mission_id)
         try:
-            cancel_session(self._socket_path, mission_id)
+            accepted = cancel_session(self._socket_path, mission_id)
         except PlannedIpcError as exc:
             self.get_logger().warning(f"PLANNED IPC 취소 전달 실패 [{exc.code}]: {exc}")
-        return CancelResponse.ACCEPT
+            return CancelResponse.REJECT
+        return CancelResponse.ACCEPT if accepted else CancelResponse.REJECT
 
     def _base_result(self, spec: ManipulationGoalSpec, started_at: object):
         result = ExecuteManipulationSkill.Result()
@@ -102,9 +104,16 @@ class PlannedIpcServer(Node):
             )
         except PlannedIpcError as exc:
             response = {"success": False, "failure_code": exc.code, "message": str(exc)}
+            # A lost response is not proof that physics stopped.
+            try:
+                response['stop_requested'] = cancel_session(self._socket_path, spec.mission_id)
+            except PlannedIpcError:
+                response['stop_requested'] = False
+            response['stop_confirmed'] = False
 
         result = self._base_result(spec, started_at)
-        result.message = str(response.get("message", ""))
+        # Preserve executor provenance and observed poses/contacts in SQLite via Action result.
+        result.message = json.dumps(response, ensure_ascii=False)
         if goal_handle.is_cancel_requested:
             try:
                 cancel_session(self._socket_path, spec.mission_id)
@@ -113,7 +122,11 @@ class PlannedIpcServer(Node):
             result.canceled = True
             result.failure_stage = phase.phase_id
             result.failure_code = "CANCELED"
-            result.message = "Action cancellation won the executor response race"
+            if response.get('executor_kind') == 'isaac_physics' and not response.get('stop_confirmed'):
+                result.canceled = False
+                result.failure_code = 'CANCEL_STOP_UNCONFIRMED'
+                goal_handle.abort()
+                return result
             goal_handle.canceled()
             return result
         if response.get("success"):

@@ -24,7 +24,7 @@
 | `hold_flow_safety` | 예정 | C++·rclcpp·tf2 | command lease, 관절 delta, timeout, 정지 | 첫 실물 명령 전에 |
 | `hold_flow_hardware` | 예정 | Python→C++ 선택·LeRobot·serial | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 | 포트·서보 변종 감사 |
 | `hold_flow_learning` | 예정 | Python·LeRobot 0.6.1·PyTorch·ACT | phase 표시 수집, ACT_ALL·로컬 ACT, rollout, 실패/HIL 데이터 | phase·backend 계약·데이터 게이트 |
-| `hold_flow_mission` | 조작 실행 v0.4 | Python·rclpy | mock Action, 산출물 재생, Python 3.11 executor용 Unix socket Action bridge | IPC 반대편 Isaac PLANNED executor |
+| `hold_flow_mission` | 조작 실행 v0.4 | Python·rclpy | mock·산출물 재생·단일 Isaac 월드 phase 실행을 잇는 Unix socket Action bridge | 반복 주문 물리 reset·Nav2·ACT 연결 |
 | `hold_flow_logging` | 예정 | Python·rosbag2·JSON·Parquet | request ID로 미션·episode·실패 연결 | 인터페이스와 함께 |
 | `hold_flow_isaac` | importer·정적 계약 존재 | Python·USD·Isaac Sim 6.0·ROS 2 Bridge | v0.3 URDF→USD, Nav2·양팔·센서 SIL, sim/real gap | Isaac 장비에서 USD·접촉·gain 검증 |
 

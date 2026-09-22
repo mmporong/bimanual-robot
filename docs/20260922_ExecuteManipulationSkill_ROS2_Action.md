@@ -214,9 +214,9 @@ runtime을 억지로 넣지 않고 다음처럼 분리했다.
   -> 장기 실행 executor (Python 3.11 / Isaac Sim)
 ```
 
-현재 executor 쪽은 `planned_executor_ipc_mock.py`다. 같은 `mission_id`에서 9개 phase의 순서를
-기억하고, 중복 request ID는 같은 결과를 반환하며, 동시 요청·범위 밖 테이블·온수·timeout을
-실패 코드로 돌려준다. 웹 취소는 별도 socket 연결로 실행 중 session에 전달된다.
+4B.1의 CPU 검증에는 `planned_executor_ipc_mock.py`를 사용한다. 같은 `mission_id`에서 9개 phase의
+순서를 기억하고 동일 ID의 완료 결과를 재생한다. 이 mock의 동시 실행 제한은 mission 내부에만
+적용되므로 실제 월드 실행기로 사용하지 않는다. 실제 Isaac 연결은 다음 9절의 단일-world executor를 사용한다.
 
 세 터미널에서 아래 순서로 실행한다.
 
@@ -251,16 +251,109 @@ source install/setup.bash
 결과는 `superseded=true`로 SQLite에 저장됐다. 이 검증에서 executor의
 `simulator_accessed`는 false다.
 
-## 9. 다음 연결
+## 9. Isaac 물리 executor (4B.2)
+
+`tools/simulate_restaurant_mobile.py --executor-socket`은 물리 월드를 한 번 초기화하고
+웹에서 전달되는 조작 phase를 기다린다. 요청을 기다리는 동안 `world.step()`을 호출하지 않아
+컵·병·물의 시뮬레이션 상태와 시간이 유지된다. socket thread는 요청만 등록하며 관절·USD·PhysX는
+시뮬레이션 thread만 다룬다. 벽시계 기준 장시간 정지의 실물 안정성을 검증하는 방식은 아니다.
+
+| Action phase | 실제 시뮬레이션 동작과 다음 단계 조건 |
+|---|---|
+| ALIGN_KITCHEN | 주방에 배치된 기체·물체 초기 안정화. 충전소에서 오는 주행은 포함하지 않음 |
+| GRASP_CUP | 왼손 컵 파지·상승, 접촉과 상승 높이 유지 확인 |
+| GRASP_BOTTLE | 오른손 병 파지·상승, 접촉과 상승 높이 유지 확인 |
+| POUR | 병 기울이기·복원. 전체 입자 중 컵 수용 60% 이상, 외부 유출 5% 이하 |
+| RETURN_BOTTLE | 병을 주방에 내려놓고 손가락 접촉 해제·테이블 지지 확인 |
+| PLACE_DECK | 선택된 상판 영역에 컵을 놓고 지지·해제·팔 이격 확인 |
+| ALIGN_TABLE | **임시로 후진·1번 테이블까지 바퀴 주행·접근·정지를 모두 포함** |
+| REGRASP_CUP | 상판 컵 재파지·상승과 접촉 유지 확인 |
+| SERVE | 손님 테이블에 놓고 지지·해제 확인, 전체 접지 검사와 결과 저장 후 성공 반환 |
+
+관제 `NAVIGATE_TABLE`은 아직 mock이며 실제 주행은 뒤의 `ALIGN_TABLE`에서 일어난다.
+따라서 관제 지도 위치는 논리 위치이지 실시간 시뮬레이터 측정 위치가 아니다. 이를 Nav2 또는
+별도 navigation adapter로 옮기는 작업이 남아 있다. 충전소 출발·복귀·충전도 mock이다.
+
+지원 범위는 **1번 테이블·냉수 주문 한 건**이다. 온도 물리 모델이나 두 병 중 선택 기능은 없다.
+동일 프로세스의 다른 mission은 `WORLD_OWNED`로 거부한다. 완료·취소·timeout 뒤에는 새 월드가
+필요하며, 서버 snapshot만 복원해 물리 상태를 복구할 수 없다. 반복 주문 자동 reset은 미구현이다.
+현재 입력 `plate_input10`은 과거 접촉 프록시로, 최신 순정 왼손의 물리 검증을 대신하지 않는다.
+
+### 실행
+
+설치된 로컬 Isaac Sim 5.1/Python 3.11과 ROS Jazzy/Python 3.12를 분리한다. 아래에서
+`plate_input10`은 Git에 없는 로컬 시뮬레이션 입력이다. 새 기기는 입력 자산을 별도로 준비해야 한다.
+기존 경로의 socket을 자동 삭제하지 않으므로 다른 executor가 쓰는 경로를 재사용하지 않는다.
+
+터미널 1 — Isaac 월드:
+
+```bash
+cd "$HOME/bimanual-robot"
+export HF_EXECUTOR_SOCKET="/tmp/hold-flow-isaac-$(id -u).sock"
+PYTHONPATH="$PWD/src/hold_flow_mission" \
+  "/data/$USER/conda-envs/leisaac/bin/python" tools/simulate_restaurant_mobile.py \
+  --source-dir "/data/$USER/robot-artifacts/restaurant/plate_input10" \
+  --output-dir "/data/$USER/robot-artifacts/restaurant/ipc_$(date +%Y%m%d_%H%M%S)" \
+  --headless --mode water-service --duration 320 \
+  --executor-socket "$HF_EXECUTOR_SOCKET" --executor-idle-timeout 180
+```
+
+터미널 2 — ROS Action bridge:
+
+```bash
+cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=73
+export PYTHONPATH="$PWD/src/hold_flow_mission:$PYTHONPATH"
+export HF_EXECUTOR_SOCKET="/tmp/hold-flow-isaac-$(id -u).sock"
+python3 -m hold_flow_mission.planned_ipc_server \
+  --ros-args -p socket_path:="$HF_EXECUTOR_SOCKET"
+```
+
+터미널 3 — 웹 관제:
+
+```bash
+cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=73
+export PYTHONPATH="$PWD/src/hold_flow_mission:$PYTHONPATH"
+python3 tools/service_order_server.py --backend ros2-planned-session \
+  --port 8768 --auto-step-s 0.1 --manipulation-timeout-s 600 \
+  --state-dir "$HOME/.local/state/bimanual-robot/isaac-$(date +%Y%m%d_%H%M%S)"
+```
+
+socket이 준비된 뒤 `http://127.0.0.1:8768/`에서 **1번 테이블·냉수** 주문을 넣는다.
+600초는 phase별 벽시계 timeout이고, 320초는 전체 시뮬레이션 시간 상한이다.
+실행 중 수동 phase 전진 API는 차단한다. 영상은 기본으로 저장하지 않는다.
+
+### 증거와 중단
+
+2026-09-22 로컬 `ipc_phase04` 실행은 웹 주문 `ISAAC-PHASE-004`의 9개 Action과 전체 물리 판정을
+통과했다. 시뮬레이션 282.942초, 컵 입자 642/918개, 운반 중 추가 입자 손실 0개였다.
+`result.json`의 입력·도구 SHA-256은 검증 시점 코드와 일치했다. 웹 관제의 마지막
+`IDLE_AT_DOCK`는 논리 상태이며 이 실행에서 충전소까지 물리 주행한 근거가 아니다.
+영속 백업은 로컬 `/data/$USER/robot-artifacts/restaurant/ipc_phase04/`에 있다.
+
+- `executor_phases.jsonl`: 요청·미션·주문 ID, 완료 phase, 관측값, 성공/실패 코드.
+- `result.json`: 전체 접촉·입자·주행 결과와 입력·실행 코드 해시. 최종 Action 성공은 이 파일 저장 뒤 반환한다.
+- 웹 상태 디렉터리의 SQLite `commands.payload_json`: Action result의 `message`에 executor 응답 JSON을 보존한다.
+- `simulator_accessed=true`, `executor_kind=isaac_physics`는 mock 결과와 구분한다. 웹은 첫 결과를 받기 전에는 executor 종류를 미확인으로 표시한다.
+- 취소 요청 수락과 정지 확인은 다르다. `CANCELING`은 요청 접수, 최종 결과의 `stop_confirmed=true`가 시뮬레이션 루프 종료 확인이다.
+- timeout·접촉 실패 뒤에는 같은 월드를 계속 실행하지 않는다. 응답 유실 시 bridge가 취소를 요청하며, 정지 확인이 없으면 성공으로 간주하지 않는다.
+- 실행 코드가 변경되었으므로 이전 `cinematic_wide01`의 코드 해시 재생은 현재 checkout에서 불일치할 수 있다. 옛 해시를 수정하지 말고 해당 코드 snapshot 또는 새 실행 근거를 사용한다.
+
+## 10. 다음 연결
 
 1. 완료: 웹 관제 runtime이 조작 Action 결과를 기다리고 성공일 때만 다음 phase로 전이한다.
 2. 완료: `ABORTED`, `CANCELED`, timeout과 `superseded`를 SQLite command payload에 저장한다.
 3. 완료: 검증된 `water_service_mission.py` 결과를 해시·phase 근거가 있는 PLANNED 산출물 backend로 연결했다.
 4. 완료: Python ABI를 분리한 Unix socket 계약에서 phase 순서·중복·취소·timeout과 session 유지를 검증했다.
-5. `water_service_mission.py` 루프를 phase 경계에서 멈추고 재개해 IPC session과 Isaac 월드를 연결한다.
-6. 취소 요청을 Isaac PLANNED executor와 이후 ACT·hardware bridge까지 전달한다.
+5. 구현: `water_service_mission.py` 루프를 phase 경계에서 멈추고 재개해 IPC session과 Isaac 월드를 연결했다.
+6. Isaac PLANNED executor의 취소·timeout 이후에는 새 월드 초기화가 필요하다. 이후 ACT·hardware bridge의 중단 계약을 별도로 연결한다.
 7. ACT backend와 checkpoint loader를 추가해 같은 Action 계약으로 세 전략을 비교한다.
 
-현재는 한 관제 명령을 한 phase Action으로 바꾸고 mock·검증 산출물·상태 보존 IPC mock 결과를
-소비한다. 여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만, IPC 반대편의 Isaac executor와
-PLANNED↔ACT lease 전환 실행기는 아직 없다.
+현재는 한 관제 명령을 한 phase Action으로 바꾸고 mock·검증 산출물·단일 Isaac 월드의 결과를
+소비한다. 여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만 PLANNED↔ACT 전환 실행기는
+아직 없다. 충전소 왕복, 여러 테이블·병, 반복 주문 물리 초기화를 다음 단계로 진행한다.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import ExitStack, nullcontext
 import hashlib
 import json
 import math
@@ -33,6 +34,15 @@ def record_failure(result, exc):
 
 
 def run(args):
+    result = {}
+    _run(args, result)
+    # Evaluate after evidence persistence and all cleanup, not before finally.
+    return 0 if result.get('task_pass') or result.get('negative_control_pass') else 1
+
+
+def _run(args, result):
+    if getattr(args, 'executor_socket', None) and args.mode != 'water-service':
+        raise ValueError('--executor-socket requires water-service')
     if getattr(args, 'cinematic', False) and (args.mode != 'water-service' or args.record):
         raise ValueError('--cinematic requires water-service and replaces --record')
     if args.mode == "static-pose-probe" and args.pose_probes is None:
@@ -60,9 +70,9 @@ def run(args):
                          "renderer": "RayTracedLighting", "anti_aliasing": 0,
                          "multi_gpu": False, "fast_shutdown": True})
     samples = []
-    result = {"task_pass": False, "hardware_accessed": False,
+    result.update({"task_pass": False, "hardware_accessed": False,
               "object_attachment_used": False, "nav2_executed": False,
-              "failure": "initialization", "mode": args.mode}
+              "failure": "initialization", "mode": args.mode})
     result["tool_sha256"] = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
         for name in ("simulate_restaurant_mobile.py", "mobile_service_control.py", "build_restaurant_scene.py",
             "restaurant_layout.py", "bimanual_pour_plan.py", "pour_geometry.py", "bottle_contact_model.py",
@@ -77,6 +87,10 @@ def run(args):
             result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
         camera_config = Path(__file__).resolve().parents[1]/"config/simulation/service_cameras.json"
         result["input_sha256"][str(camera_config)] = hashlib.sha256(camera_config.read_bytes()).hexdigest()
+        if getattr(args, 'executor_socket', None):
+            result['tool_sha256']['isaac_phase_executor.py'] = hashlib.sha256(
+                Path(__file__).with_name('isaac_phase_executor.py').read_bytes()).hexdigest()
+            result['executor_mode'] = 'isaac_phase_gated_single_mission'
     if cinematic:
         result['tool_sha256']['service_cinematic.py'] = hashlib.sha256(Path(__file__).with_name('service_cinematic.py').read_bytes()).hexdigest()
         cinematic_config = Path(__file__).resolve().parents[1]/'config/simulation/service_cinematic.json'
@@ -88,6 +102,8 @@ def run(args):
         for name in ("released_cup_probe.py", "water_service_mission.py", "tray_transfer_plan.py",
                      "raised_tray_transfer.py", "search_tray_mounts.py"):
             result["tool_sha256"][name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+    executor_scope = ExitStack()
+    phase_executor = None
     try:
         import omni.kit.app
         import omni.kit.commands
@@ -250,6 +266,13 @@ def run(args):
             return 0 if result["task_pass"] else 1
         if water_service:
             from water_service_mission import execute_water_service
+            scope = nullcontext(None)
+            if getattr(args, 'executor_socket', None):
+                from isaac_phase_executor import serve_executor
+                scope = serve_executor(args.executor_socket, output,
+                    idle_timeout_sec=args.executor_idle_timeout)
+            phase_executor = executor_scope.enter_context(scope)
+            args._phase_executor = phase_executor
             result.update(execute_water_service(args, source, water_scene, world, robot, controller,
                 names, q, wheels, arm_indices, rigid, body_names, furniture, contact, ground, output))
             samples = result.pop("samples")
@@ -481,7 +504,12 @@ def run(args):
             except Exception as exc:
                 record_failure(result, exc)
         result["samples"] = samples
-        (output/"result.json").write_text(json.dumps(result, indent=2)+"\n")
+        if phase_executor is not None:
+            phase_executor.finish(result['task_pass'], result['failure'],
+                result.get('final_observation'), persist_result=result)
+        else:
+            (output/"result.json").write_text(json.dumps(result, indent=2)+"\n")
+        executor_scope.close()
         print(json.dumps({k: v for k, v in result.items() if k != "samples"}), flush=True)
         # Kit's graceful extension teardown can leave native threads alive.
         # Persist evidence first, then request the appropriate process status.
@@ -500,6 +528,8 @@ if __name__ == "__main__":
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--cinematic", action="store_true", help="1080p24 editorial camera capture; no physics changes")
     parser.add_argument("--duration", type=float, default=25.)
+    parser.add_argument("--executor-socket", type=Path, help="Gate water-service physics by IPC phase requests")
+    parser.add_argument("--executor-idle-timeout", type=float, default=120.)
     parser.add_argument("--pose-probes", type=Path)
     parser.add_argument("--mode", choices=("drive-smoke", "collision-probe", "service", "pick-only", "water-service", "static-pose-probe", "released-cup-probe"), default="drive-smoke")
     raise SystemExit(run(parser.parse_args()))
