@@ -1,6 +1,7 @@
 import copy
 import io
 import json
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +44,50 @@ def test_invalid_speed_rejected(value):
     c['shots'][0]['speed'] = value
     with pytest.raises(ValueError):
         validate_config(c)
+
+
+def test_wide_edit_has_no_zoom_or_orbit_and_only_one_brief_detail():
+    c = config()
+    details = [s for s in c['shots'] if s['anchor'] != 'base']
+    assert len(details) == 1
+    assert details[0]['anchor'] == 'cup'
+    assert (details[0]['end_s'] - details[0]['start_s']) / details[0]['speed'] <= 4
+    wide_views = {
+        (tuple(s['eye_start_m']), tuple(s['target_offset_m']), s['focal_start_mm'])
+        for s in c['shots'] if s['anchor'] == 'base'
+    }
+    assert len(wide_views) == 2  # Workcell wide and travel/service wide, not a cut per caption.
+    for shot in c['shots']:
+        assert shot['eye_start_m'] == shot['eye_end_m']
+        assert shot['focal_start_mm'] == shot['focal_end_mm']
+    for tick in (0, 170*120, 240*120, 275*120):
+        origin = cinematic_frame(c, tick, {'base': np.zeros(3)})['view']
+        translation = np.array([-1.8, -2.25, .035])
+        moved = cinematic_frame(c, tick, {'base': translation})['view']
+        for field in ('eye_m', 'target_m'):
+            np.testing.assert_allclose(np.subtract(moved[field], origin[field]), translation)
+
+
+def test_wide_camera_keeps_full_robot_envelope_with_screen_margin():
+    c = config()
+    # Conservative presentation envelope; not a measured body collision bound.
+    envelope = np.array(list(product([-.62, .62], [-.62, .62], [0., 1.4])))
+    for shot in c['shots']:
+        if shot['anchor'] != 'base':
+            continue
+        eye = np.array(shot['eye_start_m'])
+        forward = np.array(shot['target_offset_m']) - eye
+        forward /= np.linalg.norm(forward)
+        right = np.cross(forward, [0., 0., 1.])
+        right /= np.linalg.norm(right)
+        up = np.cross(right, forward)
+        delta = envelope - eye
+        depth = delta @ forward
+        half_width = c['horizontal_aperture_mm'] / (2 * shot['focal_start_mm'])
+        half_height = half_width * 9 / 16
+        assert depth.min() > 0
+        assert np.max(np.abs(delta @ right / depth / half_width)) < .85
+        assert np.max(np.abs(delta @ up / depth / half_height)) < .85
 
 
 def test_no_camera_capture_outside_timeline_and_invalid_anchor_rejected():

@@ -159,6 +159,19 @@ def test_caption_background_is_visible_on_bright_footage(tmp_path):
     assert green > red + 60 and blue > red + 50  # Visible teal progress bar.
 
 
+def test_reviewed_head_cuts_keep_complete_source_frame_mapping():
+    shots = validate_records(records(24))
+    kept, dropped = edited_shots(shots, 2, {'approach': 12, 'serve': 5})
+    assert len(kept) == 1
+    assert kept[0]['source_kept_start_frame'] == 17
+    assert kept[0]['start_frame'] == 0 and kept[0]['end_frame'] == 7
+    assert dropped == {'approach': list(range(12)), 'serve': list(range(12, 17))}
+    for invalid in ({'missing': 2}, {'serve': -1}, {'serve': True}, {'serve': 13},
+                    {'approach': 12, 'serve': 12}, ['not-a-map']):
+        with pytest.raises(ValueError):
+            edited_shots(shots, 2, invalid)
+
+
 def test_trim_rejects_negative_or_shots_without_a_remaining_frame():
     shots = validate_records(records(4))
     with pytest.raises(ValueError, match="non-negative"):

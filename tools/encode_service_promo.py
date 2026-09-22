@@ -177,7 +177,8 @@ def _speed_label(speed: float) -> str:
     return f"{value}× SPEED"
 
 
-def edited_shots(shots: list[dict], trim_shot_head_frames: int) -> tuple[list[dict], dict[str, list[int]]]:
+def edited_shots(shots: list[dict], trim_shot_head_frames: int,
+                 head_cuts: dict[str, int] | None = None) -> tuple[list[dict], dict[str, list[int]]]:
     if (isinstance(trim_shot_head_frames, bool)
             or not isinstance(trim_shot_head_frames, int)
             or trim_shot_head_frames < 0):
@@ -185,23 +186,36 @@ def edited_shots(shots: list[dict], trim_shot_head_frames: int) -> tuple[list[di
     output_start = 0
     edited = []
     dropped = {}
+    head_cuts = {} if head_cuts is None else head_cuts
+    if not isinstance(head_cuts, dict) or set(head_cuts) - {s['shot_id'] for s in shots}:
+        raise ValueError('head cuts must map known shot IDs to frame counts')
+    if any(isinstance(n, bool) or not isinstance(n, int) or n < 0 for n in head_cuts.values()):
+        raise ValueError('head cuts require non-negative integer frame counts')
     for shot in shots:
         source_start = shot["start_frame"]
         source_end = shot["end_frame"]
-        if source_end - source_start <= trim_shot_head_frames:
+        trim = head_cuts.get(shot['shot_id'], trim_shot_head_frames)
+        if trim > source_end - source_start:
+            raise ValueError('head cut exceeds shot length')
+        if shot['shot_id'] in head_cuts and trim == source_end - source_start:
+            dropped[shot['shot_id']] = list(range(source_start, source_end))
+            continue
+        if source_end - source_start <= trim:
             raise ValueError("shot is too short for trim-shot-head-frames")
-        kept_count = source_end - source_start - trim_shot_head_frames
+        kept_count = source_end - source_start - trim
         item = {
             **shot,
             "source_start_frame": source_start,
-            "source_kept_start_frame": source_start + trim_shot_head_frames,
+            "source_kept_start_frame": source_start + trim,
             "source_end_frame": source_end,
             "start_frame": output_start,
             "end_frame": output_start + kept_count,
         }
         edited.append(item)
-        dropped[shot["shot_id"]] = list(range(source_start, source_start + trim_shot_head_frames))
+        dropped[shot["shot_id"]] = list(range(source_start, source_start + trim))
         output_start += kept_count
+    if not edited:
+        raise ValueError('head cuts removed every shot')
     return edited, dropped
 
 
@@ -314,6 +328,7 @@ def encode(
     output: Path,
     music: bool = True,
     trim_shot_head_frames: int = 2,
+    head_cuts: dict[str, int] | None = None,
 ) -> Path:
     directory = directory.resolve()
     output = output.resolve()
@@ -327,7 +342,7 @@ def encode(
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise RuntimeError("ffmpeg and ffprobe are required")
     source, metadata, result, records, source_shots, source_probe = validate_inputs(directory)
-    shots, dropped_source_frames = edited_shots(source_shots, trim_shot_head_frames)
+    shots, dropped_source_frames = edited_shots(source_shots, trim_shot_head_frames, head_cuts)
     output_frame_count = sum(shot["end_frame"] - shot["start_frame"] for shot in shots)
     duration = output_frame_count / FPS
 
@@ -396,8 +411,9 @@ def encode(
             "frame_interpolation": False,
             "retiming": False,
             "timing_retime": False,
-            "cut_deletion": trim_shot_head_frames > 0,
+            "cut_deletion": any(dropped_source_frames.values()),
             "trim_shot_head_frames": trim_shot_head_frames,
+            "head_cuts": head_cuts or {},
             "original_generated_music": music,
             "real_audio": False,
             "real_audio_false": True,
@@ -426,12 +442,17 @@ def main() -> None:
         "--trim-shot-head-frames", type=int, default=2, metavar="N",
         help="drop N render-lag frames at every shot head (default: 2; use 0 to disable)",
     )
+    parser.add_argument(
+        '--head-cuts', type=Path,
+        help='JSON mapping shot IDs to total head frames to remove; full length omits a shot',
+    )
     arguments = parser.parse_args()
     encode(
         arguments.directory,
         arguments.output,
         arguments.music,
         arguments.trim_shot_head_frames,
+        json.loads(arguments.head_cuts.read_text(encoding='utf-8')) if arguments.head_cuts else None,
     )
 
 
