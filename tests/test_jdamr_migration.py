@@ -73,6 +73,35 @@ class MigrationTest(unittest.TestCase):
         self.assertFalse(contract['software']['physical_motion_enabled'])
         self.assertFalse(contract['software']['synthetic_traction_guard_for_physical_robot'])
 
+    def test_precursor_roundtrip_keeps_physical_claims_bounded(self):
+        contract = json.loads(
+            (migration.ROOT / 'config/navigation/jdamr_migration.json').read_text())
+        precursor = contract['precursor_service_roundtrip']
+        self.assertEqual(
+            precursor['evidence']['repository_commit'],
+            contract['source']['commit'])
+        self.assertEqual(len(contract['source']['commit']), 40)
+        self.assertEqual(
+            precursor['mission_sequence'], [
+                'for_each_selected_station_in_order',
+                'navigate_to_station',
+                'confirm_station_pose',
+                'hold_continuous_stable_front_box_observation_for_20s',
+                'navigate_to_home_dock',
+                'confirm_home_position_and_yaw',
+            ])
+        self.assertEqual(
+            precursor['internal_pose_target']['xy_tolerance_m'], 0.05)
+        self.assertEqual(
+            precursor['internal_pose_target']['yaw_tolerance_deg'], 3.0)
+        self.assertFalse(precursor['box_observer']['velocity_output'])
+        self.assertIn(
+            'charging contact or current confirmation',
+            precursor['not_claimed'])
+        self.assertIn(
+            'PHYSICAL_MAP_AND_ROUNDTRIP_PENDING',
+            precursor['verification_status'])
+
     def test_pinned_commit_excludes_dirty_files_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

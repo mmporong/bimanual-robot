@@ -128,6 +128,7 @@
 
 - [모터 이식·기본 주행 → SLAM·RGB-D 통합 순서](docs/20260913_RGBD_SLAM_우선순위와_다음세션.md)
 - [기존 JD-AMR 이식 기준선과 하드웨어 확인 사항](docs/20260912_JDAMR_SLAM_실기체이식.md)
+- [차체 완성 전 지도 생성·박스 station·충전소 왕복 검증](docs/20260922_차체완성전_지도기반_왕복검증.md)
 - [시뮬레이션·Mimic·매니퓰레이션 평가와 AMMR 통합 방향](docs/20260913_시뮬레이션_매니퓰레이션_AMMR_고도화.md)
 
 
@@ -504,7 +505,7 @@ python3 tools/servo/execute_safe_recovery.py \
 | URDF | 58링크/57관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
 | IK | 투명 컵 검출, 평면 보정 도구, 왼팔 DLS·FK 시험, 충돌 감사, 저장 자세 비교·시간 동기 오프라인 스케줄 | 실측 평면/TCP, 실제 구동 경로의 시간 동기·추종 검증. 기존 실행기는 동기 추종 보증 없음 |
 | ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
-| Nav2 | 설계·검증 항목 문서화 | 지도·station·반복 접근·장애물·도킹 실측 |
+| Nav2 | JD-AMR 선행 기체에 지도 종속 station·박스 대기·home 자세 복귀 구현, 로컬 시험 통과 | 새 지도 생성, station 교시, 실차 왕복·장애물·실제 도킹 실측 |
 | ACT | 리서치·데이터 계약 | 현행 물 서빙 시연·모델·rollout 없음 |
 | PLANNED/ACT/HYBRID | phase·전환·평가 구조 문서화 | router·Action·backend·전환 테스트 구현 |
 | YOLO 물 양 | segmentation·보정 방식 결정 | 카메라 POC·라벨·보정표·실시간 판정 |
@@ -574,6 +575,7 @@ bimanual-robot/
 | ROS 2 패키지·인터페이스 경계 | [`src/README.md`](src/README.md) |
 | 기구 계산 | [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) |
 | URDF·Isaac Sim·JDAMR 구동계 | [450×340 mm 4분할 상판 모델](docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md) |
+| 차체 완성 전 지도·station·충전소 왕복 검증 | [2026-09-22 선행 왕복 검증](docs/20260922_차체완성전_지도기반_왕복검증.md) |
 | CAD·출력물 | [`design/cad/README.md`](design/cad/README.md) |
 | 실패 저장·재시험·학습 사용 | [`data/failures/README.md`](data/failures/README.md) |
 | 전체 변경 증거 | [`PROGRESS.md`](PROGRESS.md) |

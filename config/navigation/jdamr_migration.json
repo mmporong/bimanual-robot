@@ -2,7 +2,7 @@
   "schema_version": 2,
   "source": {
     "repository": "https://github.com/mmporong/jdamr_cube_ros",
-    "commit": "8204ffde34985fa7984fe4e6093801ff3897432c"
+    "commit": "8e1156453106da47a088518f2975e999a39225ff"
   },
   "target_design": {
     "source": "design/mechanical/hold_flow_mechanical_v0_3.yaml",
@@ -103,6 +103,49 @@
       "battery_voltage_sag_v": null,
       "claim_limit": "This is not a rated payload or continuous-duty validation"
     }
+  },
+  "precursor_service_roundtrip": {
+    "purpose": "pre-completion physical base validation for the final bimanual serving mission",
+    "execution_base": "JD-AMR with reused Pi, controller, wheel motors, G4 LiDAR and Astra S",
+    "mapping": "Cartographer 2D map creation followed by saved-map AMCL and Nav2",
+    "stations": {
+      "home": "home_dock map pose with x, y and yaw",
+      "destinations": "map-bound named service poses such as kitchen_station and table_01",
+      "asset_binding": ["map YAML/image hash", "keepout YAML/image hash", "live OccupancyGrid signature"]
+    },
+    "mission_sequence": [
+      "for_each_selected_station_in_order",
+      "navigate_to_station",
+      "confirm_station_pose",
+      "hold_continuous_stable_front_box_observation_for_20s",
+      "navigate_to_home_dock",
+      "confirm_home_position_and_yaw"
+    ],
+    "internal_pose_target": {
+      "xy_tolerance_m": 0.05,
+      "yaw_tolerance_deg": 3.0,
+      "stationary_hold_s": 1.0,
+      "physical_accuracy": "NOT_EXTERNALLY_MEASURED"
+    },
+    "box_observer": {
+      "topic": "/box_parking/perception_status",
+      "required_surface_kind": "front",
+      "continuous_dwell_s": 20.0,
+      "timeout_s": 45.0,
+      "velocity_output": false
+    },
+    "evidence": {
+      "registry": "$HOME/jdamr_data/service/destinations.yaml",
+      "run_logs": "$HOME/jdamr_data/service/*.jsonl",
+      "repository_commit": "8e1156453106da47a088518f2975e999a39225ff"
+    },
+    "verification_status": "CODE_AND_UNIT_TEST_PASS_PHYSICAL_MAP_AND_ROUNDTRIP_PENDING",
+    "not_claimed": [
+      "charging contact or current confirmation",
+      "box class or contents recognition",
+      "bimanual manipulation completion",
+      "final chassis payload and stopping performance"
+    ]
   },
   "base_nav2_candidate_policy": {
     "claim_scope": "offline_base_only_review_not_physical_navigation_approval",
