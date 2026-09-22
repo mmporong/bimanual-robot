@@ -61,6 +61,19 @@ def _frame(sid, instr, params=b""):
     return b"\xff\xff" + body + bytes([(~sum(body)) & 0xFF])
 
 
+def validate_status_packet(expected_sid, head, rest):
+    """요청한 ID의 완전한 status packet인지 검증하고 parameter만 반환한다."""
+    if len(head) != 4 or head[:2] != b"\xff\xff":
+        return None
+    if head[2] != expected_sid or head[3] < 2 or len(rest) != head[3]:
+        return None
+    if ((~(head[2] + head[3] + sum(rest[:-1]))) & 0xFF) != rest[-1]:
+        return None
+    if rest[0] != 0:  # status error byte
+        return None
+    return rest[1:-1]
+
+
 class Bus:
     """실물 버스."""
 
@@ -79,12 +92,8 @@ class Bus:
         if len(head) < 4 or head[:2] != b"\xff\xff":
             return None
         rest = self.ser.read(head[3])
-        if len(rest) < head[3]:
-            return None
-        # 체크섬 검증 — 깨진 패킷이 그럴듯한 값으로 들어오는 것을 막는다 (2026-09-09 범위 기록 오염)
-        if ((~(head[2] + head[3] + sum(rest[:-1]))) & 0xFF) != rest[-1]:
-            return None
-        return rest[1:-1]
+        # ID·길이·오류·체크섬 검증 — 다른 서보의 지연 응답을 현재 값으로 오인하지 않는다.
+        return validate_status_packet(sid, head, rest)
 
     def ping(self, sid):
         return self._txn(sid, 0x01) is not None

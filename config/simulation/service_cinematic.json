@@ -1,0 +1,428 @@
+{
+  "schema": "service_cinematic_v1",
+  "status": "editorial_camera_design_not_sensor_calibration",
+  "reference_run": "cinematic_service02",
+  "fps": 24,
+  "width": 1920,
+  "height": 1080,
+  "horizontal_aperture_mm": 36,
+  "shots": [
+    {
+      "id": "01_hero",
+      "start_s": 0,
+      "end_s": 8,
+      "speed": 2,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "한 잔의 물, 테이블까지",
+      "subtitle": "HOLD FLOW · 양팔 물 서빙 로봇"
+    },
+    {
+      "id": "02_cup",
+      "start_s": 8,
+      "end_s": 18,
+      "speed": 2,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "컵을 잡다",
+      "subtitle": "컵의 몸통으로 접근하는 왼손"
+    },
+    {
+      "id": "03_bottle",
+      "start_s": 18,
+      "end_s": 38,
+      "speed": 5,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "병을 들어 올리다",
+      "subtitle": "컵과 병을 나누어 다루는 두 팔"
+    },
+    {
+      "id": "04_pair",
+      "start_s": 38,
+      "end_s": 50,
+      "speed": 4,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "두 팔이 만나는 순간",
+      "subtitle": "컵 입구 위로 병을 옮깁니다"
+    },
+    {
+      "id": "05_pour",
+      "start_s": 50,
+      "end_s": 60,
+      "speed": 2,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "물을 따르다",
+      "subtitle": "전체 동작을 보며 붓기를 준비합니다"
+    },
+    {
+      "id": "06_flow",
+      "start_s": 60,
+      "end_s": 68,
+      "speed": 2,
+      "anchor": "cup",
+      "eye_start_m": [
+        0.55,
+        0.45,
+        0.42
+      ],
+      "eye_end_m": [
+        0.55,
+        0.45,
+        0.42
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.065
+      ],
+      "focal_start_mm": 35,
+      "focal_end_mm": 35,
+      "title": "컵 안으로 흐르는 물",
+      "subtitle": "물 입자까지 포함한 물리 시뮬레이션"
+    },
+    {
+      "id": "07_return",
+      "start_s": 68,
+      "end_s": 103,
+      "speed": 8,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "다음 동작을 준비하다",
+      "subtitle": "컵은 유지하고, 병은 제자리로"
+    },
+    {
+      "id": "08_clear",
+      "start_s": 103,
+      "end_s": 128,
+      "speed": 8,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "상판을 비우다",
+      "subtitle": "병을 놓고 오른팔을 물립니다"
+    },
+    {
+      "id": "09_deposit",
+      "start_s": 128,
+      "end_s": 140,
+      "speed": 2,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "상판에 내려놓다",
+      "subtitle": "높은 받침 없이, 두 팔 사이에"
+    },
+    {
+      "id": "10_release",
+      "start_s": 140,
+      "end_s": 158,
+      "speed": 6,
+      "anchor": "base",
+      "eye_start_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        -2.1,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "손을 떼고, 이동 준비",
+      "subtitle": "상판이 컵을 지지합니다"
+    },
+    {
+      "id": "11_depart",
+      "start_s": 158,
+      "end_s": 172,
+      "speed": 4,
+      "anchor": "base",
+      "eye_start_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "테이블로 출발",
+      "subtitle": "컵을 상판에 올린 채 이동합니다"
+    },
+    {
+      "id": "12_travel",
+      "start_s": 172,
+      "end_s": 215,
+      "speed": 8,
+      "anchor": "base",
+      "eye_start_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "공간을 지나, 손님 곁으로",
+      "subtitle": "이동 중에도 컵은 상판 위에"
+    },
+    {
+      "id": "13_arrive",
+      "start_s": 215,
+      "end_s": 239,
+      "speed": 6,
+      "anchor": "base",
+      "eye_start_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "테이블 앞에 멈추다",
+      "subtitle": "주행을 마치고 팔 동작으로 전환"
+    },
+    {
+      "id": "14_regrasp",
+      "start_s": 239,
+      "end_s": 259,
+      "speed": 4,
+      "anchor": "base",
+      "eye_start_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "다시, 컵을 잡다",
+      "subtitle": "상판에서 손님 테이블로"
+    },
+    {
+      "id": "15_lift",
+      "start_s": 259,
+      "end_s": 269,
+      "speed": 2,
+      "anchor": "base",
+      "eye_start_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "손님에게 한 걸음 더",
+      "subtitle": "물을 담은 컵을 들어 옮깁니다"
+    },
+    {
+      "id": "16_serve",
+      "start_s": 269,
+      "end_s": 420,
+      "speed": 2,
+      "anchor": "base",
+      "eye_start_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "eye_end_m": [
+        1.9,
+        -2.4,
+        2.2
+      ],
+      "target_offset_m": [
+        0,
+        0,
+        0.65
+      ],
+      "focal_start_mm": 26,
+      "focal_end_mm": 26,
+      "title": "한 잔의 서빙, 완료",
+      "subtitle": "테이블에 놓고 손을 물립니다"
+    }
+  ],
+  "editorial_intent": "wide_full_robot_tracking_one_brief_fixed_pour_detail_no_zoom_or_orbit"
+}

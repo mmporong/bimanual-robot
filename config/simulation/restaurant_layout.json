@@ -1,0 +1,49 @@
+{
+  "schema": "restaurant_layout_v1",
+  "status": "presentation_design_assumption_not_measured_site",
+  "room_bounds_m": [-7.0, 1.5, -3.5, 3.5],
+  "wall_height_m": 2.8,
+  "map_resolution_m": 0.05,
+  "planning_radius_m": 0.40,
+  "palette": "warm_oak_ivory_sage",
+  "kitchen": {"center_m": [0.62, 0.0, 0.705], "size_m": [0.65, 1.0, 0.03]},
+  "tables": [
+    {"id": "table_1", "center_m": [-2.65,-2.25], "size_m": [1.2,0.75], "height_m": 0.72},
+    {"id": "table_2", "center_m": [-2.65,2.25], "size_m": [1.2,0.75], "height_m": 0.72},
+    {"id": "table_3", "center_m": [-5.15,-2.25], "size_m": [1.2,0.75], "height_m": 0.72},
+    {"id": "table_4", "center_m": [-5.15,2.25], "size_m": [1.2,0.75], "height_m": 0.72}
+  ],
+  "chairs": [
+    {"center_m": [-3.05,-1.55], "yaw_deg": 180},
+    {"center_m": [-2.25,-1.55], "yaw_deg": 180},
+    {"center_m": [-3.05,1.55], "yaw_deg": 0},
+    {"center_m": [-2.25,1.55], "yaw_deg": 0},
+    {"center_m": [-5.55,-1.55], "yaw_deg": 180},
+    {"center_m": [-4.75,-1.55], "yaw_deg": 180},
+    {"center_m": [-5.55,1.55], "yaw_deg": 0},
+    {"center_m": [-4.75,1.55], "yaw_deg": 0}
+  ],
+  "obstacles": [
+    {"id": "dock_charger", "center_m": [-6.65,0], "size_m": [0.12,0.55]},
+    {"id": "back_counter", "center_m": [1.16,0], "size_m": [0.52,5.2]},
+    {"id": "banquette_south", "center_m": [-3.9,-3.12], "size_m": [4.9,0.52]},
+    {"id": "banquette_north", "center_m": [-3.9,3.12], "size_m": [4.9,0.52]},
+    {"id": "plant_1", "center_m": [-0.4,2.85], "size_m": [0.45,0.45]},
+    {"id": "plant_2", "center_m": [-0.4,-2.85], "size_m": [0.45,0.45]}
+  ],
+  "waypoints": {
+    "dock": [-6.05,0,0],
+    "kitchen": [-0.20,0,0],
+    "table_1": [-1.55,-2.25,3.141592653589793],
+    "table_2": [-1.55,2.25,3.141592653589793],
+    "table_3": [-4.05,-2.25,3.141592653589793],
+    "table_4": [-4.05,2.25,3.141592653589793]
+  },
+  "presentation_cameras": {
+    "overview": {"eye": [-10.0,-10.0,8.0], "target": [-2.75,0,0.55]},
+    "guest_view": {"eye": [-4.1,-2.85,1.65], "target": [0.3,0.1,0.85]},
+    "workcell": {"eye": [-1.65,-1.45,1.7], "target": [0.35,0,0.92]},
+    "cup_detail": {"eye": [0.62,0.48,0.99], "target": [0.39,0.17,0.79]},
+    "floorplan": {"eye": [-2.75,-0.01,13.0], "target": [-2.75,0,0]}
+  }
+}

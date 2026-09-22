@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -36,9 +37,14 @@ sys.modules['ament_index_python.packages'] = None
 print(xacro.process_file(sys.argv[1]).toxml())
 """
         with tempfile.TemporaryDirectory() as directory:
+            env = os.environ.copy()
+            ros_python = Path("/opt/ros/jazzy/lib/python3.12/site-packages")
+            if ros_python.is_dir():
+                existing = env.get("PYTHONPATH", "")
+                env["PYTHONPATH"] = str(ros_python) + (":" + existing if existing else "")
             result = subprocess.run(
                 [sys.executable, "-c", script, str(URDF_PATH.with_suffix(".urdf.xacro"))],
-                cwd=directory, check=True, capture_output=True, text=True,
+                cwd=directory, check=True, capture_output=True, text=True, env=env,
             )
         self.assertEqual(
             ET.canonicalize(result.stdout, strip_text=True),
@@ -53,6 +59,14 @@ print(xacro.process_file(sys.argv[1]).toxml())
         self.assertEqual(spec["chassis"]["plates"]["tabletop"]["z_top"], 720.0)
         self.assertEqual(spec["arm_mounts"]["left"]["xyz"], [20.0, 170.0, 726.0])
         self.assertEqual(spec["arm_mounts"]["right"]["xyz"], [20.0, -170.0, 726.0])
+        self.assertEqual(
+            spec["arm_mounts"]["left"]["gripper"],
+            "stock_so101_rotating_jaw_without_tpu_attachment",
+        )
+        self.assertIsNone(spec["left_cup_gripper"]["selected_attachment"])
+        self.assertFalse(
+            spec["provenance"]["left_finray_fingers_historical"]["current_build_use"]
+        )
         self.assertEqual(spec["camera"]["height_above_tabletop"], 250.0)
         self.assertEqual(spec["camera"]["mount"]["mast_z_bottom"], 728.0)
         self.assertEqual(

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>컵 파지 카메라 관제</title>
+<style>
+  :root{--bg:#dfe6ea;--paper:#f7fafb;--ink:#172129;--muted:#65747e;
+    --line:#bcc9d0;--live:#087c67;--fault:#b73b3b;--blue:#21657a;--stage:#080d10}
+  *{box-sizing:border-box} html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans KR","Malgun Gothic",sans-serif}
+  main{height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:10px;padding:10px 12px}
+  header{display:flex;align-items:center;gap:18px;background:var(--paper);border:1px solid var(--line);padding:10px 14px}
+  h1{font-size:17px;margin:0;letter-spacing:-.02em} header p{margin:0;color:var(--muted);font-size:12px}
+  .readonly{margin-left:auto;border-left:4px solid var(--blue);padding:4px 0 4px 10px;font-size:12px;font-weight:700}
+  .feeds{min-height:0;display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:8px}
+  figure{position:relative;min-width:0;min-height:0;margin:0;background:var(--stage);border:1px solid #293940;overflow:hidden}
+  figure img{display:block;width:100%;height:100%;object-fit:contain}
+  figcaption{position:absolute;left:9px;top:9px;background:rgba(4,10,13,.78);color:#edf7f8;padding:6px 9px;font-size:12px;font-weight:700}
+  .health{position:absolute;right:9px;top:9px;display:flex;align-items:center;gap:6px;background:rgba(4,10,13,.78);color:#d7e3e7;padding:5px 8px;font-size:11px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--fault)} .online .dot{background:#27d3a8}
+  footer{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .camera-row{background:var(--paper);border:1px solid var(--line);padding:8px 11px;display:grid;grid-template-columns:auto 1fr auto;gap:8px 12px;align-items:center}
+  .camera-row b{font-size:12px}.path{color:var(--muted);font:11px ui-monospace,SFMono-Regular,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .metrics{font:11px ui-monospace,SFMono-Regular,Consolas,monospace;text-align:right}
+  .warning{color:#f2c166}
+  @media(max-width:850px){main{height:auto;min-height:100dvh}.feeds{grid-template-columns:1fr;grid-template-rows:56vh 44vh}footer{grid-template-columns:1fr}.readonly{display:none}}
+  @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>컵 파지 카메라 관제</h1>
+    <p>상부 RGB로 작업면을 보고, 왼손목 RGB로 접근 시야를 확인합니다.</p>
+    <div class="readonly">읽기 전용 · 팔 명령 없음</div>
+  </header>
+  <section class="feeds">
+    <figure><img src="/stream/top" alt="상단 RGB 실시간 영상"><figcaption>상단 RGB · 컵 위치</figcaption><div class="health" id="top-health"><span class="dot"></span><span>연결 확인 중</span></div></figure>
+    <figure><img src="/stream/wrist" alt="왼손목 RGB 실시간 영상"><figcaption>왼손목 RGB · 근접 정렬</figcaption><div class="health" id="wrist-health"><span class="dot"></span><span>연결 확인 중</span></div></figure>
+  </section>
+  <footer>
+    <div class="camera-row"><b>상단</b><span class="path" id="top-path">-</span><span class="metrics" id="top-metrics">-</span></div>
+    <div class="camera-row"><b>왼손목</b><span class="path" id="wrist-path">-</span><span class="metrics" id="wrist-metrics">-</span></div>
+  </footer>
+</main>
+<script>
+async function refresh(){
+  try{
+    const response=await fetch('/api/status',{cache:'no-store'});
+    const status=await response.json();
+    for(const name of ['top','wrist']){
+      const item=status[name], health=document.getElementById(name+'-health');
+      health.classList.toggle('online',Boolean(item.online));
+      health.querySelector('span:last-child').textContent=item.online?'실시간':'오프라인';
+      document.getElementById(name+'-path').textContent=item.path;
+      const age=item.frame_age_ms===null?'--':item.frame_age_ms+' ms';
+      document.getElementById(name+'-metrics').textContent=`${item.width}×${item.height} · #${item.sequence} · ${age}`;
+    }
+  }catch(error){
+    for(const name of ['top','wrist']) document.getElementById(name+'-health').querySelector('span:last-child').textContent='상태 API 오류';
+  }
+}
+refresh(); setInterval(refresh,1000);
+</script>
+</body>
+</html>
