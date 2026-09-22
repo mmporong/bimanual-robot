@@ -5,7 +5,8 @@
 따른다. 과거 붓기안의 MoveIt·로드셀 중심 구조는 현행 구현 기준이 아니다.
 
 현재 실제 ROS 2 패키지는 `hold_flow_description`, `hold_flow_interfaces`, `hold_flow_mission`이다.
-`hold_flow_mission`은 조작 Action 계약·관제 명령 adapter·시뮬레이션 mock까지만 구현됐다. 아래
+`hold_flow_mission`은 조작 Action 계약·관제 명령 adapter·시뮬레이션 mock까지 구현됐고,
+`tools/service_order_server.py`의 선택형 backend에서 Action 결과를 소비한다. 아래
 나머지 패키지는 책임과 인터페이스를 먼저 고정한 **구현 예정 경계**이며, 빈 패키지를 완료물처럼
 만들지 않는다.
 
@@ -23,7 +24,7 @@
 | `hold_flow_safety` | 예정 | C++·rclcpp·tf2 | command lease, 관절 delta, timeout, 정지 | 첫 실물 명령 전에 |
 | `hold_flow_hardware` | 예정 | Python→C++ 선택·LeRobot·serial | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 | 포트·서보 변종 감사 |
 | `hold_flow_learning` | 예정 | Python·LeRobot 0.6.1·PyTorch·ACT | phase 표시 수집, ACT_ALL·로컬 ACT, rollout, 실패/HIL 데이터 | phase·backend 계약·데이터 게이트 |
-| `hold_flow_mission` | 조작 mock v0.1 | Python·rclpy | 관제 `manipulate` 변환, Action 성공·취소·timeout mock | 웹 runtime 연결과 PLANNED backend |
+| `hold_flow_mission` | 조작 mock v0.2 | Python·rclpy | 관제 `manipulate` Action 연결, 성공·취소·timeout·SQLite 결과 | 실제 PLANNED backend |
 | `hold_flow_logging` | 예정 | Python·rosbag2·JSON·Parquet | request ID로 미션·episode·실패 연결 | 인터페이스와 함께 |
 | `hold_flow_isaac` | importer·정적 계약 존재 | Python·USD·Isaac Sim 6.0·ROS 2 Bridge | v0.3 URDF→USD, Nav2·양팔·센서 SIL, sim/real gap | Isaac 장비에서 USD·접촉·gain 검증 |
 

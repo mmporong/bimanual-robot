@@ -9,6 +9,7 @@ import threading
 import rclpy
 from action_msgs.msg import GoalStatus
 from rclpy.action import ActionClient
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 
 from hold_flow_interfaces.action import ExecuteManipulationSkill
@@ -20,10 +21,19 @@ ACTION_NAME = "/execute_manipulation_skill"
 
 
 class ManipulationActionClient(Node):
-    def __init__(self) -> None:
-        super().__init__("manipulation_action_client")
+    def __init__(self, *, context: object | None = None) -> None:
+        super().__init__("manipulation_action_client", context=context)
         self.client = ActionClient(self, ExecuteManipulationSkill, ACTION_NAME)
         self.feedback: list[dict] = []
+        self._goal_lock = threading.Lock()
+        self._active_goal_handle: object | None = None
+        self._executor = SingleThreadedExecutor(context=self.context)
+        self._executor.add_node(self)
+
+    def destroy_node(self) -> None:
+        self._executor.remove_node(self)
+        self._executor.shutdown()
+        super().destroy_node()
 
     def execute(
         self,
@@ -31,24 +41,32 @@ class ManipulationActionClient(Node):
         *,
         cancel_after_sec: float | None = None,
     ) -> dict:
+        self.feedback = []
         if not self.client.wait_for_server(timeout_sec=5.0):
             raise RuntimeError(f"Action server unavailable: {ACTION_NAME}")
         goal = spec.populate_action_goal(ExecuteManipulationSkill.Goal())
         send_future = self.client.send_goal_async(goal, feedback_callback=self._feedback)
-        rclpy.spin_until_future_complete(self, send_future)
+        self._executor.spin_until_future_complete(send_future)
         goal_handle = send_future.result()
         if goal_handle is None or not goal_handle.accepted:
             return {"accepted": False, "feedback": self.feedback}
+        with self._goal_lock:
+            self._active_goal_handle = goal_handle
 
         timer: threading.Timer | None = None
         if cancel_after_sec is not None:
             timer = threading.Timer(cancel_after_sec, goal_handle.cancel_goal_async)
             timer.daemon = True
             timer.start()
-        result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result_future)
-        if timer is not None:
-            timer.cancel()
+        try:
+            result_future = goal_handle.get_result_async()
+            self._executor.spin_until_future_complete(result_future)
+        finally:
+            if timer is not None:
+                timer.cancel()
+            with self._goal_lock:
+                if self._active_goal_handle is goal_handle:
+                    self._active_goal_handle = None
         wrapped = result_future.result()
         result = wrapped.result
         return {
@@ -76,6 +94,19 @@ class ManipulationActionClient(Node):
             "message": result.message,
             "feedback": self.feedback,
         }
+
+    def cancel_active(self) -> bool:
+        """Request cancellation of the currently accepted Action goal."""
+        with self._goal_lock:
+            goal_handle = self._active_goal_handle
+        if goal_handle is None:
+            return False
+        goal_handle.cancel_goal_async()
+        return True
+
+    def has_active_goal(self) -> bool:
+        with self._goal_lock:
+            return self._active_goal_handle is not None
 
     def _feedback(self, message: object) -> None:
         feedback = message.feedback

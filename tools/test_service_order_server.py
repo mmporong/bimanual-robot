@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from service_mission_control import MissionController
+from service_execution_backend import BackendResult, ImmediateBackend, Ros2ManipulationBackend
 from service_order_server import (
     DASHBOARD_JS,
     INDEX,
@@ -47,11 +48,20 @@ def test_dashboard_and_health_are_served(server):
     assert "data-table=\"table_4\"" in html
     with urlopen(base + "/api/health", timeout=3) as response:
         health = json.loads(response.read())
-    assert health == {"status": "ok", "mode": "simulation_dry_run"}
+    assert health == {
+        "status": "ok",
+        "mode": "simulation_dry_run",
+        "manipulation": "immediate_success",
+        "navigation": "immediate_success",
+        "charge": "immediate_success",
+        "active_goal": False,
+        "hardware_accessed": False,
+    }
 
     with urlopen(base + "/dashboard.js", timeout=3) as response:
         javascript = response.read().decode()
     assert "renderMap" in javascript
+    assert "execution-backend" in javascript
 
 
 def test_order_api_is_idempotent_and_persists_state(server):
@@ -149,3 +159,80 @@ def test_store_rejects_unknown_schema_version(tmp_path):
         connection.execute("INSERT INTO metadata(key, value) VALUES('schema_version', '99')")
     with pytest.raises(RuntimeError, match="unsupported service-order database schema"):
         ServiceOrderStore(state_dir)
+
+
+@pytest.mark.parametrize("timeout_sec", [0.0, -1.0, float("nan"), float("inf")])
+def test_ros2_backend_rejects_non_positive_or_non_finite_timeout(timeout_sec):
+    with pytest.raises(ValueError, match="positive finite"):
+        Ros2ManipulationBackend(timeout_sec=timeout_sec)
+
+
+class FailureBackend(ImmediateBackend):
+    mode = "test_failure"
+
+    def execute(self, command, *, mission_id, phase_attempt):
+        del mission_id, phase_attempt
+        if command["kind"] == "manipulate":
+            return BackendResult(False, "POSE_TOLERANCE", self.mode)
+        return BackendResult(True, adapter=self.mode)
+
+
+def test_backend_result_controls_phase_and_is_persisted(tmp_path):
+    state_dir = tmp_path / "backend-result"
+    app = ServiceApplication(MissionController(), state_dir, FailureBackend())
+    app.submit({"order_id": "BACKEND-1", "table_id": "table_1", "drink": "COLD_WATER"})
+    navigation = app.execute_next()
+    assert navigation["backend_result"]["success"] is True
+    assert app.controller.phase == "ALIGN_KITCHEN"
+
+    manipulation = app.execute_next()
+    assert manipulation["backend_result"]["failure_code"] == "POSE_TOLERANCE"
+    assert app.controller.phase == "ALIGN_KITCHEN"
+    assert app.controller.phase_attempt == 2
+    with sqlite3.connect(state_dir / "service_mission_control.sqlite3") as connection:
+        payload = json.loads(connection.execute(
+            "SELECT payload_json FROM commands ORDER BY command_sequence DESC LIMIT 1"
+        ).fetchone()[0])
+    assert payload["backend_result"]["failure_code"] == "POSE_TOLERANCE"
+    app.close()
+
+
+class BlockingCancelBackend(ImmediateBackend):
+    mode = "test_blocking_cancel"
+
+    def __init__(self):
+        self.started = threading.Event()
+        self.canceled = threading.Event()
+
+    def execute(self, command, *, mission_id, phase_attempt):
+        del command, mission_id, phase_attempt
+        self.started.set()
+        assert self.canceled.wait(timeout=3)
+        return BackendResult(False, "CANCELED", self.mode)
+
+    def cancel_active(self):
+        self.canceled.set()
+        return True
+
+
+def test_active_order_cancel_propagates_and_backend_result_is_superseded(tmp_path):
+    backend = BlockingCancelBackend()
+    app = ServiceApplication(MissionController(), tmp_path / "cancel", backend)
+    app.submit({"order_id": "CANCEL-1", "table_id": "table_1", "drink": "COLD_WATER"})
+    app.controller.advance()
+    assert app.controller.phase == "ALIGN_KITCHEN"
+
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(app.execute_next()))
+    worker.start()
+    assert backend.started.wait(timeout=2)
+    canceled = app.cancel("CANCEL-1")
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert canceled["backend_cancel_requested"] is True
+    assert canceled["order"]["state"] == "CANCELED"
+    assert result["superseded"] is True
+    assert result["backend_result"]["failure_code"] == "CANCELED"
+    assert app.controller.orders["CANCEL-1"].state == "CANCELED"
+    app.close()

@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-09-22 | 웹 관제와 ROS 2 조작 Action 연결
+
+- `service_order_server.py`에 선택형 `ros2-mock` backend를 추가했다. 기본 `immediate` 모드는 유지하며, `ros2-mock`에서는 조작 phase만 `/execute_manipulation_skill` 결과를 기다린다. 주행·충전은 아직 immediate mock이다.
+- Action 성공일 때만 관제 phase를 전진시킨다. 거부·서버 미응답·timeout·실행 실패는 failure code로 재시도 또는 주문 실패에 반영하고 전체 Action 결과를 SQLite command payload에 저장한다.
+- 실행 중 웹 취소는 활성 Action Goal에 전달한다. 취소로 관제 상태가 먼저 바뀐 뒤 도착한 Action 결과는 `superseded=true`로 기록하고 phase를 다시 전진시키지 않는다.
+- 웹 화면 상단에 CPU dry-run과 ROS 2 조작 mock을 구분하고, 진단 영역에 실행 backend·활성 Goal·최근 backend 결과를 표시한다.
+- 통합 시험에서 냉수 주문 한 건이 조작 Action 9개를 모두 통과해 서빙·충전소 복귀·`IDLE_AT_DOCK`까지 완료됐다. 웹 취소는 Action `CANCELED`와 주문 `CANCELED`로 함께 종료됐다. 0.03초 timeout은 `ALIGN_KITCHEN` 두 번 실패 뒤 주문 `FAILED`와 SQLite 기록으로 남았다.
+- 다음 단계는 기존 `water_service_mission.py`의 검증 phase를 mock 대신 실제 PLANNED backend로 연결하는 것이다.
+
 ## 2026-09-22 | ExecuteManipulationSkill ROS 2 Action·mock backend
 
 - `hold_flow_interfaces`에 `ExecuteManipulationSkill.action`을 추가했다. request·mission·order·skill ID, 전략, phase별 backend·checkpoint, timeout을 Goal로 받고 현재 phase를 feedback으로 보낸다. Result에는 성공·취소·timeout, 실패 phase/code, 시작·종료 시각과 사람 개입 횟수를 남긴다.

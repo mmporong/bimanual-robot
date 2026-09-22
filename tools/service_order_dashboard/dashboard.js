@@ -147,9 +147,15 @@
 
   function renderDiagnostics(data) {
     const persistence = data.persistence || {};
+    const backend = data.execution_backend || {};
+    const result = data.last_backend_result;
     text("storage-ribbon", persistence.enabled ? `SQLite 저장 중 · ${persistence.updated_at ? timeLabel(persistence.updated_at) : "초기화"}` : "영속 저장 꺼짐");
     text("storage-backend", persistence.enabled ? `SQLite schema v${persistence.schema_version}` : "비활성"); text("storage-path", persistence.database_path || "—");
-    text("command-name", data.command?.name || "—"); text("hardware-state", data.hardware_accessed ? "접속됨" : "미접속 · dry-run");
+    text("command-name", data.command?.name || "—");
+    text("mode-badge", backend.mode === "ros2_manipulation_mock" ? "ROS 2 조작 mock" : "CPU dry-run");
+    text("execution-backend", backend.active_goal ? `${backend.mode} · Action 실행 중` : backend.mode || "—");
+    text("backend-result", result ? (result.success ? `성공 · ${result.adapter}` : `실패 · ${result.failure_code || result.adapter}`) : "실행 기록 없음");
+    text("hardware-state", backend.hardware_accessed || data.hardware_accessed ? "접속됨" : "미접속 · dry-run");
   }
 
   function render(data) {

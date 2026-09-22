@@ -138,14 +138,32 @@ client를 연결해 다음 세 경로를 확인했다.
 단위 테스트 7개와 `colcon test`도 통과했다. 이 결과는 ROS 메시지 왕복과 상태 전이 검증이며 조작
 성공이나 실물 안전 검증이 아니다.
 
-## 6. 다음 연결
+## 6. 웹 관제 연결 결과
 
-1. 웹 관제 runtime이 `manipulate` 명령을 즉시 성공시키는 대신 Action client 결과를 기다리게 한다.
-2. 성공이면 `MissionController.advance(success=true)`를 호출한다.
-3. `ABORTED`, `CANCELED`, timeout이면 `failure_code`를 그대로 관제 이벤트와 SQLite에 저장한다.
-4. 취소 요청은 mock에서 끝내지 않고 이후 PLANNED·ACT executor와 hardware bridge까지 전달한다.
-5. 검증된 `water_service_mission.py` phase를 첫 PLANNED backend로 연결한다.
-6. 그다음 ACT backend와 checkpoint loader를 추가해 같은 Action 계약으로 세 전략을 비교한다.
+`tools/service_execution_backend.py`가 두 실행 모드를 제공한다.
 
-현재는 한 관제 명령을 한 phase Action으로 바꾸는 adapter까지 구현됐다. 여러 phase를 묶은
-HYBRID Goal은 계약 검증 대상이지만 실제 PLANNED↔ACT lease 전환 실행기는 아직 없다.
+| 모드 | 주행·충전 | 조작 |
+|---|---|---|
+| `immediate` | 즉시 성공 mock | 즉시 성공 mock |
+| `ros2-mock` | 즉시 성공 mock | `/execute_manipulation_skill` 결과 대기 |
+
+`ros2-mock` 통합 시험에서 냉수 주문 한 건이 9개 조작 Action을 모두 `SUCCEEDED`로 마치고,
+손님 테이블 서빙 뒤 충전소로 복귀해 `IDLE_AT_DOCK`에 도달했다. Action 실행 중 웹에서 주문을
+취소했을 때 활성 Goal도 `CANCELED`로 끝났고, 관제 취소 뒤 돌아온 결과는 `superseded=true`로
+SQLite에 저장됐다. 이 결과가 이후 phase를 실행하지 않는 것도 확인했다.
+
+mock phase 지연보다 짧은 0.03초 timeout 시험에서는 `ALIGN_KITCHEN`이 두 번 `ABORTED/TIMEOUT`으로
+끝났다. 관제 설정의 재시도 횟수를 소진한 뒤 주문은 `ALIGN_KITCHEN:TIMEOUT`으로 실패했고 두
+Action 결과가 SQLite command payload에 각각 남았다.
+
+## 7. 다음 연결
+
+1. 완료: 웹 관제 runtime이 조작 Action 결과를 기다리고 성공일 때만 다음 phase로 전이한다.
+2. 완료: `ABORTED`, `CANCELED`, timeout과 `superseded`를 SQLite command payload에 저장한다.
+3. 검증된 `water_service_mission.py` phase를 첫 PLANNED backend로 연결한다.
+4. 취소 요청을 PLANNED·ACT executor와 이후 hardware bridge까지 전달한다.
+5. ACT backend와 checkpoint loader를 추가해 같은 Action 계약으로 세 전략을 비교한다.
+
+현재는 한 관제 명령을 한 phase Action으로 바꾸고 웹 관제에서 결과를 소비하는 데까지 구현됐다.
+여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만 실제 PLANNED↔ACT lease 전환 실행기는
+아직 없다.

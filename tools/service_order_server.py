@@ -6,6 +6,7 @@ import argparse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -13,6 +14,7 @@ import threading
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from service_execution_backend import CommandBackend, ImmediateBackend, Ros2ManipulationBackend
 from service_mission_control import DryRunRuntime, MissionController
 from service_order_store import ServiceOrderStore
 
@@ -21,6 +23,10 @@ ROOT = Path(__file__).resolve().parents[1]
 INDEX = Path(__file__).with_name("service_order_dashboard") / "index.html"
 DASHBOARD_JS = INDEX.with_name("dashboard.js")
 ORDER_PATH = re.compile(r"^/api/orders/([A-Za-z0-9._:-]{1,64})/cancel$")
+
+
+class BackendBusyError(RuntimeError):
+    """Raised when another backend command is still in progress."""
 
 
 def default_state_dir() -> Path:
@@ -32,7 +38,12 @@ def default_state_dir() -> Path:
 class ServiceApplication:
     """Thread-safe application boundary shared by HTTP and the dry-run loop."""
 
-    def __init__(self, controller: MissionController | None = None, state_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        controller: MissionController | None = None,
+        state_dir: Path | None = None,
+        backend: CommandBackend | None = None,
+    ) -> None:
         self.state_dir = Path(state_dir) if state_dir is not None else None
         self.lock = threading.RLock()
         self.store = ServiceOrderStore(self.state_dir) if self.state_dir is not None else None
@@ -48,6 +59,9 @@ class ServiceApplication:
         else:
             self.controller = controller or MissionController()
         self.runtime = DryRunRuntime(self.controller)
+        self.backend = backend or ImmediateBackend()
+        self.execution_lock = threading.Lock()
+        self.last_backend_result: dict | None = None
         self._persist()
 
     def _persist(self, command: dict | None = None) -> None:
@@ -80,6 +94,8 @@ class ServiceApplication:
                 "tables": self.controller.layout["tables"],
                 "waypoints": self.controller.layout["waypoints"],
             }
+            snapshot["execution_backend"] = self.backend.info()
+            snapshot["last_backend_result"] = self.last_backend_result
             return snapshot
 
     def _stats(self, snapshot: dict) -> dict:
@@ -115,22 +131,89 @@ class ServiceApplication:
 
     def cancel(self, order_id: str) -> dict:
         with self.lock:
+            backend_cancel_requested = (
+                self.backend.cancel_active()
+                if self.controller.active_order_id == order_id
+                else False
+            )
             order = self.controller.cancel(order_id)
             self._persist()
-            return {"order": order.__dict__, "state": self.controller.snapshot()}
+            return {
+                "order": order.__dict__,
+                "backend_cancel_requested": backend_cancel_requested,
+                "state": self.controller.snapshot(),
+            }
 
     def step(self, *, success: bool = True, failure: str | None = None) -> dict:
-        with self.lock:
-            phase_before = self.controller.phase
-            order_before = self.controller.active_order_id
-            command = self.runtime.step(success=success, failure=failure)
-            stored_command = dict(command)
-            stored_command.setdefault("phase", phase_before)
-            stored_command.setdefault("order_id", order_before)
-            self._persist(stored_command)
-            return {"executed_command": command, "state": self.controller.snapshot()}
+        if not self.execution_lock.acquire(blocking=False):
+            raise BackendBusyError("a backend command is already running")
+        try:
+            with self.lock:
+                phase_before = self.controller.phase
+                order_before = self.controller.active_order_id
+                command = self.runtime.step(success=success, failure=failure)
+                stored_command = dict(command)
+                stored_command.setdefault("phase", phase_before)
+                stored_command.setdefault("order_id", order_before)
+                stored_command["backend_result"] = {
+                    "success": success,
+                    "failure_code": failure or "",
+                    "adapter": "manual_api_step",
+                }
+                self.last_backend_result = stored_command["backend_result"]
+                self._persist(stored_command)
+                return {"executed_command": command, "state": self.controller.snapshot()}
+        finally:
+            self.execution_lock.release()
+
+    def execute_next(self) -> dict:
+        """Execute the current command through the configured backend."""
+        if not self.execution_lock.acquire(blocking=False):
+            raise BackendBusyError("a backend command is already running")
+        try:
+            with self.lock:
+                phase_before = self.controller.phase
+                order_before = self.controller.active_order_id
+                active_order = self.controller.active_order
+                mission_id = active_order.mission_id if active_order is not None else None
+                phase_attempt = self.controller.phase_attempt
+                command = self.controller.current_command()
+                self.runtime.commands.append(command)
+
+            result = self.backend.execute(
+                command,
+                mission_id=mission_id,
+                phase_attempt=phase_attempt,
+            )
+
+            with self.lock:
+                superseded = (
+                    self.controller.phase != phase_before
+                    or self.controller.active_order_id != order_before
+                )
+                if not superseded:
+                    self.controller.advance(
+                        success=result.success,
+                        failure=result.failure_code or None,
+                    )
+                stored_command = dict(command)
+                stored_command.setdefault("phase", phase_before)
+                stored_command.setdefault("order_id", order_before)
+                stored_command["backend_result"] = result.to_dict()
+                stored_command["superseded"] = superseded
+                self.last_backend_result = result.to_dict()
+                self._persist(stored_command)
+                return {
+                    "executed_command": command,
+                    "backend_result": result.to_dict(),
+                    "superseded": superseded,
+                    "state": self.controller.snapshot(),
+                }
+        finally:
+            self.execution_lock.release()
 
     def close(self) -> None:
+        self.backend.close()
         if self.store is not None:
             self.store.close()
 
@@ -175,7 +258,7 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             path = parsed.path
             if path == "/api/health":
-                self._json(HTTPStatus.OK, {"status": "ok", "mode": "simulation_dry_run"})
+                self._json(HTTPStatus.OK, {"status": "ok", **app.backend.info()})
                 return
             if path == "/api/state":
                 self._json(HTTPStatus.OK, app.state())
@@ -242,6 +325,8 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "unknown_order", "detail": str(exc)})
             except ValueError as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": "invalid_request", "detail": str(exc)})
+            except BackendBusyError as exc:
+                self._json(HTTPStatus.CONFLICT, {"error": "backend_busy", "detail": str(exc)})
 
     return Handler
 
@@ -250,7 +335,10 @@ def auto_step(app: ServiceApplication, interval_s: float, stop: threading.Event)
     while not stop.wait(interval_s):
         state = app.state()
         if state["phase"] != "IDLE_AT_DOCK" or state["queue"] or state["active_order_id"]:
-            app.step()
+            try:
+                app.execute_next()
+            except BackendBusyError:
+                continue
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -260,6 +348,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--state-dir", type=Path, default=default_state_dir())
     parser.add_argument("--auto-step-s", type=float, default=0.75)
     parser.add_argument("--battery-percent", type=float, default=100.0)
+    parser.add_argument(
+        "--backend",
+        choices=("immediate", "ros2-mock"),
+        default="immediate",
+        help="manipulation execution backend; ros2-mock never accesses hardware",
+    )
+    parser.add_argument("--manipulation-timeout-s", type=float, default=30.0)
     return parser.parse_args(argv)
 
 
@@ -269,23 +364,38 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("port must be between 1 and 65535")
     if args.auto_step_s <= 0:
         raise ValueError("auto-step-s must be positive")
-    app = ServiceApplication(MissionController(battery_percent=args.battery_percent), args.state_dir)
+    if not math.isfinite(args.manipulation_timeout_s) or args.manipulation_timeout_s <= 0:
+        raise ValueError("manipulation-timeout-s must be a positive finite number")
+    backend: CommandBackend
+    if args.backend == "ros2-mock":
+        backend = Ros2ManipulationBackend(timeout_sec=args.manipulation_timeout_s)
+    else:
+        backend = ImmediateBackend()
+    app = ServiceApplication(
+        MissionController(battery_percent=args.battery_percent),
+        args.state_dir,
+        backend,
+    )
     server = ThreadingHTTPServer((args.host, args.port), handler_factory(app))
     stop = threading.Event()
     worker = threading.Thread(target=auto_step, args=(app, args.auto_step_s, stop), daemon=True)
     worker.start()
     print(f"service order dashboard: http://{args.host}:{server.server_port}", flush=True)
-    print("mode: simulation_dry_run (no robot, ROS 2, camera, or Isaac Sim access)", flush=True)
+    print(f"mode: {backend.mode} (no robot, camera, or Isaac Sim access)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         stop.set()
+        backend.cancel_active()
         server.shutdown()
         server.server_close()
-        worker.join(timeout=max(1.0, args.auto_step_s * 2))
-        app.close()
+        worker.join(timeout=max(1.0, args.manipulation_timeout_s + 1.0))
+        if worker.is_alive():
+            print("warning: backend worker did not stop before shutdown timeout", flush=True)
+        else:
+            app.close()
     return 0
 
 
