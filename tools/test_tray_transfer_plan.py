@@ -83,6 +83,8 @@ def test_carry_path_audit_accepts_same_branch_center_region_experiment(transfer)
 
 
 def test_carry_path_audit_still_rejects_opposite_wrist_roll_branch():
+    if not MODEL.exists() or not SOURCE.exists():
+        pytest.skip("검증된 flared03 로컬 증거가 없습니다")
     source = json.loads(SOURCE.read_text())
     chain = BimanualContactChain(MODEL, source["left_config"], source["right_config"])
     held = next(p for p in source["plan"]["poses"] if p["name"] == "POUR_RETURN_CUP")
