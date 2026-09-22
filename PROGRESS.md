@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-09-22 | 영상 확인과 이전 성공 시험의 PNG 용량 정리
+
+- 발표용 영상은 로컬 `/data/$USER/robot-artifacts/restaurant/cinematic_wide01/hold_flow_wide.mp4`(59.625초·1920×1080·24fps)다. 전체 동작 영상은 `plate_service02/plate_service_full.mp4`(283초)이며 둘 다 이전 촬영본이다. 최신 웹 주문 시험 `ipc_phase04`는 영상 프레임을 기록하지 않았으므로 이 영상들을 웹 연동 시험 촬영본으로 표시하지 않는다.
+- 전체 MP4의 프레임 수·전체 디코딩과 실패 증거 참조를 확인한 뒤 `service03`, `service05`, `raised_service05`, `wide_service02`, `plate_service02`의 중복 PNG 원본 2,378개(4,094,353,488 bytes)를 삭제했다. 대상은 각 `frames`와 마지막 두 실행의 `detail_frames` 안에 있는 숫자 이름 PNG만이다.
+- MP4·결과·계획·장면·최종 이미지는 남겼다. `cinematic_wide01`, `ipc_phase04`, 실패 은행 전체를 포함한 보호 파일 118개의 SHA-256이 정리 전후 일치한다. 실패 은행의 근거 31개도 독립 검토에서 해시 일치를 확인했다.
+- `/data` 여유 공간은 약 4.1GiB에서 8.0GiB로 늘었다. 삭제한 원본 PNG는 보존 MP4에서 무손실 복원할 수 없다. 최신 발표 영상의 재편집용 원본은 보존했다.
+- 정확한 삭제 경로·크기·해시와 사후 검증은 로컬 `/data/$USER/robot-artifacts/restaurant/cleanup_20260922_frames/manifest.json`, `result.json`에 남겼다. 실패 시험, 최신 실행 및 입력 자산은 삭제하지 않았다.
+
 ## 2026-09-22 | 웹 주문과 단일 Isaac 월드의 phase별 물리 실행 연결
 
 - `simulate_restaurant_mobile.py --executor-socket`으로 같은 Isaac 월드에서 조작 9단계를 요청별로 실행한다. 단계 사이에는 물리 시간을 멈추고, 컵·병·물 입자 상태를 유지한다. socket thread는 요청을 받고 시뮬레이션 thread만 PhysX를 갱신한다.
