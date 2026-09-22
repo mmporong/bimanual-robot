@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-09-22 | PR 알림 댓글 제거와 검사 통과 후 자동 병합
+
+- `Auto PR`과 `PR policy`의 위험도 댓글 생성·수정을 제거했다. 분류 근거·해결 순서·재현 명령은 Actions 실행 요약에만 남긴다. 기존 자동 생성 본문의 반복 면책 문구도 제거했다.
+- 구형 workflow 두 개는 원격에서 비활성화하고 `auto-pr-assist.yml`·`pr-assist.yml`로 교체한다. 오래된 브랜치의 구형 workflow도 다시 댓글을 생성하지 않도록 한다. 기존 위험도 댓글 10개는 로컬 백업 후 삭제했다.
+- 위험도만으로 자동 병합을 제외하지 않는다. Draft를 제외한 PR은 `validate` 검사 통과 후 자동 병합을 예약한다. main의 필수 검사에 GitHub Actions `validate`를 연결하고 승인 인원 0·CODEOWNERS 미사용은 유지한다.
+- PR gate 실패 시 실패한 단계에 맞는 수정·재검증 명령을 요약한다. `pull_request_target`은 기준 브랜치의 정책만 읽고 PR head 코드를 실행하지 않는다.
+- 봇 댓글로 발생하는 구독자 알림 원인은 제거하지만, PR 생성·병합·Actions 결과의 플랫폼 기본 메일은 각 수신자 설정에 따른다. 전체 팀원의 이메일을 저장소 코드로 차단했다고 주장하지 않는다.
+- 충전소 왕복 구현은 별도 `feat/isaac-dock-roundtrip` 작업 트리에 보존했으며 이 변경에 섞지 않는다.
+- 로컬 전체 테스트 511개 통과·2개 skip, 정책 회귀 18개 통과, 문서 링크 94개·README 동기화·58링크/57관절 모델 계약 검사를 통과했다.
+
 ## 2026-09-22 | 영상 확인과 이전 성공 시험의 PNG 용량 정리
 
 - 발표용 영상은 로컬 `/data/$USER/robot-artifacts/restaurant/cinematic_wide01/hold_flow_wide.mp4`(59.625초·1920×1080·24fps)다. 전체 동작 영상은 `plate_service02/plate_service_full.mp4`(283초)이며 둘 다 이전 촬영본이다. 최신 웹 주문 시험 `ipc_phase04`는 영상 프레임을 기록하지 않았으므로 이 영상들을 웹 연동 시험 촬영본으로 표시하지 않는다.

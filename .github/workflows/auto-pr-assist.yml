@@ -1,4 +1,4 @@
-name: Auto PR
+name: Auto PR assistant
 
 on:
   push:
@@ -73,9 +73,9 @@ jobs:
 
           `PR gate / validate`가 YAML, Python, Markdown 링크, 회귀 테스트, URDF·Xacro 계약을 검사합니다.
 
-          ## 실패와 한계
+          ## 병합
 
-          실물 팔·서보·주행 시험은 실행하지 않습니다. 관련 변경은 자동 병합하지 않습니다.
+          필수 검사를 통과하면 자동 병합합니다. 분류 근거와 수정·재검증 방법은 Actions 실행 요약에서 확인합니다.
           EOF
           )
             url=$(gh pr create --base main --head "$BRANCH" --title "$title" --body "$body")
@@ -88,45 +88,4 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
-          files=$(gh pr view "$PR_NUMBER" --json files --jq '.files[].path')
-          risk=medium
-          if printf '%s\n' "$files" | grep -Eq '^(firmware/|tools/servo/)'; then
-            risk=hardware
-          elif printf '%s\n' "$files" | grep -Eq '^\.github/'; then
-            risk=automation
-          elif printf '%s\n' "$files" | grep -Eq '^(src/|design/mechanical/)'; then
-            risk=high
-          elif [ -n "$files" ] && printf '%s\n' "$files" | grep -Evq '^(docs/|README\.md$)'; then
-            risk=medium
-          else
-            risk=low
-          fi
-
-          for label in risk:low risk:medium risk:high risk:hardware risk:automation; do
-            gh pr edit "$PR_NUMBER" --remove-label "$label" >/dev/null 2>&1 || true
-          done
-          gh pr edit "$PR_NUMBER" --add-label "risk:$risk"
-
-          marker='<!-- hold-flow-pr-bot -->'
-          if [ "$risk" = low ]; then
-            decision='필수 검사가 통과하면 squash 방식으로 자동 병합합니다.'
-          else
-            decision='자동 병합 대상이 아닙니다. 검증 결과를 확인한 뒤 병합해야 합니다.'
-          fi
-          body="$marker
-          위험도: \`risk:$risk\`
-
-          $decision
-
-          실물 로봇 명령은 실행하지 않습니다."
-          comment_id=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" --paginate \
-            --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n 1)
-          if [ -n "$comment_id" ]; then
-            gh api --method PATCH "repos/$GH_REPO/issues/comments/$comment_id" -f body="$body" >/dev/null
-          else
-            gh api --method POST "repos/$GH_REPO/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
-          fi
-
-          if [ "$risk" = low ]; then
-            gh pr merge "$PR_NUMBER" --auto --squash
-          fi
+          python3 tools/ci/pr_policy.py
