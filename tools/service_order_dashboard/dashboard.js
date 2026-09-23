@@ -18,6 +18,7 @@
   const PHASE_LABELS = Object.fromEntries([
     ...PHASES.map(([key, label]) => [key, label]),
     ["IDLE_AT_DOCK", "충전소 대기"], ["NAVIGATE_DOCK", "충전소 복귀"], ["CHARGING", "충전 중"],
+    ["TERMINAL_HOLD", "실행 종료 · 결과 확인"],
   ]);
   const EVENT_LABELS = {
     CONTROLLER_STARTED: "관제 시작", CONTROLLER_RESTORED: "저장 상태 복구",
@@ -26,6 +27,7 @@
     MISSION_SUCCEEDED: "서빙 완료", MISSION_FAILED: "미션 실패", CHARGE_REQUIRED: "충전 선행 결정",
     RETURN_REQUIRED_FOR_CHARGE: "충전 복귀 결정", RETURN_TO_DOCK_STARTED: "충전소 복귀 시작",
     DOCK_ARRIVED: "충전소 도착", CHARGE_COMPLETED: "충전 완료", SYSTEM_PHASE_FAILED: "시스템 단계 실패",
+    ROUNDTRIP_TERMINAL_HOLD: "왕복 실행 종료",
   };
   const LOCATION_LABELS = {dock: "충전소", kitchen: "주방", table_1: "1번 테이블", table_2: "2번 테이블", table_3: "3번 테이블", table_4: "4번 테이블"};
   const STATE_LABELS = {QUEUED: "대기", RUNNING: "실행 중", SUCCEEDED: "완료", FAILED: "실패", CANCELED: "취소"};
@@ -55,9 +57,12 @@
     text("phase-attempt", data.phase_attempt ? `시도 ${data.phase_attempt}` : "시도 —");
     text("mission-ribbon", active ? `${active.order_id} · ${tableNumber(active.table_id)}번 · ${drinkLabel(active.drink)}` : PHASE_LABELS[data.phase] || data.phase);
     text("mission-order", active ? `${active.order_id} / ${tableNumber(active.table_id)}번 테이블 / ${drinkLabel(active.drink)}` : "활성 주문이 없습니다.");
-    const activeIndex = PHASES.findIndex(([key]) => key === data.phase);
+    const phases = data.execution_backend?.mode === "ros2_planned_roundtrip"
+      ? [...PHASES, ["NAVIGATE_DOCK", "충전소 복귀", "주문 성공 전 충전소 도착과 정지 확인"]]
+      : PHASES;
+    const activeIndex = phases.findIndex(([key]) => key === data.phase);
     const list = $("phase-list"); list.replaceChildren();
-    PHASES.forEach(([key, label, detail], index) => {
+    phases.forEach(([key, label, detail], index) => {
       const item = element("li", "phase-item");
       if (activeIndex >= 0 && index < activeIndex) item.classList.add("done");
       if (key === data.phase) item.classList.add("active");
@@ -152,7 +157,7 @@
     text("storage-ribbon", persistence.enabled ? `SQLite 저장 중 · ${persistence.updated_at ? timeLabel(persistence.updated_at) : "초기화"}` : "영속 저장 꺼짐");
     text("storage-backend", persistence.enabled ? `SQLite schema v${persistence.schema_version}` : "비활성"); text("storage-path", persistence.database_path || "—");
     text("command-name", data.command?.name || "—");
-    const modeLabels = {ros2_manipulation_mock: "ROS 2 조작 mock", ros2_planned_artifact_replay: "PLANNED 산출물 재생", ros2_planned_session: "PLANNED 세션", simulation_dry_run: "CPU dry-run"};
+    const modeLabels = {ros2_manipulation_mock: "ROS 2 조작 mock", ros2_planned_artifact_replay: "PLANNED 산출물 재생", ros2_planned_session: "PLANNED 세션", ros2_planned_roundtrip: "Isaac 물리 주행 · 충전 모델 전용", simulation_dry_run: "CPU dry-run"};
     if (backend.executor_kind === "isaac_physics") {
       modeLabels.ros2_planned_session = "Isaac 물리 실행 · 충전소/충전 mock";
     }

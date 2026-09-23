@@ -113,6 +113,10 @@ def follow_path(
     wheel_radius: float = 0.0329,
     wheel_track: float = 0.510,
     axle_offset: float = 0.105,
+    *,
+    position_tolerance_m: float = FINAL_POSITION_TOLERANCE_M,
+    yaw_tolerance_rad: float = FINAL_YAW_TOLERANCE_RAD,
+    minimum_angular_rad_s: float = 0.0,
 ) -> dict[str, float | bool]:
     """Compute one bounded wheel-velocity command for a static waypoint path.
 
@@ -129,11 +133,16 @@ def follow_path(
         axle_offset = float(axle_offset)
     except (TypeError, ValueError) as exc:
         raise ValueError("controller parameters must be numeric") from exc
-    parameters = np.array([goal_yaw, wheel_radius, wheel_track, axle_offset])
+    parameters = np.array([goal_yaw, wheel_radius, wheel_track, axle_offset,
+                           position_tolerance_m, yaw_tolerance_rad, minimum_angular_rad_s])
     if not np.all(np.isfinite(parameters)):
         raise ValueError("controller parameters must be finite")
     if wheel_radius <= 0.0 or wheel_track <= 0.0 or axle_offset < 0.0:
         raise ValueError("wheel dimensions must be positive and axle_offset non-negative")
+    if position_tolerance_m <= 0 or yaw_tolerance_rad <= 0:
+        raise ValueError('pose tolerances must be positive')
+    if not 0 <= minimum_angular_rad_s <= MAX_ANGULAR_RAD_S:
+        raise ValueError('minimum angular speed must be within controller limits')
 
     chassis_xy = pose[:2]
     yaw = float(pose[2])
@@ -141,8 +150,8 @@ def follow_path(
     position_error = float(np.linalg.norm(goal_xy - chassis_xy))
     yaw_error = _wrap_angle(goal_yaw - yaw)
     arrived = (
-        position_error <= FINAL_POSITION_TOLERANCE_M
-        and abs(yaw_error) <= FINAL_YAW_TOLERANCE_RAD
+        position_error <= position_tolerance_m
+        and abs(yaw_error) <= yaw_tolerance_rad
     )
 
     linear = 0.0
@@ -180,6 +189,10 @@ def follow_path(
 
         linear = float(np.clip(linear, -MAX_LINEAR_M_S, MAX_LINEAR_M_S))
         angular = float(np.clip(angular, -MAX_ANGULAR_RAD_S, MAX_ANGULAR_RAD_S))
+        # Optional fine-alignment command floor; arrival still requires the
+        # measured pose tolerance. Default navigation retains its old law.
+        if abs(yaw_error) > yaw_tolerance_rad and 0 < abs(angular) < minimum_angular_rad_s:
+            angular = math.copysign(minimum_angular_rad_s, angular)
 
     left = (linear - 0.5 * wheel_track * angular) / wheel_radius
     right = (linear + 0.5 * wheel_track * angular) / wheel_radius

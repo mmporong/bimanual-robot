@@ -13,7 +13,7 @@ from rclpy.node import Node
 from hold_flow_interfaces.action import ExecuteManipulationSkill
 
 from .contract import ManipulationGoalSpec
-from .planned_ipc import PlannedIpcError, cancel_session, execute_phase
+from .planned_ipc import PlannedIpcError, call_executor, cancel_session, execute_phase
 
 
 ACTION_NAME = "/execute_manipulation_skill"
@@ -24,6 +24,10 @@ class PlannedIpcServer(Node):
         super().__init__("planned_ipc_manipulation_server")
         self.declare_parameter("socket_path", "/tmp/hold-flow-planned-executor.sock")
         self._socket_path = Path(str(self.get_parameter("socket_path").value))
+        status = call_executor(self._socket_path, {'op': 'status'}, timeout_sec=5.)
+        self._executor_id = str(status.get('executor_id') or '')
+        if status.get('scope') == 'dock_roundtrip' and not self._executor_id:
+            raise RuntimeError('roundtrip executor instance identity is missing')
         self._action_server = ActionServer(
             self,
             ExecuteManipulationSkill,
@@ -58,7 +62,7 @@ class PlannedIpcServer(Node):
     def cancel_callback(self, goal_handle: object) -> CancelResponse:
         mission_id = str(goal_handle.request.mission_id)
         try:
-            accepted = cancel_session(self._socket_path, mission_id)
+            accepted = cancel_session(self._socket_path, mission_id, executor_id=self._executor_id)
         except PlannedIpcError as exc:
             self.get_logger().warning(f"PLANNED IPC 취소 전달 실패 [{exc.code}]: {exc}")
             return CancelResponse.REJECT
@@ -101,12 +105,14 @@ class PlannedIpcServer(Node):
                 table_id=spec.table_id,
                 drink=spec.drink,
                 timeout_sec=spec.timeout_sec,
+                executor_id=self._executor_id,
             )
         except PlannedIpcError as exc:
             response = {"success": False, "failure_code": exc.code, "message": str(exc)}
             # A lost response is not proof that physics stopped.
             try:
-                response['stop_requested'] = cancel_session(self._socket_path, spec.mission_id)
+                response['stop_requested'] = cancel_session(self._socket_path, spec.mission_id,
+                                                            executor_id=self._executor_id)
             except PlannedIpcError:
                 response['stop_requested'] = False
             response['stop_confirmed'] = False
@@ -116,7 +122,7 @@ class PlannedIpcServer(Node):
         result.message = json.dumps(response, ensure_ascii=False)
         if goal_handle.is_cancel_requested:
             try:
-                cancel_session(self._socket_path, spec.mission_id)
+                cancel_session(self._socket_path, spec.mission_id, executor_id=self._executor_id)
             except PlannedIpcError:
                 pass
             result.canceled = True

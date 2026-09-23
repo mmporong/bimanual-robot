@@ -4,7 +4,7 @@ import time
 import pytest
 
 from isaac_phase_executor import PhaseExecutor, phase_for_tick, serve_executor
-from hold_flow_mission.planned_ipc import MANIPULATION_PHASES, PROTOCOL, call_executor
+from hold_flow_mission.planned_ipc import MANIPULATION_PHASES, ROUNDTRIP_PHASES, PROTOCOL, call_executor
 
 
 def request(phase='ALIGN_KITCHEN', **values):
@@ -147,25 +147,42 @@ def test_idle_timeout_and_scope_rejection(tmp_path):
     assert executor.checkpoint('ALIGN_KITCHEN', {}) == 'EXECUTOR_IDLE_TIMEOUT'
 
 
-def test_all_phases_share_world_and_final_response_follows_result_file(tmp_path):
-    executor = PhaseExecutor(tmp_path)
+@pytest.mark.parametrize('roundtrip', [False, True])
+def test_all_phases_share_world_and_final_response_follows_result_file(tmp_path, roundtrip):
+    executor = PhaseExecutor(tmp_path, roundtrip=roundtrip)
+    phases = ROUNDTRIP_PHASES if roundtrip else MANIPULATION_PHASES
     results = []
 
     def client():
-        for phase in MANIPULATION_PHASES:
-            response = executor.handle(request(phase))
+        for phase in phases:
+            response = executor.handle(request(phase, executor_id=executor.executor_id))
             results.append(response)
-            if phase == 'SERVE':
+            if phase == phases[-1]:
                 assert (tmp_path / 'result.json').is_file()
 
     thread = threading.Thread(target=client)
     thread.start()
-    for index, phase in enumerate(MANIPULATION_PHASES):
+    for index, phase in enumerate(phases):
         assert executor.checkpoint(phase, {'sequence': index}) == ''
     executor.finish(True, 'water_served', persist_result={'task_pass': True})
     thread.join(1)
     assert not thread.is_alive()
-    assert len(results) == len(MANIPULATION_PHASES)
+    assert len(results) == len(phases)
     assert all(row['success'] for row in results)
     assert results[-1]['session_state'] == 'COMPLETE'
-    assert executor.index == len(MANIPULATION_PHASES)
+    assert executor.index == len(phases)
+
+
+def test_restarted_world_rejects_stale_execute_and_cancel(tmp_path):
+    old = PhaseExecutor(tmp_path, roundtrip=True)
+    new = PhaseExecutor(tmp_path, roundtrip=True)
+    assert old.executor_id != new.executor_id
+    for payload in (request('NAVIGATE_KITCHEN'),
+                    {'protocol': PROTOCOL, 'op': 'cancel_session', 'mission_id': 'mission'}):
+        result = new.handle({**payload, 'executor_id': old.executor_id})
+        assert result['failure_code'] == 'STALE_EXECUTOR'
+        assert not new.stop_reason and new.active is None
+    thread, result = submit(new, request('NAVIGATE_KITCHEN', executor_id=new.executor_id))
+    new.finish(False, 'test_stop')
+    thread.join(1)
+    assert result['executor_id'] == new.executor_id

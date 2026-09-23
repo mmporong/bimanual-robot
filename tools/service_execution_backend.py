@@ -10,7 +10,28 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 import math
+from pathlib import Path
+import threading
 from typing import Protocol
+
+
+def _planned_ipc_module():
+    """Load ROS-workspace IPC only when the roundtrip backend is selected."""
+    from hold_flow_mission import planned_ipc
+
+    return planned_ipc
+
+
+def call_executor(*args, **kwargs):
+    return _planned_ipc_module().call_executor(*args, **kwargs)
+
+
+def execute_phase(*args, **kwargs):
+    return _planned_ipc_module().execute_phase(*args, **kwargs)
+
+
+def cancel_session(*args, **kwargs):
+    return _planned_ipc_module().cancel_session(*args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -212,5 +233,157 @@ class Ros2PlannedSessionBackend(Ros2ManipulationBackend):
             "simulator_accessed": getattr(self, '_executor_evidence', {}).get('simulator_accessed'),
             "executor_kind": getattr(self, '_executor_evidence', {}).get('executor_kind', 'unconfirmed'),
             "scope": "table_1 cold water; dock navigation and charging are mocks",
+        })
+        return info
+
+
+class Ros2PlannedRoundtripBackend(Ros2PlannedSessionBackend):
+    """Runs navigation in the same Isaac world as ROS Action manipulation."""
+
+    mode = "ros2_planned_roundtrip"
+    scope = "dock_roundtrip"
+
+    def __init__(self, *, executor_socket: Path, timeout_sec: float = 30.0) -> None:
+        self.executor_socket = Path(executor_socket).expanduser()
+        self._identity: dict[str, str] | None = None
+        self._identity_lock = threading.Lock()
+        self._executor_evidence = self._validate_executor(timeout_sec)
+        self._executor_id = self._executor_evidence["executor_id"]
+        super().__init__(timeout_sec=timeout_sec)
+
+    def _validate_executor(self, timeout_sec: float) -> dict:
+        try:
+            status = call_executor(
+                self.executor_socket,
+                {"op": "status"},
+                timeout_sec=min(float(timeout_sec), 5.0),
+            )
+        except (OSError, RuntimeError) as exc:
+            code = getattr(exc, "code", "IPC_UNAVAILABLE")
+            raise RuntimeError(f"roundtrip executor status failed ({code}): {exc}") from exc
+        expected = {
+            "success": True,
+            "executor_kind": "isaac_physics",
+            "scope": self.scope,
+            "simulator_accessed": True,
+            "hardware_accessed": False,
+        }
+        mismatches = [key for key, value in expected.items() if status.get(key) != value]
+        if mismatches:
+            raise RuntimeError(
+                "roundtrip executor provenance mismatch: " + ", ".join(mismatches)
+            )
+        if status.get("mission_id") is not None or status.get("session_state") != "WAITING":
+            raise RuntimeError("roundtrip executor world is not fresh and waiting")
+        if not isinstance(status.get("executor_id"), str) or not status["executor_id"]:
+            raise RuntimeError("roundtrip executor provenance mismatch: executor_id")
+        return status
+
+    def validate_order(self, payload: dict, *, existing_order_ids: set[str]) -> None:
+        order_id = payload.get("order_id")
+        if payload.get("table_id") != "table_1" or payload.get("drink") != "COLD_WATER":
+            raise ValueError("ros2-planned-roundtrip supports table_1/COLD_WATER only")
+        if existing_order_ids and order_id not in existing_order_ids:
+            raise ValueError("ros2-planned-roundtrip allows one order per Isaac world")
+
+    def _remember_identity(self, command: dict, mission_id: str | None) -> dict[str, str] | None:
+        with self._identity_lock:
+            if mission_id:
+                candidate = {
+                    "mission_id": mission_id,
+                    "order_id": str(command.get("order_id") or ""),
+                    "table_id": str(command.get("table_id") or ""),
+                    "drink": str(command.get("drink") or ""),
+                }
+                if all(candidate.values()):
+                    if self._identity is not None and self._identity != candidate:
+                        raise RuntimeError("roundtrip world identity changed")
+                    self._identity = candidate
+            return dict(self._identity) if self._identity is not None else None
+
+    def execute(self, command: dict, *, mission_id: str | None, phase_attempt: int) -> BackendResult:
+        try:
+            identity = self._remember_identity(command, mission_id)
+        except RuntimeError as exc:
+            return BackendResult(False, "WORLD_IDENTITY_MISMATCH", self.mode, {"message": str(exc)})
+        if command.get("kind") == "navigate":
+            phase = str(command.get("phase") or "")
+            if phase not in {"NAVIGATE_KITCHEN", "NAVIGATE_TABLE", "NAVIGATE_DOCK"}:
+                return BackendResult(False, "NAVIGATION_PHASE_UNSUPPORTED", self.mode)
+            if identity is None:
+                return BackendResult(False, "MISSION_IDENTITY_MISSING", self.mode)
+            request_id = f"{identity['mission_id']}:{phase}:{phase_attempt}"
+            try:
+                result = execute_phase(
+                    self.executor_socket,
+                    request_id=request_id,
+                    mission_id=identity["mission_id"],
+                    order_id=identity["order_id"],
+                    phase_id=phase,
+                    table_id=identity["table_id"],
+                    drink=identity["drink"],
+                    executor_id=self._executor_id,
+                    timeout_sec=self.timeout_sec,
+                )
+            except Exception as exc:
+                planned_ipc_error = _planned_ipc_module().PlannedIpcError
+                if not isinstance(exc, planned_ipc_error):
+                    raise
+                detail = {"message": str(exc), "result_state": "unknown"}
+                if exc.code == "IPC_TIMEOUT":
+                    detail["cancel_requested"] = self._cancel_identity(identity)
+                    return BackendResult(False, "IPC_TIMEOUT_RESULT_UNKNOWN", self.mode, detail)
+                return BackendResult(False, exc.code, self.mode, detail)
+            self._executor_evidence = result
+            if result.get("success"):
+                return BackendResult(True, adapter=self.mode, action_result=result)
+            return BackendResult(
+                False,
+                str(result.get("failure_code") or "EXECUTOR_FAILED"),
+                self.mode,
+                result,
+            )
+        if command.get("kind") == "charge":
+            return BackendResult(
+                True,
+                adapter="battery_model_only",
+                action_result={"message": "charge is controller-model-only; no physical charging"},
+            )
+        if command.get("kind") == "manipulate":
+            return super().execute(command, mission_id=mission_id, phase_attempt=phase_attempt)
+        return BackendResult(False, "COMMAND_UNSUPPORTED", self.mode)
+
+    def _cancel_identity(self, identity: dict[str, str]) -> bool:
+        try:
+            return cancel_session(
+                self.executor_socket,
+                identity["mission_id"],
+                executor_id=self._executor_id,
+                timeout_sec=1.0,
+            )
+        except (OSError, RuntimeError):
+            return False
+
+    def cancel_active(self) -> bool:
+        action_requested = super().cancel_active()
+        with self._identity_lock:
+            identity = dict(self._identity) if self._identity is not None else None
+        ipc_requested = self._cancel_identity(identity) if identity is not None else False
+        return action_requested or ipc_requested
+
+    def info(self) -> dict:
+        info = super().info()
+        info.update({
+            "mode": self.mode,
+            "navigation": "Isaac physics via planned executor IPC",
+            "charge": "controller_model_only (not physical charging)",
+            "executor_socket": str(self.executor_socket),
+            "executor_kind": self._executor_evidence.get("executor_kind", "unconfirmed"),
+            "executor_id": self._executor_id,
+            "simulator_accessed": self._executor_evidence.get("simulator_accessed"),
+            "scope": self.scope,
+            "single_order_only": True,
+            "supported_order": {"table_id": "table_1", "drink": "COLD_WATER"},
+            "world_resume_supported": False,
         })
         return info

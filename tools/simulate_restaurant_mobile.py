@@ -41,6 +41,9 @@ def run(args):
 
 
 def _run(args, result):
+    roundtrip = getattr(args, 'dock_roundtrip', False)
+    if roundtrip and (args.mode != 'water-service' or getattr(args, 'cinematic', False)):
+        raise ValueError('--dock-roundtrip requires water-service without cinematic timeline')
     if getattr(args, 'executor_socket', None) and args.mode != 'water-service':
         raise ValueError('--executor-socket requires water-service')
     if getattr(args, 'cinematic', False) and (args.mode != 'water-service' or args.record):
@@ -91,6 +94,12 @@ def _run(args, result):
             result['tool_sha256']['isaac_phase_executor.py'] = hashlib.sha256(
                 Path(__file__).with_name('isaac_phase_executor.py').read_bytes()).hexdigest()
             result['executor_mode'] = 'isaac_phase_gated_single_mission'
+        if roundtrip:
+            from restaurant_roundtrip import CONFIG
+            result['input_sha256'][str(CONFIG)] = hashlib.sha256(CONFIG.read_bytes()).hexdigest()
+            result['tool_sha256']['restaurant_roundtrip.py'] = hashlib.sha256(
+                Path(__file__).with_name('restaurant_roundtrip.py').read_bytes()).hexdigest()
+            result['mission_scope'] = 'dock_roundtrip'
     if cinematic:
         result['tool_sha256']['service_cinematic.py'] = hashlib.sha256(Path(__file__).with_name('service_cinematic.py').read_bytes()).hexdigest()
         cinematic_config = Path(__file__).resolve().parents[1]/'config/simulation/service_cinematic.json'
@@ -236,6 +245,10 @@ def _run(args, result):
         q[right_grip] = initial["right_gripper_m"]
         position, orientation = robot.get_world_pose()
         position[:2] = [0., 0.] if service else [-2., 0.]
+        if roundtrip:
+            position[:2] = layout['waypoints']['dock'][:2]
+            yaw_rad = layout['waypoints']['dock'][2]
+            orientation = np.array([math.cos(yaw_rad/2), 0., 0., math.sin(yaw_rad/2)])
         robot.set_world_pose(position, orientation)
         robot.set_joint_positions(q)
         robot.set_joint_velocities(np.zeros_like(q))
@@ -270,7 +283,7 @@ def _run(args, result):
             if getattr(args, 'executor_socket', None):
                 from isaac_phase_executor import serve_executor
                 scope = serve_executor(args.executor_socket, output,
-                    idle_timeout_sec=args.executor_idle_timeout)
+                    idle_timeout_sec=args.executor_idle_timeout, roundtrip=roundtrip)
             phase_executor = executor_scope.enter_context(scope)
             args._phase_executor = phase_executor
             result.update(execute_water_service(args, source, water_scene, world, robot, controller,
@@ -530,6 +543,7 @@ if __name__ == "__main__":
     parser.add_argument("--duration", type=float, default=25.)
     parser.add_argument("--executor-socket", type=Path, help="Gate water-service physics by IPC phase requests")
     parser.add_argument("--executor-idle-timeout", type=float, default=120.)
+    parser.add_argument('--dock-roundtrip', action='store_true', help='Drive from dock, serve table_1, then return to dock')
     parser.add_argument("--pose-probes", type=Path)
     parser.add_argument("--mode", choices=("drive-smoke", "collision-probe", "service", "pick-only", "water-service", "static-pose-probe", "released-cup-probe"), default="drive-smoke")
     raise SystemExit(run(parser.parse_args()))

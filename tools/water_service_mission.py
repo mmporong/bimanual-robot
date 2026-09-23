@@ -17,6 +17,7 @@ from mobile_service_control import follow_path
 from mobile_service_model import ground_collision, ground_window_verified
 from pour_geometry import liquid_counts, quaternion_matrix, preclose_violation, inward_pour_direction
 from restaurant_layout import load_layout, plan_route
+from restaurant_roundtrip import load_roundtrip_config, roundtrip_routes, station_rest_verified
 from workcell_preview_inputs import ARM_JOINTS
 
 
@@ -283,6 +284,12 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
     route = plan_route(layout, "carry_start", "table_1")
     route[-1] = layout["waypoints"]["table_1"][:2]
     state, state_start = "POUR", 2.
+    roundtrip = getattr(args, 'dock_roundtrip', False)
+    roundtrip_config = load_roundtrip_config() if roundtrip else None
+    if roundtrip:
+        outbound_route, home_route = roundtrip_routes(layout, roundtrip_config)
+        state, state_start = "START_SETTLE", 0.
+    kitchen_arrived = service_completed = dock_return_completed = False
     state_phase = None
     events, samples, window = [], [], []
     touchdown_events = []
@@ -377,9 +384,29 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             path = route if state == "NAVIGATE" else [[-1.75, -2.25]]
             nav = follow_path([*position[:2], yaw], path, math.pi)
             velocities = [nav["left_rad_s"], nav["right_rad_s"]]
+        elif state in {"GO_KITCHEN", "KITCHEN_ALIGN", "RETURN_HOME"}:
+            if state == "GO_KITCHEN":
+                path, target = outbound_route, layout['waypoints']['kitchen']
+                tolerances = {}
+            elif state == "KITCHEN_ALIGN":
+                target = roundtrip_config['kitchen_work_pose_m_rad']
+                path = [target[:2]]
+                tolerances = {
+                    'position_tolerance_m': roundtrip_config['kitchen_position_tolerance_m'],
+                    'yaw_tolerance_rad': roundtrip_config['kitchen_yaw_tolerance_rad'],
+                    'minimum_angular_rad_s': roundtrip_config['minimum_alignment_angular_rad_s']}
+            else:
+                path, target = home_route, layout['waypoints']['dock']
+                tolerances = {
+                    'position_tolerance_m': roundtrip_config['dock_position_tolerance_m'],
+                    'yaw_tolerance_rad': roundtrip_config['dock_yaw_tolerance_rad']}
+            nav = follow_path([*position[:2], yaw], path, target[2], **tolerances)
+            velocities = [nav['left_rad_s'], nav['right_rad_s']]
+        elif state == "RETURN_CLEAR":
+            velocities = [-roundtrip_config['exit_speed_m_s']/.0329]*2
 
         if executor is not None:
-            requested_phase = phase_for_tick(state, phase, t)
+            requested_phase = phase_for_tick(state, phase, t, roundtrip=roundtrip)
             boundary_failure = ''
             if requested_phase != executor.running_phase:
                 if executor.running_phase == 'GRASP_CUP' and not lift_verified['cup']:
@@ -454,6 +481,10 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             "environment_contact_force_n": environment_force, "self_contact_force_n": self_force,
             "wheel_target_rad_s": velocities, "wheel_actual_rad_s": robot.get_joint_velocities()[wheels].tolist()}
         last["bottle_tilt_deg"] = math.degrees(math.acos(float(np.clip(quaternion_matrix(bq)[2, 2], -1., 1.))))
+        last.update(base_yaw_rad=math.atan2(rotation[1, 0], rotation[0, 0]),
+                    base_linear_speed_m_s=float(np.linalg.norm(robot.get_linear_velocity())),
+                    base_angular_speed_rad_s=float(np.linalg.norm(robot.get_angular_velocity())),
+                    navigation=nav)
         last["mouth_relative_to_cup_rim_m"] = (
             bp+quaternion_matrix(bq) @ [0., 0., right["cup_height_m"]/2]
             -cp-quaternion_matrix(cq) @ [0., 0., left["cup_height_m"]/2]).tolist()
@@ -465,7 +496,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             "bottle": {scene["bottle_filters"][i]: float(bf[i]) for i in range(3, len(bf)) if bf[i] > .05}}
         if initialization is None:
             initialization = copy.deepcopy(last)
-        if tick == round(2./dt):
+        if (not roundtrip and tick == round(2./dt)) or (roundtrip and state == 'POUR' and baseline is None):
             # Match the source runner's settling-before-observation protocol.
             # This is before either arm approaches a container; no pose resets.
             baseline = copy.deepcopy(last)
@@ -575,7 +606,33 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             break
 
         next_state = None
-        if state == "POUR" and command["done"]:
+        if state == "START_SETTLE" and t-state_start >= roundtrip_config['initial_settle_s']:
+            next_state = "GO_KITCHEN"
+        elif state == "GO_KITCHEN" and nav['arrived']:
+            next_state = "KITCHEN_ALIGN"
+        elif state == "KITCHEN_ALIGN" and nav['arrived']:
+            next_state = "KITCHEN_SETTLE"
+        elif state in {"KITCHEN_SETTLE", "HOME_SETTLE"}:
+            kitchen = state == "KITCHEN_SETTLE"
+            target = (roundtrip_config['kitchen_work_pose_m_rad'] if kitchen
+                      else layout['waypoints']['dock'])
+            rest = station_rest_verified(last, target, roundtrip_config, kitchen=kitchen)
+            stopped = stopped+dt if rest else 0.
+            if not rest:
+                next_state = "KITCHEN_ALIGN" if kitchen else "RETURN_HOME"
+            elif stopped >= roundtrip_config['settle_duration_s']:
+                if kitchen:
+                    kitchen_arrived = True
+                    next_state = "POUR"
+                else:
+                    dock_return_completed = complete = True
+                    reason = "water_served_returned_to_dock"
+                    break
+        elif state == "RETURN_CLEAR" and position[0] >= roundtrip_config['guest_exit_pose_m_rad'][0]:
+            next_state = "RETURN_HOME"
+        elif state == "RETURN_HOME" and nav['arrived']:
+            next_state = "HOME_SETTLE"
+        elif state == "POUR" and command["done"]:
             if counts["cup"] < math.ceil(count*.60) or counts["outside"] > math.floor(count*.05):
                 reason = "pour_delivery_not_verified"
                 break
@@ -616,12 +673,18 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             next_state = "SERVE"
         elif state == "SERVE" and command["done"]:
             if supported_window(window, support_config([-2.14, -2.42, .78]), "PLACE_HOLD", 1., released=True, clear=True):
-                reason, complete = "water_served", True
+                service_completed = True
+                if roundtrip:
+                    next_state = "RETURN_CLEAR"
+                else:
+                    reason, complete = "water_served", True
+                    break
             else:
                 reason = "guest_release_not_verified"
-            break
+                break
         if next_state:
             state, state_start = next_state, t+dt
+            stopped = 0.
             touchdown = {}
             window = []
     controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
@@ -639,6 +702,9 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             args._cinematic_recorder = None
     return {"task_pass": bool(sequence_pass and placement_verified), "sequence_pass": sequence_pass,
         **requirement,
+        "dock_roundtrip_included": roundtrip, "kitchen_arrival_verified": kitchen_arrived,
+        "service_completed": service_completed, "dock_return_completed": dock_return_completed,
+        "charging_physics_executed": False, "base_pose_reset_after_start": False,
         "failure": "tray_target_placement_not_verified" if sequence_pass and not placement_verified else reason,
         "water_pour_included": True, "deck_transport_included": True, "regrasp_included": True,
         "water_pour_completed": received is not None,

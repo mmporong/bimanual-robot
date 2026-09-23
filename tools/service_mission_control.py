@@ -40,7 +40,7 @@ SERVICE_PHASES = (
     "SERVE",
 )
 NAVIGATION_PHASES = {"NAVIGATE_KITCHEN", "NAVIGATE_TABLE", "NAVIGATE_DOCK"}
-SYSTEM_PHASES = {"IDLE_AT_DOCK", "NAVIGATE_DOCK", "CHARGING"}
+SYSTEM_PHASES = {"IDLE_AT_DOCK", "NAVIGATE_DOCK", "CHARGING", "TERMINAL_HOLD"}
 SKILL_BY_PHASE = {
     "ALIGN_KITCHEN": "align_at_kitchen",
     "GRASP_CUP": "grasp_cup",
@@ -155,11 +155,15 @@ class MissionController:
         config: dict | None = None,
         layout: dict | None = None,
         battery_percent: float = 100.0,
+        require_dock_return: bool = False,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
+        if not isinstance(require_dock_return, bool):
+            raise ValueError("require_dock_return must be boolean")
         self.config = config if config is not None else load_control_config()
         self.layout = layout if layout is not None else load_layout()
         self.clock = clock
+        self.require_dock_return = require_dock_return
         self.table_ids = {table["id"] for table in self.layout["tables"]}
         self.orders: dict[str, ServiceOrder] = {}
         self.sequence = 0
@@ -337,7 +341,12 @@ class MissionController:
         self._record("ORDER_CANCELED", order_id=order_id)
         if self.active_order_id == order_id:
             self.active_order_id = None
-            self._decide_after_terminal_order()
+            if self.require_dock_return:
+                self.phase = "TERMINAL_HOLD"
+                self.phase_attempt = 0
+                self._record("ROUNDTRIP_TERMINAL_HOLD", outcome="CANCELED")
+            else:
+                self._decide_after_terminal_order()
         return order
 
     def _queued(self) -> list[ServiceOrder]:
@@ -413,6 +422,12 @@ class MissionController:
                 "target_percent": self.config["battery"]["charge_target_percent"],
                 "hardware_accessed": False,
             }
+        if self.phase == "TERMINAL_HOLD":
+            return {
+                "kind": "hold",
+                "name": "roundtrip_terminal_hold",
+                "hardware_accessed": False,
+            }
         if self.phase in NAVIGATION_PHASES:
             if self.phase == "NAVIGATE_KITCHEN":
                 destination = "kitchen"
@@ -463,6 +478,8 @@ class MissionController:
             raise ValueError("success must be boolean")
         command = self.current_command()
         phase_before = self.phase
+        if self.phase == "TERMINAL_HOLD":
+            return command
         if self.phase == "IDLE_AT_DOCK":
             self._dispatch_or_charge()
             return command
@@ -484,7 +501,12 @@ class MissionController:
                 self.active_order_id = None
             else:
                 self._record("SYSTEM_PHASE_FAILED", failed_phase=phase_before, failure=reason)
-            self._decide_after_terminal_order()
+            if self.require_dock_return:
+                self.phase = "TERMINAL_HOLD"
+                self.phase_attempt = 0
+                self._record("ROUNDTRIP_TERMINAL_HOLD", outcome="FAILED")
+            else:
+                self._decide_after_terminal_order()
             return command
 
         self._consume_for_command(command)
@@ -495,6 +517,16 @@ class MissionController:
             return command
         if self.phase == "NAVIGATE_DOCK":
             self.current_location = "dock"
+            order = self.active_order
+            if self.require_dock_return and order is not None:
+                self._record("PHASE_SUCCEEDED", completed_phase=phase_before, order_id=order.order_id)
+                order.state = "SUCCEEDED"
+                order.completed_at = _iso(self.clock())
+                self._record("MISSION_SUCCEEDED", order_id=order.order_id, mission_id=order.mission_id)
+                self.active_order_id = None
+                self.phase = "IDLE_AT_DOCK"
+                self.phase_attempt = 0
+                return command
             self.phase = "CHARGING"
             self.phase_attempt = 1
             self._record("DOCK_ARRIVED")
@@ -512,11 +544,16 @@ class MissionController:
             self.phase = SERVICE_PHASES[index + 1]
             self.phase_attempt = 1
         else:
-            order.state = "SUCCEEDED"
-            order.completed_at = _iso(self.clock())
-            self._record("MISSION_SUCCEEDED", order_id=order.order_id, mission_id=order.mission_id)
-            self.active_order_id = None
-            self._decide_after_terminal_order()
+            if self.require_dock_return:
+                self.phase = "NAVIGATE_DOCK"
+                self.phase_attempt = 1
+                self._record("RETURN_TO_DOCK_STARTED", order_id=order.order_id)
+            else:
+                order.state = "SUCCEEDED"
+                order.completed_at = _iso(self.clock())
+                self._record("MISSION_SUCCEEDED", order_id=order.order_id, mission_id=order.mission_id)
+                self.active_order_id = None
+                self._decide_after_terminal_order()
         return command
 
     def snapshot(self) -> dict:
@@ -528,6 +565,7 @@ class MissionController:
             "timestamp": _iso(self.clock()),
             "mission_state": (
                 "RUNNING" if self.active_order is not None else
+                "TERMINAL" if self.phase == "TERMINAL_HOLD" else
                 "CHARGING" if self.phase == "CHARGING" else
                 "IDLE" if self.phase == "IDLE_AT_DOCK" else "RUNNING"
             ),

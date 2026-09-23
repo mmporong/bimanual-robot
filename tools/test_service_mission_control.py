@@ -81,6 +81,40 @@ def test_multiple_orders_continue_without_intermediate_dock_return():
     assert current.current_command()["bottle_id"] == "hot_bottle"
 
 
+def test_required_dock_return_keeps_order_running_until_dock_arrival():
+    current = MissionController(require_dock_return=True, clock=lambda: NOW)
+    current.submit(order())
+    finish_active(current)
+
+    active = current.orders["ORD-001"]
+    assert active.state == "RUNNING"
+    assert active.completed_at is None
+    assert current.active_order_id == active.order_id
+    assert current.phase == "NAVIGATE_DOCK"
+    assert current.current_command()["destination"] == "dock"
+
+    current.advance()
+    assert active.state == "SUCCEEDED"
+    assert active.completed_at == "2026-09-22T03:00:00Z"
+    assert current.active_order_id is None
+    assert current.phase == "IDLE_AT_DOCK"
+
+
+def test_required_dock_return_failure_ends_in_terminal_hold_without_retry():
+    current = MissionController(require_dock_return=True, clock=lambda: NOW)
+    current.submit(order())
+    finish_active(current)
+
+    current.advance(success=False, failure="DOCK_BLOCKED")
+    failed = current.orders["ORD-001"]
+    assert failed.state == "FAILED"
+    assert failed.failure == "NAVIGATE_DOCK:DOCK_BLOCKED"
+    assert current.active_order_id is None
+    assert current.phase == "TERMINAL_HOLD"
+    assert current.current_command()["name"] == "roundtrip_terminal_hold"
+    assert current.advance() == current.current_command()
+
+
 def test_priority_orders_are_selected_after_current_mission():
     current = controller()
     current.submit(order("ACTIVE", "table_1"))

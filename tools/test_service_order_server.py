@@ -1,7 +1,11 @@
 import json
 from http.server import ThreadingHTTPServer
+import os
 from pathlib import Path
+import select
+import socket
 import sqlite3
+import subprocess
 import threading
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -9,12 +13,20 @@ from urllib.request import Request, urlopen
 import pytest
 
 from service_mission_control import MissionController
-from service_execution_backend import BackendResult, ImmediateBackend, Ros2ManipulationBackend
+import service_execution_backend
+from service_execution_backend import (
+    BackendResult,
+    ImmediateBackend,
+    Ros2ManipulationBackend,
+    Ros2PlannedRoundtripBackend,
+    Ros2PlannedSessionBackend,
+)
 from service_order_server import (
     BackendBusyError,
     DASHBOARD_JS,
     INDEX,
     ServiceApplication,
+    auto_step,
     default_state_dir,
     handler_factory,
 )
@@ -63,6 +75,36 @@ def test_dashboard_and_health_are_served(server):
         javascript = response.read().decode()
     assert "renderMap" in javascript
     assert "execution-backend" in javascript
+
+
+def test_default_cpu_server_starts_without_ros_pythonpath(tmp_path):
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    process = subprocess.Popen(
+        [
+            "python3",
+            "tools/service_order_server.py",
+            "--port",
+            str(port),
+            "--state-dir",
+            str(tmp_path / "cpu-server"),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        ready, _, _ = select.select([process.stdout], [], [], 5.0)
+        assert ready, process.stderr.read()
+        assert process.stdout.readline().startswith("service order dashboard: http://127.0.0.1:")
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
 
 
 def test_order_api_is_idempotent_and_persists_state(server):
@@ -263,3 +305,271 @@ def test_active_order_cancel_propagates_and_backend_result_is_superseded(tmp_pat
     assert result["backend_result"]["failure_code"] == "CANCELED"
     assert app.controller.orders["CANCEL-1"].state == "CANCELED"
     app.close()
+
+
+class RoundtripConstraintBackend(ImmediateBackend):
+    mode = "ros2_planned_roundtrip"
+
+    def validate_order(self, payload, *, existing_order_ids):
+        if payload.get("table_id") != "table_1" or payload.get("drink") != "COLD_WATER":
+            raise ValueError("unsupported roundtrip order")
+        if existing_order_ids and payload.get("order_id") not in existing_order_ids:
+            raise ValueError("one order per world")
+
+
+def _advance_application_to_dock(app):
+    while app.controller.phase != "NAVIGATE_DOCK":
+        app.execute_next()
+
+
+def test_roundtrip_application_completes_only_after_dock_observation(tmp_path):
+    app = ServiceApplication(
+        MissionController(require_dock_return=True),
+        tmp_path / "dock-success",
+        RoundtripConstraintBackend(),
+    )
+    try:
+        app.submit({"order_id": "RETURN", "table_id": "table_1", "drink": "COLD_WATER"})
+        _advance_application_to_dock(app)
+        order = app.controller.orders["RETURN"]
+        assert order.state == "RUNNING"
+        assert app.controller.active_order_id == "RETURN"
+
+        result = app.execute_next()
+        assert result["executed_command"]["phase"] == "NAVIGATE_DOCK"
+        assert order.state == "SUCCEEDED"
+        assert app.controller.phase == "IDLE_AT_DOCK"
+    finally:
+        app.close()
+
+
+class BlockingDockBackend(RoundtripConstraintBackend):
+    def __init__(self):
+        self.started = threading.Event()
+        self.canceled = threading.Event()
+
+    def execute(self, command, *, mission_id, phase_attempt):
+        del mission_id, phase_attempt
+        if command.get("phase") == "NAVIGATE_DOCK":
+            self.started.set()
+            assert self.canceled.wait(timeout=3)
+        return BackendResult(True, adapter=self.mode)
+
+    def cancel_active(self):
+        self.canceled.set()
+        return True
+
+
+class FailingDockBackend(RoundtripConstraintBackend):
+    def __init__(self):
+        self.dock_calls = 0
+
+    def execute(self, command, *, mission_id, phase_attempt):
+        del mission_id, phase_attempt
+        if command.get("phase") == "NAVIGATE_DOCK":
+            self.dock_calls += 1
+            return BackendResult(False, "DOCK_BLOCKED", self.mode)
+        return BackendResult(True, adapter=self.mode)
+
+
+def test_roundtrip_dock_failure_stops_auto_execution(tmp_path):
+    backend = FailingDockBackend()
+    app = ServiceApplication(
+        MissionController(require_dock_return=True),
+        tmp_path / "dock-failure",
+        backend,
+    )
+    try:
+        app.submit({"order_id": "FAIL-DOCK", "table_id": "table_1", "drink": "COLD_WATER"})
+        _advance_application_to_dock(app)
+        result = app.execute_next()
+        assert result["backend_result"]["failure_code"] == "DOCK_BLOCKED"
+        assert app.controller.orders["FAIL-DOCK"].state == "FAILED"
+        assert app.controller.phase == "TERMINAL_HOLD"
+
+        stop = threading.Event()
+        worker = threading.Thread(target=auto_step, args=(app, 0.01, stop))
+        worker.start()
+        stop.wait(0.05)
+        stop.set()
+        worker.join(timeout=1)
+        assert backend.dock_calls == 1
+    finally:
+        app.close()
+
+
+def test_roundtrip_dock_cancel_is_forwarded_and_late_success_is_superseded(tmp_path):
+    backend = BlockingDockBackend()
+    app = ServiceApplication(
+        MissionController(require_dock_return=True),
+        tmp_path / "dock-cancel",
+        backend,
+    )
+    try:
+        app.submit({"order_id": "CANCEL-DOCK", "table_id": "table_1", "drink": "COLD_WATER"})
+        _advance_application_to_dock(app)
+        result = {}
+        worker = threading.Thread(target=lambda: result.update(app.execute_next()))
+        worker.start()
+        assert backend.started.wait(timeout=2)
+
+        canceled = app.cancel("CANCEL-DOCK")
+        worker.join(timeout=3)
+        assert not worker.is_alive()
+        assert canceled["backend_cancel_requested"] is True
+        assert canceled["order"]["state"] == "CANCELED"
+        assert result["superseded"] is True
+        assert app.controller.phase == "TERMINAL_HOLD"
+        assert app.controller.orders["CANCEL-DOCK"].state == "CANCELED"
+    finally:
+        app.close()
+
+
+def test_roundtrip_rejects_unsupported_and_second_orders(tmp_path):
+    app = ServiceApplication(
+        MissionController(require_dock_return=True),
+        tmp_path / "fresh",
+        RoundtripConstraintBackend(),
+    )
+    try:
+        with pytest.raises(ValueError, match="unsupported"):
+            app.submit({"order_id": "HOT", "table_id": "table_1", "drink": "HOT_WATER"})
+        app.submit({"order_id": "ONLY", "table_id": "table_1", "drink": "COLD_WATER"})
+        duplicate, created = app.submit(
+            {"order_id": "ONLY", "table_id": "table_1", "drink": "COLD_WATER"}
+        )
+        assert created is False and duplicate["order"]["order_id"] == "ONLY"
+        with pytest.raises(ValueError, match="one order"):
+            app.submit({"order_id": "SECOND", "table_id": "table_1", "drink": "COLD_WATER"})
+    finally:
+        app.close()
+
+
+def test_roundtrip_refuses_persisted_controller_world(tmp_path):
+    state_dir = tmp_path / "persisted"
+    first = ServiceApplication(MissionController(), state_dir)
+    first.close()
+    with pytest.raises(RuntimeError, match="cannot resume"):
+        ServiceApplication(MissionController(), state_dir, RoundtripConstraintBackend())
+
+
+def _roundtrip_backend_without_ros(tmp_path):
+    backend = Ros2PlannedRoundtripBackend.__new__(Ros2PlannedRoundtripBackend)
+    backend.executor_socket = tmp_path / "executor.sock"
+    backend.timeout_sec = 2.0
+    backend._identity = None
+    backend._identity_lock = threading.Lock()
+    backend._executor_evidence = {
+        "executor_id": "executor-test-1",
+        "executor_kind": "isaac_physics",
+        "simulator_accessed": True,
+        "scope": "dock_roundtrip",
+    }
+    backend._executor_id = "executor-test-1"
+    return backend
+
+
+def test_roundtrip_navigation_keeps_identity_for_dock(monkeypatch, tmp_path):
+    backend = _roundtrip_backend_without_ros(tmp_path)
+    calls = []
+
+    def fake_execute_phase(socket_path, **payload):
+        calls.append((socket_path, payload))
+        return {
+            "success": True,
+            "failure_code": "",
+            "message": "ok",
+            "session_state": "WAITING",
+            "executor_kind": "isaac_physics",
+            "simulator_accessed": True,
+            "hardware_accessed": False,
+        }
+
+    monkeypatch.setattr(service_execution_backend, "execute_phase", fake_execute_phase)
+    identity = {"order_id": "ORD-1", "table_id": "table_1", "drink": "COLD_WATER"}
+    first = backend.execute(
+        {"kind": "navigate", "phase": "NAVIGATE_KITCHEN", **identity},
+        mission_id="MIS-1",
+        phase_attempt=1,
+    )
+    dock = backend.execute(
+        {"kind": "navigate", "phase": "NAVIGATE_DOCK"},
+        mission_id=None,
+        phase_attempt=1,
+    )
+    assert first.success and dock.success
+    assert [call[1]["phase_id"] for call in calls] == ["NAVIGATE_KITCHEN", "NAVIGATE_DOCK"]
+    assert calls[1][1]["mission_id"] == "MIS-1"
+    assert calls[1][1]["order_id"] == "ORD-1"
+    assert calls[1][1]["executor_id"] == "executor-test-1"
+
+
+def test_roundtrip_timeout_requests_cancel_and_marks_unknown(monkeypatch, tmp_path):
+    backend = _roundtrip_backend_without_ros(tmp_path)
+    monkeypatch.setattr(
+        service_execution_backend,
+        "execute_phase",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            service_execution_backend._planned_ipc_module().PlannedIpcError(
+                "IPC_TIMEOUT", "lost response"
+            )
+        ),
+    )
+    canceled = []
+    monkeypatch.setattr(
+        service_execution_backend,
+        "cancel_session",
+        lambda path, mission_id, executor_id, timeout_sec: (
+            canceled.append((mission_id, executor_id)) or True
+        ),
+    )
+    result = backend.execute(
+        {
+            "kind": "navigate",
+            "phase": "NAVIGATE_KITCHEN",
+            "order_id": "ORD-1",
+            "table_id": "table_1",
+            "drink": "COLD_WATER",
+        },
+        mission_id="MIS-1",
+        phase_attempt=1,
+    )
+    assert result.failure_code == "IPC_TIMEOUT_RESULT_UNKNOWN"
+    assert result.action_result == {
+        "message": "lost response",
+        "result_state": "unknown",
+        "cancel_requested": True,
+    }
+    assert canceled == [("MIS-1", "executor-test-1")]
+
+
+def test_roundtrip_constructor_requires_fresh_scoped_physics_executor(monkeypatch, tmp_path):
+    status = {
+        "success": True,
+        "executor_id": "executor-test-1",
+        "executor_kind": "isaac_physics",
+        "scope": "dock_roundtrip",
+        "simulator_accessed": True,
+        "hardware_accessed": False,
+        "mission_id": None,
+        "session_state": "WAITING",
+    }
+    monkeypatch.setattr(service_execution_backend, "call_executor", lambda *args, **kwargs: status)
+    monkeypatch.setattr(
+        Ros2PlannedSessionBackend,
+        "__init__",
+        lambda self, timeout_sec: setattr(self, "timeout_sec", timeout_sec),
+    )
+    backend = Ros2PlannedRoundtripBackend(
+        executor_socket=tmp_path / "executor.sock",
+        timeout_sec=4.0,
+    )
+    assert backend._executor_evidence == status
+    assert backend._executor_id == "executor-test-1"
+
+    status["scope"] = "manipulation_only"
+    with pytest.raises(RuntimeError, match="scope"):
+        Ros2PlannedRoundtripBackend(
+            executor_socket=tmp_path / "executor.sock",
+            timeout_sec=4.0,
+        )

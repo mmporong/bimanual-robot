@@ -20,6 +20,10 @@ MANIPULATION_PHASES = (
     "REGRASP_CUP",
     "SERVE",
 )
+ROUNDTRIP_PHASES = (
+    'NAVIGATE_KITCHEN', *MANIPULATION_PHASES[:6], 'NAVIGATE_TABLE',
+    *MANIPULATION_PHASES[6:], 'NAVIGATE_DOCK',
+)
 
 
 class PlannedIpcError(RuntimeError):
@@ -85,6 +89,7 @@ def execute_phase(
     table_id: str,
     drink: str,
     timeout_sec: float,
+    executor_id: str = '',
 ) -> dict:
     response = call_executor(
         socket_path,
@@ -97,6 +102,7 @@ def execute_phase(
             "table_id": table_id,
             "drink": drink,
             "timeout_sec": timeout_sec,
+            **({'executor_id': executor_id} if executor_id else {}),
         },
         timeout_sec=timeout_sec + 1.0,
     )
@@ -110,15 +116,19 @@ def execute_phase(
                     'order_id': order_id, 'completed_phase': phase_id}
         if any(response.get(key) != value for key, value in expected.items()):
             raise PlannedIpcError('IPC_RESULT_ID_MISMATCH', 'physics result identity differs from request')
+        if executor_id and response.get('executor_id') != executor_id:
+            raise PlannedIpcError('IPC_RESULT_ID_MISMATCH', 'executor incarnation changed')
         if response.get('simulator_accessed') is not True or response.get('hardware_accessed') is not False:
             raise PlannedIpcError('IPC_PROTOCOL_ERROR', 'physics result provenance is invalid')
     return response
 
 
-def cancel_session(socket_path: Path, mission_id: str, *, timeout_sec: float = 1.0) -> bool:
+def cancel_session(socket_path: Path, mission_id: str, *, timeout_sec: float = 1.0,
+                   executor_id: str = '') -> bool:
     response = call_executor(
         socket_path,
-        {"op": "cancel_session", "mission_id": mission_id},
+        {"op": "cancel_session", "mission_id": mission_id,
+         **({'executor_id': executor_id} if executor_id else {})},
         timeout_sec=timeout_sec,
     )
     return response.get("canceled") is True

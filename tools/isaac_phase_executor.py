@@ -14,12 +14,23 @@ import socket
 import socketserver
 import threading
 import time
+import uuid
 
-from hold_flow_mission.planned_ipc import MANIPULATION_PHASES, MAX_MESSAGE_BYTES, PROTOCOL
+from hold_flow_mission.planned_ipc import MANIPULATION_PHASES, ROUNDTRIP_PHASES, MAX_MESSAGE_BYTES, PROTOCOL
 
 
-def phase_for_tick(state: str, pose: str, time_s: float) -> str:
-    if time_s < 2.0:
+def phase_for_tick(state: str, pose: str, time_s: float, *, roundtrip=False) -> str:
+    if roundtrip:
+        navigation = {
+            'START_SETTLE': 'NAVIGATE_KITCHEN', 'GO_KITCHEN': 'NAVIGATE_KITCHEN',
+            'KITCHEN_ALIGN': 'ALIGN_KITCHEN', 'KITCHEN_SETTLE': 'ALIGN_KITCHEN',
+            'BACKOUT': 'NAVIGATE_TABLE', 'NAVIGATE': 'NAVIGATE_TABLE',
+            'RETURN_CLEAR': 'NAVIGATE_DOCK', 'RETURN_HOME': 'NAVIGATE_DOCK',
+            'HOME_SETTLE': 'NAVIGATE_DOCK',
+        }
+        if state in navigation:
+            return navigation[state]
+    if not roundtrip and time_s < 2.0:
         return "ALIGN_KITCHEN"
     if state == "POUR":
         if pose.startswith("LEFT_"):
@@ -38,10 +49,14 @@ def phase_for_tick(state: str, pose: str, time_s: float) -> str:
 
 
 class PhaseExecutor:
-    def __init__(self, output: Path, *, idle_timeout_sec: float = 120.0):
+    def __init__(self, output: Path, *, idle_timeout_sec: float = 120.0, roundtrip=False):
         if not math.isfinite(idle_timeout_sec) or idle_timeout_sec <= 0:
             raise ValueError("idle timeout must be positive and finite")
         self.output = output
+        self.phases = ROUNDTRIP_PHASES if roundtrip else MANIPULATION_PHASES
+        self.scope = 'dock_roundtrip' if roundtrip else 'kitchen_service'
+        self.executor_id = uuid.uuid4().hex
+        self.require_executor_id = roundtrip
         self.idle_timeout = idle_timeout_sec
         self.condition = threading.Condition()
         self.identity = None
@@ -56,7 +71,8 @@ class PhaseExecutor:
 
     def _response(self, **values):
         return dict(protocol=PROTOCOL, hardware_accessed=False, simulator_accessed=True,
-                    executor_kind="isaac_physics", **values)
+                    executor_kind="isaac_physics", scope=self.scope,
+                    executor_id=self.executor_id, **values)
 
     def _failure(self, code, message, **values):
         return self._response(success=False, failure_code=code, message=message,
@@ -69,8 +85,10 @@ class PhaseExecutor:
             if request.get("op") == "status":
                 return self._response(success=True, failure_code="", message="Isaac world ready",
                     session_state="FINISHED" if self.finished else "RUNNING" if self.active else "WAITING",
-                    phase=self.running_phase, next_phase=MANIPULATION_PHASES[self.index] if self.index < len(MANIPULATION_PHASES) else "",
+                    phase=self.running_phase, next_phase=self.phases[self.index] if self.index < len(self.phases) else "",
                     stop_reason=self.stop_reason, mission_id=self.identity[0] if self.identity else None)
+            if self.require_executor_id and request.get('executor_id') != self.executor_id:
+                return self._failure('STALE_EXECUTOR', 'request does not belong to this executor instance')
             if request.get("op") == "cancel_session":
                 if self.identity is None or request.get("mission_id") != self.identity[0]:
                     return self._failure("SESSION_NOT_FOUND", "mission does not own this world", canceled=False)
@@ -104,8 +122,8 @@ class PhaseExecutor:
                 return self._failure(self.stop_reason or "SESSION_COMPLETE", "world cannot be resumed")
             if self.active is not None:
                 return self._failure("SESSION_BUSY", "another phase is running")
-            if request["phase_id"] != MANIPULATION_PHASES[self.index]:
-                return self._failure("PHASE_ORDER_MISMATCH", f"expected {MANIPULATION_PHASES[self.index]}")
+            if request["phase_id"] != self.phases[self.index]:
+                return self._failure("PHASE_ORDER_MISMATCH", f"expected {self.phases[self.index]}")
             self.identity = identity
             self.requests[rid] = dict(request)
             self.active = request
@@ -215,10 +233,10 @@ class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 
 @contextmanager
-def serve_executor(path, output, *, idle_timeout_sec=120.0):
+def serve_executor(path, output, *, idle_timeout_sec=120.0, roundtrip=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    executor = PhaseExecutor(output, idle_timeout_sec=idle_timeout_sec)
+    executor = PhaseExecutor(output, idle_timeout_sec=idle_timeout_sec, roundtrip=roundtrip)
     # Binding is exclusive: never unlink another live or stale socket implicitly.
     server = _Server(str(path), _Handler)
     identity = path.stat().st_ino

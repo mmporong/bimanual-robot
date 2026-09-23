@@ -19,6 +19,7 @@ from service_execution_backend import (
     ImmediateBackend,
     Ros2ManipulationBackend,
     Ros2PlannedArtifactBackend,
+    Ros2PlannedRoundtripBackend,
     Ros2PlannedSessionBackend,
 )
 from service_mission_control import DryRunRuntime, MissionController
@@ -54,6 +55,12 @@ class ServiceApplication:
         self.lock = threading.RLock()
         self.store = ServiceOrderStore(self.state_dir) if self.state_dir is not None else None
         persisted = self.store.load_snapshot() if self.store is not None else None
+        selected_backend = backend or ImmediateBackend()
+        if persisted is not None and selected_backend.mode == "ros2_planned_roundtrip":
+            if self.store is not None:
+                self.store.close()
+            selected_backend.close()
+            raise RuntimeError("ros2-planned-roundtrip cannot resume a persisted Isaac world")
         if persisted is not None:
             source = controller or MissionController()
             self.controller = MissionController.from_snapshot(
@@ -65,7 +72,7 @@ class ServiceApplication:
         else:
             self.controller = controller or MissionController()
         self.runtime = DryRunRuntime(self.controller)
-        self.backend = backend or ImmediateBackend()
+        self.backend = selected_backend
         self.execution_lock = threading.Lock()
         self.last_backend_result: dict | None = None
         self._persist()
@@ -134,6 +141,9 @@ class ServiceApplication:
 
     def submit(self, payload: dict) -> tuple[dict, bool]:
         with self.lock:
+            validate_order = getattr(self.backend, "validate_order", None)
+            if validate_order is not None:
+                validate_order(payload, existing_order_ids=set(self.controller.orders))
             order, created = self.controller.submit(payload)
             self._persist()
             return {"order": order.__dict__, "state": self.controller.snapshot()}, created
@@ -154,7 +164,7 @@ class ServiceApplication:
             }
 
     def step(self, *, success: bool = True, failure: str | None = None) -> dict:
-        if self.backend.mode == 'ros2_planned_session':
+        if self.backend.mode in {'ros2_planned_session', 'ros2_planned_roundtrip'}:
             raise BackendBusyError('manual phase advance is disabled for persistent executor sessions')
         if not self.execution_lock.acquire(blocking=False):
             raise BackendBusyError("a backend command is already running")
@@ -189,6 +199,16 @@ class ServiceApplication:
                 mission_id = active_order.mission_id if active_order is not None else None
                 phase_attempt = self.controller.phase_attempt
                 command = self.controller.current_command()
+                if active_order is not None:
+                    command = {
+                        **command,
+                        "phase": phase_before,
+                        "order_id": active_order.order_id,
+                        "table_id": active_order.table_id,
+                        "drink": active_order.drink,
+                    }
+                elif phase_before == "NAVIGATE_DOCK":
+                    command = {**command, "phase": phase_before}
                 self.runtime.commands.append(command)
 
             result = self.backend.execute(
@@ -345,7 +365,7 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
 def auto_step(app: ServiceApplication, interval_s: float, stop: threading.Event) -> None:
     while not stop.wait(interval_s):
         state = app.state()
-        if state["phase"] != "IDLE_AT_DOCK" or state["queue"] or state["active_order_id"]:
+        if state["phase"] not in {"IDLE_AT_DOCK", "TERMINAL_HOLD"} or state["queue"] or state["active_order_id"]:
             try:
                 app.execute_next()
             except BackendBusyError:
@@ -361,11 +381,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--battery-percent", type=float, default=100.0)
     parser.add_argument(
         "--backend",
-        choices=("immediate", "ros2-mock", "ros2-planned-artifact", "ros2-planned-session"),
+        choices=(
+            "immediate",
+            "ros2-mock",
+            "ros2-planned-artifact",
+            "ros2-planned-session",
+            "ros2-planned-roundtrip",
+        ),
         default="immediate",
         help="manipulation backend; ROS modes are simulation-only and never access hardware",
     )
     parser.add_argument("--manipulation-timeout-s", type=float, default=30.0)
+    parser.add_argument(
+        "--executor-socket",
+        type=Path,
+        help="required Unix socket for ros2-planned-roundtrip",
+    )
     return parser.parse_args(argv)
 
 
@@ -384,10 +415,20 @@ def main(argv: list[str] | None = None) -> int:
         backend = Ros2PlannedArtifactBackend(timeout_sec=args.manipulation_timeout_s)
     elif args.backend == "ros2-planned-session":
         backend = Ros2PlannedSessionBackend(timeout_sec=args.manipulation_timeout_s)
+    elif args.backend == "ros2-planned-roundtrip":
+        if args.executor_socket is None:
+            raise ValueError("--executor-socket is required for ros2-planned-roundtrip")
+        backend = Ros2PlannedRoundtripBackend(
+            executor_socket=args.executor_socket,
+            timeout_sec=args.manipulation_timeout_s,
+        )
     else:
         backend = ImmediateBackend()
     app = ServiceApplication(
-        MissionController(battery_percent=args.battery_percent),
+        MissionController(
+            battery_percent=args.battery_percent,
+            require_dock_return=args.backend == "ros2-planned-roundtrip",
+        ),
         args.state_dir,
         backend,
     )

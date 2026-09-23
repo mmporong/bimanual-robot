@@ -1,0 +1,17 @@
+{
+  "schema": "dock_roundtrip_v1",
+  "status": "simulation_targets_not_measured_calibration",
+  "kitchen_work_pose_m_rad": [0.0, 0.0, 0.0],
+  "guest_work_pose_m_rad": [-1.75, -2.25, 3.141592653589793],
+  "guest_exit_pose_m_rad": [-1.2, -2.25, 3.141592653589793],
+  "kitchen_position_tolerance_m": 0.0005,
+  "kitchen_yaw_tolerance_rad": 0.0005,
+  "minimum_alignment_angular_rad_s": 0.015,
+  "dock_position_tolerance_m": 0.015,
+  "dock_yaw_tolerance_rad": 0.02,
+  "settle_duration_s": 2.0,
+  "rest_linear_speed_m_s": 0.005,
+  "rest_angular_speed_rad_s": 0.01,
+  "initial_settle_s": 2.0,
+  "exit_speed_m_s": 0.05
+}

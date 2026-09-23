@@ -344,7 +344,53 @@ socket이 준비된 뒤 `http://127.0.0.1:8768/`에서 **1번 테이블·냉수*
 - timeout·접촉 실패 뒤에는 같은 월드를 계속 실행하지 않는다. 응답 유실 시 bridge가 취소를 요청하며, 정지 확인이 없으면 성공으로 간주하지 않는다.
 - 실행 코드가 변경되었으므로 이전 `cinematic_wide01`의 코드 해시 재생은 현재 checkout에서 불일치할 수 있다. 옛 해시를 수정하지 말고 해당 코드 snapshot 또는 새 실행 근거를 사용한다.
 
-## 10. 다음 연결
+## 10. 충전소 왕복 executor
+
+`ros2-planned-roundtrip`은 다음 12개 단계를 한 주문과 한 Isaac 월드로 연결한다.
+
+```text
+NAVIGATE_KITCHEN → ALIGN_KITCHEN → GRASP_CUP → GRASP_BOTTLE → POUR
+→ RETURN_BOTTLE → PLACE_DECK → NAVIGATE_TABLE → ALIGN_TABLE
+→ REGRASP_CUP → SERVE → NAVIGATE_DOCK
+```
+
+조작은 기존 ROS Action으로, 세 주행 단계는 같은 Unix socket executor로 전달한다.
+초기 위치만 충전소에 설정하고 이후에는 바퀴 속도로 움직인다. 주방 접근과 작업 위치의
+정밀 정렬을 분리한다. 도크에 도착해 목표 위치·방향·정지 조건을 유지한 뒤 주문을 성공 처리한다.
+서빙만 끝났거나 도크 복귀가 실패한 상태는 주문 성공이 아니다. 실패·취소 후에는
+`TERMINAL_HOLD`에서 종료하고 같은 월드를 재사용하지 않는다.
+
+범위는 `table_1`·`COLD_WATER` 한 주문이다. 충전 접점이나 배터리 충전 물리는 구현하지 않았으며
+복귀 성공 뒤 배터리 값을 충전 완료로 올리지 않는다. 기존 `plate_input10` 접촉 프록시를 사용하므로
+최신 순정 왼손 그리퍼 검증, 여러 테이블·두 종류 병 선택, 반복 주문 reset과 구분한다.
+Nav2·SLAM 대신 시뮬레이터 좌표와 A*·차동구동 추종을 사용한다.
+
+재현은 9절과 같은 세 프로세스를 사용한다. 매번 새로운 출력·상태 디렉터리와 socket을 지정한다.
+
+1. Isaac 실행 명령에 `--dock-roundtrip --duration 800 --executor-idle-timeout 300`을 추가한다.
+2. socket의 `status`가 `scope=dock_roundtrip`, `session_state=WAITING`, `mission_id=null`을
+   반환한 뒤 ROS bridge를 시작한다. bridge와 웹은 시작할 때 `executor_id`를 고정한다.
+   같은 경로에 새 executor가 생겨도 이전 실행의 명령·취소는 `STALE_EXECUTOR`로 거부된다.
+3. 웹을 아래와 같이 시작한다. ROS 환경과 `PYTHONPATH`는 9절과 동일하다.
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/service_order_server.py --backend ros2-planned-roundtrip \
+  --port 8769 --auto-step-s 0.1 --manipulation-timeout-s 1200 \
+  --executor-socket "$HF_EXECUTOR_SOCKET" \
+  --state-dir "$HOME/.local/state/bimanual-robot/roundtrip-$(date +%Y%m%d_%H%M%S)"
+```
+
+4. 웹에서 1번 테이블 냉수 주문을 넣는다. 800초는 전체 시뮬레이션 시간 상한,
+   1200초는 단계별 벽시계 timeout이다. 기본 영상 기록은 꺼져 있다.
+
+작업 좌표·도크 오차·정지 시간은 [`dock_roundtrip.json`](../config/simulation/dock_roundtrip.json)에
+시뮬레이션 목표로 기록했다. 실측 보정값이 아니다. `live.json`에는 물리 좌표·속도·추종 오차가,
+`executor_phases.jsonl`에는 단계별 관측이 남는다. 관제 지도 위치는 완료한 station 기준이며
+연속적인 실측 궤적 표시와 다르다. 최종 `result.json`의 `task_pass`, `service_completed`,
+`dock_return_completed`, 접지·접촉·입자 판정을 함께 확인한다.
+
+## 11. 다음 연결
 
 1. 완료: 웹 관제 runtime이 조작 Action 결과를 기다리고 성공일 때만 다음 phase로 전이한다.
 2. 완료: `ABORTED`, `CANCELED`, timeout과 `superseded`를 SQLite command payload에 저장한다.
@@ -356,4 +402,5 @@ socket이 준비된 뒤 `http://127.0.0.1:8768/`에서 **1번 테이블·냉수*
 
 현재는 한 관제 명령을 한 phase Action으로 바꾸고 mock·검증 산출물·단일 Isaac 월드의 결과를
 소비한다. 여러 phase를 묶은 HYBRID Goal은 계약 검증 대상이지만 PLANNED↔ACT 전환 실행기는
-아직 없다. 충전소 왕복, 여러 테이블·병, 반복 주문 물리 초기화를 다음 단계로 진행한다.
+아직 없다. 충전소 왕복은 위 executor로 검증하고, 여러 테이블·병과 반복 주문 물리 초기화는
+후속 범위로 남긴다.
