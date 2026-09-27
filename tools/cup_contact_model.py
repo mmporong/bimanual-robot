@@ -48,15 +48,22 @@ def load_config(path=DEFAULT_CONFIG):
 
 
 def validate_config(config):
+    unit = config.get("gripper_unit", "rad")
+    geometry = config.setdefault("gripper_geometry", "rigid_pad_proxy" if unit == "rad" else "stock_flat_jaw_proxy")
+    if not isinstance(geometry, str) or geometry not in {"rigid_pad_proxy", "stock_so101", "stock_flat_jaw_proxy"}:
+        raise ValueError("지원하지 않는 그리퍼 형상")
+    if geometry in {"stock_so101", "rigid_pad_proxy"} and unit != "rad":
+        raise ValueError("SO101 순정·패드 형상은 회전식 rad 관절만 지원합니다")
+    if geometry == "stock_flat_jaw_proxy" and unit != "m":
+        raise ValueError("평면 병 죠 형상은 직선식 m 관절만 지원합니다")
     config.setdefault("mesh_collision_mode", "convexHull")
     if config["mesh_collision_mode"] not in {"convexHull", "convexDecomposition"}:
         raise ValueError("지원하지 않는 메쉬 충돌 근사")
-    unit = config.get("gripper_unit", "rad")
     if unit not in {"rad", "m"}:
         raise ValueError("그리퍼 단위는 rad 또는 m이어야 합니다")
     validate_placement(config["placement"], unit)
     vectors = ["table_center_m", "table_size_m", "cup_center_m", "contact_center_tool_m", "cup_spawn_offset_m"]
-    if unit == "rad":
+    if unit == "rad" and geometry == "rigid_pad_proxy":
         vectors += ["pad_size_m", "fixed_pad_center_tool_m", "moving_pad_center_jaw_m"]
     for key in vectors:
         value = np.asarray(config[key], dtype=float)
@@ -69,7 +76,9 @@ def validate_config(config):
                 "minimum_contact_force_n", "maximum_midbody_height_error_m",
                 "maximum_contact_center_error_m", "maximum_cup_lateral_drift_m", "maximum_cup_tilt_deg",
                 "maximum_preclose_displacement_m"]
-    positive += ["moving_pad_mass_kg", "gripper_max_effort_nm"] if unit == "rad" else ["gripper_max_effort_n", "gripper_kp", "gripper_kd"]
+    positive += ["gripper_max_effort_nm"] if unit == "rad" else ["gripper_max_effort_n", "gripper_kp", "gripper_kd"]
+    if unit == "rad" and geometry == "rigid_pad_proxy":
+        positive.append("moving_pad_mass_kg")
     for key in positive:
         if type(config[key]) not in (int, float) or not math.isfinite(config[key]) or config[key] <= 0:
             raise ValueError(f"{key}: 유한한 양수 필요")
@@ -99,6 +108,13 @@ def preclose_failure(sample, config):
     return None
 
 
+def stock_non_gripping_contact_failure(forces, config):
+    """순정 죠 시험에서 손목·반대 팔 등의 컵 접촉을 파지로 세지 않는다."""
+    if config.get("gripper_geometry") == "stock_so101" and max(forces.values(), default=0.) >= config["minimum_contact_force_n"]:
+        return "cup_contact_with_non_gripping_robot_link"
+    return None
+
+
 def _box(link, name, center_m, size_m):
     for kind in ("visual", "collision"):
         element = ET.SubElement(link, kind, name=name)
@@ -117,12 +133,35 @@ def _required(parent: ET.Element, xpath: str) -> ET.Element:
 
 
 def prepare_model(output: Path, config, source=URDF_PATH):
-    """원본을 보존하고 로그 폴더에만 가정 URDF를 만든다."""
+    """원본을 보존하고 로그 사본에만 명시한 형상과 접촉 프레임을 적용한다."""
     target = output / "contact_proxy.urdf"
     provenance = materialize_urdf(source, target,
         base_contract=ROOT / "config/navigation/jdamr_migration.json")
     tree = ET.parse(target)
     root = tree.getroot()
+    stock = config.get("gripper_geometry") == "stock_so101"
+    if not stock:
+        _apply_pad_proxy(root, config, source)
+    else:
+        for name in FINGER_LINKS:
+            link = _required(root, f"./link[@name='{name}']")
+            _required(link, "collision/geometry/mesh")
+            _required(link, "inertial")
+    ET.SubElement(root, "link", name="left_contact_center")
+    joint = ET.SubElement(root, "joint", name="left_contact_center_joint", type="fixed")
+    ET.SubElement(joint, "parent", link="left_tool0")
+    ET.SubElement(joint, "child", link="left_contact_center")
+    ET.SubElement(joint, "origin", xyz=" ".join(map(str, config["contact_center_tool_m"])), rpy="0 0 0")
+    ET.indent(root)
+    tree.write(target, encoding="utf-8", xml_declaration=True)
+    return target, {"source": provenance, "proxy_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                    "assembly_mode": "stock_so101_source_geometry" if stock else "left_contact_proxy",
+                    "status": "source_stock_geometry_unmeasured_contact_frame" if stock else
+                              "assumed_rigid_pads_stock_revolute_joint_not_finray_twin"}
+
+
+def _apply_pad_proxy(root, config, source):
+    """기존 실험의 패드 교체만 수행한다. 순정 형상 경로에서는 호출하지 않는다."""
     fixed = _required(root, "./link[@name='left_gripper_link']")
     moving = _required(root, "./link[@name='left_moving_jaw_link']")
     inertial = _required(moving, "inertial")
@@ -151,15 +190,6 @@ def prepare_model(output: Path, config, source=URDF_PATH):
         inertia.set(key, str(value))
     for key in ("ixy", "ixz", "iyz"):
         inertia.set(key, "0")
-    ET.SubElement(root, "link", name="left_contact_center")
-    joint = ET.SubElement(root, "joint", name="left_contact_center_joint", type="fixed")
-    ET.SubElement(joint, "parent", link="left_tool0")
-    ET.SubElement(joint, "child", link="left_contact_center")
-    ET.SubElement(joint, "origin", xyz=" ".join(map(str, config["contact_center_tool_m"])), rpy="0 0 0")
-    ET.indent(root)
-    tree.write(target, encoding="utf-8", xml_declaration=True)
-    return target, {"source": provenance, "proxy_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-                    "status": "assumed_rigid_pads_stock_revolute_joint_not_finray_twin"}
 
 
 class ContactChain(Chain):

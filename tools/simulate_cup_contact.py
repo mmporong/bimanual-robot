@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isaac 5.1의 실험용 회전식 강체 패드로 컵 접근·접촉·상승을 검사한다.
+"""Isaac 5.1의 회전식 그리퍼로 컵 접근·접촉·상승을 검사한다.
 
 실물 접근 없음. 컵 순간이동·부착 없음. 가정 패드의 결과는 FinRay 실물 검증이 아니다.
 """
@@ -29,6 +29,7 @@ def run(args, backend=cup_contact_model):
     if args.recover and backend.SIDE != "left":
         raise ValueError("접촉 복구는 아직 왼손 컵 실험만 지원합니다")
     config = backend.load_config(args.config)
+    stock = config.get("gripper_geometry") == "stock_so101"
     side, unit = backend.SIDE, backend.GRIPPER_UNIT
     object_label = backend.OBJECT_LABEL
     object_path = f"/World/{object_label}"
@@ -63,7 +64,9 @@ def run(args, backend=cup_contact_model):
                 "recovery_enabled": args.recover,
                 "placement_enabled": args.place,
                 "observation_source": "simulator_ground_truth_not_rgb",
-                "hardware_accessed": False, "mode": "rigid_proxy_contact_experiment"}
+                "hardware_accessed": False, "gripper_geometry": config["gripper_geometry"],
+                "self_collision_checked": False,
+                "mode": "stock_so101_contact_experiment" if stock else "rigid_proxy_contact_experiment"}
     (output / "plan.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+"\n")
     if args.plan_only:
         print(f"{object_label.upper()}_CONTACT_PLAN_READY {output / 'plan.json'}")
@@ -89,6 +92,12 @@ def run(args, backend=cup_contact_model):
         place_pass = evaluate_placement(current, evaluation_config, completed, lift_pass, touchdown_observed) if args.place else False
         return {**outcome, "object_kind": object_label.lower(), "physical_grasp_verified": False,
                 "assembly_mode": provenance.get("assembly_mode", "left_contact_proxy"),
+                "gripper_geometry": config["gripper_geometry"],
+                "model_sha256": provenance["proxy_sha256"],
+                "source_config_sha256": source_config_sha256,
+                "effective_config_sha256": cup_contact_model.effective_config_sha256(config),
+                "stock_geometry_lift_pass": bool(stock and lift_pass),
+                "stock_geometry_place_pass": bool(stock and place_pass),
                 "model_calibrated": False,
                 "lift_stage_pass": lift_pass, "placement_enabled": args.place,
                 "touchdown_observed": touchdown_observed,
@@ -196,7 +205,7 @@ def run(args, backend=cup_contact_model):
         UsdGeom.Xformable(sun).AddRotateXYZOp().Set(Gf.Vec3f(-30,-45,0))
         UsdLux.DomeLight.Define(stage, "/World/Fill").CreateIntensityAttr(500)
         robot = world.scene.add(SingleArticulation(prim_path=root, name="robot"))
-        other_links = sorted(set(rigid_links)-set(backend.FINGER_LINKS)) if side == "right" else []
+        other_links = sorted(set(rigid_links)-set(backend.FINGER_LINKS)) if side == "right" or stock else []
         filters = [*(rigid_links[name] for name in backend.FINGER_LINKS), "/World/Table",
                    *(rigid_links[name] for name in other_links)]
         cup_view = world.scene.add(RigidPrim(object_path, name="object_contacts",
@@ -352,6 +361,11 @@ def run(args, backend=cup_contact_model):
                 break
             if side == "right":
                 failure = backend.non_gripping_contact_failure(other_forces, config)
+                if failure:
+                    reason = failure
+                    break
+            elif stock:
+                failure = cup_contact_model.stock_non_gripping_contact_failure(other_forces, config)
                 if failure:
                     reason = failure
                     break

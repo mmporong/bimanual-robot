@@ -392,6 +392,14 @@ python3 tools/service_order_server.py --backend ros2-planned-roundtrip \
 
 ## 11. 다음 연결
 
+2026-09-27 결과 확인: `dock_roundtrip02`는 2026-09-22 실행한 `DOCK-ROUNDTRIP-002` 주문의
+12개 phase 모두 성공했다. `task_pass=true`, `service_completed=true`, `dock_return_completed=true`,
+`ground_verified=true`이며 시뮬레이션 시간은 473.892초다. 검사 대상 환경·자가충돌 최대 접촉력
+0 N, 운반 중 추가 입자 손실 0개다. 컵 687개·병 227개·외부 4개 입자를 기록했다.
+`charging_physics_executed=false`, `nav2_executed=false`, `hardware_accessed=false`이며
+구형 `plate_input10` 접촉 프록시 조건 1회 결과다. 현재 순정 죠 전체 미션 성공으로 세지 않는다.
+종료된 executor 없이 대기하던 웹·ROS bridge는 2026-09-27 기록 보존 후 종료했다.
+
 1. 완료: 웹 관제 runtime이 조작 Action 결과를 기다리고 성공일 때만 다음 phase로 전이한다.
 2. 완료: `ABORTED`, `CANCELED`, timeout과 `superseded`를 SQLite command payload에 저장한다.
 3. 완료: 검증된 `water_service_mission.py` 결과를 해시·phase 근거가 있는 PLANNED 산출물 backend로 연결했다.
