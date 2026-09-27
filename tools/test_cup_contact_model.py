@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -9,6 +10,71 @@ import cup_contact_model
 
 from cup_contact_model import (Chain, URDF_PATH, load_config, prepare_model, make_plan,
                                sample_plan, evaluate_lift, ready_to_lift, preclose_failure)
+
+
+def stock_config():
+    return load_config(cup_contact_model.ROOT / "config/simulation/cup_stock_so101_experiment.json")
+
+
+def test_stock_source_geometry_inertia_and_joint_are_not_replaced(tmp_path):
+    original = hashlib.sha256(URDF_PATH.read_bytes()).hexdigest()
+    path, provenance = prepare_model(tmp_path, stock_config())
+    source, generated = ET.parse(URDF_PATH).getroot(), ET.parse(path).getroot()
+    for name in cup_contact_model.FINGER_LINKS:
+        before = source.find(f"./link[@name='{name}']")
+        after = generated.find(f"./link[@name='{name}']")
+        assert before is not None and after is not None
+        # Materialization only resolves package mesh paths; compare all other
+        # authored geometry, origins, mass and inertia without whitespace.
+        for mesh in after.findall(".//mesh"):
+            mesh.set("filename", "package://hold_flow_description/meshes/so101/" + Path(mesh.get("filename")).name)
+        assert [(e.tag, e.attrib) for e in before.iter()] == [(e.tag, e.attrib) for e in after.iter()]
+    assert [(e.tag, e.attrib) for e in source.find("./joint[@name='left_gripper']").iter()] == [
+        (e.tag, e.attrib) for e in generated.find("./joint[@name='left_gripper']").iter()]
+    assert not any("assumed_" in e.get("name", "") for e in generated.iter())
+    assert provenance["assembly_mode"] == "stock_so101_source_geometry"
+    assert hashlib.sha256(URDF_PATH.read_bytes()).hexdigest() == original
+
+
+@pytest.mark.parametrize("geometry", ["tpu", None, True, [], {}])
+def test_unknown_geometry_cannot_silently_use_stock_or_pads(geometry):
+    config = load_config()
+    config["gripper_geometry"] = geometry
+    with pytest.raises(ValueError, match="그리퍼 형상"):
+        cup_contact_model.validate_config(config)
+
+
+def test_stock_plan_is_horizontal_midbody_and_uses_same_revolute_contract(tmp_path):
+    config = stock_config()
+    model, _ = prepare_model(tmp_path, config)
+    plan = make_plan(model, config, place=True)
+    approach = next(p for p in plan["poses"] if p["name"] == "APPROACH")
+    np.testing.assert_allclose(approach["target_m"], config["cup_center_m"])
+    assert all("gripper_rad" in p for p in plan["poses"])
+    assert max(p["measurement"]["position_error_mm"] for p in plan["poses"] if "measurement" in p) < 2
+    assert max(p["measurement"]["closing_horizontal_error_deg"] for p in plan["poses"] if "measurement" in p) < 2
+
+
+def test_stock_wrist_or_opposite_arm_cup_contact_is_not_a_grasp():
+    config = stock_config()
+    check = cup_contact_model.stock_non_gripping_contact_failure
+    assert check({}, config) is None
+    assert check({"left_wrist_link": .019}, config) is None
+    for link in ("left_wrist_link", "right_finger1_link", "left_lower_arm_link"):
+        assert check({link: .02}, config) == "cup_contact_with_non_gripping_robot_link"
+    assert check({"left_wrist_link": 1.}, load_config()) is None
+
+
+def test_bottle_backend_geometry_metadata_does_not_claim_left_pads():
+    import bottle_contact_model
+    config = bottle_contact_model.load_config()
+    assert config["gripper_geometry"] == "stock_flat_jaw_proxy"
+    config["gripper_geometry"] = "stock_so101"
+    with pytest.raises(ValueError, match="rad 관절"):
+        cup_contact_model.validate_config(config)
+    config["gripper_geometry"] = "rigid_pad_proxy"
+    with pytest.raises(ValueError, match="rad 관절"):
+        cup_contact_model.validate_config(config)
 
 
 def test_proxy_preserves_source_and_revolute_joint(tmp_path):
