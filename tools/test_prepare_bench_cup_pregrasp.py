@@ -1,0 +1,48 @@
+import copy
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+import yaml
+
+import prepare_bench_cup_pregrasp as pregrasp
+from test_ik_reset_clear_step import CALIBRATION_BYTES, snapshot
+
+
+MEASUREMENT = yaml.safe_load((Path(__file__).resolve().parents[1] /
+                             "calibration/workcells/bench_cup_20260929.yaml").read_text())
+
+
+def test_pregrasp_has_no_grip_or_execution_claim():
+    result = pregrasp.build(MEASUREMENT, snapshot(), CALIBRATION_BYTES)
+    assert not result["hardware_accessed"] and not result["motion_command_emitted"]
+    assert not result["physical_execution_ready"]
+    assert not result["gripper_raw_command_available"] and not result["close_command_available"]
+    assert not result["start_to_endpoint_path_verified"]
+    assert [stage["phase"] for stage in result["stages"]] == ["ALIGN_ABOVE_BEHIND_CUP", "PREGRASP_ABOVE_CUP"]
+    assert result["endpoints_ready_for_path_review"]
+    assert abs(result["stages"][0]["joint_deg"][4] - result["stages"][1]["joint_deg"][4]) < 5
+    base = pregrasp.FixedContactChain({"contact_center_tool_m": MEASUREMENT["nominal_pregrasp"]["contact_center_tool_m"]}).transforms(
+        pregrasp.base_positions("left", np.zeros(5)))["left_base_link"][:3, 3]
+    assert np.allclose(np.asarray(result["stages"][0]["contact_center_target_m"]) - base, [.270, 0, .170])
+    assert np.allclose(np.asarray(result["stages"][1]["contact_center_target_m"]) - base, [.350, 0, .170])
+    assert result["midbody_behind_cup_candidate"]["endpoint_violations"]
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("changed", ["unit", "diameter", "backoff", "snapshot", "execution_ready"])
+def test_unverified_or_mismatched_inputs_are_rejected(changed):
+    data, start = copy.deepcopy(MEASUREMENT), snapshot()
+    if changed == "unit":
+        data["cup_forward"]["unit"] = "mm"
+    elif changed == "diameter":
+        data["cup_diameter"]["value"] = .070
+    elif changed == "backoff":
+        data["nominal_pregrasp"]["selected_backoff_m"] = .060
+    elif changed == "execution_ready":
+        data["physical_execution_ready"] = True
+    else:
+        start["calibration_sha256"] = "different"
+    with pytest.raises(ValueError):
+        pregrasp.build(data, start, CALIBRATION_BYTES)

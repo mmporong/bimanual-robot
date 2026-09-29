@@ -15,6 +15,7 @@ from pathlib import Path
 import signal
 import sys
 import threading
+import time
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -29,7 +30,8 @@ from plan_body_side_grasp import Chain, URDF_PATH, base_positions
 from servo.execute_safe_recovery import degrees_to_raw, read_required
 from servo.servo_record_ranges import validate_capture
 from servo.small_raw_jog import dashboard_monitor
-from servo.sts_bus import A_MAX_ANGLE, A_MIN_ANGLE, A_OFFSET, A_POS, A_TORQUE, decode_offset
+from servo.sts_bus import (A_LOCK, A_MAX_ANGLE, A_MIN_ANGLE, A_OFFSET, A_P, A_POS,
+                           A_TORQUE, decode_offset)
 
 JOINTS = ik_pick_place.JOINTS
 NAMES = ik_pick_place.NAMES
@@ -259,12 +261,154 @@ def validate_hardware(bus, plan: dict, calibration_bytes: bytes) -> None:
         raise RuntimeError("실행 직전 모든 토크가 OFF여야 합니다")
 
 
-def execute(bus, plan: dict, calibration_bytes: bytes, monitor) -> dict:
-    result = ik_pick_place.run_sequence(
-        bus, plan, lambda phase: phase == "CLEAR_RESET_STEP", monitor=monitor,
-        preflight=lambda: validate_hardware(bus, plan, calibration_bytes),
-        raw_step_ticks=MAX_DELTA_TICKS, arrival_tolerance_ticks=4,
-    )
+def _journal(path: Path, event: dict, mode: str = "a") -> None:
+    with path.open(mode, encoding="utf-8") as stream:
+        stream.write(json.dumps(event, ensure_ascii=False, allow_nan=False) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def reserve_gain_journal(path: Path) -> None:
+    _journal(path, {"schema": "ik_reset_elbow_gain_journal_v1", "status": "reserved"}, "x")
+
+
+def _restore_gain(bus, original_p: int, original_lock: int, gain: dict) -> None:
+    errors = gain["errors"]
+    for sid in range(1, 7):
+        try:
+            if not bus.write(sid, A_TORQUE, 0):
+                raise RuntimeError(f"ID {sid}: torque OFF ACK 실패")
+        except BaseException as exc:
+            errors.append(f"torque_off:{exc}")
+    torque_off_proven = False
+    try:
+        gain["final_torque"] = [read_required(bus, sid, A_TORQUE) for sid in range(1, 7)]
+        torque_off_proven = gain["final_torque"] == [0] * 6
+        if not torque_off_proven:
+            errors.append(f"final_torque:{gain['final_torque']}")
+    except BaseException as exc:
+        errors.append(f"final_torque_read:{exc}")
+
+    # 전축 OFF와 unlock ACK/readback이 증명된 경우에만 EEPROM P를 쓴다.
+    # 마지막 LOCK 복원은 앞 단계의 성공 여부와 무관하게 항상 시도한다.
+    unlock_proven = False
+    if torque_off_proven:
+        try:
+            unlock_ack = bus.write(3, A_LOCK, 0)
+            time.sleep(0.05)
+            unlock_readback = read_required(bus, 3, A_LOCK)
+            unlock_proven = unlock_ack and unlock_readback == 0
+            if not unlock_proven:
+                errors.append(f"restore_unlock:ACK/readback 실패 ({unlock_ack}, {unlock_readback})")
+        except BaseException as exc:
+            errors.append(f"restore_unlock:{exc}")
+    else:
+        errors.append("restore_p:전축 토크 OFF 미증명으로 P 복구 쓰기 보류")
+    if unlock_proven:
+        try:
+            p_ack = bus.write(3, A_P, original_p)
+            time.sleep(0.05)
+            if not p_ack:
+                errors.append("restore_p:ACK 실패")
+        except BaseException as exc:
+            errors.append(f"restore_p:{exc}")
+    else:
+        gain["restore_pending"] = True
+    try:
+        lock_ack = bus.write(3, A_LOCK, original_lock)
+        time.sleep(0.05)
+        if not lock_ack:
+            errors.append("restore_lock:ACK 실패")
+    except BaseException as exc:
+        errors.append(f"restore_lock:{exc}")
+    try:
+        gain["restored_p"] = read_required(bus, 3, A_P)
+        gain["restored_lock"] = read_required(bus, 3, A_LOCK)
+        if (gain["restored_p"], gain["restored_lock"]) != (original_p, original_lock):
+            errors.append("P/LOCK 복구 readback 불일치")
+            gain["restore_pending"] = True
+        elif unlock_proven:
+            gain["restore_pending"] = False
+    except BaseException as exc:
+        errors.append(f"restore_readback:{exc}")
+        gain["restore_pending"] = True
+
+
+def execute(bus, plan: dict, calibration_bytes: bytes, monitor, *, elbow_p_test: int | None = None,
+            gain_journal: Path | None = None) -> dict:
+    if elbow_p_test is None:
+        gain = None
+    else:
+        if elbow_p_test != 32 or gain_journal is None:
+            raise ValueError("P 시험은 값 32와 사전 확보된 gain journal이 필요합니다")
+        gain = {"requested": True, "servo_id": 3, "test_p": 32, "original_p": None,
+                "original_lock": None, "observed_test_p": None, "restored_p": None,
+                "restored_lock": None, "restore_pending": False, "errors": [],
+                "journal": str(gain_journal.resolve())}
+
+    if gain is not None:
+        result = None
+        mutated = False
+        try:
+            # EEPROM 쓰기 전의 실물 상태와 시작 위치를 먼저 모두 검증한다.
+            validate_hardware(bus, plan, calibration_bytes)
+            monitor()
+            gain["original_p"] = read_required(bus, 3, A_P)
+            gain["original_lock"] = read_required(bus, 3, A_LOCK)
+            if gain["original_p"] != 16 or gain["original_lock"] != 1:
+                raise RuntimeError("ID 3 원래 P=16, LOCK=1이 아니므로 쓰지 않습니다")
+            _journal(gain_journal, {"status": "backup_fsynced", "servo_id": 3,
+                "original_p": gain["original_p"], "original_lock": gain["original_lock"],
+                "test_p": gain["test_p"]})
+            mutated = True
+            if not bus.write(3, A_LOCK, 0):
+                raise RuntimeError("ID 3 EEPROM unlock ACK 실패")
+            time.sleep(0.05)
+            if read_required(bus, 3, A_LOCK) != 0:
+                raise RuntimeError("ID 3 EEPROM unlock readback 실패")
+            p_ack = bus.write(3, A_P, gain["test_p"])
+            time.sleep(0.08)
+            gain["observed_test_p"] = read_required(bus, 3, A_P)
+            if not p_ack:
+                raise RuntimeError("ID 3 P 쓰기 ACK 실패")
+            if gain["observed_test_p"] != gain["test_p"]:
+                raise RuntimeError("ID 3 P=32 readback 실패")
+            if not bus.write(3, A_LOCK, gain["original_lock"]):
+                raise RuntimeError("ID 3 원래 LOCK 복원 ACK 실패")
+            time.sleep(0.05)
+            if read_required(bus, 3, A_LOCK) != gain["original_lock"]:
+                raise RuntimeError("ID 3 원래 LOCK 복원 readback 실패")
+            _journal(gain_journal, {"status": "test_p_observed", "observed_test_p": 32,
+                                    "lock_restored_before_motion": True})
+            monitor()
+            result = ik_pick_place.run_sequence(
+                bus, plan, lambda phase: phase == "CLEAR_RESET_STEP", monitor=monitor,
+                preflight=lambda: validate_hardware(bus, plan, calibration_bytes),
+                raw_step_ticks=MAX_DELTA_TICKS, arrival_tolerance_ticks=4,
+            )
+        except BaseException as exc:
+            gain["errors"].append(f"setup:{type(exc).__name__}:{exc}")
+            result = {"sequence_completed": False, "failure": f"{type(exc).__name__}:{exc}",
+                      "stop_errors": [], "command_write_attempted": False,
+                      "phases_completed": [], "temperature_load_read": False}
+        finally:
+            if mutated:
+                _restore_gain(bus, gain["original_p"], gain["original_lock"], gain)
+                try:
+                    _journal(gain_journal, {"status": "restore_attempted", "restored_p": gain["restored_p"],
+                        "restored_lock": gain["restored_lock"], "restore_pending": gain["restore_pending"],
+                        "errors": gain["errors"]})
+                except BaseException as exc:
+                    gain["errors"].append(f"journal_restore:{exc}")
+        if gain["errors"]:
+            result["sequence_completed"] = False
+            result.setdefault("stop_errors", []).extend(gain["errors"])
+    else:
+        result = ik_pick_place.run_sequence(
+            bus, plan, lambda phase: phase == "CLEAR_RESET_STEP", monitor=monitor,
+            preflight=lambda: validate_hardware(bus, plan, calibration_bytes),
+            raw_step_ticks=MAX_DELTA_TICKS, arrival_tolerance_ticks=4,
+        )
     result.update(
         schema="ik_reset_clear_step_result_v1",
         snapshot_sha256=plan["snapshot_sha256"],
@@ -273,6 +417,7 @@ def execute(bus, plan: dict, calibration_bytes: bytes, monitor) -> dict:
         physical_cup_grasp_verified=False,
         full_physical_geometry_verified=False,
         temperature_load_read=False,
+        gain_test=gain,
     )
     try:
         result["final_torque"] = [read_required(bus, sid, A_TORQUE) for sid in plan["servo_ids"]]
@@ -294,6 +439,7 @@ def main() -> int:
     parser.add_argument("--port")
     parser.add_argument("--stop-status-url")
     parser.add_argument("--model-review", type=Path)
+    parser.add_argument("--elbow-p-test", type=int, choices=(32,))
     args = parser.parse_args()
     protected = {args.snapshot_file.resolve(), args.calibration.resolve()}
     if args.model_review is not None:
@@ -304,6 +450,8 @@ def main() -> int:
         parser.error("실행에는 --port, --stop-status-url, --model-review가 모두 필요합니다")
     if not args.execute and (args.port or args.stop_status_url or args.model_review):
         parser.error("포트·정지 상태·모델 검토는 --execute에서만 사용합니다")
+    if args.elbow_p_test is not None and not args.execute:
+        parser.error("--elbow-p-test는 --execute에서만 사용합니다")
 
     calibration_bytes = args.calibration.read_bytes()
     plan = prepare(json.loads(args.snapshot_file.read_text()), calibration_bytes)
@@ -325,6 +473,11 @@ def main() -> int:
     bus = None
     if args.execute:
         validate_model_review(plan, json.loads(args.model_review.read_text()), calibration_bytes)
+        gain_journal = args.output.with_suffix(".gain.jsonl") if args.elbow_p_test is not None else None
+        if gain_journal is not None:
+            if gain_journal.exists() or gain_journal.resolve() in protected:
+                parser.error("gain journal은 기존 파일이나 입력을 덮어쓸 수 없습니다")
+            reserve_gain_journal(gain_journal)
 
         def interrupt(_signum, _frame):
             interrupted.set()
@@ -339,7 +492,8 @@ def main() -> int:
         old_handlers = {sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
             bus = open_stop_bus(args.port)
-            result = execute(bus, plan, calibration_bytes, monitor)
+            result = execute(bus, plan, calibration_bytes, monitor,
+                             elbow_p_test=args.elbow_p_test, gain_journal=gain_journal)
             result.update(hardware_accessed=True, motion_command_emitted=result["command_write_attempted"],
                           model_review_path=str(args.model_review.resolve()))
         finally:
