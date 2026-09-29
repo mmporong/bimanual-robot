@@ -46,6 +46,11 @@ SmolVLA의 실물 성공 조건을 유지하면서 왼팔 IK 픽앤플레이스�
 전체 개구·실물 TCP·컵 파지는 아직 검증 전이다.
 실물 정렬 자세의 raw 값을 별도 관절 기준으로 저장하고, 현재 내려놓은 자세와 구분한다.
 `tools/servo/joint_reference.py`의 기준은 EEPROM을 바꾸지 않으며 수동 정렬의 정밀도를 보증하지 않는다.
+**현재 등록한 수동 영점은 실물 리셋 자세와의 불일치가 보고되어 실행 기준으로 사용하지 않는다.**
+`tools/compare_joint_conventions.py`로 같은 raw를 수동 영점과 LeRobot 범위 정규화 각도로 비교한다.
+어느 쪽도 자동으로 URDF 영점의 정답으로 채택하지 않는다. 현행 `joint_reference_v1`은 오프라인
+비교 전용이며, 실물 대응 검증 형식이 마련될 때까지 `ik_pick_place.py execute`는 포트를 열지 않는다.
+`prepare`·`check`·`mock`·`snapshot`은 유지한다. 아래 실행 준비 절차만으로 현재 기체 파지가 보장되지는 않는다.
 IK는 이 기준으로 변환한 실물 가동 범위와 URDF 관절 한계의 교집합에서 해를 찾는다.
 `tools/prepare_bench_cup_pregrasp.py`는 컵 뒤 상부·컵 상부 끝점을 만들고,
 `tools/review_bench_pregrasp_path.py`는 초기 후퇴·상승을 포함한 경로를 raw 표본으로 검토한다.

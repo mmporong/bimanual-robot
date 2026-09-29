@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "design/cad"))
 from render_design_handoff import UrdfScene, URDF_PATH, FONT_REGULAR
 
 
-def render(output: Path) -> None:
+def render(output: Path, comparisons=None) -> None:
     if output.exists():
         raise FileExistsError(output)
     scene = UrdfScene(URDF_PATH)
@@ -25,14 +25,17 @@ def render(output: Path) -> None:
     window.SetOffScreenRendering(0)
     window.SetSize(1400, 650)
     window.SetMultiSamples(4)
-    for index, (title, camera_offset) in enumerate([
-        ("옆면 · 5개 팔 관절 q=0°", np.array([180, -1200, 150])),
-        ("입체 · 같은 자세", np.array([850, -950, 600])),
-    ]):
+    views = comparisons or [
+        ("옆면 · 5개 팔 관절 q=0°", {}, np.array([180, -1200, 150])),
+        ("입체 · 같은 자세", {}, np.array([850, -950, 600])),
+    ]
+    if len(views) != 2:
+        raise ValueError("두 비교 화면이 필요합니다")
+    for index, (title, positions, camera_offset) in enumerate(views):
         renderer = vtk.vtkRenderer()
         renderer.SetViewport(index / 2, 0, (index + 1) / 2, 1)
         renderer.SetBackground(0.96, 0.97, 0.98)
-        for actor in scene.actors({"left_gripper": 0.4}):
+        for actor in scene.actors({"left_gripper": 0.4, **positions}):
             renderer.AddActor(actor)
         label = vtk.vtkTextActor()
         label.SetInput(title + "\n자동 이동 명령 아님 · 그리퍼 개구는 기준에서 제외")

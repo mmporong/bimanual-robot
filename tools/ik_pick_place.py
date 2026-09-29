@@ -163,6 +163,17 @@ def decode_raw(raw, cal, config, calibration_bytes=None):
     return q_deg, angle_rad
 
 
+def require_verified_physical_mapping(config):
+    """수동 기준/범위 midpoint를 검증된 실물 좌표로 승격하지 않는다.
+
+    현재 joint_reference_v1은 오프라인 사용자 정렬 후보만 표현한다.
+    실물 대응 검증 형식이 구현되기 전에는 이 실행기에서 사용할 수 없다.
+    """
+    reference = config.get("joint_reference")
+    if not isinstance(reference, dict) or reference.get("pose_alignment_precision_verified") is not True:
+        raise ValueError("실물 관절 좌표 대응 미검증: 수동 영점과 범위 midpoint는 오프라인 비교용입니다")
+
+
 def prepare(config, calibration_bytes, right_calibration_bytes=None):
     validate_config(config)
     chain = FixedContactChain(config)
@@ -533,6 +544,11 @@ def main():
                           "collision_audit": audit(plan, calibration_bytes)}
             else:
                 mock = args.mode == "mock"
+                if not mock:
+                    try:
+                        require_verified_physical_mapping(plan["config"])
+                    except ValueError as exc:
+                        parser.error(str(exc))
                 if not mock and (not args.port or not args.right_port or
                     Path(args.port).resolve() == Path(args.right_port).resolve() or not args.observed_workcell or
                     plan["config"]["provenance"]["status"] != "user_measured" or

@@ -210,6 +210,18 @@ def test_full_mock_no_physical_success_or_eeprom(plan):
     assert_restored(bus, plan)
 
 
+def test_unverified_reference_still_allows_offline_mock():
+    calibration_bytes = p.DEFAULT_CALIBRATION.read_bytes()
+    config = fixture_config()
+    config["joint_reference"] = reference_fixture(calibration_bytes)
+    packet = p.prepare(config, calibration_bytes)
+    bus = p.MockBus(packet["servo_ids"], packet["start_raw"])
+    result = run(bus, packet)
+    assert result["sequence_completed"]
+    assert not result["physical_task_verified"]
+    assert_restored(bus, packet)
+
+
 def test_simulation_uses_same_quantized_goal_sequence_and_required_holds(plan):
     from simulate_fixed_ik_pick_place import simulation_plan
     result = simulation_plan(plan, p.DEFAULT_CALIBRATION.read_bytes())
@@ -440,6 +452,8 @@ def test_execute_uses_exclusive_buses_and_composes_dashboard_monitor(plan, tmp_p
             pass
 
     monkeypatch.setattr(p, "verify_packet", lambda *_: None)
+    # 포트/정지 감시 연결만 검사한다. 미검증 기준 거부는 별도 회귀에서 검사한다.
+    monkeypatch.setattr(p, "require_verified_physical_mapping", lambda *_: None)
     monkeypatch.setattr(p, "audit", lambda *_: {"robot_sampled_collision_pass": True})
     monkeypatch.setattr(p, "open_stop_bus", lambda port: opened.append(port) or DummyBus())
     monkeypatch.setattr("serial.Serial", lambda *_: pytest.fail("execute가 검증된 포트 개방을 우회하면 안 됩니다"))
@@ -476,3 +490,25 @@ def test_execute_uses_exclusive_buses_and_composes_dashboard_monitor(plan, tmp_p
     assert opened == ["/dev/right", "/dev/left"]
     assert polls == 2
     assert dashboard_urls == ["http://127.0.0.1:8770/api/stop/status"]*4
+
+
+@pytest.mark.parametrize("with_reference", [False, True])
+def test_unverified_mapping_cannot_open_ports_even_when_workspace_is_measured(tmp_path, monkeypatch, with_reference):
+    config = fixture_config()
+    config["provenance"]["status"] = "user_measured"
+    calibration_bytes = p.DEFAULT_CALIBRATION.read_bytes()
+    if with_reference:
+        config["joint_reference"] = reference_fixture(calibration_bytes)
+    packet = p.prepare(config, calibration_bytes)
+    packet["packet_sha256"] = p.digest(packet)
+    source = tmp_path / "plan.json"
+    source.write_text(json.dumps(packet))
+    monkeypatch.setattr(p, "audit", lambda *_: {"robot_sampled_collision_pass": True})
+    monkeypatch.setattr(p, "open_stop_bus", lambda *_: pytest.fail("미검증 기준으로 포트를 열 수 없습니다"))
+    monkeypatch.setattr(sys, "argv", ["pick", "execute", "--plan", str(source),
+        "--port", "/dev/left", "--right-port", "/dev/right", "--observed-workcell",
+        "--output", str(tmp_path / "result.json")])
+    with pytest.raises(SystemExit) as exc:
+        p.main()
+    assert exc.value.code == 2
+    assert not (tmp_path / "result.json").exists()
