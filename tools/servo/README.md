@@ -76,6 +76,7 @@ python3 servo_read.py
 | `servo_home.py` | 지금 자세를 2047 로 — 범위가 0/4095 를 안 넘게 | 아니오 | 필요 |
 | `servo_record_ranges.py` | 손으로 훑는 동안 범위 기록, `--capture-only`로 후보 JSON 저장 | 아니오 | 후보 기록에는 불필요 |
 | `servo_apply_ranges.py` | 백업·Phase 대조 후 한계값만 적용, 실패 시 복구 시도 | 아니오 | 적용 시 필요 |
+| `small_raw_jog.py` | 현재 위치 기준 손목 +32 tick 왕복 또는 보정 대조 후 ID 6 부분 개폐 | **예** | 이동 시 필요 |
 | `servo_check_calibration.py` | lerobot JSON 과 서보 EEPROM 대조, 범위 오염 검사 | 아니오 | 불필요 |
 | `servo_check_phase.py` | STS3215 Phase(주소 18)를 기대값과 대조 | 아니오 | 불필요 |
 | `export_lerobot_calibration.py` | 서보 EEPROM 값을 lerobot JSON 으로 내보내기 | 아니오 | 필요 |
@@ -116,6 +117,24 @@ LeRobot 캐시는 자동 갱신하지 않는다. 사용할 양팔 follower 설�
 
 기존 `servo_record_ranges.py --execute`에는 부분 실패 자동 복구가 없으므로
 새 범위의 기체 적용에는 위 분리된 도구를 사용한다.
+
+### 전원 재인가 후 작은 그리퍼 개폐 시험
+
+`small_raw_jog.py`에 `--calibration <양팔 중 해당 팔 JSON>`과
+`--expected-gripper-phase 12`(현재 왼손) 또는 `76`(현재 오른손)을 지정하면
+ID 6만 시험한다. 기본은 읽기 대조이며 `--output <새 로컬 JSON>`이 필요하다.
+사용자의 실물 실행 요청 범위에서 `--execute`를 추가한다.
+
+양팔 중 해당 팔의 6축 보정·토크 OFF와 ID 6 Phase·위치 모드를 대조한 뒤,
+`drive_mode`에 따른 열림 방향으로 128 tick 이동하고 시작점 기준 64 tick 위치로
+부분 되닫기한다. 닫힘 끝점으로 되돌아가지 않는다. 위치 판정 허용 오차는 16 tick이며
+이 시험 결과를 전체 개폐나 파지 정밀도로 해석하지 않는다.
+
+실패 시 자동 복귀하지 않는다. 현재 위치 목표·속도/가속도 복원 후 OFF를 마지막으로
+전송하고 최대 3회 읽어 확인한다. `release_attempts`와 `stop_errors`를 보존하며,
+오류나 최종 OFF 미확인은 종료 코드 2다. 온도·부하·EEPROM 접근은 없다.
+`partial_cycle_reached`는 서보 위치 단계의 완료이고, 죠 동작을 관측하지 않았다면
+`physical_jaw_motion_verified`는 false로 남긴다.
 
 ## 리허설
 
