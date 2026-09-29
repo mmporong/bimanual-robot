@@ -19,13 +19,13 @@ from simulate_cup_contact import run
 def simulation_plan(packet, calibration_bytes):
     config = packet["config"]
     cal = json.loads(calibration_bytes)
-    start_deg, start_rad = pick.decode_raw(packet["start_raw"], cal, config)
+    start_deg, start_rad = pick.decode_raw(packet["start_raw"], cal, config, calibration_bytes)
     poses = [{"name": "RESET", "joint_deg": start_deg, "gripper_rad": start_rad, "duration_s": 1.0}]
     holds = {"CLOSE": ("CONTACT_HOLD", 1.0), "LIFT": ("LIFT_HOLD", 2.0),
              "LOWER": ("TABLE_SETTLE", 1.0), "OPEN": ("RELEASE_HOLD", 1.0),
              "CLEAR_ABOVE": ("PLACE_HOLD", 2.0)}
     for index, pose in enumerate(packet["poses"]):
-        q_deg, angle_rad = pick.decode_raw(pose["raw_ticks"], cal, config)
+        q_deg, angle_rad = pick.decode_raw(pose["raw_ticks"], cal, config, calibration_bytes)
         previous = poses[-1]
         duration_s = max(.2, float(np.max(np.abs(np.array(q_deg)-previous["joint_deg"]))) / 20,
                          abs(angle_rad-previous["gripper_rad"])/.65)

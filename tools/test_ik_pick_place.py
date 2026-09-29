@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import signal
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import ik_pick_place as p
+from servo.joint_reference import build_reference
 
 
 def fixture_config():
@@ -25,6 +27,51 @@ def fixture_config():
         "reorient_backoff_m": .1, "reorient_height_m": .13,
         "lowering_offset_m": .002,
         "withdraw_distance_m": .065}
+
+
+def reference_fixture(calibration_bytes):
+    cal = json.loads(calibration_bytes)
+    raw = [int(round((cal[n]["range_min"] + cal[n]["range_max"]) / 2)) + 20 for n in p.NAMES]
+    return build_reference(calibration_bytes, raw, [0]*5,
+        hashlib.sha256(p.URDF_PATH.read_bytes()).hexdigest(),
+        {"status": "user_aligned_reference", "observed_at": "2026-09-29T12:00:00+09:00",
+         "description": "synthetic test fixture, not a physical alignment"})
+
+
+def test_reference_changes_raw_but_preserves_ik_and_simulation_angles():
+    from simulate_fixed_ik_pick_place import simulation_plan
+    calibration_bytes = p.DEFAULT_CALIBRATION.read_bytes()
+    config = fixture_config()
+    baseline = p.prepare(config, calibration_bytes)
+    config["joint_reference"] = reference_fixture(calibration_bytes)
+    packet = p.prepare(config, calibration_bytes)
+    assert packet["start_raw"][:5] != baseline["start_raw"][:5]
+    assert p.verify_packet(packet, calibration_bytes)
+    simulated = simulation_plan(packet, calibration_bytes)
+    poses = [pose for pose in simulated["poses"] if pose["name"] in p.PHASES]
+    for pose, source in zip(poses, packet["poses"]):
+        assert pose["joint_deg"] == p.decode_raw(source["raw_ticks"],
+            json.loads(calibration_bytes), config, calibration_bytes)[0]
+        assert max(abs(a-b) for a, b in zip(pose["joint_deg"], source["joint_deg"])) < .05
+    changed = copy.deepcopy(packet)
+    changed["config"]["joint_reference"]["zero_raw"][0] += 1
+    with pytest.raises(ValueError):
+        p.verify_packet(changed, calibration_bytes)
+
+
+def test_snapshot_uses_reference_without_writing_hardware():
+    from servo.sts_bus import A_OFFSET, encode_offset
+    calibration_bytes = p.DEFAULT_CALIBRATION.read_bytes()
+    cal = json.loads(calibration_bytes)
+    reference = reference_fixture(calibration_bytes)
+    raw = reference["reference_raw"] + [cal["gripper"]["range_min"]]
+    bus = p.MockBus(list(range(1, 7)), raw)
+    for name in p.NAMES:
+        bus.reg[cal[name]["id"], A_OFFSET] = encode_offset(cal[name]["homing_offset"])
+    observed = p.snapshot(bus, calibration_bytes, reference)
+    assert observed["joint_deg"] == [0]*5
+    assert observed["joint_reference"] == reference
+    assert not bus.writes
 
 
 @pytest.fixture(scope="module")
@@ -357,7 +404,7 @@ def test_simulation_fixture_cannot_open_real_bus_even_with_execute_flags(plan, t
     source.write_text(json.dumps(packet))
     def forbidden(*args, **kwargs):
         pytest.fail("실측하지 않은 packet에서 버스를 열면 안 됩니다")
-    monkeypatch.setattr(p, "Bus", forbidden)
+    monkeypatch.setattr(p, "open_stop_bus", forbidden)
     monkeypatch.setattr(sys, "argv", ["pick", "execute", "--plan", str(source), "--port", "/dev/left",
         "--right-port", "/dev/right", "--observed-workcell", "--output", str(tmp_path / "out.json")])
     with pytest.raises(SystemExit) as exc:
@@ -380,7 +427,7 @@ def test_execute_uses_exclusive_buses_and_composes_dashboard_monitor(plan, tmp_p
     monkeypatch.setattr(p, "verify_packet", lambda *_: None)
     monkeypatch.setattr(p, "audit", lambda *_: {"robot_sampled_collision_pass": True})
     monkeypatch.setattr(p, "open_stop_bus", lambda port: opened.append(port) or DummyBus())
-    monkeypatch.setattr(p, "Bus", lambda *_: pytest.fail("execute가 일반 Bus를 열면 안 됩니다"))
+    monkeypatch.setattr("serial.Serial", lambda *_: pytest.fail("execute가 검증된 포트 개방을 우회하면 안 됩니다"))
     monkeypatch.setattr(p, "dashboard_monitor", dashboard_urls.append)
     monkeypatch.setattr(p, "snapshot", lambda *_: {
         "raw_ticks": packet["right_expected_raw"], "torque": [0]*6})

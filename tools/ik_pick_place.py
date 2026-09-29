@@ -23,9 +23,10 @@ from plan_body_side_grasp import (Chain, URDF_PATH, solve_horizontal_endpoint,
 from workcell_preview_motion import leveled_pose
 from servo.execute_safe_recovery import (JOINTS, DEFAULT_CALIBRATION, calibration_binding,
     interpolate_raw, read_required, require_write)
-from servo.sts_bus import Bus, A_POS, A_GOAL, A_SPEED, A_ACCEL, A_TORQUE, A_OFFSET, decode_offset
+from servo.sts_bus import A_POS, A_GOAL, A_SPEED, A_ACCEL, A_TORQUE, A_OFFSET, decode_offset
 from dashboard_stop import open_stop_bus
 from servo.small_raw_jog import dashboard_monitor
+from servo.joint_reference import joint_deg_to_raw, raw_to_joint_deg, validate_reference
 
 PHASES = ["REORIENT_ABOVE", "PREGRASP_ABOVE", "ALIGN_MIDDLE", "APPROACH", "CLOSE", "LIFT",
           "TRANSFER", "LOWER", "OPEN", "WITHDRAW", "CLEAR_ABOVE"]
@@ -104,11 +105,15 @@ class FixedContactChain(Chain):
         return transforms
 
 
-def raw_for(q_deg, percent, calibration_bytes):
+def raw_for(q_deg, percent, calibration_bytes, joint_reference=None):
     if type(percent) not in (int, float) or not math.isfinite(percent) or not 0 <= percent <= 100:
         raise ValueError("그리퍼 percentage 범위 오류")
     plan = {"start_joint_deg": q_deg, "recovery": {"target_joint_deg": q_deg}}
-    raw = calibration_binding(plan, calibration_bytes)["target_raw"]
+    if joint_reference is None:
+        raw = calibration_binding(plan, calibration_bytes)["target_raw"]
+    else:
+        validate_reference(joint_reference, calibration_bytes, hashlib.sha256(URDF_PATH.read_bytes()).hexdigest())
+        raw = joint_deg_to_raw(q_deg, calibration_bytes, joint_reference)
     cal = json.loads(calibration_bytes)
     item = cal["gripper"]
     if any(type(item[k]) is not int for k in ("id", "range_min", "range_max", "drive_mode")):
@@ -121,9 +126,16 @@ def raw_for(q_deg, percent, calibration_bytes):
     return [*raw, int(normalized * (item["range_max"] - item["range_min"]) + item["range_min"])]
 
 
-def decode_raw(raw, cal, config):
-    q_deg = [(value - (cal[name]["range_min"] + cal[name]["range_max"]) / 2) * 360 / 4095
-             for name, value in zip(JOINTS, raw)]
+def decode_raw(raw, cal, config, calibration_bytes=None):
+    reference = config.get("joint_reference")
+    if reference is None:
+        q_deg = [(value - (cal[name]["range_min"] + cal[name]["range_max"]) / 2) * 360 / 4095
+                 for name, value in zip(JOINTS, raw)]
+    else:
+        if calibration_bytes is None:
+            raise ValueError("joint_reference 대조에는 원본 calibration bytes 필요")
+        validate_reference(reference, calibration_bytes, hashlib.sha256(URDF_PATH.read_bytes()).hexdigest())
+        q_deg = raw_to_joint_deg(raw[:5], calibration_bytes, reference)
     item = cal["gripper"]
     # 물리 열림과 URDF rad의 두 대응점은 설정에서 제공한다. 무보정 자동 등치는 하지 않는다.
     def endpoint(percent):
@@ -152,7 +164,7 @@ def prepare(config, calibration_bytes, right_calibration_bytes=None):
                place_m + [-config["withdraw_distance_m"], 0, config["lift_distance_m"]]]
     # IK 초기값에서만 손목 수평 해를 선택한다. 실제 시작 자세/명령은 바꾸지 않는다.
     seed = np.radians(leveled_pose(chain, "left", config["start_joint_deg"]))
-    start_raw = raw_for(config["start_joint_deg"], config["start_gripper_percent"], calibration_bytes)
+    start_raw = raw_for(config["start_joint_deg"], config["start_gripper_percent"], calibration_bytes, config.get("joint_reference"))
     poses = []
     for index, (name, target_m) in enumerate(zip(PHASES, targets)):
         # 첫 접근에서는 접힌 시작 자세를 수평 끝점으로 재정렬한다.
@@ -172,8 +184,8 @@ def prepare(config, calibration_bytes, right_calibration_bytes=None):
                 raise ValueError(f"{name}: IK 미통과 {reasons}")
             percent = config["close_percent"] if name in {"CLOSE", "LIFT", "TRANSFER", "LOWER"} else config["open_percent"]
             q_deg = np.degrees(seed).tolist()
-            raw_ticks = raw_for(q_deg, percent, calibration_bytes)
-            quantized_deg, _ = decode_raw(raw_ticks, json.loads(calibration_bytes), config)
+            raw_ticks = raw_for(q_deg, percent, calibration_bytes, config.get("joint_reference"))
+            quantized_deg, _ = decode_raw(raw_ticks, json.loads(calibration_bytes), config, calibration_bytes)
             raw_measurement = measure_stage(chain, "left", np.radians(quantized_deg), point_m, np.array([1, 0, 0]))
             if validate_measurement(raw_measurement):
                 raise ValueError(f"{name}: 양자화 후 FK 미통과")
@@ -204,7 +216,7 @@ def audit(plan, calibration_bytes):
     for pose in [{"phase": "START", "raw_ticks": previous}, *plan["poses"]]:
         for raw in interpolate_raw(previous, pose["raw_ticks"], 10):
             count += 1
-            q_deg, gripper_rad = decode_raw(raw, cal, config)
+            q_deg, gripper_rad = decode_raw(raw, cal, config, calibration_bytes)
             positions = dict(zip([f"left_{n}" for n in JOINTS], np.radians(q_deg)))
             positions.update(zip([f"right_{n}" for n in JOINTS], np.radians(config["right_parked_deg"])))
             positions.update(left_gripper=gripper_rad, right_finger1_joint=config["right_gripper_m"],
@@ -236,13 +248,13 @@ def verify_packet(plan, calibration_bytes, right_calibration_bytes=None):
     if plan["calibration_sha256"] != hashlib.sha256(calibration_bytes).hexdigest() or plan["urdf_sha256"] != hashlib.sha256(URDF_PATH.read_bytes()).hexdigest() or plan["config_sha256"] != digest(config):
         raise ValueError("준비 뒤 calibration/URDF/config 변경")
     cal = json.loads(calibration_bytes)
-    if plan["servo_ids"] != [cal[n]["id"] for n in NAMES] or plan["start_raw"] != raw_for(config["start_joint_deg"], config["start_gripper_percent"], calibration_bytes):
+    if plan["servo_ids"] != [cal[n]["id"] for n in NAMES] or plan["start_raw"] != raw_for(config["start_joint_deg"], config["start_gripper_percent"], calibration_bytes, config.get("joint_reference")):
         raise ValueError("시작 상태/ID 불일치")
     phases = [p["phase"] for i, p in enumerate(plan["poses"]) if i == 0 or p["phase"] != plan["poses"][i-1]["phase"]]
     if phases != PHASES:
         raise ValueError("픽앤플레이스 단계 누락/순서 오류")
     for pose in plan["poses"]:
-        if pose["raw_ticks"] != raw_for(pose["joint_deg"], pose["gripper_percent"], calibration_bytes):
+        if pose["raw_ticks"] != raw_for(pose["joint_deg"], pose["gripper_percent"], calibration_bytes, config.get("joint_reference")):
             raise ValueError("raw 목표 불일치")
     expected = prepare(config, calibration_bytes, right_calibration_bytes)
     if any(plan[key] != expected[key] for key in ("right_calibration_sha256", "right_expected_raw")) or len(plan["poses"]) != len(expected["poses"]):
@@ -414,7 +426,7 @@ def run_sequence(bus, plan, confirm, *, sleep=time.sleep, clock=time.monotonic,
     return result
 
 
-def snapshot(bus, calibration_bytes):
+def snapshot(bus, calibration_bytes, joint_reference=None):
     cal = json.loads(calibration_bytes)
     raw_for([0]*5, 50, calibration_bytes)
     raw, torque = [], []
@@ -429,9 +441,13 @@ def snapshot(bus, calibration_bytes):
         raw.append(value)
         torque.append(read_required(bus, sid, A_TORQUE))
     q_deg = [(v - (cal[n]["range_min"] + cal[n]["range_max"])/2)*360/4095 for n, v in zip(JOINTS, raw)]
+    if joint_reference is not None:
+        validate_reference(joint_reference, calibration_bytes, hashlib.sha256(URDF_PATH.read_bytes()).hexdigest())
+        q_deg = raw_to_joint_deg(raw[:5], calibration_bytes, joint_reference)
     item = cal["gripper"]
     percent = (raw[5]-item["range_min"])*100/(item["range_max"]-item["range_min"])
     return {"raw_ticks": raw, "torque": torque, "joint_deg": q_deg,
+            **({"joint_reference": joint_reference} if joint_reference is not None else {}),
             "gripper_percent": 100-percent if item["drive_mode"] else percent,
             "hardware_accessed": True, "motion_command_emitted": False,
             "calibration_sha256": hashlib.sha256(calibration_bytes).hexdigest()}
@@ -447,13 +463,16 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--port")
     parser.add_argument("--right-port")
+    parser.add_argument("--joint-reference", type=Path, help="snapshot/prepare에 적용할 실물 정렬 기준")
     parser.add_argument("--ik-only", action="store_true", help="prepare에서 IK packet만 만들고 CPU 감사를 미룸")
     parser.add_argument("--observed-workcell", action="store_true",
                         help="컵·작업대 경로를 관측하며 단계 확인 방식으로 실행")
     parser.add_argument("--stop-status-url", default="http://127.0.0.1:8770/api/stop/status",
                         help="execute 중 합성할 대시보드 정지 상태 API")
     args = parser.parse_args()
-    protected = {p.resolve() for p in (args.config, args.plan, args.calibration, args.right_calibration, URDF_PATH) if p}
+    protected = {p.resolve() for p in (args.config, args.plan, args.calibration, args.right_calibration, args.joint_reference, URDF_PATH) if p}
+    if args.joint_reference and args.mode not in {"snapshot", "prepare"}:
+        parser.error("joint-reference는 snapshot/prepare에서만 지정합니다. 실행은 packet에 묶인 기준을 사용합니다")
     if args.output.resolve() in protected or args.output.exists():
         parser.error("출력은 기존 파일/입력을 덮어쓸 수 없습니다")
     if args.mode == "template":
@@ -461,18 +480,26 @@ def main():
     else:
         calibration_bytes = args.calibration.read_bytes()
         right_calibration_bytes = args.right_calibration.read_bytes()
+        joint_reference = json.loads(args.joint_reference.read_text()) if args.joint_reference else None
+        if joint_reference is not None:
+            validate_reference(joint_reference, calibration_bytes, hashlib.sha256(URDF_PATH.read_bytes()).hexdigest())
         if args.mode == "snapshot":
             if not args.port:
                 parser.error("snapshot에는 --port 필요")
-            bus = Bus(args.port)
+            bus = open_stop_bus(args.port)
             try:
-                result = snapshot(bus, calibration_bytes)
+                result = snapshot(bus, calibration_bytes, joint_reference)
             finally:
                 bus.close()
         elif args.mode == "prepare":
             if args.config is None:
                 parser.error("--config 필요")
-            result = prepare(json.loads(args.config.read_text()), calibration_bytes, right_calibration_bytes)
+            config = json.loads(args.config.read_text())
+            if joint_reference is not None:
+                if "joint_reference" in config and config["joint_reference"] != joint_reference:
+                    raise ValueError("config와 CLI joint_reference 불일치")
+                config["joint_reference"] = joint_reference
+            result = prepare(config, calibration_bytes, right_calibration_bytes)
             result["collision_audit"] = ({"robot_sampled_collision_pass": False,
                 "fully_audited": False, "reason": "not_run", "object_collision_validated": False,
                 "continuous_collision_validated": False} if args.ik_only else audit(result, calibration_bytes))

@@ -19,7 +19,8 @@ from ik_pick_place import FixedContactChain, JOINTS, digest
 from plan_body_side_grasp import (URDF_PATH, base_positions, measure_stage,
                                  solve_horizontal_endpoint, validate_measurement)
 from servo.execute_safe_recovery import degrees_to_raw
-from servo.ik_reset_clear_step import prepare
+from servo.ik_reset_clear_step import prepare, _snapshot_joint_deg
+from servo.joint_reference import validate_reference, joint_deg_to_raw, raw_to_joint_deg
 
 
 def _json_date(value):
@@ -52,8 +53,18 @@ def build(measurement: dict, snapshot: dict, calibration_bytes: bytes) -> dict:
     if not np.isfinite(backoff_m) or backoff_m < float(model["minimum_geometric_backoff_m"]) + 0.005:
         raise ValueError("후퇴 거리는 기하 최솟값보다 5 mm 이상 커야 합니다")
     # 기존 스냅샷 검증을 재사용한다. 반환된 제한 동작 후보는 실행하지 않는다.
-    prepare(snapshot, calibration_bytes)
     cal = json.loads(calibration_bytes)
+    reference = snapshot.get("joint_reference")
+    if reference is None:
+        prepare(snapshot, calibration_bytes)
+    else:
+        validate_reference(reference, calibration_bytes, hashlib.sha256(URDF_PATH.read_bytes()).hexdigest())
+        reference_deg = raw_to_joint_deg(snapshot["raw_ticks"][:5], calibration_bytes, reference)
+        if not np.allclose(snapshot["joint_deg"], reference_deg, rtol=0, atol=1e-9):
+            raise ValueError("snapshot의 joint reference 각도 불일치")
+        # 기존 검사에 raw·토크·범위·해시만 대조시킨다. IK에는 정렬 기준 각도를 쓴다.
+        normalized_snapshot = {**snapshot, "joint_deg": _snapshot_joint_deg(snapshot["raw_ticks"][:5], cal)}
+        prepare(normalized_snapshot, calibration_bytes)
     chain = FixedContactChain({"contact_center_tool_m": offset_m.tolist()})
     transforms = chain.transforms(base_positions("left", np.zeros(5)))
     base_m = transforms["left_base_link"][:3, 3]
@@ -78,10 +89,13 @@ def build(measurement: dict, snapshot: dict, calibration_bytes: bytes) -> dict:
                                          restarts=12 if index == 0 else 1)
         measured = measure_stage(chain, "left", q_rad, target_m, np.array([1.0, 0.0, 0.0]))
         q_deg = np.degrees(q_rad)
-        raw = [degrees_to_raw(float(q), cal[name]["range_min"], cal[name]["range_max"])
-               for name, q in zip(JOINTS, q_deg)]
-        quantized_deg = [(value - (cal[name]["range_min"] + cal[name]["range_max"]) / 2) * 360 / 4095
-                         for name, value in zip(JOINTS, raw)]
+        if reference is None:
+            raw = [degrees_to_raw(float(q), cal[name]["range_min"], cal[name]["range_max"])
+                   for name, q in zip(JOINTS, q_deg)]
+            quantized_deg = _snapshot_joint_deg(raw, cal)
+        else:
+            raw = joint_deg_to_raw(q_deg.tolist(), calibration_bytes, reference)
+            quantized_deg = raw_to_joint_deg(raw, calibration_bytes, reference)
         quantized = measure_stage(chain, "left", np.radians(quantized_deg), target_m, np.array([1.0, 0.0, 0.0]))
         stages.append({"phase": phase, "contact_center_target_m": target_m.tolist(),
                        "joint_deg": q_deg.tolist(), "arm_raw_ticks": raw, "endpoint_check": measured,
@@ -90,6 +104,7 @@ def build(measurement: dict, snapshot: dict, calibration_bytes: bytes) -> dict:
         seed = q_rad
     low_candidate = stages.pop()
     return {"schema": "bench_cup_pregrasp_candidates_v1", "hardware_accessed": False,
+            **({"joint_reference": reference} if reference is not None else {}),
             "motion_command_emitted": False, "physical_execution_ready": False,
             "start_to_endpoint_path_verified": False, "gripper_raw_command_available": False,
             "close_command_available": False, "calibration_sha256": hashlib.sha256(calibration_bytes).hexdigest(),

@@ -8,6 +8,8 @@ import yaml
 
 import prepare_bench_cup_pregrasp as pregrasp
 from test_ik_reset_clear_step import CALIBRATION_BYTES, snapshot
+from test_ik_pick_place import reference_fixture
+from servo.joint_reference import raw_to_joint_deg
 
 
 MEASUREMENT = yaml.safe_load((Path(__file__).resolve().parents[1] /
@@ -29,6 +31,22 @@ def test_pregrasp_has_no_grip_or_execution_claim():
     assert np.allclose(np.asarray(result["stages"][1]["contact_center_target_m"]) - base, [.350, 0, .170])
     assert result["midbody_behind_cup_candidate"]["endpoint_violations"]
     json.dumps(result, allow_nan=False)
+
+
+def test_aligned_snapshot_and_endpoint_round_trip_use_same_reference():
+    start = snapshot()
+    reference = reference_fixture(CALIBRATION_BYTES)
+    start["joint_reference"] = reference
+    start["joint_deg"] = raw_to_joint_deg(start["raw_ticks"][:5], CALIBRATION_BYTES, reference)
+    result = pregrasp.build(MEASUREMENT, start, CALIBRATION_BYTES)
+    assert result["joint_reference"] == reference
+    for stage in result["stages"]:
+        actual_deg = raw_to_joint_deg(stage["arm_raw_ticks"], CALIBRATION_BYTES, reference)
+        assert max(abs(a-b) for a, b in zip(actual_deg, stage["joint_deg"])) < .05
+    assert not result["physical_execution_ready"]
+    start["joint_deg"][0] += 2
+    with pytest.raises(ValueError, match="각도 불일치"):
+        pregrasp.build(MEASUREMENT, start, CALIBRATION_BYTES)
 
 
 @pytest.mark.parametrize("changed", ["unit", "diameter", "backoff", "snapshot", "execution_ready"])
