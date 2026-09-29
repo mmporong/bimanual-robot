@@ -440,8 +440,10 @@ def test_simulation_fixture_cannot_open_real_bus_even_with_execute_flags(plan, t
 
 
 def test_execute_uses_exclusive_buses_and_composes_dashboard_monitor(plan, tmp_path, monkeypatch):
-    packet = copy.deepcopy(plan)
-    packet["config"]["provenance"]["status"] = "user_measured"
+    config = copy.deepcopy(plan["config"])
+    config["provenance"]["status"] = "user_measured"
+    config["joint_convention"] = p.NOMINAL_JOINT_CONVENTION
+    packet = p.prepare(config, p.DEFAULT_CALIBRATION.read_bytes())
     packet["packet_sha256"] = p.digest(packet)
     source = tmp_path / "plan.json"
     source.write_text(json.dumps(packet))
@@ -451,9 +453,7 @@ def test_execute_uses_exclusive_buses_and_composes_dashboard_monitor(plan, tmp_p
         def close(self):
             pass
 
-    monkeypatch.setattr(p, "verify_packet", lambda *_: None)
-    # 포트/정지 감시 연결만 검사한다. 미검증 기준 거부는 별도 회귀에서 검사한다.
-    monkeypatch.setattr(p, "require_verified_physical_mapping", lambda *_: None)
+    # packet/규약 검사는 실제 함수로 수행한다. 버스와 경로 감사만 모의한다.
     monkeypatch.setattr(p, "audit", lambda *_: {"robot_sampled_collision_pass": True})
     monkeypatch.setattr(p, "open_stop_bus", lambda port: opened.append(port) or DummyBus())
     monkeypatch.setattr("serial.Serial", lambda *_: pytest.fail("execute가 검증된 포트 개방을 우회하면 안 됩니다"))
@@ -512,3 +512,80 @@ def test_unverified_mapping_cannot_open_ports_even_when_workspace_is_measured(tm
         p.main()
     assert exc.value.code == 2
     assert not (tmp_path / "result.json").exists()
+
+
+def test_standard_convention_preserves_existing_raw_without_claiming_precision():
+    config = fixture_config()
+    calibration = p.DEFAULT_CALIBRATION.read_bytes()
+    baseline = p.prepare(config, calibration)
+    config["joint_convention"] = p.NOMINAL_JOINT_CONVENTION
+    packet = p.prepare(config, calibration)
+    p.require_supported_physical_mapping(config)
+    p.verify_packet(packet, calibration)
+    assert packet["poses"] == baseline["poses"]
+    assert packet["start_raw"] == baseline["start_raw"]
+    result = p.run_sequence(p.MockBus(packet["servo_ids"], packet["start_raw"]),
+                            packet, lambda _: True, sleep=lambda _: None)
+    assert result["sequence_completed"]
+    assert not result["physical_mapping_precision_verified"]
+    assert not result["physical_task_verified"]
+
+
+@pytest.mark.parametrize("precision", [False, True])
+def test_standard_convention_cannot_enable_manual_reference(precision):
+    config = fixture_config()
+    config["joint_convention"] = p.NOMINAL_JOINT_CONVENTION
+    config["joint_reference"] = {"pose_alignment_precision_verified": precision}
+    with pytest.raises(ValueError, match="함께 적용"):
+        p.validate_config(config)
+    with pytest.raises(ValueError, match="수동 영점"):
+        p.require_supported_physical_mapping(config)
+
+
+@pytest.mark.parametrize("convention", [None, "old_calib", "raw_2048", True])
+def test_unknown_or_implicit_convention_cannot_execute(convention):
+    with pytest.raises(ValueError, match="joint_convention"):
+        p.require_supported_physical_mapping({"joint_convention": convention})
+
+
+def test_nominal_convention_does_not_bypass_collision_failure(tmp_path, monkeypatch):
+    config = fixture_config()
+    config["provenance"]["status"] = "user_measured"
+    config["joint_convention"] = p.NOMINAL_JOINT_CONVENTION
+    packet = p.prepare(config, p.DEFAULT_CALIBRATION.read_bytes())
+    packet["packet_sha256"] = p.digest(packet)
+    source = tmp_path / "plan.json"
+    source.write_text(json.dumps(packet))
+    monkeypatch.setattr(p, "audit", lambda *_: {"robot_sampled_collision_pass": False})
+    monkeypatch.setattr(p, "open_stop_bus", lambda *_: pytest.fail("충돌 경로에서 포트를 열면 안 됩니다"))
+    monkeypatch.setattr(sys, "argv", ["pick", "execute", "--plan", str(source),
+        "--port", "/dev/left", "--right-port", "/dev/right", "--observed-workcell",
+        "--output", str(tmp_path / "result.json")])
+    with pytest.raises(SystemExit) as exc:
+        p.main()
+    assert exc.value.code == 2
+    assert not (tmp_path / "result.json").exists()
+
+
+def test_prepare_cli_binds_convention_and_execute_cannot_replace_it(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(fixture_config()))
+    output = tmp_path / "plan.json"
+    monkeypatch.setattr(sys, "argv", ["pick", "prepare", "--config", str(config_path),
+        "--joint-convention", p.NOMINAL_JOINT_CONVENTION, "--ik-only", "--output", str(output)])
+    assert p.main() == 0
+    packet = json.loads(output.read_text())
+    fingerprint = packet.pop("packet_sha256")
+    assert fingerprint == p.digest(packet)
+    assert packet["config"]["joint_convention"] == p.NOMINAL_JOINT_CONVENTION
+    p.verify_packet(packet, p.DEFAULT_CALIBRATION.read_bytes())
+    changed = copy.deepcopy(packet)
+    del changed["config"]["joint_convention"]
+    with pytest.raises(ValueError, match="준비 뒤"):
+        p.verify_packet(changed, p.DEFAULT_CALIBRATION.read_bytes())
+    monkeypatch.setattr(p, "open_stop_bus", lambda *_: pytest.fail("규약 변경 시 포트를 열면 안 됩니다"))
+    monkeypatch.setattr(sys, "argv", ["pick", "execute", "--plan", str(output),
+        "--joint-convention", p.NOMINAL_JOINT_CONVENTION, "--output", str(tmp_path / "result.json")])
+    with pytest.raises(SystemExit) as exc:
+        p.main()
+    assert exc.value.code == 2

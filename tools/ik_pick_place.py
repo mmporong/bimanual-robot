@@ -33,6 +33,7 @@ PHASES = ["REORIENT_ABOVE", "PREGRASP_ABOVE", "ALIGN_MIDDLE", "APPROACH", "CLOSE
           "TRANSFER", "LOWER", "OPEN", "WITHDRAW", "CLEAR_ABOVE"]
 NAMES = [*JOINTS, "gripper"]
 RIGHT_CALIBRATION = DEFAULT_CALIBRATION.with_name("arms_right.json")
+NOMINAL_JOINT_CONVENTION = "lerobot_degrees_so101_new_calib"
 
 
 def digest(value):
@@ -53,6 +54,12 @@ def template():
 def validate_config(config):
     if config.get("schema") != "fixed_ik_pick_place_v1" or config.get("frame") != "base_footprint":
         raise ValueError("schema/frame 오류")
+    convention = config.get("joint_convention")
+    if convention is not None:
+        if convention != NOMINAL_JOINT_CONVENTION:
+            raise ValueError("지원하지 않는 joint_convention")
+        if config.get("joint_reference") is not None:
+            raise ValueError("표준 관절 규약과 수동 영점을 함께 적용할 수 없습니다")
     for key in template():
         if key not in config or config[key] is None:
             raise ValueError(f"실측/입력 필요: {key}")
@@ -163,15 +170,17 @@ def decode_raw(raw, cal, config, calibration_bytes=None):
     return q_deg, angle_rad
 
 
-def require_verified_physical_mapping(config):
-    """수동 기준/범위 midpoint를 검증된 실물 좌표로 승격하지 않는다.
+def require_supported_physical_mapping(config):
+    """지원하는 표준 규약의 명시 선택과 정밀도 보증을 구분한다.
 
-    현재 joint_reference_v1은 오프라인 사용자 정렬 후보만 표현한다.
-    실물 대응 검증 형식이 구현되기 전에는 이 실행기에서 사용할 수 없다.
+    LeRobot degrees와 SO101 new-calib은 가동 범위 중점 영점을 사용한다.
+    이 선택은 실측 정밀도 인증이 아니다. 경로 감사·작업셀 관측·현재 보정
+    readback은 별도로 요구한다. 수동 영점은 계속 오프라인 비교에만 쓴다.
     """
-    reference = config.get("joint_reference")
-    if not isinstance(reference, dict) or reference.get("pose_alignment_precision_verified") is not True:
-        raise ValueError("실물 관절 좌표 대응 미검증: 수동 영점과 범위 midpoint는 오프라인 비교용입니다")
+    if config.get("joint_reference") is not None:
+        raise ValueError("수동 영점은 실물 실행에 사용할 수 없습니다")
+    if config.get("joint_convention") != NOMINAL_JOINT_CONVENTION:
+        raise ValueError("실행 계획에 joint_convention을 명시해야 합니다")
 
 
 def prepare(config, calibration_bytes, right_calibration_bytes=None):
@@ -375,6 +384,7 @@ def run_sequence(bus, plan, confirm, *, sleep=time.sleep, clock=time.monotonic,
     result = {"sequence_completed": False, "physical_grasp_verified": False,
               "physical_task_verified": False, "phases_completed": [], "events": events,
               "temperature_load_read": False, "failure": None, "command_write_attempted": False}
+    result["physical_mapping_precision_verified"] = False
     result.update(raw_step_ticks=raw_step_ticks,
                   arrival_tolerance_ticks=arrival_tolerance_ticks)
     result.update(plan_sha256=digest(plan), config_sha256=plan["config_sha256"],
@@ -491,6 +501,8 @@ def main():
     parser.add_argument("--port")
     parser.add_argument("--right-port")
     parser.add_argument("--joint-reference", type=Path, help="snapshot/prepare에 적용할 실물 정렬 기준")
+    parser.add_argument("--joint-convention", choices=(NOMINAL_JOINT_CONVENTION,),
+                        help="prepare에서 표준 LeRobot degrees/SO101 new-calib 규약을 명시")
     parser.add_argument("--ik-only", action="store_true", help="prepare에서 IK packet만 만들고 CPU 감사를 미룸")
     parser.add_argument("--observed-workcell", action="store_true",
                         help="컵·작업대 경로를 관측하며 단계 확인 방식으로 실행")
@@ -500,6 +512,8 @@ def main():
     protected = {p.resolve() for p in (args.config, args.plan, args.calibration, args.right_calibration, args.joint_reference, URDF_PATH) if p}
     if args.joint_reference and args.mode not in {"snapshot", "prepare"}:
         parser.error("joint-reference는 snapshot/prepare에서만 지정합니다. 실행은 packet에 묶인 기준을 사용합니다")
+    if args.joint_convention and args.mode != "prepare":
+        parser.error("joint-convention은 prepare에서만 지정합니다. 실행은 packet의 규약을 사용합니다")
     if args.output.resolve() in protected or args.output.exists():
         parser.error("출력은 기존 파일/입력을 덮어쓸 수 없습니다")
     if args.mode == "template":
@@ -522,6 +536,10 @@ def main():
             if args.config is None:
                 parser.error("--config 필요")
             config = json.loads(args.config.read_text())
+            if args.joint_convention:
+                if config.get("joint_convention", args.joint_convention) != args.joint_convention:
+                    parser.error("config와 CLI joint_convention 불일치")
+                config["joint_convention"] = args.joint_convention
             if joint_reference is not None:
                 if "joint_reference" in config and config["joint_reference"] != joint_reference:
                     raise ValueError("config와 CLI joint_reference 불일치")
@@ -546,7 +564,7 @@ def main():
                 mock = args.mode == "mock"
                 if not mock:
                     try:
-                        require_verified_physical_mapping(plan["config"])
+                        require_supported_physical_mapping(plan["config"])
                     except ValueError as exc:
                         parser.error(str(exc))
                 if not mock and (not args.port or not args.right_port or

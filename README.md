@@ -48,10 +48,13 @@ SmolVLA의 실물 성공 조건을 유지하면서 왼팔 IK 픽앤플레이스�
 `tools/servo/joint_reference.py`의 기준은 EEPROM을 바꾸지 않으며 수동 정렬의 정밀도를 보증하지 않는다.
 **현재 등록한 수동 영점은 실물 리셋 자세와의 불일치가 보고되어 실행 기준으로 사용하지 않는다.**
 `tools/compare_joint_conventions.py`로 같은 raw를 수동 영점과 LeRobot 범위 정규화 각도로 비교한다.
-어느 쪽도 자동으로 URDF 영점의 정답으로 채택하지 않는다. 현행 `joint_reference_v1`은 오프라인
-비교 전용이며, 실물 대응 검증 형식이 마련될 때까지 `ik_pick_place.py execute`는 포트를 열지 않는다.
-`prepare`·`check`·`mock`·`snapshot`은 유지한다. 아래 실행 준비 절차만으로 현재 기체 파지가 보장되지는 않는다.
-IK는 이 기준으로 변환한 실물 가동 범위와 URDF 관절 한계의 교집합에서 해를 찾는다.
+사용자는 B(LeRobot 각도 해석)의 손끝이 아래로 접힌 모습이 현재 리셋 자세라고 확인했다.
+현행 `joint_reference_v1`은 오프라인 비교 전용이다. 표준 경로는 `prepare`에서
+`--joint-convention lerobot_degrees_so101_new_calib`를 명시해 packet에 묶는다.
+수동 영점 병용·규약 미지정·충돌 감사 실패는 실물 실행 전에 거부한다. 명목 규약의 선택을
+실측 정밀도 인증으로 표시하지 않으며, 현재 접힌 시작 자세의 모델 간섭은 아직 해결되지 않았다.
+`prepare`·`check`·`mock`·`snapshot`은 유지한다. 실행 준비 절차만으로 현재 기체 파지가 보장되지는 않는다.
+수동 기준의 오프라인 IK는 변환한 실물 가동 범위와 URDF 관절 한계의 교집합에서 해를 찾는다.
 `tools/prepare_bench_cup_pregrasp.py`는 컵 뒤 상부·컵 상부 끝점을 만들고,
 `tools/review_bench_pregrasp_path.py`는 초기 후퇴·상승을 포함한 경로를 raw 표본으로 검토한다.
 후자는 메시 자가충돌·가정 책상면·컵 여유영역을 검사하는 오프라인 도구이며 실행 명령을 만들지 않는다.
