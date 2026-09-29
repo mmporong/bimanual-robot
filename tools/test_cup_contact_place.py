@@ -61,6 +61,18 @@ def test_support_is_required_before_open_even_at_correct_height():
     assert not supported_window(samples, config, "TABLE_SETTLE", .5)
 
 
+def test_transfer_placement_uses_destination_not_original_cup_position():
+    config = load_config()
+    config["placement_center_m"] = np.asarray(config["cup_center_m"]) + [.06, 0, 0]
+    samples = settled_samples(config)
+    assert not supported_window(samples, config, "PLACE_HOLD", 1.)
+    for sample in samples:
+        sample["cup_position_m"] = config["placement_center_m"].tolist()
+    assert supported_window(samples, config, "PLACE_HOLD", 1., released=True, clear=True)
+    config["placement_center_m"] = [float("nan"), 0, 0]
+    assert not supported_window(samples, config, "PLACE_HOLD", 1.)
+
+
 def test_edge_support_is_opt_in_and_does_not_certify_upright_release():
     config = load_config()
     tilted = {**config, "edge_support_radius_m": .028,

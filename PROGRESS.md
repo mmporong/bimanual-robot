@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-09-29 | IK 픽앤플레이스 실행 전 전체 소프트웨어 준비
+
+- `ik_pick_place.py`에 재정렬·접근·닫기·상승·이송·내려놓기·열기·후퇴 11개 phase를 연결했다. 기본은 포트 미접근이며 snapshot/execute만 명시 포트를 요구한다. 현행 보정 JSON·EEPROM·실물 팔은 변경하지 않았다.
+- 보정·URDF·설정·packet 해시, 좌우 raw 기준, 6축 ID·단위·목표와 시작 상태를 묶는다. DEGREE에 gripper drive-mode 반전을 덧붙이지 않고, gripper percent는 방향을 적용한다. 양자화된 개구 끝점과 FK를 다시 검사하며 Python 환경 간 작은 부동소수 차이와 raw 불일치를 구분한다.
+- 감독형 실물 실행기를 구현하고 mock으로 검증했다. 오른팔은 snapshot·waypoint 전 대조만 수행한다. 왼팔의 시작 위치·offset·토크, 목표 readback, 위치 발산·스톨·timeout과 단계 확인 거절을 처리하고 실패 시 다음 phase로 가지 않는다. 현재 위치 목표·torque off·speed/accel 복원과 readback 실패 기록을 포함한다. 사용자 요구에 따라 온도·부하는 읽지 않는다.
+- `simulate_fixed_ik_pick_place.py`는 같은 packet의 양자화된 목표를 순정 죠 물리 시험에 전달한다. 반대손 두 개구도 CPU 감사 값과 맞췄고, 배치 판정은 최초 컵 위치가 아닌 목적 위치를 사용한다. 기존 실험 경로의 기본값은 보존했다.
+- 초기 접촉·상승 유지 중 기울기·하강 지지 미관측 실패를 저장했다. 접근 거리·IK 수렴·명시 하강 여유를 수정하되 실패 판정 기준은 완화하지 않았다. 최종 `validated_plan.json`의 59개 목표·459개 로봇 경로 sample이 통과했고 양자화 후 최대 FK 오차는 0.5064 mm다. 이는 가정 모델 수치다.
+- `validated_mock.json`은 11개 phase와 정지·복원까지 통과했다. `isaac_touchdown`·최종 코드 `isaac_final`은 10 g 강체 컵 집기·상승·10 mm 이송·내려놓기·분리를 통과했다. 유지 최소 상승 59.596 mm, 최종 책상 지지 0.0981 N·손가락 접촉 0 N이며 최종 tool 해시도 일치한다. 실물·RGB 인식·유동·컵 변형·완전 연속 충돌 검증은 아니다.
+- 실행 전/후 성공을 분리한다. mock·모터 도달로 physical_grasp_verified/physical_task_verified를 참으로 만들지 않는다. 현행 실측 작업셀·TCP·개구 대응값은 아직 없어 템플릿을 비워 두었다. 연결만 하면 무조건 실행된다고 표시하지 않는다. 실물은 감독형 확인, Isaac의 자동 접촉 하강 정지는 시뮬레이션 전용이다.
+- 검증: tools pytest 525개 통과·2개 skip, 이후 추가한 실측 미확인 packet 실행 거부 검사 포함 신규 파일 45개 통과. 구문·pyflakes·diff·README 자동 요약·수정 문서 47개 로컬 링크 검사 통과. code-reviewer 생성은 native thread limit으로 불가했다. 별도 검증 패스와 연구자 보조 검토를 수행했으며 공식 독립 승인으로 과장하지 않는다.
+- 실행 절차: [IK 픽앤플레이스 실행 전 준비](docs/20260929_IK_픽앤플레이스_실행전_준비.md). 로컬 증거는 `/data/$USER/robot-artifacts/restaurant/ik_pre_execution_20260929/`에 보존한다. 새 영상 프레임·데이터셋·가중치는 만들지 않았다.
+
 ## 2026-09-29 | 최신 보정 재사용과 고정 좌표 IK 준비
 
 - 사용자가 저장소 캘리브레이션을 최신 상태로 확인했다. follower JSON 값은 변경하지 않고 calibration README·기계 YAML·메인 README의 FinRay 재보정 필수 설명을 정정했다. 사용자 확인과 실측 TCP·정밀도 검증은 구분한다.
