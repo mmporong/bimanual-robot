@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from ik_pick_place import FixedContactChain, JOINTS, digest
+from ik_pick_place import FixedContactChain, JOINTS, digest, apply_joint_reference_limits
 from plan_body_side_grasp import (URDF_PATH, base_positions, measure_stage,
                                  solve_horizontal_endpoint, validate_measurement)
 from servo.execute_safe_recovery import degrees_to_raw
@@ -66,6 +66,8 @@ def build(measurement: dict, snapshot: dict, calibration_bytes: bytes) -> dict:
         normalized_snapshot = {**snapshot, "joint_deg": _snapshot_joint_deg(snapshot["raw_ticks"][:5], cal)}
         prepare(normalized_snapshot, calibration_bytes)
     chain = FixedContactChain({"contact_center_tool_m": offset_m.tolist()})
+    # 해를 구한 뒤 각도를 감거나 raw를 잘라 맞추지 않고 탐색 범위를 제한한다.
+    apply_joint_reference_limits(chain, calibration_bytes, reference)
     transforms = chain.transforms(base_positions("left", np.zeros(5)))
     base_m = transforms["left_base_link"][:3, 3]
     local_cup_m = np.array([measurement["cup_forward"]["value"],
@@ -112,6 +114,8 @@ def build(measurement: dict, snapshot: dict, calibration_bytes: bytes) -> dict:
             "midbody_behind_cup_candidate": low_candidate,
             "urdf_sha256": hashlib.sha256(URDF_PATH.read_bytes()).hexdigest(),
             "snapshot_sha256": digest(snapshot), "measurement": measurement,
+            "solver_joint_limits_deg": {name: np.degrees(chain.limits[f"left_{name}"]).tolist()
+                                        for name in JOINTS},
             "assumptions": ["left_arm_base_center와 left_base_link 원점 대응은 미검증",
                             "동일 책상면을 모델 left_base_link 높이에 잠정 대응",
                             "접촉 중심과 개방각은 메시 후보이며 실측이 아님"],

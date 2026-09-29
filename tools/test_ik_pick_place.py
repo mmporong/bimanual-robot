@@ -74,6 +74,21 @@ def test_snapshot_uses_reference_without_writing_hardware():
     assert not bus.writes
 
 
+def test_reference_limits_intersect_urdf_without_changing_other_chain():
+    calibration_bytes = p.DEFAULT_CALIBRATION.read_bytes()
+    reference = reference_fixture(calibration_bytes)
+    chain, untouched = p.FixedContactChain(fixture_config()), p.FixedContactChain(fixture_config())
+    original = dict(chain.limits)
+    p.apply_joint_reference_limits(chain, calibration_bytes, reference)
+    for name, hardware in zip(p.JOINTS, p.joint_limits_deg(calibration_bytes, reference)):
+        key = f"left_{name}"
+        low, high = p.np.radians(hardware)
+        assert chain.limits[key] == (max(original[key][0], low), min(original[key][1], high))
+    assert untouched.limits == original
+    p.apply_joint_reference_limits(untouched, calibration_bytes, None)
+    assert untouched.limits == original
+
+
 @pytest.fixture(scope="module")
 def plan():
     return p.prepare(fixture_config(), p.DEFAULT_CALIBRATION.read_bytes())

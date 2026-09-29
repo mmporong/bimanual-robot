@@ -63,6 +63,17 @@ def test_joint_raw_roundtrip_with_quantization():
     assert restored == pytest.approx(requested, abs=360 / 4095 / 2)
 
 
+def test_limits_are_in_the_reference_frame_and_round_trip_to_raw_edges():
+    calibration = calibration_bytes()
+    reference = build(calibration)
+    limits = joint.joint_limits_deg(calibration, reference)
+    cal = json.loads(calibration)
+    for index, edge in enumerate(("range_min", "range_max")):
+        raw = joint.joint_deg_to_raw([pair[index] for pair in limits], calibration, reference)
+        assert raw == [cal[name][edge] for name in joint.JOINT_ORDER]
+    assert limits[-1][0] == pytest.approx(-1600 * 360 / 4095)
+
+
 def test_cli_requires_pose_confirmation_and_valid_snapshot(tmp_path, monkeypatch):
     calibration = calibration_bytes()
     cal_path, snapshot_path, output = (tmp_path / "cal.json", tmp_path / "snapshot.json",

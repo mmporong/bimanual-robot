@@ -217,6 +217,16 @@ def joint_deg_to_raw(q5, calibration_bytes, reference):
     return raw
 
 
+def joint_limits_deg(calibration_bytes, reference):
+    """저장된 raw 가동 범위를 같은 정렬 기준의 각도 범위로 변환한다."""
+    calibration = _load_calibration(calibration_bytes)
+    lower = raw_to_joint_deg(
+        [calibration[name]["range_min"] for name in JOINT_ORDER], calibration_bytes, reference)
+    upper = raw_to_joint_deg(
+        [calibration[name]["range_max"] for name in JOINT_ORDER], calibration_bytes, reference)
+    return list(zip(lower, upper))
+
+
 def _snapshot_for_build(snapshot: dict, calibration_bytes: bytes) -> list[int]:
     if not isinstance(snapshot, dict):
         raise ValueError("snapshot 객체가 필요합니다")

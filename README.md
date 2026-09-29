@@ -44,6 +44,13 @@ SmolVLA의 실물 성공 조건을 유지하면서 왼팔 IK 픽앤플레이스�
 새 한계값을 EEPROM에 적용하고 양팔 JSON을 갱신했다. 보드의 홈오프셋·Phase·게인은 유지했다.
 12V 전원 재인가 후 대조와 서보 위치 기준의 작은 그리퍼 개폐 시험을 통과했다.
 전체 개구·실물 TCP·컵 파지는 아직 검증 전이다.
+실물 정렬 자세의 raw 값을 별도 관절 기준으로 저장하고, 현재 내려놓은 자세와 구분한다.
+`tools/servo/joint_reference.py`의 기준은 EEPROM을 바꾸지 않으며 수동 정렬의 정밀도를 보증하지 않는다.
+IK는 이 기준으로 변환한 실물 가동 범위와 URDF 관절 한계의 교집합에서 해를 찾는다.
+`tools/prepare_bench_cup_pregrasp.py`는 컵 뒤 상부·컵 상부 끝점을 만들고,
+`tools/review_bench_pregrasp_path.py`는 초기 후퇴·상승을 포함한 경로를 raw 표본으로 검토한다.
+후자는 메시 자가충돌·가정 책상면·컵 여유영역을 검사하는 오프라인 도구이며 실행 명령을 만들지 않는다.
+그리퍼 개구와 책상 좌표는 미보정 상태로 표시하며, 표본 검사 통과를 실물 파지 성공으로 기록하지 않는다.
 `tools/cup_pick_dry_run.py --plan --fixed-cup-base-xy-m X Y --table-surface-z-m Z
 --grasp-height-above-table-m H`는 카메라·YOLO 없이 고정 좌표 접근 계획을 만든다.
 X·Y는 `base_footprint` 기준 컵 바닥의 실측 좌표, Z는 작업대 높이, H는 작업대 위 파지 높이다.

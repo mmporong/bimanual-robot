@@ -26,7 +26,8 @@ from servo.execute_safe_recovery import (JOINTS, DEFAULT_CALIBRATION, calibratio
 from servo.sts_bus import A_POS, A_GOAL, A_SPEED, A_ACCEL, A_TORQUE, A_OFFSET, decode_offset
 from dashboard_stop import open_stop_bus
 from servo.small_raw_jog import dashboard_monitor
-from servo.joint_reference import joint_deg_to_raw, raw_to_joint_deg, validate_reference
+from servo.joint_reference import (joint_deg_to_raw, raw_to_joint_deg,
+                                   validate_reference, joint_limits_deg)
 
 PHASES = ["REORIENT_ABOVE", "PREGRASP_ABOVE", "ALIGN_MIDDLE", "APPROACH", "CLOSE", "LIFT",
           "TRANSFER", "LOWER", "OPEN", "WITHDRAW", "CLEAR_ABOVE"]
@@ -105,6 +106,19 @@ class FixedContactChain(Chain):
         return transforms
 
 
+def apply_joint_reference_limits(chain, calibration_bytes, reference):
+    """현재 chain에 URDF 한계와 정렬 기준의 raw 한계 교집합을 적용한다."""
+    if reference is None:
+        return
+    for name, hardware_deg in zip(JOINTS, joint_limits_deg(calibration_bytes, reference)):
+        key = f"left_{name}"
+        nominal, hardware = chain.limits[key], np.radians(hardware_deg)
+        lower, upper = max(nominal[0], hardware[0]), min(nominal[1], hardware[1])
+        if lower >= upper:
+            raise ValueError(f"{name}: URDF와 실물 가동 범위의 교집합이 없습니다")
+        chain.limits[key] = (lower, upper)
+
+
 def raw_for(q_deg, percent, calibration_bytes, joint_reference=None):
     if type(percent) not in (int, float) or not math.isfinite(percent) or not 0 <= percent <= 100:
         raise ValueError("그리퍼 percentage 범위 오류")
@@ -152,6 +166,7 @@ def decode_raw(raw, cal, config, calibration_bytes=None):
 def prepare(config, calibration_bytes, right_calibration_bytes=None):
     validate_config(config)
     chain = FixedContactChain(config)
+    apply_joint_reference_limits(chain, calibration_bytes, config.get("joint_reference"))
     cup_m, place_m = np.array(config["cup_center_m"]), np.array(config["place_center_m"])
     above_m = np.array([0, 0, config["lift_distance_m"]])
     back_m = np.array([-config["pregrasp_backoff_m"], 0, 0])
@@ -209,6 +224,7 @@ def audit(plan, calibration_bytes):
         nonadjacent_self_pairs, MOVING_LEFT_LINKS, STATIC_CRITICAL_LINKS, joint_margin_deg)
     scene, chain = UrdfScene(URDF_PATH), FixedContactChain(plan["config"])
     cal, config = json.loads(calibration_bytes), plan["config"]
+    apply_joint_reference_limits(chain, calibration_bytes, config.get("joint_reference"))
     pairs = nonadjacent_self_pairs(scene) + [(a, b) for a in MOVING_LEFT_LINKS for b in STATIC_CRITICAL_LINKS]
     previous = plan["start_raw"]
     failures, count = [], 0

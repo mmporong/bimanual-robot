@@ -9,7 +9,7 @@ import yaml
 import prepare_bench_cup_pregrasp as pregrasp
 from test_ik_reset_clear_step import CALIBRATION_BYTES, snapshot
 from test_ik_pick_place import reference_fixture
-from servo.joint_reference import raw_to_joint_deg
+from servo.joint_reference import raw_to_joint_deg, build_reference
 
 
 MEASUREMENT = yaml.safe_load((Path(__file__).resolve().parents[1] /
@@ -47,6 +47,27 @@ def test_aligned_snapshot_and_endpoint_round_trip_use_same_reference():
     start["joint_deg"][0] += 2
     with pytest.raises(ValueError, match="각도 불일치"):
         pregrasp.build(MEASUREMENT, start, CALIBRATION_BYTES)
+
+
+def test_asymmetric_reference_limits_select_feasible_roll_branch():
+    # 회귀용 비대칭 영점: -87도 손목 해는 raw 하한 밖, +93도 해는 범위 안.
+    start = snapshot()
+    fixture = reference_fixture(CALIBRATION_BYTES)
+    reference_raw = [2000, 1900, 1500, 2800, 980, start["raw_ticks"][5]]
+    reference = build_reference(CALIBRATION_BYTES, reference_raw, [0]*5,
+                                fixture["urdf_sha256"], fixture["provenance"])
+    start["joint_reference"] = reference
+    start["joint_deg"] = raw_to_joint_deg(start["raw_ticks"][:5], CALIBRATION_BYTES, reference)
+    result = pregrasp.build(MEASUREMENT, start, CALIBRATION_BYTES)
+    assert result["endpoints_ready_for_path_review"]
+    cal = json.loads(CALIBRATION_BYTES)
+    for stage in result["stages"]:
+        assert 85 < stage["joint_deg"][4] < 100
+        for name, raw in zip(pregrasp.JOINTS, stage["arm_raw_ticks"]):
+            assert cal[name]["range_min"] <= raw <= cal[name]["range_max"]
+        assert stage["quantized_endpoint_check"]["position_error_mm"] < 2
+    assert abs(result["stages"][0]["joint_deg"][4] - result["stages"][1]["joint_deg"][4]) < 5
+    assert not result["physical_execution_ready"]
 
 
 @pytest.mark.parametrize("changed", ["unit", "diameter", "backoff", "snapshot", "execution_ready"])
