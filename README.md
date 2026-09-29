@@ -6,7 +6,7 @@
 
 - 시작: 2026-08-19
 - 현행 태스크 확정: 2026-09-07
-- 최종 문서 갱신: 2026-09-27
+- 최종 문서 갱신: 2026-09-29
 - 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
 - 시뮬레이터: Isaac Sim 6.0 목표 계약 · 로컬 5.1 물리 실행·URDF 프리뷰(ROS Bridge 미사용)
 - 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
@@ -40,7 +40,9 @@
 ## 현재 최우선 작업 · 2026-09-29
 
 SmolVLA의 실물 성공 조건을 유지하면서 왼팔 IK 픽앤플레이스를 별도로 검증한다.
-저장소의 양팔 follower 캘리브레이션은 사용자가 최신 상태로 확인했으며 재보정하지 않는다.
+연결 후 저장소와 실기체의 보정값 차이가 확인돼, 사용자 승인으로 양팔 범위를 다시 기록했다.
+새 한계값을 EEPROM에 적용하고 양팔 JSON을 갱신했다. 보드의 홈오프셋·Phase·게인은 유지했다.
+현재는 12V 전원 재인가 후 대조와 그리퍼 개폐 검증 전이다.
 `tools/cup_pick_dry_run.py --plan --fixed-cup-base-xy-m X Y --table-surface-z-m Z
 --grasp-height-above-table-m H`는 카메라·YOLO 없이 고정 좌표 접근 계획을 만든다.
 X·Y는 `base_footprint` 기준 컵 바닥의 실측 좌표, Z는 작업대 높이, H는 작업대 위 파지 높이다.
@@ -215,12 +217,15 @@ Pi에서 ROS 하드웨어가 점유한 USB-A는 1개이고 3개가 남아 있다
 
 왼손은 **SO-101 순정 회전식 죠를 TPU 손가락·오버캡 없이 사용**한다. URDF도
 `so101_stock_gripper.xacro`의 순정 형상·관절·TCP를 사용한다. 80 mm FinRay는 2026-09-22
-선정에서 제외했으며 출력 기준과 해시는 의사결정 이력으로만 보존한다. 현재
-2026-09-29 사용자가 저장소의 캘리브레이션을 최신 상태로 확인했다. IK 실행 준비에는
-`calibration/bi_follower/arms_left.json`·`arms_right.json`을 사용하며, 과거 문구를 근거로
-재보정하지 않는다. 현재 비교 목표는 SmolVLA 성공 조건에서의 고정 위치 컵 IK
-픽앤플레이스이며, 이후 RGB 좌표 연결과 물붓기를 검증한다. 이 확인만으로 실물 TCP나
-파지 정밀도가 측정됐다고 보지는 않는다.
+선정에서 제외했으며 출력 기준과 해시는 의사결정 이력으로만 보존한다.
+2026-09-29 연결된 보드의 오프셋과 저장소 JSON이 달라 사용자 승인으로 양팔 범위를
+수동 기록했다. 새 한계값을 적용하고 `calibration/bi_follower/arms_left.json`·
+`arms_right.json`을 기체와 대조했다. JSON 오프셋은 현재 보드 값을 반영했으며
+보드의 홈오프셋은 바꾸지 않았다. 오른손은 `drive_mode=1`, Phase=76을 유지한다.
+[보정 상태와 다음 검증](calibration/README.md)을 확인하고 새 JSON으로 IK 목표를
+다시 생성한다. 12V 전원 재인가와 실물 개폐·TCP·파지 정밀도 검증은 아직 남아 있다.
+현재 비교 목표는 SmolVLA 성공 조건에서의 고정 위치 컵 IK 픽앤플레이스이며,
+이후 RGB 좌표 연결과 물붓기를 검증한다.
 
 오른손은 **ggao50 순정 평면 죠를 홈·교체형 인서트 없이 사용**한다. 과거의 V홈·사다리꼴·평면 TPU 인서트는 선정안에서 제외했으며, 현행 출력 준비 도구는 죠에 인서트 볼트 구멍을 뚫지 않는다. 물병 파지는 순정 평면 죠 상태에서 먼저 검증한다.
 
