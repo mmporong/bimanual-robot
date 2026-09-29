@@ -13,6 +13,7 @@ import math
 from pathlib import Path
 import signal
 import select
+import threading
 import time
 
 import numpy as np
@@ -23,6 +24,8 @@ from workcell_preview_motion import leveled_pose
 from servo.execute_safe_recovery import (JOINTS, DEFAULT_CALIBRATION, calibration_binding,
     interpolate_raw, read_required, require_write)
 from servo.sts_bus import Bus, A_POS, A_GOAL, A_SPEED, A_ACCEL, A_TORQUE, A_OFFSET, decode_offset
+from dashboard_stop import open_stop_bus
+from servo.small_raw_jog import dashboard_monitor
 
 PHASES = ["REORIENT_ABOVE", "PREGRASP_ABOVE", "ALIGN_MIDDLE", "APPROACH", "CLOSE", "LIFT",
           "TRANSFER", "LOWER", "OPEN", "WITHDRAW", "CLEAR_ABOVE"]
@@ -276,15 +279,17 @@ class MockBus:
 
 def stop_restore(bus, ids, profiles):
     errors = []
+    # 먼저 모든 축에 OFF를 전송한다. 한 축 실패가 나머지 축의 정지를 막지 않는다.
+    for sid in ids:
+        try:
+            require_write(bus, sid, A_TORQUE, 0)
+        except BaseException as exc:
+            errors.append(str(exc))
+    # 해제한 뒤 현재 위치를 goal로 고정하고 기존 프로파일을 복원한다.
     for sid in ids:
         try:
             pos = read_required(bus, sid, A_POS, 2)
             require_write(bus, sid, A_GOAL, pos, 2)
-        except BaseException as exc:
-            errors.append(str(exc))
-    for sid in ids:
-        try:
-            require_write(bus, sid, A_TORQUE, 0)
         except BaseException as exc:
             errors.append(str(exc))
     for sid, (speed, accel) in zip(ids, profiles):
@@ -295,12 +300,27 @@ def stop_restore(bus, ids, profiles):
                     raise RuntimeError(f"ID {sid}: 복원 readback 실패 {address}")
             except BaseException as exc:
                 errors.append(str(exc))
-    for sid in ids:
-        try:
-            if read_required(bus, sid, A_TORQUE) != 0:
-                raise RuntimeError(f"ID {sid}: torque off readback 실패")
-        except BaseException as exc:
-            errors.append(str(exc))
+    # 복원 쓰기 뒤 OFF를 최대 3회 다시 쓰고 매회 readback한다.
+    pending = list(ids)
+    last_errors = {}
+    for _ in range(3):
+        for sid in list(pending):
+            try:
+                require_write(bus, sid, A_TORQUE, 0)
+            except BaseException as exc:
+                last_errors[sid] = str(exc)
+        for sid in list(pending):
+            try:
+                if read_required(bus, sid, A_TORQUE) == 0:
+                    pending.remove(sid)
+                    last_errors.pop(sid, None)
+                else:
+                    last_errors[sid] = f"ID {sid}: torque off readback 실패"
+            except BaseException as exc:
+                last_errors[sid] = str(exc)
+        if not pending:
+            break
+    errors.extend(last_errors[sid] for sid in ids if sid in pending)
     return errors
 
 
@@ -353,6 +373,9 @@ def run_sequence(bus, plan, confirm, *, sleep=time.sleep, clock=time.monotonic,
                 deadline_s = clock() + 8
                 while True:
                     sleep(.03)
+                    monitor()
+                    if [read_required(bus, sid, A_TORQUE) for sid in ids] != [1]*len(ids):
+                        raise RuntimeError(f"torque_released:{phase}")
                     now = [read_required(bus, sid, A_POS, 2) for sid in ids]
                     errors = [abs(a-b) for a, b in zip(goals, now)]
                     if any(e > b + 10 for e, b in zip(errors, baseline)):
@@ -417,6 +440,8 @@ def main():
     parser.add_argument("--ik-only", action="store_true", help="prepare에서 IK packet만 만들고 CPU 감사를 미룸")
     parser.add_argument("--observed-workcell", action="store_true",
                         help="컵·작업대 경로를 관측하며 단계 확인 방식으로 실행")
+    parser.add_argument("--stop-status-url", default="http://127.0.0.1:8770/api/stop/status",
+                        help="execute 중 합성할 대시보드 정지 상태 API")
     args = parser.parse_args()
     protected = {p.resolve() for p in (args.config, args.plan, args.calibration, args.right_calibration, URDF_PATH) if p}
     if args.output.resolve() in protected or args.output.exists():
@@ -460,7 +485,7 @@ def main():
                     plan["config"]["provenance"]["status"] != "user_measured" or
                     not audit(plan, calibration_bytes)["robot_sampled_collision_pass"]):
                     parser.error("실행에는 실측 설정·좌우 별도 포트·작업셀 관측·로봇 경로 감사 통과 필요")
-                right_bus = None if mock else Bus(args.right_port)
+                right_bus = None if mock else open_stop_bus(args.right_port)
                 if right_bus is not None:
                     try:
                         right_state = snapshot(right_bus, right_calibration_bytes)
@@ -470,30 +495,43 @@ def main():
                         right_bus.close()
                         raise
                 try:
-                    bus = MockBus(plan["servo_ids"], plan["start_raw"]) if mock else Bus(args.port)
+                    bus = MockBus(plan["servo_ids"], plan["start_raw"]) if mock else open_stop_bus(args.port)
                 except BaseException:
                     if right_bus is not None:
                         right_bus.close()
                     raise
+                interrupted = threading.Event()
                 def monitor():
+                    if interrupted.is_set():
+                        raise KeyboardInterrupt("실행 중단")
                     if mock:
                         return
+                    dashboard_monitor(args.stop_status_url)
                     state = snapshot(right_bus, right_calibration_bytes)
                     if max(abs(a-b) for a, b in zip(state["raw_ticks"], plan["right_expected_raw"])) > 15 or state["torque"] != right_state["torque"]:
                         raise RuntimeError("right_parked_state_changed")
+                    if interrupted.is_set():
+                        raise KeyboardInterrupt("실행 중단")
                 def confirm(phase):
                     if mock:
                         return True
                     monitor()
                     print(f"{phase}: 컵·책상·반대 팔 경로 확인 후 Enter, 중단 q (30초 제한):", flush=True)
                     import sys
-                    available, _, _ = select.select([sys.stdin], [], [], 30)
-                    if not available:
-                        return False
-                    value = sys.stdin.readline()
-                    return value != "" and value.strip() == ""
-                def interrupt(signum, frame):
-                    raise KeyboardInterrupt(f"signal {signum}")
+                    deadline = time.monotonic() + 30
+                    while not interrupted.is_set():
+                        monitor()
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            return False
+                        available, _, _ = select.select([sys.stdin], [], [], min(.2, remaining))
+                        if available:
+                            value = sys.stdin.readline()
+                            return value != "" and value.strip() == ""
+                    raise KeyboardInterrupt("실행 중단")
+                def interrupt(_signum, _frame):
+                    # cleanup을 신호 예외로 끊지 않고 실행 루프에 취소를 전달한다.
+                    interrupted.set()
                 old_handlers = {s: signal.signal(s, interrupt) for s in (signal.SIGINT, signal.SIGTERM)}
                 try:
                     result = run_sequence(bus, plan, confirm, sleep=(lambda _: None) if mock else time.sleep,

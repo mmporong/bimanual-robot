@@ -1,5 +1,6 @@
 import copy
 import json
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -262,6 +263,55 @@ def test_failed_torque_off_is_reported(plan):
     assert not result["sequence_completed"] and result["stop_errors"]
 
 
+def test_stop_restore_sends_all_off_before_goal_and_retries_final_off(plan):
+    class Ordered(p.MockBus):
+        def __init__(self, ids, raw):
+            super().__init__(ids, raw)
+            self.operations = []
+            self.final_off_failures = 0
+
+        def read(self, sid, address, size=1):
+            self.operations.append(("read", sid, address))
+            return super().read(sid, address, size)
+
+        def write(self, sid, address, value, size=1):
+            self.operations.append(("write", sid, address, value))
+            if address == p.A_SPEED and sid == plan["servo_ids"][0]:
+                self.reg[sid, p.A_TORQUE] = 1
+            if address == p.A_TORQUE and value == 0 and self.reg[sid, p.A_TORQUE] == 1:
+                self.final_off_failures += 1
+                if self.final_off_failures < 3:
+                    return True
+            return super().write(sid, address, value, size)
+
+    bus = Ordered(plan["servo_ids"], plan["start_raw"])
+    errors = p.stop_restore(bus, plan["servo_ids"], [(300, 10)]*6)
+    assert not errors
+    assert bus.operations[:6] == [
+        ("write", sid, p.A_TORQUE, 0) for sid in plan["servo_ids"]
+    ]
+    assert bus.final_off_failures == 3
+    assert all(bus.reg[sid, p.A_TORQUE] == 0 for sid in plan["servo_ids"])
+
+
+def test_wait_loop_monitors_and_detects_torque_release(plan):
+    bus = p.MockBus(plan["servo_ids"], plan["start_raw"])
+    calls = 0
+
+    def monitor():
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            bus.reg[plan["servo_ids"][0], p.A_TORQUE] = 0
+
+    clock = Clock()
+    result = p.run_sequence(bus, plan, lambda _: True, sleep=clock.sleep,
+                            clock=clock.now, monitor=monitor)
+    assert calls == 3
+    assert "torque_released" in result["failure"]
+    assert_restored(bus, plan)
+
+
 def test_stall_and_interrupt_restore(plan):
     class Stalled(p.MockBus):
         def read(self, sid, address, size=1):
@@ -313,3 +363,54 @@ def test_simulation_fixture_cannot_open_real_bus_even_with_execute_flags(plan, t
     with pytest.raises(SystemExit) as exc:
         p.main()
     assert exc.value.code == 2
+
+
+def test_execute_uses_exclusive_buses_and_composes_dashboard_monitor(plan, tmp_path, monkeypatch):
+    packet = copy.deepcopy(plan)
+    packet["config"]["provenance"]["status"] = "user_measured"
+    packet["packet_sha256"] = p.digest(packet)
+    source = tmp_path / "plan.json"
+    source.write_text(json.dumps(packet))
+    opened, dashboard_urls = [], []
+
+    class DummyBus:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(p, "verify_packet", lambda *_: None)
+    monkeypatch.setattr(p, "audit", lambda *_: {"robot_sampled_collision_pass": True})
+    monkeypatch.setattr(p, "open_stop_bus", lambda port: opened.append(port) or DummyBus())
+    monkeypatch.setattr(p, "Bus", lambda *_: pytest.fail("execute가 일반 Bus를 열면 안 됩니다"))
+    monkeypatch.setattr(p, "dashboard_monitor", dashboard_urls.append)
+    monkeypatch.setattr(p, "snapshot", lambda *_: {
+        "raw_ticks": packet["right_expected_raw"], "torque": [0]*6})
+
+    polls = 0
+    def fake_select(_read, _write, _errors, timeout):
+        nonlocal polls
+        assert 0 < timeout <= .2
+        polls += 1
+        if polls == 2:
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+        return [], [], []
+
+    monkeypatch.setattr(p.select, "select", fake_select)
+
+    def fake_run(_bus, _plan, _confirm, **kwargs):
+        kwargs["monitor"]()
+        with pytest.raises(KeyboardInterrupt):
+            _confirm("REORIENT_ABOVE")
+        with pytest.raises(KeyboardInterrupt):
+            kwargs["monitor"]()
+        return {"failure": "KeyboardInterrupt:실행 중단", "stop_errors": [],
+                "command_write_attempted": False}
+
+    monkeypatch.setattr(p, "run_sequence", fake_run)
+    output = tmp_path / "result.json"
+    monkeypatch.setattr(sys, "argv", ["pick", "execute", "--plan", str(source),
+        "--port", "/dev/left", "--right-port", "/dev/right", "--observed-workcell",
+        "--stop-status-url", "http://127.0.0.1:8770/api/stop/status", "--output", str(output)])
+    assert p.main() == 2
+    assert opened == ["/dev/right", "/dev/left"]
+    assert polls == 2
+    assert dashboard_urls == ["http://127.0.0.1:8770/api/stop/status"]*4
