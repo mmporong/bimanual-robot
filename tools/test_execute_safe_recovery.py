@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import sys
 
+import pytest
+
 
 MODULE_PATH = Path(__file__).parent / "servo" / "execute_safe_recovery.py"
 SPEC = importlib.util.spec_from_file_location("execute_safe_recovery", MODULE_PATH)
@@ -15,6 +17,62 @@ SPEC.loader.exec_module(MODULE)
 def test_degree_raw_roundtrip_reference_values():
     assert MODULE.degrees_to_raw(0.0, 778, 3281) == 2030
     assert MODULE.degrees_to_raw(-93.643, 778, 3281) == 964
+
+
+def _bound_inputs(tmp_path):
+    calibration_path = MODULE.DEFAULT_CALIBRATION
+    plan = {
+        "motion_command_emitted": False,
+        "ready_for_explicit_motion_approval": True,
+        "start_joint_deg": [0.0] * 5,
+        "recovery": {"target_joint_deg": [1.0] * 5},
+    }
+    plan["calibration_binding"] = MODULE.calibration_binding(plan, calibration_path.read_bytes())
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+    return path, calibration_path, plan
+
+
+def test_bound_plan_uses_current_repository_calibration(tmp_path):
+    path, calibration_path, plan = _bound_inputs(tmp_path)
+    _, _, raw_ticks = MODULE.load_inputs(path, calibration_path)
+    assert raw_ticks == plan["calibration_binding"]["target_raw"]
+    assert plan["calibration_binding"]["servo_ids"] == [1, 2, 3, 4, 5]
+
+
+def test_bound_plan_rejects_changed_calibration(tmp_path):
+    path, calibration_path, _ = _bound_inputs(tmp_path)
+    changed = tmp_path / "changed.json"
+    changed.write_bytes(calibration_path.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="calibration"):
+        MODULE.load_inputs(path, changed)
+
+
+@pytest.mark.parametrize("key,value", [
+    ("target_raw", [0] * 5), ("servo_ids", [5, 4, 3, 2, 1]),
+    ("joint_order", list(reversed(MODULE.JOINTS))),
+])
+def test_bound_plan_rejects_inconsistent_commands(tmp_path, key, value):
+    path, calibration_path, plan = _bound_inputs(tmp_path)
+    plan["calibration_binding"][key] = value
+    path.write_text(json.dumps(plan), encoding="utf-8")
+    with pytest.raises(ValueError, match="raw"):
+        MODULE.load_inputs(path, calibration_path)
+
+
+@pytest.mark.parametrize("value_deg", [float("nan"), float("inf"), True, 500.0])
+def test_binding_rejects_invalid_or_out_of_range_angle(tmp_path, value_deg):
+    _, calibration_path, plan = _bound_inputs(tmp_path)
+    plan["recovery"]["target_joint_deg"][0] = value_deg
+    with pytest.raises(ValueError):
+        MODULE.calibration_binding(plan, calibration_path.read_bytes())
+
+
+def test_legacy_unbound_plan_remains_supported(tmp_path):
+    path, calibration_path, plan = _bound_inputs(tmp_path)
+    del plan["calibration_binding"]
+    path.write_text(json.dumps(plan), encoding="utf-8")
+    assert len(MODULE.load_inputs(path, calibration_path)[2]) == 5
 
 
 def test_interpolation_limits_every_synchronized_step():

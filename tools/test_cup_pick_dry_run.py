@@ -4,6 +4,7 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 
 MODULE_PATH = Path(__file__).with_name("cup_pick_dry_run.py")
@@ -32,6 +33,48 @@ class Vector:
 
 def box(label_id, confidence, xyxy):
     return SimpleNamespace(cls=Scalar(label_id), conf=Scalar(confidence), xyxy=Vector(xyxy))
+
+
+def test_fixed_coordinates_require_no_model_and_default_to_horizontal(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["cup_pick_dry_run.py", "--plan",
+        "--fixed-cup-base-xy-m", "0.32", "0.17", "--table-surface-z-m", "0.72",
+        "--grasp-height-above-table-m", "0.06"])
+    args = MODULE.parse_args()
+    assert args.model is None
+    assert args.approach_pitch_deg == 0.0
+
+
+@pytest.mark.parametrize("extra", [[], ["--table-surface-z-m", "0.72"],
+    ["--table-surface-z-m", "nan", "--grasp-height-above-table-m", "0.06"],
+    ["--table-surface-z-m", "0.72", "--grasp-height-above-table-m", "-0.06"]])
+def test_fixed_coordinates_reject_missing_or_invalid_heights(monkeypatch, extra):
+    monkeypatch.setattr(sys, "argv", ["cup_pick_dry_run.py", "--plan",
+        "--fixed-cup-base-xy-m", "0.32", "0.17", *extra])
+    with pytest.raises(SystemExit):
+        MODULE.parse_args()
+
+
+def test_fixed_main_never_reads_camera_or_calls_detector(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["cup_pick_dry_run.py", "--plan",
+        "--fixed-cup-base-xy-m", "0.32", "0.17", "--table-surface-z-m", "0.72",
+        "--grasp-height-above-table-m", "0.06"])
+    def unexpected(*args, **kwargs):
+        raise AssertionError("고정 좌표 계획에서 영상 장치를 사용함")
+    monkeypatch.setattr(MODULE, "read_frame", unexpected)
+    monkeypatch.setattr(MODULE, "detect_cup", unexpected)
+    status = MODULE.main()
+    assert status in (0, 2)
+    import json
+    report = json.loads(capsys.readouterr().out)
+    assert report["detection"] is None
+    assert report["coordinate_source"]["camera_accessed"] is False
+    assert report["motion_command_emitted"] is False
+
+
+def test_detection_mode_still_requires_model(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["cup_pick_dry_run.py"])
+    with pytest.raises(SystemExit):
+        MODULE.parse_args()
 
 
 def test_select_best_cup_uses_floor_contact_and_confidence():

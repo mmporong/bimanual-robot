@@ -156,14 +156,14 @@ left_cup_gripper:
   selected_geometry: upstream_stock_so101_rotating_jaw
   material: upstream_stock_print_material_not_verified
   retention: stock_jaw_contact_only
-  status: selected_for_current_build_physical_recalibration_and_cup_tests_pending
+  status: selected_for_current_build_ik_physical_cup_tests_pending
   superseded_candidates:
     - finray_80mm_lip3_reinforced_pair
     - independent_strap_mount_concave_jaw_overcaps
-  calibration_status: finray_era_id6_range_must_not_be_reused_as_stock_calibration
+  calibration_status: repository_calibration_confirmed_current_by_user_20260929
   measurement_gates:
     - stock_jaw_mount_and_full_open_close_clearance
-    - id6_stock_jaw_recalibration
+    - reuse_current_repository_calibration_without_automatic_recalibration
     - actual_cup_outer_diameter_and_taper
     - wet_surface_retention_and_slip_test
 

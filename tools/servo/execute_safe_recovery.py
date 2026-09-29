@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -36,6 +37,47 @@ def degrees_to_raw(degrees: float, range_min: int, range_max: int) -> int:
     return int(round(degrees * RESOLUTION_MAX / 360.0 + midpoint))
 
 
+def calibration_binding(plan: dict, calibration_bytes: bytes) -> dict:
+    """파일 스냅샷과 같은 변환으로 실행 준비물의 관절 명령을 기록한다."""
+    calibration = json.loads(calibration_bytes)
+    ids = []
+    for name in JOINTS:
+        item = calibration[name]
+        for key in ("id", "range_min", "range_max"):
+            if type(item[key]) is not int:
+                raise ValueError(f"{name}: {key}는 정수여야 합니다")
+        if not 1 <= item["id"] <= 253:
+            raise ValueError(f"{name}: servo ID 범위 오류")
+        if not 0 <= item["range_min"] < item["range_max"] <= RESOLUTION_MAX:
+            raise ValueError(f"{name}: calibration range 오류")
+        ids.append(item["id"])
+    if len(set(ids)) != len(ids):
+        raise ValueError("servo ID가 중복됩니다")
+    vectors = {
+        "start_raw": plan["start_joint_deg"],
+        "target_raw": plan["recovery"]["target_joint_deg"],
+    }
+    result = {
+        "sha256": hashlib.sha256(calibration_bytes).hexdigest(),
+        "joint_order": JOINTS.copy(),
+        "servo_ids": ids,
+    }
+    for label, joint_deg in vectors.items():
+        if not isinstance(joint_deg, list) or len(joint_deg) != len(JOINTS):
+            raise ValueError(f"{label}: 관절 수는 5개여야 합니다")
+        raw_ticks = []
+        for name, value_deg in zip(JOINTS, joint_deg):
+            if type(value_deg) not in (int, float) or not math.isfinite(value_deg):
+                raise ValueError(f"{name}: 관절각은 유한한 숫자여야 합니다")
+            item = calibration[name]
+            raw = degrees_to_raw(value_deg, item["range_min"], item["range_max"])
+            if not item["range_min"] <= raw <= item["range_max"]:
+                raise ValueError(f"{name}: {label}가 calibration range 밖입니다")
+            raw_ticks.append(raw)
+        result[label] = raw_ticks
+    return result
+
+
 def interpolate_raw(start: list[int], target: list[int], max_step_ticks: int) -> list[list[int]]:
     if max_step_ticks <= 0:
         raise ValueError("max_step_ticks는 양수여야 합니다")
@@ -48,11 +90,16 @@ def interpolate_raw(start: list[int], target: list[int], max_step_ticks: int) ->
 
 def load_inputs(plan_path: Path, calibration_path: Path) -> tuple[dict, dict, list[int]]:
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+    calibration_bytes = calibration_path.read_bytes()
+    calibration = json.loads(calibration_bytes)
     if plan.get("motion_command_emitted") is not False:
         raise ValueError("motion_command_emitted=false인 미리보기 계획만 허용합니다")
     if not plan.get("ready_for_explicit_motion_approval", False):
         raise ValueError("복귀 계획이 실행 승인 전 게이트를 통과하지 못했습니다")
+    if "calibration_binding" in plan:
+        expected = calibration_binding(plan, calibration_bytes)
+        if plan["calibration_binding"] != expected:
+            raise ValueError("계획 생성 뒤 calibration 또는 raw 목표가 변경됐습니다")
     target_deg = plan["recovery"]["target_joint_deg"]
     if len(target_deg) != len(JOINTS):
         raise ValueError("복귀 목표 관절 수가 5개가 아닙니다")
