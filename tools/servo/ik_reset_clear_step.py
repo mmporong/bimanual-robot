@@ -263,6 +263,7 @@ def execute(bus, plan: dict, calibration_bytes: bytes, monitor) -> dict:
     result = ik_pick_place.run_sequence(
         bus, plan, lambda phase: phase == "CLEAR_RESET_STEP", monitor=monitor,
         preflight=lambda: validate_hardware(bus, plan, calibration_bytes),
+        raw_step_ticks=MAX_DELTA_TICKS, arrival_tolerance_ticks=4,
     )
     result.update(
         schema="ik_reset_clear_step_result_v1",

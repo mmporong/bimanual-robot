@@ -325,12 +325,19 @@ def stop_restore(bus, ids, profiles):
 
 
 def run_sequence(bus, plan, confirm, *, sleep=time.sleep, clock=time.monotonic,
-                 monitor=lambda: None, preflight=lambda: None):
+                 monitor=lambda: None, preflight=lambda: None,
+                 raw_step_ticks=10, arrival_tolerance_ticks=15):
+    if type(raw_step_ticks) is not int or not 1 <= raw_step_ticks <= 35:
+        raise ValueError("raw_step_ticks: 1..35 정수가 필요합니다")
+    if type(arrival_tolerance_ticks) is not int or not 1 <= arrival_tolerance_ticks <= 15:
+        raise ValueError("arrival_tolerance_ticks: 1..15 정수가 필요합니다")
     ids = plan["servo_ids"]
     profiles, events = [], []
     result = {"sequence_completed": False, "physical_grasp_verified": False,
               "physical_task_verified": False, "phases_completed": [], "events": events,
               "temperature_load_read": False, "failure": None, "command_write_attempted": False}
+    result.update(raw_step_ticks=raw_step_ticks,
+                  arrival_tolerance_ticks=arrival_tolerance_ticks)
     result.update(plan_sha256=digest(plan), config_sha256=plan["config_sha256"],
                   calibration_sha256=plan["calibration_sha256"], urdf_sha256=plan["urdf_sha256"],
                   failure_phase=None)
@@ -361,7 +368,7 @@ def run_sequence(bus, plan, confirm, *, sleep=time.sleep, clock=time.monotonic,
             if index == 0 or phase != plan["poses"][index-1]["phase"]:
                 if not confirm(phase):
                     raise RuntimeError(f"observation_rejected:{phase}")
-            for goals in interpolate_raw(previous, pose["raw_ticks"], 10):
+            for goals in interpolate_raw(previous, pose["raw_ticks"], raw_step_ticks):
                 monitor()
                 before = [read_required(bus, sid, A_POS, 2) for sid in ids]
                 baseline = [abs(a-b) for a, b in zip(goals, before)]
@@ -369,6 +376,7 @@ def run_sequence(bus, plan, confirm, *, sleep=time.sleep, clock=time.monotonic,
                     require_write(bus, sid, A_GOAL, goal, 2)
                 if [read_required(bus, sid, A_GOAL, 2) for sid in ids] != goals:
                     raise RuntimeError(f"goal_readback_failed:{phase}")
+                result["last_goal_raw"] = goals.copy()
                 last, last_motion_s = before, [clock()]*6
                 deadline_s = clock() + 8
                 while True:
@@ -378,14 +386,16 @@ def run_sequence(bus, plan, confirm, *, sleep=time.sleep, clock=time.monotonic,
                         raise RuntimeError(f"torque_released:{phase}")
                     now = [read_required(bus, sid, A_POS, 2) for sid in ids]
                     errors = [abs(a-b) for a, b in zip(goals, now)]
+                    result["last_observed_raw"] = now.copy()
+                    result["max_position_error_ticks"] = max(errors)
                     if any(e > b + 10 for e, b in zip(errors, baseline)):
                         raise RuntimeError(f"position_diverged:{phase}")
                     for i, (a, b) in enumerate(zip(now, last)):
                         if abs(a-b) > 2:
                             last_motion_s[i], last[i] = clock(), a
-                    if max(errors) <= 15:
+                    if max(errors) <= arrival_tolerance_ticks:
                         break
-                    if any(e > 15 and clock()-t > .5 for e, t in zip(errors, last_motion_s)):
+                    if any(e > arrival_tolerance_ticks and clock()-t > .5 for e, t in zip(errors, last_motion_s)):
                         raise RuntimeError(f"position_stall:{phase}")
                     if clock() > deadline_s:
                         raise RuntimeError(f"arrival_timeout:{phase}")

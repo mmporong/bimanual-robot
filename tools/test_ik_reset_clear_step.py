@@ -139,6 +139,48 @@ def test_mock_limited_run_restores_profiles_and_all_torque_off():
     assert result["final_torque"] == [0] * 6
     assert all(bus.reg[sid, A_SPEED] == 300 and bus.reg[sid, A_ACCEL] == 10 for sid in plan["servo_ids"])
     assert not result["temperature_load_read"] and not result["physical_cup_grasp_verified"]
+    assert result["raw_step_ticks"] == 35
+    assert result["arrival_tolerance_ticks"] == 4
+    assert result["max_position_error_ticks"] <= 4
+    targets = {value for sid, addr, value in bus.writes if sid == 3 and addr == A_GOAL}
+    assert targets <= {plan["start_raw"][2], plan["poses"][0]["raw_ticks"][2], bus.positions[3]}
+
+
+def test_stationary_motor_is_not_accepted_and_last_error_is_recorded(monkeypatch):
+    plan = step.prepare(snapshot(), CALIBRATION_BYTES)
+    bus = HardwareBus(plan)
+    original_read = bus.read
+    def stationary_read(sid, address, size=1):
+        if address == A_POS:
+            return bus.positions[sid]
+        return original_read(sid, address, size)
+    bus.read = stationary_read
+    now = [0.0]
+    def sleep(seconds):
+        now[0] += seconds
+    original_run = step.ik_pick_place.run_sequence
+    def timed_run(*args, **kwargs):
+        return original_run(*args, sleep=sleep, clock=lambda: now[0], **kwargs)
+    monkeypatch.setattr(step.ik_pick_place, "run_sequence", timed_run)
+    result = step.execute(bus, plan, CALIBRATION_BYTES, lambda: None)
+    assert "position_stall" in result["failure"]
+    assert result["last_goal_raw"] == plan["poses"][0]["raw_ticks"]
+    assert result["last_observed_raw"] == plan["start_raw"]
+    assert result["max_position_error_ticks"] == 34
+    assert not result["phases_completed"]
+    assert result["final_torque"] == [0] * 6
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"raw_step_ticks": 36}, {"raw_step_ticks": True},
+    {"arrival_tolerance_ticks": 0}, {"arrival_tolerance_ticks": 16},
+])
+def test_bad_execution_settings_prevent_writes(kwargs):
+    plan = step.prepare(snapshot(), CALIBRATION_BYTES)
+    bus = HardwareBus(plan)
+    with pytest.raises(ValueError):
+        step.ik_pick_place.run_sequence(bus, plan, lambda _: True, **kwargs)
+    assert not bus.writes
 
 
 def test_default_cli_writes_candidate_without_opening_port(tmp_path, monkeypatch):
