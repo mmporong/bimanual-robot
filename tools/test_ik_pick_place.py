@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -461,7 +462,10 @@ def test_execute_uses_exclusive_buses_and_composes_dashboard_monitor(plan, tmp_p
     # packet/규약 검사는 실제 함수로 수행한다. 버스와 경로 감사만 모의한다.
     monkeypatch.setattr(p, "audit", lambda *_: {"robot_sampled_collision_pass": True})
     monkeypatch.setattr(p, "open_stop_bus", lambda port: opened.append(port) or DummyBus())
-    monkeypatch.setattr("serial.Serial", lambda *_: pytest.fail("execute가 검증된 포트 개방을 우회하면 안 됩니다"))
+    def forbidden_serial(*_args, **_kwargs):
+        pytest.fail("execute가 검증된 포트 개방을 우회하면 안 됩니다")
+    # pyserial 설치 여부와 무관하게 잘못된 실제 포트 접근을 실패시킨다.
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=forbidden_serial))
     monkeypatch.setattr(p, "dashboard_monitor", dashboard_urls.append)
     monkeypatch.setattr(p, "snapshot", lambda *_: {
         "raw_ticks": packet["right_expected_raw"], "torque": [0]*6})
