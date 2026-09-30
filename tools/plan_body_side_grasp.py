@@ -150,15 +150,24 @@ def solve_horizontal_endpoint(
     restarts: int = 12,
     random_seed: int = 29,
     iterations: int = 240,
+    position_tolerance_mm: float = POSITION_LIMIT_MM * .5,
+    axes_tolerance_deg: float = .5,
+    joint_margin_extra_deg: float = 0.0,
 ) -> np.ndarray:
     """Bounded numerical DLS without adding a sixth orientation constraint."""
     if isinstance(restarts, bool) or not isinstance(restarts, int) or restarts < 1:
         raise ValueError("restarts는 양의 정수여야 합니다")
     if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
         raise ValueError("iterations는 양의 정수여야 합니다")
+    for value in (position_tolerance_mm, axes_tolerance_deg):
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError("IK 수렴 허용오차는 유한한 양수여야 합니다")
+    if (type(joint_margin_extra_deg) not in (int, float)
+            or not math.isfinite(joint_margin_extra_deg) or joint_margin_extra_deg < 0):
+        raise ValueError("추가 관절 여유는 유한한 음이 아닌 값이어야 합니다")
     target = _vector3(target_m, "target_m")
     lower, upper = _limits(chain, side)
-    margin = math.radians(JOINT_MARGIN_LIMIT_DEG)
+    margin = math.radians(JOINT_MARGIN_LIMIT_DEG + joint_margin_extra_deg)
     safe_lower, safe_upper = lower + margin, upper - margin
     if np.any(safe_lower >= safe_upper):
         raise ValueError("3도 관절 여유를 적용할 수 없는 관절 한계입니다")
@@ -184,8 +193,8 @@ def solve_horizontal_endpoint(
         cost = float(weighted @ weighted)
         for _ in range(iterations):
             raw = constraint_residual(chain, side, q, target)
-            position_ok = np.linalg.norm(raw[:3]) * 1000.0 <= POSITION_LIMIT_MM * 0.5
-            axes_ok = max(abs(raw[3]), abs(raw[4])) <= math.sin(math.radians(0.5))
+            position_ok = np.linalg.norm(raw[:3]) * 1000.0 <= position_tolerance_mm
+            axes_ok = max(abs(raw[3]), abs(raw[4])) <= math.sin(math.radians(axes_tolerance_deg))
             if position_ok and axes_ok:
                 break
             weighted = raw * weights

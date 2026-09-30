@@ -13,6 +13,7 @@ import numbers
 from pathlib import Path
 from typing import Any
 
+from servo.execute_safe_recovery import DEFAULT_CALIBRATION, calibration_binding
 
 JOINT_COUNT = 5
 TARGET_MATCH_TOLERANCE_DEG = 1e-3
@@ -147,6 +148,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--audit", type=Path, required=True)
     parser.add_argument("--stage", choices=["pregrasp", "grasp"], default="pregrasp")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--calibration", type=Path, default=DEFAULT_CALIBRATION,
+                        help="현행 follower JSON. 수정하거나 재보정하지 않습니다")
     return parser.parse_args()
 
 
@@ -157,9 +160,10 @@ def main() -> int:
         json.loads(args.audit.read_text(encoding="utf-8")),
         args.stage,
     )
+    result["calibration_binding"] = calibration_binding(result, args.calibration.read_bytes())
     text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     if args.output:
-        write_new_output(args.output, [args.plan, args.audit], text)
+        write_new_output(args.output, [args.plan, args.audit, args.calibration], text)
     print(text, end="")
     return 0
 

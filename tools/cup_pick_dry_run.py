@@ -31,9 +31,11 @@ from solve_task_poses import (  # noqa: E402
     Chain,
     URDF_PATH,
     base_positions,
-    residual,
+    residual as _axis_residual,
     solve_with_restarts,
 )
+
+residual = _axis_residual
 
 
 DEFAULT_TOP = "/dev/v4l/by-path/pci-0000:65:00.3-usb-0:2.1:1.0-video-index0"
@@ -168,7 +170,7 @@ def joint_limit_margin_deg(chain: Chain, side: str, q: np.ndarray) -> float:
 
 
 def solve_pick_plan_at_xy(
-    detection: Detection,
+    detection: Detection | None,
     base_xy: np.ndarray,
     surface_z: float,
     grasp_height: float,
@@ -220,7 +222,7 @@ def solve_pick_plan_at_xy(
     return {
         "mode": "dry_run_only",
         "motion_command_emitted": False,
-        "detection": asdict(detection),
+        "detection": None if detection is None else asdict(detection),
         "cup_floor_contact_base_xy_m": [round(float(value), 5) for value in base_xy],
         "approach_axis": [round(float(value), 5) for value in axis],
         "approach_pitch_deg": approach_pitch_deg,
@@ -256,16 +258,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera", default=DEFAULT_TOP)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--model", required=True, help="COCO cup 클래스가 있는 Ultralytics 모델")
+    parser.add_argument("--model", help="COCO cup 클래스가 있는 Ultralytics 모델")
+    parser.add_argument("--fixed-cup-base-xy-m", type=float, nargs=2, metavar=("X", "Y"),
+                        help="실측 컵 바닥 XY(base_footprint, m). 카메라·YOLO 없이 IK 계산")
     parser.add_argument("--confidence", type=float, default=0.40)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
     parser.add_argument("--measured-forward-m", type=float,
                         help="왼팔 장착축 기준 컵 전방 거리. workspace homography 대신 단일 실측 좌표 사용")
     parser.add_argument("--measured-lateral-m", type=float, default=0.0,
                         help="왼팔 장착축 기준 컵 좌우 거리(+는 URDF +Y)")
-    parser.add_argument("--table-surface-z-m", type=float, default=0.6931)
-    parser.add_argument("--grasp-height-above-table-m", type=float, default=0.070)
-    parser.add_argument("--approach-pitch-deg", type=float, default=-55.0,
+    parser.add_argument("--table-surface-z-m", type=float)
+    parser.add_argument("--grasp-height-above-table-m", type=float)
+    parser.add_argument("--approach-pitch-deg", type=float,
                         help="0은 수평, 음수는 컵을 향해 아래로 기울인 접근")
     parser.add_argument("--pregrasp-clearance-m", type=float, default=0.060)
     parser.add_argument("--annotated", type=Path)
@@ -275,11 +279,55 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="보정된 작업대 좌표와 URDF로 pre-grasp/grasp IK까지 계산",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    fixed = args.fixed_cup_base_xy_m is not None
+    if fixed:
+        if not args.plan or args.image or args.annotated or args.measured_forward_m is not None:
+            parser.error("고정 좌표 모드는 --plan만 사용하며 영상·상대좌표 입력과 섞지 않습니다")
+        if args.table_surface_z_m is None or args.grasp_height_above_table_m is None:
+            parser.error("고정 좌표에는 작업대 높이와 컵 파지 높이를 명시해야 합니다")
+        values = [*args.fixed_cup_base_xy_m, args.table_surface_z_m,
+                  args.grasp_height_above_table_m, args.pregrasp_clearance_m]
+        if not all(math.isfinite(value) for value in values):
+            parser.error("고정 좌표와 높이·접근 거리는 유한해야 합니다")
+        if args.grasp_height_above_table_m <= 0 or args.pregrasp_clearance_m <= 0:
+            parser.error("파지 높이와 접근 거리는 양수여야 합니다")
+    elif not args.model:
+        parser.error("영상 검출에는 --model이 필요합니다")
+    if args.table_surface_z_m is None:
+        args.table_surface_z_m = 0.6931
+    if args.grasp_height_above_table_m is None:
+        args.grasp_height_above_table_m = 0.070
+    if args.approach_pitch_deg is None:
+        args.approach_pitch_deg = 0.0 if fixed else -55.0
+    if not math.isfinite(args.approach_pitch_deg):
+        parser.error("접근 각도는 유한해야 합니다")
+    return args
+
+
+def write_report(args: argparse.Namespace, report: dict[str, Any]) -> None:
+    text = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text, encoding="utf-8")
+    print(text, end="")
 
 
 def main() -> int:
     args = parse_args()
+    if args.fixed_cup_base_xy_m is not None:
+        report = solve_pick_plan_at_xy(
+            None, np.asarray(args.fixed_cup_base_xy_m), args.table_surface_z_m,
+            args.grasp_height_above_table_m, args.pregrasp_clearance_m,
+            args.approach_pitch_deg,
+        )
+        report["coordinate_source"] = {
+            "type": "explicit_fixed_base_footprint",
+            "repeatable_pixel_mapping_available": False,
+            "camera_accessed": False,
+        }
+        write_report(args, report)
+        return 0 if report["ready_for_collision_review"] else 2
     image = read_frame(args.image, args.camera, args.width, args.height)
     detection = detect_cup(image, args.model, args.confidence)
     if args.annotated:
@@ -323,11 +371,7 @@ def main() -> int:
             report["mode"] = "plan_blocked"
             report["blocking_findings"] = [str(exc)]
             exit_code = 2
-    text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text, encoding="utf-8")
-    print(text, end="")
+    write_report(args, report)
     return exit_code
 
 

@@ -1,0 +1,62 @@
+schema: bench_cup_measurement_v1
+status: target_measured_pose_alignment_pending
+frame: left_arm_base_center
+axes:
+  x: forward_toward_cup
+  y: left
+  z: up_from_table_surface
+provenance:
+  source: user_report_in_session
+  measured_at: 2026-09-29
+  valid_for: 동일 책상 위 왼팔 순정 SO101과 현재 컵 배치
+cup_forward:
+  value: 0.350
+  unit: m
+  measured_at: 2026-09-29
+  valid_for: 현재 왼팔 베이스 중심에서 컵 중심까지
+cup_lateral:
+  value: 0.0
+  unit: m
+  measured_at: 2026-09-29
+  valid_for: 현재 왼팔 베이스 중심에서 컵 중심까지
+cup_diameter:
+  value: 0.080
+  unit: m
+  measured_at: 2026-09-29
+  valid_for: 현재 컵 몸통
+cup_height:
+  value: 0.100
+  unit: m
+  measured_at: 2026-09-29
+  valid_for: 현재 컵
+same_table_surface: true
+unverified:
+  - 베이스 중심과 URDF left_base_link 원점의 실제 대응
+  - 범위 중간값 기반 관절각과 URDF 관절 영점의 실제 대응
+  - 순정 죠의 실측 접촉 중심과 개구 폭
+  - 카메라 평면 보정 및 컵 좌표 자동 갱신
+physical_execution_ready: false
+nominal_pregrasp:
+  status: mesh_based_candidate_not_physical_calibration
+  computed_at: 2026-09-29
+  source: src/hold_flow_description/urdf/hold_flow.urdf 및 순정 죠 메시의 단면 검토
+  reference_cup_diameter_m: 0.080
+  contact_center_tool_m: [-0.0404, 0.0, -0.020]
+  gripper_open_rad: 1.45
+  minimum_geometric_backoff_m: 0.0663
+  selected_backoff_m: 0.080
+  high_clearance_above_table_m: 0.170
+  minimum_jaw_radial_clearance_m: 0.002846
+  gripper_raw_to_gap_verified: false
+  robot_start_to_endpoint_path_verified: false
+  notes:
+    - 같은 개방각에서 고정 죠와 이동 죠 여유를 균형화한 메시 단면 후보다.
+    - 기존 70 mm 컵의 접촉 중심과 60 mm 후퇴를 재사용하지 않는다.
+    - 이 개방각은 모델 값이며 보정 JSON의 퍼센트나 raw에 자동 대응시키지 않는다.
+    - 뒤 80 mm·몸통 높이 후보는 손목 한계로 수평 정렬 조건을 만족하지 못했다.
+    - 활성 준비 후보는 뒤 80 mm·높이 170 mm에서 컵 위·높이 170 mm로 이동한다.
+    - 무접촉 준비 후보이며 컵을 닫아 잡는 명령을 포함하지 않는다.
+notes:
+  - 컵 중간 목표 높이는 책상 위 0.050 m로 계산한다.
+  - 이 상대좌표를 이동 베이스의 base_footprint 실측값으로 표시하지 않는다.
+  - 원점 대응과 관절 영점 대조 전에는 수치 IK 해를 실물 실행 승인 근거로 사용하지 않는다.

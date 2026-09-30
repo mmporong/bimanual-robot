@@ -55,7 +55,8 @@ def run(args, backend=cup_contact_model):
                 "tool_sha256": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                                 for name in dict.fromkeys(("simulate_cup_contact.py", "cup_contact_model.py", "cup_contact_recovery.py", "cup_contact_place.py",
                                                           "plan_body_side_grasp.py", "workcell_preview_inputs.py", "workcell_preview_motion.py",
-                                                          f"simulate_{object_label.lower()}_contact.py", Path(backend.__file__).name))},
+                                                          f"simulate_{object_label.lower()}_contact.py", Path(backend.__file__).name,
+                                                          *getattr(backend, "EXTRA_TOOL_FILES", ())))},
                 "config_sha256": source_config_sha256,
                 "source_config_sha256": source_config_sha256,
                 "effective_config_sha256": cup_contact_model.effective_config_sha256(config),
@@ -221,7 +222,7 @@ def run(args, backend=cup_contact_model):
         q[parked_indices] = np.radians(plan["parked_joint_deg"])
         q[names.index("left_gripper")] = 1.
         for name in ("right_finger1_joint", "right_finger2_joint"):
-            q[names.index(name)] = .0433
+            q[names.index(name)] = plan.get("right_gripper_m", .0433)
         q[gripper_indices] = config[f"gripper_open_{unit}"]
         # 초기 배치만 순간 설정한다. 이후는 물리 드라이브 목표만 보낸다.
         robot.set_joint_positions(q)

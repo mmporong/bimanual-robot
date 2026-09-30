@@ -34,7 +34,9 @@ def supported_window(samples, config, phase, duration_s, released=False, clear=F
         return False
     if np.max(np.linalg.norm(positions-positions[0], axis=1)) > limits["maximum_window_motion_m"]:
         return False
-    center = np.asarray(config["cup_center_m"])
+    center = np.asarray(config.get("placement_center_m", config["cup_center_m"]))
+    if center.shape != (3,) or not np.isfinite(center).all():
+        return False
     unit = config.get("gripper_unit", "rad")
     for sample in window:
         numbers = [sample["table_support_force_n"], sample["cup_tilt_deg"],
