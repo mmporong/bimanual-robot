@@ -2,6 +2,27 @@
 
 현행 왼손은 TPU FinRay가 아니라 SO-101 순정 회전식 죠를 사용한다.
 
+## 현행 왼팔 · 2026-09-30
+
+사용자가 중간 자세 설정과 가동 범위 기록을 마쳐 공식 LeRobot
+`SOFollower.calibrate()`의 왼팔 보정을 완료했다. 일반 연결 시 설정 변경은
+실행하지 않았고 기존 게인·Phase를 유지했다. 새 후보와 보드의 offset·범위를
+대조하고 6축 토크 OFF를 확인한 뒤 `bi_follower/arms_left.json`에 반영했다.
+오른팔 보정은 아래 2026-09-29 기록을 유지한다.
+
+- 왼팔 ID 6: `drive_mode=0`, raw `2028~3483`; 손목 롤 범위는 관례값 `0~4095`다.
+- 백업·실측 후보·종료 검증·새 snapshot: `/data/lim/robot-artifacts/restaurant/standard_calibration_20260930_left01/`.
+- 활성 파일 SHA-256: `69b3a38747f7f143670f795808beaeedaeffb6114a5b9b076e6cc330701e7fbe`.
+  공식 후보와 JSON 값은 같고 활성 파일에만 마지막 개행이 있다. 후보·snapshot의
+  바이트 해시는 `9a9328bec2bc350e69d75989bdb0c8c8231c875bf02cb15faafcf86477713873`이다.
+- 보정 기록 완료는 IK 좌표 정밀도나 컵 파지 성공이 아니다. 종료 자세의 어깨 각도는
+  명목 URDF 하한 밖으로 계산되며, URDF 한계나 좌표를 임의 수정하지 않았다.
+- 이전 raw 목표·계획 packet은 재사용하지 않는다. 기존 IL 정책·데이터도 이전
+  보정의 정규화를 사용했으므로 새 보정과의 호환을 검증하기 전 실행하지 않는다.
+  리더·LeRobot 캐시·기존 데이터셋은 변경하지 않았다.
+
+## 이전 기록 · 2026-09-29
+
 2026-09-29 실기체 연결에서 저장소 JSON과 보드의 오프셋 차이를 확인했다.
 사용자 승인으로 양팔 범위를 수동 기록하고 MIN/MAX만 EEPROM에 적용했다.
 IK 실행 준비의 기준은 `bi_follower/arms_left.json`과 `bi_follower/arms_right.json`이다.
