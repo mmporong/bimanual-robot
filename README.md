@@ -37,7 +37,14 @@
 과거 후보: [`finray_80mm_lip3_selection.yaml`](design/gripper/finray_80mm_lip3_selection.yaml)
 <!-- AUTO:PROJECT-STATUS:END -->
 
-## 현재 최우선 작업 · 2026-09-29
+## 현재 최우선 작업 · 2026-09-30
+
+추가 높이 측정과 임의 영점 맞추기 대신 공식 LeRobot `SOFollower.calibrate()`로
+왼팔 수동 보정을 진행 중이다. 중간 자세 설정·전체 가동 범위 기록의 두 단계를 사용한다.
+`tools/servo/standard_so101_calibration.py`는 일반 연결의 게인·보호 설정 변경 없이
+공식 보정 함수를 호출하고, 기존 보정 백업과 중단 시 복원·재판독을 수행한다.
+현재 중간 자세 입력 대기이며 새 보정·실물 IK 파지는 완료되지 않았다.
+새 후보는 별도 저장하고 검증 전에 기존 활성 JSON이나 IL 정책 보정을 교체하지 않는다.
 
 SmolVLA의 실물 성공 조건을 유지하면서 왼팔 IK 픽앤플레이스를 별도로 검증한다.
 연결 후 저장소와 실기체의 보정값 차이가 확인돼, 사용자 승인으로 양팔 범위를 다시 기록했다.
