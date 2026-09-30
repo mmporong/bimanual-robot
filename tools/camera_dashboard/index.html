@@ -40,8 +40,8 @@
     <p>상단과 손목 카메라 2대의 실시간 영상</p>
     <div class="readonly">이동·토크 ON 기능 없음</div>
   </header>
-  <section class="stop-panel" aria-label="양팔 정지">
-    <button id="stop" type="button" disabled>양팔 긴급정지</button>
+  <section class="stop-panel" aria-label="설정된 팔 정지">
+    <button id="stop" type="button" disabled>설정된 팔 긴급정지</button>
     <div class="stop-copy"><p id="stop-status" role="status" aria-live="polite">정지 연결 확인 중</p>
     <p>토크 OFF: 팔이 내려앉거나 물체가 떨어질 수 있습니다. 하드웨어 전원 차단은 아닙니다.</p>
     <p>다른 제어기가 포트를 사용하거나 통신이 끊기면 정지할 수 없습니다. 실패 시 모터 전원을 차단하세요.</p>
@@ -81,10 +81,12 @@ async function refresh(){
 const stopButton=document.getElementById('stop');
 let stopping=false;
 function showStop(state){
+  const armCount=state.arm_count||0;
+  stopButton.textContent=armCount===1?'연결된 한 팔 긴급정지':armCount===2?'양팔 긴급정지':'정지 대상 미설정';
   stopButton.disabled=!state.enabled||state.running||stopping;
   document.getElementById('stop-status').textContent=state.running?'토크 OFF 전송 중':
     !state.enabled?'정지 포트 미설정':!state.requested?'정지 버튼 사용 가능 · 현재 토크 상태 미측정':
-    state.verified_off?'마지막 정지 요청: 서보 12개 토크 OFF 확인 (현재 상태 보증 아님)':
+    state.verified_off?`마지막 정지 요청: 서보 ${armCount*6}개 토크 OFF 확인 (현재 상태 보증 아님)`:
     '정지 확인 실패 · 모터 전원을 차단하세요';
   document.getElementById('stop-detail').textContent=(state.results||[]).map(r=>
     r.port.split('/').pop()+': '+(r.error||r.servos.map(s=>`${s.id}:${s.torque===0?'OFF':'미확인'}`).join(' '))

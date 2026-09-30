@@ -1,6 +1,7 @@
 import copy
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -9,7 +10,9 @@ from servo.sts_bus import (A_ACCEL, A_GOAL, A_LOCK, A_MAX_ANGLE, A_MIN_ANGLE, A_
                            A_P, A_POS, A_SPEED, A_TORQUE, encode_offset)
 
 
-CALIBRATION_BYTES = step.ik_pick_place.DEFAULT_CALIBRATION.read_bytes()
+# 2026-09-29 저장 raw의 회귀 자료다. 최신 보정과 과거 raw를 섞지 않는다.
+# 원본: e00092f의 calibration/bi_follower/arms_left.json. 실물 실행에 사용하지 않는다.
+CALIBRATION_BYTES = (Path(__file__).parent / "fixtures/so101_left_20260929.json").read_bytes()
 CALIBRATION = json.loads(CALIBRATION_BYTES)
 
 

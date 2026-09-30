@@ -152,6 +152,7 @@ def solve_horizontal_endpoint(
     iterations: int = 240,
     position_tolerance_mm: float = POSITION_LIMIT_MM * .5,
     axes_tolerance_deg: float = .5,
+    joint_margin_extra_deg: float = 0.0,
 ) -> np.ndarray:
     """Bounded numerical DLS without adding a sixth orientation constraint."""
     if isinstance(restarts, bool) or not isinstance(restarts, int) or restarts < 1:
@@ -161,9 +162,12 @@ def solve_horizontal_endpoint(
     for value in (position_tolerance_mm, axes_tolerance_deg):
         if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
             raise ValueError("IK 수렴 허용오차는 유한한 양수여야 합니다")
+    if (type(joint_margin_extra_deg) not in (int, float)
+            or not math.isfinite(joint_margin_extra_deg) or joint_margin_extra_deg < 0):
+        raise ValueError("추가 관절 여유는 유한한 음이 아닌 값이어야 합니다")
     target = _vector3(target_m, "target_m")
     lower, upper = _limits(chain, side)
-    margin = math.radians(JOINT_MARGIN_LIMIT_DEG)
+    margin = math.radians(JOINT_MARGIN_LIMIT_DEG + joint_margin_extra_deg)
     safe_lower, safe_upper = lower + margin, upper - margin
     if np.any(safe_lower >= safe_upper):
         raise ValueError("3도 관절 여유를 적용할 수 없는 관절 한계입니다")

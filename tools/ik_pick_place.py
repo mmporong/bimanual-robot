@@ -114,10 +114,17 @@ class FixedContactChain(Chain):
 
 
 def apply_joint_reference_limits(chain, calibration_bytes, reference):
-    """현재 chain에 URDF 한계와 정렬 기준의 raw 한계 교집합을 적용한다."""
+    """현재 chain에 URDF와 선택한 각도 규약의 raw 한계 교집합을 적용한다."""
     if reference is None:
-        return
-    for name, hardware_deg in zip(JOINTS, joint_limits_deg(calibration_bytes, reference)):
+        calibration = json.loads(calibration_bytes)
+        raw_for([0] * 5, 50, calibration_bytes)
+        hardware_limits = [
+            [-(calibration[n]["range_max"] - calibration[n]["range_min"]) * 180 / 4095,
+             (calibration[n]["range_max"] - calibration[n]["range_min"]) * 180 / 4095]
+            for n in JOINTS]
+    else:
+        hardware_limits = joint_limits_deg(calibration_bytes, reference)
+    for name, hardware_deg in zip(JOINTS, hardware_limits):
         key = f"left_{name}"
         nominal, hardware = chain.limits[key], np.radians(hardware_deg)
         lower, upper = max(nominal[0], hardware[0]), min(nominal[1], hardware[1])
@@ -211,8 +218,10 @@ def prepare(config, calibration_bytes, right_calibration_bytes=None):
         else:
             points = [target_m]
         for point_m in points:
+            # 정수 tick 반올림 뒤에도 기존 3도 관절 여유를 유지한다.
             seed = solve_horizontal_endpoint(chain, "left", point_m, seed, restarts=1, iterations=240,
-                                             position_tolerance_mm=.1, axes_tolerance_deg=.1)
+                                             position_tolerance_mm=.1, axes_tolerance_deg=.1,
+                                             joint_margin_extra_deg=360 / 4095 / 2 + 1e-6)
             measured = measure_stage(chain, "left", seed, point_m, np.array([1, 0, 0]))
             reasons = validate_measurement(measured)
             if reasons:

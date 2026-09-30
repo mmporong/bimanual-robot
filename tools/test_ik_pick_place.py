@@ -86,7 +86,12 @@ def test_reference_limits_intersect_urdf_without_changing_other_chain():
         assert chain.limits[key] == (max(original[key][0], low), min(original[key][1], high))
     assert untouched.limits == original
     p.apply_joint_reference_limits(untouched, calibration_bytes, None)
-    assert untouched.limits == original
+    cal = json.loads(calibration_bytes)
+    for name in p.JOINTS:
+        half_span = (cal[name]["range_max"] - cal[name]["range_min"]) * p.math.pi / 4095
+        key = f"left_{name}"
+        assert untouched.limits[key] == pytest.approx((max(original[key][0], -half_span),
+                                                      min(original[key][1], half_span)))
 
 
 @pytest.fixture(scope="module")

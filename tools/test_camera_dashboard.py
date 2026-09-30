@@ -52,10 +52,25 @@ class MockBus:
         self.events.append((self.port, "close", 0))
 
 
-@pytest.mark.parametrize("ports", [["A"], ["A", "A"], ["A", "B", "C"]])
+@pytest.mark.parametrize("ports", [["A", "A"], ["A", "B", "C"]])
 def test_incomplete_or_duplicate_arm_configuration_rejected(ports):
     with pytest.raises(ValueError):
         StopController(ports)
+
+
+def test_explicit_single_arm_stops_only_six_servos():
+    events = []
+    control = StopController(["LEFT"], lambda p: MockBus(p, events))
+    assert control.snapshot()["arm_count"] == 1
+    assert control.stop()["verified_off"]
+    assert [e[1] for e in events[:6]] == ["off"] * 6
+    assert len(events) == 13
+    assert {e[0] for e in events} == {"LEFT"}
+
+
+def test_no_ports_never_reports_verified_stop():
+    control = StopController([])
+    assert not control.stop()["verified_off"]
 
 
 def test_stop_all_before_readback_and_repeat(tmp_path):

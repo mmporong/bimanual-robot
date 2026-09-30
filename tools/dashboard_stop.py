@@ -28,13 +28,14 @@ def open_stop_bus(port):
 class StopController:
     def __init__(self, ports=(), bus_factory=open_stop_bus, log_path=None):
         self.ports = tuple(ports)
-        if len(self.ports) not in (0, 2) or len(set(self.ports)) != len(self.ports):
-            raise ValueError("양팔 정지는 서로 다른 팔 포트 2개를 지정해야 합니다.")
+        if len(self.ports) not in (0, 1, 2) or len(set(self.ports)) != len(self.ports):
+            raise ValueError("정지 대상은 서로 다른 팔 포트 1개 또는 2개여야 합니다.")
         self.bus_factory = bus_factory
         self.log_path = pathlib.Path(log_path) if log_path else None
         self.lock = threading.Lock()
         self.run_lock = threading.Lock()
-        self.state = {"enabled": bool(ports), "requested": False, "running": False,
+        self.state = {"enabled": bool(ports), "arm_count": len(self.ports),
+                      "requested": False, "running": False,
                       "verified_off": False, "results": [], "log_error": None}
 
     def snapshot(self):
@@ -78,7 +79,7 @@ class StopController:
                         bus.close()
                     except (Exception, SystemExit) as exc:
                         result["error"] = str(exc)
-                verified = len(self.ports) == 2 and len(results) == 2 and all(
+                verified = bool(self.ports) and len(results) == len(self.ports) and all(
                     not r["error"] and len(r["servos"]) == 6 and all(
                         s["torque"] == 0 and not s["error"] for s in r["servos"]
                     ) for r in results

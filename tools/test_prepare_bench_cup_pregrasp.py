@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,10 +11,26 @@ import prepare_bench_cup_pregrasp as pregrasp
 from test_ik_reset_clear_step import CALIBRATION_BYTES, snapshot
 from test_ik_pick_place import reference_fixture
 from servo.joint_reference import raw_to_joint_deg, build_reference
+import ik_pick_place
 
 
 MEASUREMENT = yaml.safe_load((Path(__file__).resolve().parents[1] /
                              "calibration/workcells/bench_cup_20260929.yaml").read_text())
+
+
+def test_current_calibration_produces_bounded_nominal_endpoints():
+    calibration_bytes = ik_pick_place.DEFAULT_CALIBRATION.read_bytes()
+    cal = json.loads(calibration_bytes)
+    raw = ik_pick_place.raw_for([0, -80, 80, 60, 0], 0, calibration_bytes)
+    start = snapshot()
+    start.update(raw_ticks=raw, calibration_sha256=hashlib.sha256(calibration_bytes).hexdigest(),
+                 joint_deg=pregrasp._snapshot_joint_deg(raw[:5], cal))
+    result = pregrasp.build(MEASUREMENT, start, calibration_bytes)
+    assert result["endpoints_ready_for_path_review"]
+    for stage in result["stages"]:
+        assert stage["quantized_endpoint_check"]["joint_margin_deg"] >= 3
+        for name, value in zip(pregrasp.JOINTS, stage["arm_raw_ticks"]):
+            assert cal[name]["range_min"] <= value <= cal[name]["range_max"]
 
 
 def test_pregrasp_has_no_grip_or_execution_claim():

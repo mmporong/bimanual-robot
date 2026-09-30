@@ -88,7 +88,8 @@ def build(measurement: dict, snapshot: dict, calibration_bytes: bytes) -> dict:
                                              ("MIDBODY_BEHIND_CUP_CANDIDATE", before_m))):
         # 첫 자세 이후에는 현재 해에서 이어 풀어 등가 손목 180도 분기 전환을 피한다.
         q_rad = solve_horizontal_endpoint(chain, "left", target_m, seed_q=seed,
-                                         restarts=12 if index == 0 else 1)
+                                         restarts=12 if index == 0 else 1,
+                                         joint_margin_extra_deg=360 / 4095 / 2 + 1e-6)
         measured = measure_stage(chain, "left", q_rad, target_m, np.array([1.0, 0.0, 0.0]))
         q_deg = np.degrees(q_rad)
         if reference is None:

@@ -3,9 +3,9 @@
 
 기본은 실물 상태를 읽고 계획과 대조하는 dry-run이다. ``--execute``를 명시해야만
 목표 위치와 토크를 쓴다. 기본 실행은 부하·온도·스톨·계획 시작점 불일치를 감시하고
-끝에 토크를 해제한다. ``--position-only``는 부하·온도를 읽지 않으며,
-``--hold-torque-on-success``는 승인된 다음 연속 단계까지 성공 토크를 유지한다.
-실패·예외·인터럽트에서는 토크 해제 경로를 실행하고 기존 속도/가속도를 복원한다.
+끝에 자세를 유지한다. ``--position-only``는 부하·온도를 읽지 않는다.
+실패·예외·인터럽트에서는 현재 위치로 목표를 동결하고 토크 상태를 바꾸지 않는다.
+토크 해제는 팔이 지지된 상태에서 명시한 성공 후 해제 옵션으로만 수행한다.
 """
 
 from __future__ import annotations
@@ -156,20 +156,72 @@ def validate_start(plan: dict, calibration: dict, state: dict, target_raw: list[
 
 
 def release_and_restore(bus, ids: list[int], previous: list[tuple[int, int]]) -> None:
+    prepared = hold_current(bus, ids)
+    if prepared["errors"]:
+        raise RuntimeError(f"토크 해제 전 목표 동결 실패: {prepared}")
+    errors = []
+    interrupted = None
     for sid in ids:
-        position = bus.read(sid, A_POS, 2)
-        if position is not None:
-            bus.write(sid, A_GOAL, position, 2)
+        try:
+            require_write(bus, sid, A_TORQUE, 0)
+        except BaseException as exc:
+            errors.append(f"ID {sid}: {exc}")
+            if not isinstance(exc, Exception) and interrupted is None:
+                interrupted = exc
+    torque = {}
     for sid in ids:
-        bus.write(sid, A_TORQUE, 0)
+        try:
+            torque[sid] = read_required(bus, sid, A_TORQUE)
+        except BaseException as exc:
+            torque[sid] = None
+            errors.append(f"ID {sid}: {exc}")
+            if not isinstance(exc, Exception) and interrupted is None:
+                interrupted = exc
+    if interrupted is not None:
+        interrupted.add_note(f"토크 해제 중단: torque={torque}, errors={errors}")
+        raise interrupted
+    if errors or any(value != 0 for value in torque.values()):
+        raise RuntimeError(f"토크 해제 미확인: torque={torque}, errors={errors}")
     for sid, (speed, accel) in zip(ids, previous):
-        bus.write(sid, A_SPEED, speed, 2)
-        bus.write(sid, A_ACCEL, accel)
+        require_write(bus, sid, A_SPEED, speed, 2)
+        require_write(bus, sid, A_ACCEL, accel)
 
 
 def require_write(bus, sid: int, address: int, value: int, size: int = 1) -> None:
     if not bus.write(sid, address, value, size):
         raise RuntimeError(f"ID {sid}: register {address} 쓰기 실패")
+
+
+def hold_current(bus, ids: list[int]) -> dict:
+    """진행 목표를 취소한다. 토크를 끄거나 꺼진 축을 다시 켜지 않는다.
+
+    통신 실패는 유지 성공이 아니다. 실패한 축이 있어도 나머지 축을 처리한다.
+    """
+    report = {"action": "hold_current", "torque_write_emitted": False,
+              "servos": [], "errors": []}
+    for sid in ids:
+        item = {"id": sid, "goal": None, "torque": None, "goal_verified": False}
+        report["servos"].append(item)
+        try:
+            position = read_required(bus, sid, A_POS, 2)
+            item["goal"] = position
+            require_write(bus, sid, A_GOAL, position, 2)
+            item["goal_verified"] = read_required(bus, sid, A_GOAL, 2) == position
+            item["torque"] = read_required(bus, sid, A_TORQUE)
+            if not item["goal_verified"]:
+                raise RuntimeError(f"ID {sid}: 정지 목표 판독 불일치")
+        except BaseException as exc:
+            report["errors"].append(f"ID {sid}: {type(exc).__name__}: {exc}")
+    report["hold_command_verified"] = bool(ids) and not report["errors"] and all(
+        item["goal_verified"] and item["torque"] == 1 for item in report["servos"]
+    )
+    return report
+
+
+def stop_after_error(bus, ids: list[int], error: BaseException) -> None:
+    report = hold_current(bus, ids)
+    error.motion_stop_report = report
+    error.add_note(json.dumps(report, ensure_ascii=False))
 
 
 def read_required(bus, sid: int, address: int, size: int = 1, retries: int = 3) -> int:
@@ -189,16 +241,33 @@ def confirmed_temperatures(bus, ids: list[int], limit: int) -> list[int]:
 
 def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acceleration: int,
             load_limit: int, temperature_limit: int, arrival_tolerance_ticks: int = 15,
-            hold_torque_on_success: bool = False, position_only: bool = False) -> dict:
+            hold_torque_on_success: bool = True, position_only: bool = False,
+            monitor=lambda: None, waypoint_period_s: float | None = None,
+            tracking_limit_ticks: int = 45) -> dict:
     ids = [int(calibration[name]["id"]) for name in JOINTS]
-    previous = [(read_required(bus, sid, A_SPEED, 2), read_required(bus, sid, A_ACCEL)) for sid in ids]
-    initial = [read_required(bus, sid, A_POS, 2) for sid in ids]
     peak_load = None if position_only else [0] * len(ids)
     loaded_final: list[int] | None = None
     reached = False
     try:
-        for sid, position in zip(ids, initial):
-            require_write(bus, sid, A_GOAL, position, 2)
+        monitor()
+        if waypoint_period_s is not None and not (math.isfinite(waypoint_period_s)
+                                                   and 0 < waypoint_period_s <= 1):
+            raise ValueError("waypoint_period_s는 0 초과 1 이하이어야 합니다")
+        if waypoint_period_s is not None and not arrival_tolerance_ticks <= tracking_limit_ticks <= 45:
+            raise ValueError("도달 허용치 <= 추종 상한 <= 45 tick이어야 합니다")
+        previous = [(read_required(bus, sid, A_SPEED, 2), read_required(bus, sid, A_ACCEL)) for sid in ids]
+        initial = [read_required(bus, sid, A_POS, 2) for sid in ids]
+        if waypoint_period_s is not None:
+            for first, second in zip([initial] + waypoints[:-1], waypoints):
+                if len(second) != len(ids) or max(abs(b-a) for a, b in zip(first, second)) > 5:
+                    raise ValueError("연속 전달 경로의 관절별 간격은 5 tick 이하이어야 합니다")
+        for name, sid, position in zip(JOINTS, ids, initial):
+            item = calibration[name]
+            seed_ticks = min(item["range_max"], max(item["range_min"], position))
+            # 경계의 정수 판독 편차만 허용하며 명령 범위 자체는 넓히지 않는다.
+            if abs(seed_ticks - position) > 2:
+                raise RuntimeError(f"{name}: 현재 위치가 저장 범위에서 벗어남: {position}")
+            require_write(bus, sid, A_GOAL, seed_ticks, 2)
             require_write(bus, sid, A_ACCEL, acceleration)
             require_write(bus, sid, A_SPEED, speed, 2)
         for sid in ids:
@@ -209,7 +278,11 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
             raise RuntimeError(f"토크 활성화 확인 실패: {enabled}")
 
         for waypoint_index, waypoint in enumerate(waypoints, start=1):
+            monitor()
             before = [read_required(bus, sid, A_POS, 2) for sid in ids]
+            if waypoint_period_s is not None and max(
+                    abs(goal - value) for goal, value in zip(waypoint, before)) > tracking_limit_ticks:
+                raise RuntimeError(f"waypoint {waypoint_index}: 명령 전 추종 상한 초과")
             for sid, goal in zip(ids, waypoint):
                 require_write(bus, sid, A_GOAL, goal, 2)
             written_goals = [read_required(bus, sid, A_GOAL, 2) for sid in ids]
@@ -219,12 +292,16 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
                     f"expected={waypoint}, actual={written_goals}"
                 )
             initial_error = [abs(goal - value) for goal, value in zip(waypoint, before)]
+            next_waypoint_s = time.monotonic() + (waypoint_period_s or 0)
             budget = max(8.0, max(initial_error) / max(speed, 1) * 1.5 + 2.0)
             deadline = time.monotonic() + budget
             last_motion = [time.monotonic()] * len(ids)
             last = before
             while True:
                 time.sleep(0.03)
+                monitor()
+                if [read_required(bus, sid, A_TORQUE) for sid in ids] != [1] * len(ids):
+                    raise RuntimeError("복귀 중 토크 해제 감지")
                 now = [read_required(bus, sid, A_POS, 2) for sid in ids]
                 loads = None if position_only else [
                     read_required(bus, sid, A_LOAD, 2) & 0x3FF for sid in ids
@@ -235,7 +312,10 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
                 if loads is not None:
                     peak_load = [max(old, new) for old, new in zip(peak_load, loads)]
                 errors = [abs(goal - value) for goal, value in zip(waypoint, now)]
-                if any(error > baseline + 10 for error, baseline in zip(errors, initial_error)):
+                if waypoint_period_s is not None and max(errors) > tracking_limit_ticks:
+                    raise RuntimeError(f"waypoint {waypoint_index}: 추종 상한 초과, error={errors}")
+                if waypoint_period_s is None and any(
+                        error > baseline + 10 for error, baseline in zip(errors, initial_error)):
                     raise RuntimeError(
                         f"waypoint {waypoint_index}: 목표에서 멀어짐, "
                         f"initial_error={initial_error}, error={errors}"
@@ -248,14 +328,17 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
                     if abs(value - old) > 2:
                         last_motion[index] = time.monotonic()
                         last[index] = value
-                if max(errors) <= arrival_tolerance_ticks:
+                streaming_midpoint = waypoint_period_s is not None and waypoint_index < len(waypoints)
+                if streaming_midpoint and time.monotonic() >= next_waypoint_s:
+                    break
+                if not streaming_midpoint and max(errors) <= arrival_tolerance_ticks:
                     break
                 stalled = [
                     JOINTS[index]
                     for index, error in enumerate(errors)
                     if error > arrival_tolerance_ticks and time.monotonic() - last_motion[index] > 0.5
                 ]
-                if stalled:
+                if stalled and not streaming_midpoint:
                     raise RuntimeError(
                         f"waypoint {waypoint_index}: 0.5초 스톨 {stalled}, "
                         f"position={now}, error={errors}, load={loads}"
@@ -265,10 +348,10 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
         loaded_final = [read_required(bus, sid, A_POS, 2) for sid in ids]
         loaded_error = [abs(goal - value) for goal, value in zip(waypoints[-1], loaded_final)]
         reached = max(loaded_error) <= arrival_tolerance_ticks
-    except BaseException:
-        release_and_restore(bus, ids, previous)
+    except BaseException as exc:
+        stop_after_error(bus, ids, exc)
         raise
-    if reached and hold_torque_on_success:
+    if hold_torque_on_success:
         try:
             for sid, (previous_speed, previous_accel) in zip(ids, previous):
                 require_write(bus, sid, A_SPEED, previous_speed, 2)
@@ -276,12 +359,12 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
             held_torque = [read_required(bus, sid, A_TORQUE) for sid in ids]
             if held_torque != [1] * len(ids):
                 raise RuntimeError(f"토크 유지 확인 실패: {held_torque}")
-        except BaseException:
-            release_and_restore(bus, ids, previous)
+        except BaseException as exc:
+            stop_after_error(bus, ids, exc)
             raise
         return {
-            "completed": True,
-            "target_reached_with_torque": True,
+            "completed": reached,
+            "target_reached_with_torque": reached,
             "persistent_after_torque_release": None,
             "torque_held": True,
             "loaded_final_raw": loaded_final,
@@ -289,6 +372,10 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
             "released_target_error_ticks": None,
             "peak_load": peak_load,
         }
+    if not reached:
+        error = RuntimeError("최종 목표 미도달: 현재 위치에서 정지")
+        stop_after_error(bus, ids, error)
+        raise error
     release_and_restore(bus, ids, previous)
     time.sleep(0.5)
     released_final = [read_required(bus, sid, A_POS, 2) for sid in ids]
@@ -306,6 +393,122 @@ def execute(bus, calibration: dict, waypoints: list[list[int]], speed: int, acce
         "released_target_error_ticks": released_error,
         "peak_load": peak_load,
     }
+
+
+def execute_encoder_feedback(bus, calibration, target, *, monitor=lambda: None,
+                             speed=60, acceleration=5, tolerance_ticks=10,
+                             compensation_limit_ticks=40, tracking_limit_ticks=45,
+                             sleep=time.sleep, clock=time.monotonic):
+    """이미 켜진 팔의 위치 오차를 제한된 외부 피드백으로 보정한다.
+
+    P/EEPROM/보호 설정과 토크 상태를 변경하지 않는다. 보낸 goal과 관측 위치,
+    명목 IK 목표를 구분한다. 실패 시 진행 목표를 취소하고 토크를 유지한다.
+    기본 보정/추종 상한은 40/45 tick이다. 명시한 책상 시험은 최대 50/60 tick까지
+    허용하되 실제 위치 구간, 전달 간격과 실행 시간 상한은 바꾸지 않는다.
+    """
+    ids = [calibration[name]["id"] for name in JOINTS]
+    if len(target) != 5 or any(type(v) is not int for v in target):
+        raise ValueError("관절 목표는 정수 5개여야 합니다")
+    if not 1 <= tolerance_ticks <= 15 or not 0 <= compensation_limit_ticks <= 50 or not 15 <= tracking_limit_ticks <= 60:
+        raise ValueError("피드백 보정 범위 오류")
+    samples, prior = [], []
+    current = goals = bias = None
+    try:
+        monitor()
+        if [read_required(bus, sid, A_TORQUE) for sid in ids] != [1] * 5:
+            raise RuntimeError("연속 피드백은 전축 토크 ON 상태에서만 실행합니다")
+        current = [read_required(bus, sid, A_POS, 2) for sid in ids]
+        for name, value in zip(JOINTS, target):
+            if not calibration[name]["range_min"] <= value <= calibration[name]["range_max"]:
+                raise ValueError(f"{name}: 목표가 저장 범위 밖입니다")
+        initial = current.copy()
+        goals = [read_required(bus, sid, A_GOAL, 2) for sid in ids]
+        if max(abs(a-b) for a, b in zip(goals, current)) > tracking_limit_ticks:
+            raise RuntimeError("초기 유지 명령이 추종 범위 밖입니다")
+        # 직전 피드백의 중력 보상 명령을 현재 위치 값으로 덮어쓰지 않는다.
+        bias = [goal-value if abs(now-value) <= 15 and abs(goal-value) <= compensation_limit_ticks else 0
+                for goal, now, value in zip(goals, current, target)]
+        prior = [(read_required(bus, sid, A_SPEED, 2), read_required(bus, sid, A_ACCEL)) for sid in ids]
+        for sid in ids:
+            require_write(bus, sid, A_SPEED, speed, 2)
+            require_write(bus, sid, A_ACCEL, acceleration)
+        deadline = clock() + 10
+        last_position, last_motion = current.copy(), [clock()] * 5
+        consecutive = 0
+        while True:
+            monitor()
+            if clock() > deadline:
+                raise RuntimeError("제한된 피드백 보정으로 목표에 도달하지 못했습니다")
+            if [read_required(bus, sid, A_TORQUE) for sid in ids] != [1] * 5:
+                raise RuntimeError("피드백 중 토크 해제 감지")
+            current = [read_required(bus, sid, A_POS, 2) for sid in ids]
+            errors = [v-t for v, t in zip(current, target)]
+            for i, value in enumerate(current):
+                if abs(value-last_position[i]) > 2:
+                    last_motion[i], last_position[i] = clock(), value
+                if not min(initial[i], target[i])-10 <= value <= max(initial[i], target[i])+10:
+                    raise RuntimeError("피드백 중 관측 위치가 목표 구간을 벗어났습니다")
+            if max(abs(e) for e in errors) <= tolerance_ticks:
+                consecutive += 1
+                if consecutive == 3:
+                    break
+                sleep(.1)
+                continue
+            consecutive = 0
+            for i, error in enumerate(errors):
+                # 명목 목표에 명령이 도착한 뒤에만 작은 보정량을 누적한다.
+                if abs(goals[i]-(target[i]+bias[i])) <= 2 and abs(error) > tolerance_ticks:
+                    bias[i] = max(-compensation_limit_ticks, min(compensation_limit_ticks,
+                                    bias[i] + (-2 if error > 0 else 2)))
+                desired = target[i] + bias[i]
+                candidate = goals[i] + max(-5, min(5, desired-goals[i]))
+                candidate = max(current[i]-tracking_limit_ticks, min(current[i]+tracking_limit_ticks, candidate))
+                if abs(candidate-goals[i]) > 5:
+                    raise RuntimeError("현재 판독과 이전 명령의 차이로 5 tick 전달 제한을 유지할 수 없습니다")
+                item = calibration[JOINTS[i]]
+                if not item["range_min"] <= candidate <= item["range_max"]:
+                    raise RuntimeError("보정 명령이 저장 범위를 벗어났습니다")
+                if (abs(error) > tolerance_ticks and abs(candidate-current[i]) >= tracking_limit_ticks
+                        and clock()-last_motion[i] > .8):
+                    raise RuntimeError(f"{JOINTS[i]}: 피드백 추종 한계에서 위치 변화 없음")
+                require_write(bus, ids[i], A_GOAL, candidate, 2)
+                goals[i] = candidate
+            if [read_required(bus, sid, A_GOAL, 2) for sid in ids] != goals:
+                raise RuntimeError("피드백 목표 readback 불일치")
+            samples.append({"actual_raw": current.copy(), "command_raw": goals.copy(),
+                            "compensation_ticks": bias.copy()})
+            if clock() > deadline:
+                raise RuntimeError("제한된 피드백 보정으로 목표에 도달하지 못했습니다")
+            sleep(.1)
+        for sid, (old_speed, old_acceleration) in zip(ids, prior):
+            require_write(bus, sid, A_SPEED, old_speed, 2)
+            require_write(bus, sid, A_ACCEL, old_acceleration)
+        monitor()
+        if clock() > deadline:
+            raise RuntimeError("종료 확인 중 피드백 실행 시간 상한을 넘었습니다")
+        if [read_required(bus, sid, A_TORQUE) for sid in ids] != [1] * 5:
+            raise RuntimeError("피드백 종료 토크 유지 미확인")
+        if [read_required(bus, sid, A_GOAL, 2) for sid in ids] != goals:
+            raise RuntimeError("피드백 종료 목표 유지 미확인")
+        current = [read_required(bus, sid, A_POS, 2) for sid in ids]
+        if max(abs(a-b) for a,b in zip(current, target)) > tolerance_ticks:
+            raise RuntimeError("프로파일 복원 뒤 최종 위치가 목표 허용오차 밖입니다")
+        return {"completed": True, "target_raw": target, "actual_raw": current,
+                "command_raw": goals, "compensation_ticks": bias, "samples": samples,
+                "torque_held": True, "temperature_load_read": False}
+    except BaseException as exc:
+        exc.encoder_feedback_report = {"target_raw": target, "actual_raw": current,
+                                       "command_raw": goals, "compensation_ticks": bias,
+                                       "samples": samples, "temperature_load_read": False}
+        exc.add_note(json.dumps({"encoder_feedback": exc.encoder_feedback_report}, ensure_ascii=False))
+        stop_after_error(bus, ids, exc)
+        for sid, (old_speed, old_acceleration) in zip(ids, prior):
+            for address, value, size in ((A_SPEED, old_speed, 2), (A_ACCEL, old_acceleration, 1)):
+                try:
+                    require_write(bus, sid, address, value, size)
+                except BaseException as restore_error:
+                    exc.add_note(f"ID {sid} 프로파일 복원 실패: {restore_error}")
+        raise
 
 
 class MultiJointFakeBus:
@@ -356,9 +559,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--execute", action="store_true")
     parser.add_argument(
         "--hold-torque-on-success",
+        dest="hold_torque_on_success",
         action="store_true",
-        help="도착 성공 시 팔 토크를 유지한다. 실패 시에는 항상 토크를 해제한다",
+        default=True,
+        help="도착 후 팔 토크를 유지한다(기본값). 오류 시 현재 위치에서 정지한다",
     )
+    parser.add_argument("--release-torque-on-success", dest="hold_torque_on_success",
+                        action="store_false", help="팔을 받친 상태에서만 사용: 성공 후 토크 해제")
     parser.add_argument(
         "--allow-torque-enabled",
         action="store_true",
@@ -416,7 +623,8 @@ def main() -> int:
                 args.hold_torque_on_success, args.position_only,
             )
         except KeyboardInterrupt as exc:
-            print(f"실행 중단: {exc}. 토크 해제 경로를 실행했습니다.", file=sys.stderr)
+            print(f"실행 중단: {exc}. 현재 위치 정지를 시도했습니다. "
+                  f"결과={getattr(exc, 'motion_stop_report', None)}", file=sys.stderr)
             return 130
         finally:
             signal.signal(signal.SIGINT, previous_sigint)

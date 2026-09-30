@@ -84,6 +84,12 @@ def test_invalid_object_and_solver_inputs_are_rejected():
         MODULE.constraint_residual(object(), "left", np.zeros(4), np.zeros(3))
 
 
+@pytest.mark.parametrize("extra", [-1, math.nan, math.inf, True])
+def test_solver_rejects_invalid_extra_joint_margin(extra):
+    with pytest.raises(ValueError, match="추가 관절 여유"):
+        MODULE.solve_horizontal_endpoint(object(), "left", np.zeros(3), joint_margin_extra_deg=extra)
+
+
 def test_plan_side_never_masquerades_failed_stage_as_success(monkeypatch):
     monkeypatch.setattr(
         MODULE,
