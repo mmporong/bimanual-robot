@@ -15,7 +15,6 @@ wrist_roll 은 lerobot 관례대로 0~4095 로 둔다. 서보는 움직이지 �
 """
 import argparse
 import json
-import select
 import shutil
 import sys
 import time
@@ -27,9 +26,21 @@ from sts_bus import (Bus, A_MIN_ANGLE, A_MAX_ANGLE, A_OFFSET, A_POS, A_TORQUE,
 SO101 = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 FULL_TURN = {"wrist_roll"}
 
+if sys.platform == "win32":
+    import msvcrt
 
-def enter_pressed():
-    return select.select([sys.stdin], [], [], 0)[0] and sys.stdin.readline() is not None
+    def enter_pressed():
+        # select.select() on stdin only works on sockets on Windows (WinError 10093).
+        pressed = False
+        while msvcrt.kbhit():
+            if msvcrt.getwch() in ("\r", "\n"):
+                pressed = True
+        return pressed
+else:
+    import select
+
+    def enter_pressed():
+        return select.select([sys.stdin], [], [], 0)[0] and sys.stdin.readline() is not None
 
 
 def record(bus, ids, jump):
