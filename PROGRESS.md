@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-02 | PR #54 새 양팔 캘리브레이션 통합과 충돌 해결
+
+- 사용자 요청으로 `JANGJUNSEO`의 PR #54에 최신 main을 병합했다. 양팔 follower와 오른쪽 leader JSON은 팀원 커밋 `c75a93d2a173bd9bfff73e739b5b7a6df5f057a4`의 파일 전체를 채택했다. 그리퍼뿐 아니라 다른 축의 offset·범위도 바뀌므로 항목별로 이전 보정과 섞지 않았다. 왼팔 leader·단일팔 과거 사본은 유지했다.
+- 충돌 5파일 중 JSON 3개는 새 팀원 보정, PROGRESS는 양쪽 이력 보존, 텔레옵 문서는 최신 실행 원본 링크와 새 보정 안내를 채택했다. 단일팔 과거 JSON을 양팔 파일에 복사하는 명령과 이미 해소된 FinRay 재보정 대기 설명은 제거했다. 새 보정 상태와 IK 이전 산출물 무효화를 대표 README의 관련 기능에 반영했다.
+- 이전 main의 활성 JSON 3개를 교체 전에 `$HOME/.local/state/bimanual-robot/calibration-pr54-20261002.5K71fR/calibration/`에 보존했다. 캘리브레이션 README에 출처·해시·ID 6 범위와 유효한 실행 폴더를 기록했다. 기존 mapping·snapshot·계획의 SHA 검사를 완화하지 않았으며, 새 JSON으로 재생성해야 한다. URDF 기하는 근거 없이 수정하지 않았다.
+- 팀원이 보고한 오른쪽 ID 6 보호값 복원은 EEPROM 작업 기록이며 저장소 JSON 변경과 구분했다. 이번 작업에서는 실물·카메라·서보·캐시·IL 정책을 실행하거나 수정하지 않았고, 팀원의 새 보정과 현재 기체 EEPROM 일치를 재측정하지 않았다. Windows Enter 수정과 그 revert는 상쇄되며 녹화 도구의 현행 main 구현을 유지한다.
+- 검증: 신규 JSON 3개는 팀원 원본과 바이트 일치·스키마·ID 고유성·범위 검사 PASS. 관련 회귀 138 PASS, 전체 로컬 회귀 816 PASS / 2 SKIP(194.34초), Python·YAML 구문·Markdown 101파일 링크·README 자동 요약·URDF/Xacro 계약 PASS. main 대비 제품 코드·워크플로·기구 변경은 없다. 팀원 실험 문서의 공백 오류를 제거하고 공개할 필요가 없는 SSH 계정·공인 주소를 예시 표기로 바꿨다. 별도 verifier가 관련 검증 65 PASS와 출처·해시·문서·기능 보존을 대조해 최종 PASS, 병합 blocker 없음으로 판정했다.
+
 ## 2026-10-02 | 완료 브랜치 정리와 대표 README 통합 최신화
 
 - 사용자 요청으로 로컬 브랜치 7개·원격 브랜치 3개를 정리했다. squash 병합은 PR·파일 내용·patch 대응으로 대조했고, 오래된 통합 스냅샷은 후속 기능 보존을 확인했다. 삭제 전 전체 이력과 refs를 Git 밖의 bundle에 보존하고 verify를 통과했다. 별도 verifier의 PASS 뒤 예상 SHA를 재확인해 원격은 atomic·exact lease 삭제했다. 열린 팀원 PR #54와 JANGJUNSEO, 미푸시 노션 문서 브랜치 2커밋, 연결된 AMMR·PR 정책 작업 폴더는 보존했다. 복구 기록은 `$HOME/.local/state/bimanual-robot/branch-cleanup-20261002.VloVZc/cleanup.md`다.

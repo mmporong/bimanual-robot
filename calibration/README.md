@@ -2,13 +2,55 @@
 
 현행 왼손은 TPU FinRay가 아니라 SO-101 순정 회전식 죠를 사용한다.
 
-## 현행 왼팔 · 2026-09-30
+## 현행 양팔 · 2026-10-02
+
+PR [#54](https://github.com/mmporong/bimanual-robot/pull/54)의
+`c75a93d2a173bd9bfff73e739b5b7a6df5f057a4`에서 갱신한 양팔 follower와
+오른쪽 leader JSON을 현행 기준으로 채택했다. 팀원은 그리퍼 축 재조립 후
+여유를 적용한 범위를 기록했다. follower 파일에는 그리퍼 외 관절의 영점·범위
+변경도 있으므로 기존 파일의 그리퍼 항목만 섞지 않고 새 JSON 전체를 사용한다.
+
+| 용도 | 현행 파일 | ID 6 방향 | ID 6 범위 (tick) |
+|---|---|---|---|
+| 왼팔 follower, 순정 죠 | `bi_follower/arms_left.json` | `drive_mode=0` | 1452~2845 |
+| 오른팔 follower, ggao50 | `bi_follower/arms_right.json` | `drive_mode=1` | 1209~3999 |
+| 오른팔 leader | `bi_leader/arms_right.json` | `drive_mode=0` | 2049~3303 |
+
+파일 SHA-256:
+
+- 왼팔 follower: `e4c89b7ef2226a3ce9ae49e5a5cfbc0501705ec62e7fa2aab40f80d1114ee56f`
+- 오른팔 follower: `00bc7e362024ef95a4ee27fe8b9b02210571c1aae5d565933dc9ee2043462f06`
+- 오른팔 leader: `76864f87f603de73557cc372079f0deb9f486c9c5abeff2886f12e8d2f50f90d`
+
+왼팔 leader는 기존 `bi_leader/arms_left.json`을 유지한다. 단일팔 폴더의
+`so_follower/follower.json`, `so_follower_left/follower_left.json`,
+`so_leader/leader.json`은 과거 사본이며 현행 양팔 파일을 덮어쓰는 원본이 아니다.
+양팔 텔레옵·녹화는 `robot.id=arms`, `teleop.id=arms`와 `bi_follower`·`bi_leader`
+폴더를 지정한다. LeRobot 로컬 캐시를 자동으로 교체하지 않는다.
+
+이번 반영은 저장소 파일·문서의 통합이다. EEPROM 재판독·쓰기나 팔 동작으로
+새 JSON과 현재 연결 기체의 일치를 확인한 것은 아니다. 팀원의 커밋에는 오른팔
+ID 6의 `Overload_Torque` 25→80%, `Max_Torque` 500→1000,
+`Protection_Current` 250→320 복원 기록이 있다. 이 설정은 JSON 보정과 별개인
+EEPROM 기록이며, JSON을 받는 것만으로 적용되거나 이번 병합에서 다시 쓰이지 않는다.
+
+기존 IK mapping·joint reference·snapshot·pregrasp 후보·계획 packet은 보정 해시가
+달라졌으므로 재사용하지 않는다. 새 JSON으로 현재 상태와 계획을 다시 생성한다.
+해시 검사나 관절 한계를 완화해서 이전 계획을 통과시키지 않는다. URDF 기하는 보정
+파일 변경만으로 수정하지 않으며 영점·TCP·개구 대응은 별도 확인 대상이다.
+기존 IL 데이터·checkpoint의 정규화도 수집 당시 보정과 대조한 뒤 평가한다.
+
+이전 활성 JSON 3개는 Git의 `9720d6f`와 로컬
+`$HOME/.local/state/bimanual-robot/calibration-pr54-20261002.5K71fR/calibration/`에 보존했다.
+아래 기록의 토크·전원·연결·시험 결과는 각 날짜 당시 상태이며 현재 기체 상태가 아니다.
+
+## 이전 기록 · 2026-09-30
 
 사용자가 중간 자세 설정과 가동 범위 기록을 마쳐 공식 LeRobot
 `SOFollower.calibrate()`의 왼팔 보정을 완료했다. 일반 연결 시 설정 변경은
 실행하지 않았고 기존 게인·Phase를 유지했다. 새 후보와 보드의 offset·범위를
 대조하고 6축 토크 OFF를 확인한 뒤 `bi_follower/arms_left.json`에 반영했다.
-오른팔 보정은 아래 2026-09-29 기록을 유지한다.
+당시 오른팔 보정은 아래 2026-09-29 기록을 유지했다.
 
 - 왼팔 ID 6: `drive_mode=0`, raw `2028~3483`; 손목 롤 범위는 관례값 `0~4095`다.
 - 백업·실측 후보·종료 검증·새 snapshot: `/data/lim/robot-artifacts/restaurant/standard_calibration_20260930_left01/`.
