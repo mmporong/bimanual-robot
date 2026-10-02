@@ -1,0 +1,11 @@
+{
+  "kind": "manipulate",
+  "name": "grasp_cup",
+  "phase": "GRASP_CUP",
+  "policy_mode": "PLANNED_ALL",
+  "order_id": "ORD-DEMO-001",
+  "table_id": "table_1",
+  "drink": "COLD_WATER",
+  "bottle_id": "cold_bottle",
+  "hardware_accessed": false
+}

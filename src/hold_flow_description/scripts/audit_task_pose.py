@@ -28,8 +28,8 @@ PACKAGE_URI_PREFIX = "package://hold_flow_description/"
 REQUIRED_TASK_FRAMES = {
     "left_tool0",
     "right_tool0",
-    "left_bottle_tcp",
-    "right_cup_tcp",
+    "left_cup_tcp",
+    "right_bottle_tcp",
 }
 
 
@@ -148,7 +148,8 @@ def pose_values(spec: dict, state: str) -> dict[str, float]:
         output.update(
             {f"{prefix}_{suffix}": math.radians(value) for suffix, value in zip(suffixes, degrees)}
         )
-        output[f"{prefix}_finger1_joint"] = 0.0325
+    output["left_gripper"] = 0.5
+    output["right_finger1_joint"] = 0.0325
     return output
 
 
@@ -268,8 +269,8 @@ def main() -> None:
             }
         else:
             targets = {
-                "left": chassis_target_to_base_footprint_m(spec["workspace"]["bottle_gripper_pour_xyz"]),
-                "right": chassis_target_to_base_footprint_m(spec["workspace"]["cup_gripper_xyz"]),
+                "left": chassis_target_to_base_footprint_m(spec["workspace"]["cup_gripper_xyz"]),
+                "right": chassis_target_to_base_footprint_m(spec["workspace"]["bottle_gripper_pour_xyz"]),
             }
         states[state] = {
             "joint_limits_pass": all(item.get("within_limit", False) for item in limit_results),
@@ -289,7 +290,9 @@ def main() -> None:
 
     blockers = []
     if missing_frames:
-        blockers.append("명시적 좌우 tool0와 병/컵 TCP frame이 없다")
+        blockers.append("현행 역할의 좌우 tool0와 컵/병 TCP frame이 없다")
+    if {"left_bottle", "right_cup"}.issubset(spec["workspace"]["pour_joint_degrees"]):
+        blockers.append("기계 명세의 붓기 관절 필드가 이전 역할(왼병·오컵) 이름으로 남아 있다")
     if "Component(\"left_parallel_gripper\"" in calculation_text:
         blockers.append("계산 스크립트의 task 위치가 URDF FK가 아니라 상수로 저장되어 있다")
     if any(

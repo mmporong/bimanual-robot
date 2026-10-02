@@ -51,3 +51,6 @@ credentials/
 # 사용자 개인 렌더·작업 파일 (커밋 대상 아님)
 docs/renders/
 .omx/
+
+# 캘리브레이션 도구가 실행 직전 자동 생성하는 로컬 백업
+calibration/**/*.json.bak-*

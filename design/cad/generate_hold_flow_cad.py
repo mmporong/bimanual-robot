@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""HOLD THE FLOW v0.3 기구 부품의 STEP/STL을 재현 가능하게 생성한다.
+"""HOLD THE FLOW 기구 부품의 STEP/STL을 재현 가능하게 생성한다.
 
-치수 단위는 mm이다. 300 mm 상판과 720 mm 작업 높이, 2020 기둥, 팔 어댑터,
-카메라 마스트, Astra 거치대, 주행 모터 캐리어와 캐스터 어댑터를 생성한다.
-상판은 K1 Max 명목 폭과 같아서 절삭 판재이며 FDM 출력물로 판정하지 않는다.
+치수 단위는 mm이다. 하부와 같은 340(x)×450(y) mm 상부 프레임, 720 mm 작업
+높이, 2020 기둥, 4분할 출력 상판, 배터리·라이다 장착판, 팔 어댑터와 카메라
+부품을 생성한다. 상판 네 조각은 K1 Max에서 평면 출력할 수 있다.
 SO-101 본체와 ggao50 평행 그리퍼는 공개 원본 형상을 사용하므로 여기서 다시
 모델링하지 않는다.
 """
@@ -27,7 +27,6 @@ SPEC_PATH = REPO_ROOT / "design/mechanical/hold_flow_mechanical_v0_3.yaml"
 DEFAULT_OUTPUT = REPO_ROOT / "design/cad/exports"
 ROS_CAD_MESH_DIR = REPO_ROOT / "src/hold_flow_description/meshes/cad"
 PETG_DENSITY_G_CM3 = 1.27
-PLYWOOD_DENSITY_G_CM3 = 0.60
 ALUMINUM_DENSITY_G_CM3 = 2.70
 K1_MAX_BUILD_MM = (300.0, 300.0, 300.0)
 K1_MAX_SAFE_XY_MM = 296.0
@@ -36,11 +35,13 @@ ROS_MESH_PARTS = {
     "astra_cradle",
     "camera_backing",
     "camera_mast_segment",
-    "chassis_bottom",
-    "chassis_middle",
-    "chassis_top",
+    "battery_mount_plate",
     "frame_column",
-    "lidar_riser",
+    "lidar_mount_plate",
+    "tabletop_front_left",
+    "tabletop_front_right",
+    "tabletop_rear_left",
+    "tabletop_rear_right",
 }
 STEP_TIMESTAMP_PATTERN = re.compile(
     r"(FILE_NAME\('Open CASCADE Shape Model',')[^']+(')"
@@ -119,52 +120,7 @@ def lightened_plate(
     return plate
 
 
-def bottom_plate(spec: dict) -> cq.Workplane:
-    length, width = spec["chassis"]["tabletop_footprint"]
-    thickness = float(spec["chassis"]["plates"]["bottom"]["thickness"])
-    plate = lightened_plate(
-        length,
-        width,
-        thickness,
-        float(spec["chassis"]["corner_radius"]),
-        [tuple(point) for point in spec["chassis"]["vertical_frame"]["centers_xy"]],
-        True,
-        [(0.0, 0.0, 28.0)],
-    )
-    # 주행 모터 지지벽. 바퀴만 300 mm 상판 바깥으로 20 mm 돌출한다.
-    for side in (-1.0, 1.0):
-        wall = (
-            cq.Workplane("XY")
-            .box(70.0, 8.0, 48.0, centered=(True, True, False))
-            .translate((0.0, side * (width / 2.0 - 4.0), 0.0))
-        )
-        plate = plate.union(wall)
-        # 축 중심은 조립 시 바닥에서 32.9 mm, 부품 바닥은 6 mm이므로 z=26.9 mm.
-        # 원형 수평공은 내부 서포트와 처짐을 만들므로 위가 열린 U 슬롯으로 가공한다.
-        axle_slot = (
-            cq.Workplane("XY")
-            .box(18.2, 12.0, 30.2, centered=(True, True, False))
-            .translate((0.0, side * (width / 2.0 - 4.0), 17.8))
-        )
-        plate = plate.cut(axle_slot)
-        # 측면 캐리어 자체를 드릴 지그로 사용해 M4 구멍 4개를 출력 후 천공한다.
-    return plate
-
-
-def middle_plate(spec: dict) -> cq.Workplane:
-    length, width = spec["chassis"]["tabletop_footprint"]
-    return lightened_plate(
-        length,
-        width,
-        float(spec["chassis"]["plates"]["middle"]["thickness"]),
-        float(spec["chassis"]["corner_radius"]),
-        [tuple(point) for point in spec["chassis"]["vertical_frame"]["centers_xy"]],
-        True,
-        [(-45.0, 0.0, 42.0), (55.0, 0.0, 32.0)],
-    )
-
-
-def top_plate(spec: dict) -> cq.Workplane:
+def full_top_plate(spec: dict) -> cq.Workplane:
     length, width = spec["chassis"]["tabletop_footprint"]
     thickness = float(spec["chassis"]["plates"]["tabletop"]["thickness"])
     arm_adapter_x, arm_adapter_y = spec["arm_mounts"]["adapter"]["footprint"]
@@ -198,6 +154,77 @@ def top_plate(spec: dict) -> cq.Workplane:
         for dy in (-(backing_y / 2.0 - 7.5), backing_y / 2.0 - 7.5)
     ]
     plate = through_holes(plate, mast_points, 4.5, thickness)
+    split_x = float(spec["chassis"]["plates"]["tabletop"]["split_x"])
+    seam_fasteners = (
+        [(split_x + dx, y) for dx in (-12.0, 12.0) for y in (-165.0, -65.0, 65.0, 165.0)]
+        + [(x, y) for x in (-125.0, -75.0, 20.0, 105.0) for y in (-12.0, 12.0)]
+    )
+    plate = through_holes(plate, seam_fasteners, 4.5, thickness)
+    return plate
+
+
+def tabletop_quadrants(spec: dict) -> dict[str, cq.Workplane]:
+    """완성 외곽과 체결공을 보존하며 상판을 출력 가능한 네 판으로 자른다."""
+    length, width = map(float, spec["chassis"]["tabletop_footprint"])
+    tabletop = spec["chassis"]["plates"]["tabletop"]
+    thickness = float(tabletop["thickness"])
+    split_x = float(tabletop["split_x"])
+    gap = float(tabletop["seam_gap"])
+    x_ranges = {
+        "front": (split_x + gap / 2.0, length / 2.0),
+        "rear": (-length / 2.0, split_x - gap / 2.0),
+    }
+    y_ranges = {
+        "left": (gap / 2.0, width / 2.0),
+        "right": (-width / 2.0, -gap / 2.0),
+    }
+    source = full_top_plate(spec)
+    result: dict[str, cq.Workplane] = {}
+    for fore_aft, (x0, x1) in x_ranges.items():
+        for side, (y0, y1) in y_ranges.items():
+            center_x = (x0 + x1) / 2.0
+            center_y = (y0 + y1) / 2.0
+            clip = (
+                cq.Workplane("XY")
+                .box(x1 - x0, y1 - y0, thickness + 2.0, centered=(True, True, False))
+                .translate((center_x, center_y, -1.0))
+            )
+            result[f"tabletop_{fore_aft}_{side}"] = source.intersect(clip).translate(
+                (-center_x, -center_y, 0.0)
+            )
+    return result
+
+
+def battery_mount_plate(spec: dict) -> cq.Workplane:
+    mount = spec["printed_mounts"]["battery_plate"]
+    length, width = map(float, mount["footprint"])
+    thickness = float(mount["thickness"])
+    plate = rounded_box_xy(length, width, thickness, 8.0)
+    plate = through_holes(
+        plate,
+        [(dx, dy) for dx in (-75.0, 75.0) for dy in (-45.0, 45.0)],
+        4.5,
+        thickness,
+    )
+    for x in (-45.0, 45.0):
+        plate = plate.cut(cq.Workplane("XY").center(x, 0).slot2D(42.0, 5.0, 90).extrude(thickness))
+    return plate
+
+
+def lidar_mount_plate(spec: dict) -> cq.Workplane:
+    mount = spec["printed_mounts"]["lidar_plate"]
+    length, width = map(float, mount["footprint"])
+    thickness = float(mount["thickness"])
+    plate = rounded_box_xy(length, width, thickness, 7.0)
+    plate = through_holes(
+        plate,
+        [(dx, dy) for dx in (-35.0, 35.0) for dy in (-27.5, 27.5)],
+        3.4,
+        thickness,
+    )
+    for y in (-13.0, 13.0):
+        plate = plate.cut(cq.Workplane("XY").center(0.0, y).slot2D(20.0, 3.4, 0.0).extrude(thickness))
+    plate = plate.cut(cq.Workplane("XY").circle(8.0).extrude(thickness))
     return plate
 
 
@@ -285,28 +312,6 @@ def astra_cradle(spec: dict) -> cq.Workplane:
     return base
 
 
-def lidar_riser(spec: dict) -> cq.Workplane:
-    """LDS-03 스캔면을 약 165 mm로 올리는 짧고 강성 높은 받침대."""
-    riser_spec = spec["navigation"]["lidar_candidate"]["mount_riser"]
-    length, width = riser_spec["footprint"]
-    height = float(riser_spec["height"])
-    riser = rounded_box_xy(length, width, height, 6.0)
-    riser = through_holes(
-        riser,
-        [(-22.5, -17.0), (-22.5, 17.0), (22.5, -17.0), (22.5, 17.0)],
-        3.4,
-        height,
-    )
-    # USB/UART 케이블 통과공과 수직 경량공은 출력 방향을 바꾸지 않아도 된다.
-    riser = riser.cut(cq.Workplane("XY").circle(8.0).extrude(height))
-    for x in (-14.0, 14.0):
-        riser = riser.cut(cq.Workplane("XY").center(x, 0.0).circle(5.0).extrude(height))
-    # LDS-03 상세 홀 패턴을 실측하기 전 사용할 상단 조절 장공.
-    for y in (-13.0, 13.0):
-        riser = riser.cut(cq.Workplane("XY").center(0.0, y).slot2D(20.0, 3.4, 0.0).extrude(height))
-    return riser
-
-
 def drive_side_carrier() -> cq.Workplane:
     carrier = rounded_box_xy(82.0, 58.0, 8.0, 6.0)
     carrier = carrier.cut(cq.Workplane("XY").circle(8.05).extrude(8.0))
@@ -333,29 +338,61 @@ def rear_caster_adapter(thickness: float = 8.0) -> cq.Workplane:
 def parts(spec: dict) -> list[Part]:
     frame = spec["chassis"]["vertical_frame"]
     mast = spec["camera"]["mount"]
-    riser = spec["navigation"]["lidar_candidate"]["mount_riser"]
-    return [
-        Part("chassis_bottom", bottom_plate(spec), 1, "바퀴측 모터 지지벽이 통합된 하판"),
-        Part("chassis_middle", middle_plate(spec), 1, "배터리·제어기 층의 경량 중판"),
+    quadrants = tabletop_quadrants(spec)
+    generated = [
         Part(
-            "chassis_top",
-            top_plate(spec),
+            name,
+            shape,
             1,
-            "양팔·카메라 마스트가 체결되는 300×300×8 mm 절삭 상판",
-            "판재 재질·평탄도·질량과 절삭 공차 확정",
-            "birch_plywood_nominal",
-            PLYWOOD_DENSITY_G_CM3,
-            False,
-        ),
+            "340×450 mm 상판을 K1 Max용으로 나눈 PETG 판",
+            "프로파일 체결공·SO101 체결부 인서트와 상판 평탄도 실측",
+        )
+        for name, shape in quadrants.items()
+    ]
+    generated += [
         Part(
             "frame_column",
             rectangular_tube(float(frame["length"]), float(frame["section"][0])),
             4,
-            "상판을 720 mm로 지지하는 2020 중공 기둥 후보",
+            "상부 프레임을 720 mm 작업 높이로 지지하는 2020 중공 기둥 후보",
             "선정 압출재 카탈로그 단면·선형 질량·체결 브래킷 확정",
             "aluminum_6063_nominal",
             ALUMINUM_DENSITY_G_CM3,
             False,
+        ),
+        Part(
+            "frame_rail_x",
+            rectangular_tube(float(spec["chassis"]["profile_rings"]["x_rail_length"])),
+            5,
+            "하부·상부 프레임과 중앙 이음부를 받치는 x축 2020 프로파일",
+            "실물 하부 프레임 체결 길이와 브래킷 간섭 측정",
+            "aluminum_6063_nominal",
+            ALUMINUM_DENSITY_G_CM3,
+            False,
+        ),
+        Part(
+            "frame_rail_y",
+            rectangular_tube(float(spec["chassis"]["profile_rings"]["y_rail_length"])),
+            5,
+            "하부·상부 프레임과 중앙 이음부를 받치는 y축 2020 프로파일",
+            "실물 하부 프레임 체결 길이와 브래킷 간섭 측정",
+            "aluminum_6063_nominal",
+            ALUMINUM_DENSITY_G_CM3,
+            False,
+        ),
+        Part(
+            "battery_mount_plate",
+            battery_mount_plate(spec),
+            1,
+            "배터리 스트랩 슬롯과 M4 체결공을 가진 하단 출력판",
+            "배터리 실물 외곽·커넥터 방향·스트랩 폭 측정",
+        ),
+        Part(
+            "lidar_mount_plate",
+            lidar_mount_plate(spec),
+            1,
+            "LDS-03 조절 장공과 케이블 구멍을 가진 출력판",
+            "LDS-03 하부 체결공과 광학 스캔면 높이 측정",
         ),
         Part(
             "arm_adapter",
@@ -372,13 +409,6 @@ def parts(spec: dict) -> list[Part]:
             1,
             "Astra S 40×165×48 mm 설계 포락선용 거치대",
             "보유 Astra의 하단 M6 위치와 실제 외곽 치수 측정 후 측면 유격 확정",
-        ),
-        Part(
-            "lidar_riser",
-            lidar_riser(spec),
-            1,
-            f"중판에서 LDS-03 중심 z≈165 mm를 만드는 {riser['height']:.0f} mm 받침대",
-            "LDS-03 실물 광학 스캔면 높이와 하부 체결공 측정 후 상단 장공 확정",
         ),
         Part(
             "drive_side_carrier",
@@ -398,6 +428,7 @@ def parts(spec: dict) -> list[Part]:
         Part("rear_caster_shim_2mm", rear_caster_adapter(2.0), 1, "캐스터 높이 2 mm 보정판"),
         Part("rear_caster_shim_3mm", rear_caster_adapter(3.0), 1, "캐스터 높이 3 mm 보정판"),
     ]
+    return generated
 
 
 def bbox_mm(shape: cq.Workplane) -> tuple[float, float, float]:
@@ -459,18 +490,16 @@ def assembly_placements(spec: dict) -> dict[str, object]:
     plates = spec["chassis"]["plates"]
     mast = spec["camera"]["mount"]
     frame = spec["chassis"]["vertical_frame"]
-    lidar = spec["navigation"]["lidar_candidate"]
+    ring = spec["chassis"]["profile_rings"]
     return {
-        "chassis_bottom": [0.0, 0.0, float(plates["bottom"]["z_bottom"])],
-        "chassis_middle": [0.0, 0.0, float(plates["middle"]["z_bottom"])],
-        "chassis_top": [0.0, 0.0, float(plates["tabletop"]["z_bottom"])],
+        "tabletop_front_left": [60.15, 112.65, float(plates["tabletop"]["z_bottom"])],
+        "tabletop_front_right": [60.15, -112.65, float(plates["tabletop"]["z_bottom"])],
+        "tabletop_rear_left": [-110.15, 112.65, float(plates["tabletop"]["z_bottom"])],
+        "tabletop_rear_right": [-110.15, -112.65, float(plates["tabletop"]["z_bottom"])],
+        "battery_mount_plate": list(map(float, spec["printed_mounts"]["battery_plate"]["origin_xyz"])),
+        "lidar_mount_plate": list(map(float, spec["printed_mounts"]["lidar_plate"]["origin_xyz"])),
         "camera_backing": [*map(float, mast["mast_center_xy"]), float(plates["tabletop"]["z_top"])],
         "camera_mast_segment": [*map(float, mast["mast_center_xy"]), float(mast["mast_z_bottom"])],
-        "lidar_riser": [
-            float(lidar["center_xyz"][0]),
-            float(lidar["center_xyz"][1]),
-            float(lidar["mount_riser"]["z_bottom"]),
-        ],
         "arm_adapters": [
             [float(arm[0]), float(arm[1]), float(plates["tabletop"]["z_top"])]
             for arm in (spec["arm_mounts"]["left"]["xyz"], spec["arm_mounts"]["right"]["xyz"])
@@ -479,14 +508,24 @@ def assembly_placements(spec: dict) -> dict[str, object]:
             [float(x), float(y), float(frame["z_bottom"])]
             for x, y in frame["centers_xy"]
         ],
+        "frame_rail_x": [
+            [0.0, y, z]
+            for z in (float(ring["lower_center_z"]), float(ring["upper_center_z"]))
+            for y in (-float(ring["x_rail_center_y"]), float(ring["x_rail_center_y"]))
+        ] + [[0.0, 0.0, float(ring["upper_center_z"])]],
+        "frame_rail_y": [
+            [x, 0.0, z]
+            for z in (float(ring["lower_center_z"]), float(ring["upper_center_z"]))
+            for x in (-float(ring["y_rail_center_x"]), float(ring["y_rail_center_x"]))
+        ] + [[float(plates["tabletop"]["split_x"]), 0.0, float(ring["upper_center_z"])]],
     }
 
 
 def export_assembly(items: list[Part], output: Path, spec: dict) -> dict[str, object]:
-    assembly = cq.Assembly(name="hold_flow_printed_structure")
+    assembly = cq.Assembly(name="hold_flow_frame_structure")
     placements = assembly_placements(spec)
     for part in items:
-        if part.name not in placements:
+        if part.name not in placements or part.name in {"frame_rail_x", "frame_rail_y"}:
             continue
         x, y, z = placements[part.name]
         assembly.add(
@@ -500,7 +539,26 @@ def export_assembly(items: list[Part], output: Path, spec: dict) -> dict[str, ob
     column = next(item.shape for item in items if item.name == "frame_column")
     for index, location in enumerate(placements["frame_columns"], start=1):
         assembly.add(column, name=f"frame_column_{index}", loc=cq.Location(cq.Vector(*location)))
-    assembly_path = output / "step/hold_flow_printed_structure.step"
+    ring = spec["chassis"]["profile_rings"]
+    rail_x = next(item.shape for item in items if item.name == "frame_rail_x")
+    rail_y = next(item.shape for item in items if item.name == "frame_rail_y")
+    rail_x_length = float(ring["x_rail_length"])
+    rail_y_length = float(ring["y_rail_length"])
+    for index, location in enumerate(placements["frame_rail_x"], start=1):
+        x, y, z = location
+        assembly.add(
+            rail_x,
+            name=f"frame_rail_x_{index}",
+            loc=cq.Location(cq.Vector(x - rail_x_length / 2.0, y, z), cq.Vector(0, 1, 0), 90),
+        )
+    for index, location in enumerate(placements["frame_rail_y"], start=1):
+        x, y, z = location
+        assembly.add(
+            rail_y,
+            name=f"frame_rail_y_{index}",
+            loc=cq.Location(cq.Vector(x, y - rail_y_length / 2.0, z), cq.Vector(1, 0, 0), -90),
+        )
+    assembly_path = output / "step/hold_flow_frame_structure.step"
     assembly.save(str(assembly_path))
     normalize_step_header(assembly_path)
     return placements
@@ -521,8 +579,8 @@ def main() -> None:
     args = parser.parse_args()
     with SPEC_PATH.open(encoding="utf-8") as stream:
         spec = yaml.safe_load(stream)
-    if spec["chassis"]["tabletop_footprint"] != [300.0, 300.0]:
-        raise ValueError("현재 CAD 생성기는 v0.3의 300×300 mm 상판만 허용합니다.")
+    if spec["chassis"]["tabletop_footprint"] != [340.0, 450.0]:
+        raise ValueError("현재 CAD 생성기는 340(x)×450(y) mm 4분할 상판만 허용합니다.")
 
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)

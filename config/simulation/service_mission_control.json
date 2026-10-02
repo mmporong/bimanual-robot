@@ -1,0 +1,42 @@
+{
+  "schema": "service_mission_control_v1",
+  "supported_drinks": {
+    "COLD_WATER": {
+      "label_ko": "냉수",
+      "station": "kitchen",
+      "bottle_id": "cold_bottle"
+    },
+    "HOT_WATER": {
+      "label_ko": "온수",
+      "station": "kitchen",
+      "bottle_id": "hot_bottle"
+    }
+  },
+  "battery": {
+    "reserve_percent": 15.0,
+    "route_percent_per_m": 0.12,
+    "charge_target_percent": 95.0
+  },
+  "phase_energy_percent": {
+    "ALIGN_KITCHEN": 0.10,
+    "GRASP_CUP": 0.20,
+    "GRASP_BOTTLE": 0.20,
+    "POUR": 0.35,
+    "RETURN_BOTTLE": 0.15,
+    "PLACE_DECK": 0.20,
+    "ALIGN_TABLE": 0.10,
+    "REGRASP_CUP": 0.20,
+    "SERVE": 0.20
+  },
+  "retry": {
+    "max_attempts_per_phase": 2,
+    "retryable_phases": [
+      "ALIGN_KITCHEN",
+      "GRASP_CUP",
+      "GRASP_BOTTLE",
+      "ALIGN_TABLE",
+      "REGRASP_CUP"
+    ]
+  },
+  "event_history_limit": 200
+}

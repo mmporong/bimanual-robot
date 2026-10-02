@@ -26,52 +26,62 @@ from render_design_handoff import (
 
 def collision_polydata(scene: UrdfScene, link_name: str, transforms: dict[str, np.ndarray]) -> vtk.vtkPolyData | None:
     link = scene.links[link_name]
-    collision = link.find("collision")
-    if collision is None:
+    collisions = link.findall("collision")
+    if not collisions:
         return None
-    origin = collision.find("origin")
-    xyz = parse_vector(None if origin is None else origin.attrib.get("xyz"), (0, 0, 0))
-    rpy = parse_vector(None if origin is None else origin.attrib.get("rpy"), (0, 0, 0))
-    matrix = transforms[link_name] @ transform(xyz, rpy)
-    geometry = collision.find("geometry")
-    mesh = geometry.find("mesh")
-    if mesh is not None:
-        source = vtk.vtkSTLReader()
-        source.SetFileName(str(resolve_package_mesh(mesh.attrib["filename"])))
-        scale = parse_vector(mesh.attrib.get("scale"), (1, 1, 1)) * 1000.0
-        scale_matrix = np.eye(4)
-        scale_matrix[0, 0], scale_matrix[1, 1], scale_matrix[2, 2] = scale
-        matrix = matrix @ scale_matrix
-    elif geometry.find("box") is not None:
-        size = [float(value) * 1000.0 for value in geometry.find("box").attrib["size"].split()]
-        source = vtk.vtkCubeSource()
-        source.SetXLength(size[0])
-        source.SetYLength(size[1])
-        source.SetZLength(size[2])
-    elif geometry.find("cylinder") is not None:
-        element = geometry.find("cylinder")
-        source = vtk.vtkCylinderSource()
-        source.SetRadius(float(element.attrib["radius"]) * 1000.0)
-        source.SetHeight(float(element.attrib["length"]) * 1000.0)
-        source.SetResolution(64)
-        matrix = matrix @ transform(rpy=np.array([math.pi / 2.0, 0.0, 0.0]))
-    elif geometry.find("sphere") is not None:
-        source = vtk.vtkSphereSource()
-        source.SetRadius(float(geometry.find("sphere").attrib["radius"]) * 1000.0)
-        source.SetThetaResolution(48)
-        source.SetPhiResolution(32)
-    else:
-        return None
+    appended = vtk.vtkAppendPolyData()
+    added = 0
+    for collision in collisions:
+        origin = collision.find("origin")
+        xyz = parse_vector(None if origin is None else origin.attrib.get("xyz"), (0, 0, 0))
+        rpy = parse_vector(None if origin is None else origin.attrib.get("rpy"), (0, 0, 0))
+        matrix = transforms[link_name] @ transform(xyz, rpy)
+        geometry = collision.find("geometry")
+        mesh = geometry.find("mesh")
+        if mesh is not None:
+            source = vtk.vtkSTLReader()
+            source.SetFileName(str(resolve_package_mesh(mesh.attrib["filename"])))
+            scale = parse_vector(mesh.attrib.get("scale"), (1, 1, 1)) * 1000.0
+            scale_matrix = np.eye(4)
+            scale_matrix[0, 0], scale_matrix[1, 1], scale_matrix[2, 2] = scale
+            matrix = matrix @ scale_matrix
+        elif geometry.find("box") is not None:
+            size = [float(value) * 1000.0 for value in geometry.find("box").attrib["size"].split()]
+            source = vtk.vtkCubeSource()
+            source.SetXLength(size[0])
+            source.SetYLength(size[1])
+            source.SetZLength(size[2])
+        elif geometry.find("cylinder") is not None:
+            element = geometry.find("cylinder")
+            source = vtk.vtkCylinderSource()
+            source.SetRadius(float(element.attrib["radius"]) * 1000.0)
+            source.SetHeight(float(element.attrib["length"]) * 1000.0)
+            source.SetResolution(64)
+            matrix = matrix @ transform(rpy=np.array([math.pi / 2.0, 0.0, 0.0]))
+        elif geometry.find("sphere") is not None:
+            source = vtk.vtkSphereSource()
+            source.SetRadius(float(geometry.find("sphere").attrib["radius"]) * 1000.0)
+            source.SetThetaResolution(48)
+            source.SetPhiResolution(32)
+        else:
+            continue
 
-    vtk_transform = vtk.vtkTransform()
-    vtk_transform.SetMatrix(vtk_matrix(matrix))
-    transformed = vtk.vtkTransformPolyDataFilter()
-    transformed.SetInputConnection(source.GetOutputPort())
-    transformed.SetTransform(vtk_transform)
-    triangles = vtk.vtkTriangleFilter()
-    triangles.SetInputConnection(transformed.GetOutputPort())
-    triangles.Update()
-    return triangles.GetOutput()
+        vtk_transform = vtk.vtkTransform()
+        vtk_transform.SetMatrix(vtk_matrix(matrix))
+        transformed = vtk.vtkTransformPolyDataFilter()
+        transformed.SetInputConnection(source.GetOutputPort())
+        transformed.SetTransform(vtk_transform)
+        triangles = vtk.vtkTriangleFilter()
+        triangles.SetInputConnection(transformed.GetOutputPort())
+        triangles.Update()
+        appended.AddInputData(triangles.GetOutput())
+        added += 1
+    if not added:
+        return None
+    appended.Update()
+    output = vtk.vtkPolyData()
+    output.DeepCopy(appended.GetOutput())
+    return output
 
 
 def aabb_gap(first: vtk.vtkPolyData, second: vtk.vtkPolyData) -> float:
@@ -145,11 +155,11 @@ def audit_state(scene: UrdfScene, positions: dict[str, float]) -> dict[str, obje
         if name.startswith("right_") and name not in {"right_arm_backing_link", "right_wheel_link"}
     ]
     grippers = [
-        "left_finger1_link", "left_finger2_link", "left_gripper_base_link",
+        "left_gripper_link", "left_moving_jaw_link",
         "right_finger1_link", "right_finger2_link", "right_gripper_base_link",
     ]
     arm_links = left + right
-    extra = ["camera_mast_lower_link", "laser_link"]
+    extra = ["camera_mast_link", "laser_link"]
     polys = {
         name: collision_polydata(scene, name, transforms)
         for name in arm_links + extra

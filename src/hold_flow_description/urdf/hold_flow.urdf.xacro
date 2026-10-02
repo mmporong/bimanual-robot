@@ -1,24 +1,24 @@
 <?xml version="1.0"?>
 <robot name="hold_flow" xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:include filename="$(find hold_flow_description)/urdf/materials.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/mobile_base.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/sensors.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/third_party/so_arm_101/so101_arm.urdf.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/so101_stock_gripper.xacro"/>
-  <xacro:include filename="$(find hold_flow_description)/urdf/ggao50_gripper.xacro"/>
+  <xacro:include filename="materials.xacro"/>
+  <xacro:include filename="mobile_base.xacro"/>
+  <xacro:include filename="sensors.xacro"/>
+  <xacro:include filename="../third_party/so_arm_101/so101_arm.urdf.xacro"/>
+  <xacro:include filename="so101_stock_gripper.xacro"/>
+  <xacro:include filename="ggao50_gripper.xacro"/>
 
   <xacro:hold_flow_mobile_base/>
   <xacro:hold_flow_sensors/>
 
-  <!-- 상판 윗면 720 mm + 어댑터 6 mm. 팔은 상판 중앙의 y=±75 mm에 둔다. -->
+  <!-- 전면 모서리 x=170 mm에서 150 mm 뒤(x=20 mm), 상판 윗면 + 어댑터 6 mm. -->
   <xacro:so101_arm prefix="left_" parent="base_link">
-    <origin xyz="0 0.075 0.6931" rpy="0 0 0"/>
+    <origin xyz="0.020 0.170 0.6931" rpy="0 0 0"/>
   </xacro:so101_arm>
   <xacro:so101_arm prefix="right_" parent="base_link">
-    <origin xyz="0 -0.075 0.6931" rpy="0 0 0"/>
+    <origin xyz="0.020 -0.170 0.6931" rpy="0 0 0"/>
   </xacro:so101_arm>
 
-  <!-- P0: 왼팔은 기본 SO-101 죠, 오른팔은 ggao50 평행 그리퍼 프록시다. -->
+  <!-- 현행: 왼팔은 TPU 부착물 없는 SO-101 순정 죠, 오른팔은 ggao50 평행 그리퍼 프록시다. -->
   <xacro:so101_stock_gripper prefix="left_" parent="left_gripper_link"/>
   <xacro:ggao50_gripper prefix="right_" parent="right_gripper_link"/>
 </robot>

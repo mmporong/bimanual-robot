@@ -3,6 +3,10 @@
 **이 폴더에는 실데이터를 넣지 않는다.** 에피소드·영상·가중치는 Hugging Face Hub(private)에
 두고, 여기에는 저장 위치 인덱스와 데이터를 만드는 계약만 둔다.
 
+새 팀원이나 다른 AI가 실제 양팔 수집부터 비공개 Hub 업로드, 다른 GPU PC의 ACT 학습까지
+수행할 때는 [2026-09-11 양팔 IL 실행 인계](../docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)를
+단일 진입점으로 사용한다. 이 문서는 데이터 ID·스키마·평가 규약의 세부 원본이다.
+
 현행 태스크, 조작 phase와 `PLANNED_ALL / ACT_ALL / HYBRID` 비교 경계는
 [2026-09-07 물 서빙 로봇 회의 결정](../docs/20260907_물서빙로봇_회의결정과_실행범위.md)을
 따른다. 커넥터·범용 3태스크·음성 명령 데이터는 현행 데이터셋에 섞지 않는다.
@@ -20,11 +24,12 @@
 
 | dataset ID 예시 | 목적 | 포함 범위 |
 |---|---|---|
-| `water_kitchen_full_demo_v1` | 전체 ACT와 phase ACT의 공통 원본 | 주방 전체 시연 + 6개 phase 시작·종료 timestamp |
-| `water_kitchen_phase_<phase>_v1` | phase별 ACT 파생 데이터 | 공통 원본에서 자른 단일 phase, 시작 상태 출처 포함 |
-| `water_table_full_demo_v1` | 테이블 ACT 기준선 원본 | 선반 컵 파지부터 테이블 놓기·팔 복귀 |
-| `water_kitchen_strategy_eval_v1` | 세 전략 공통 평가 기록 | 같은 scenario matrix의 PLANNED_ALL·ACT_ALL·HYBRID 실행 |
-| `water_kitchen_hil_recovery_v1` | 실패 교정 데이터 | 사람 개입 전후 문맥 + 검증된 성공 복구 구간 |
+| `water-kitchen-full-demo-v1` | 전체 ACT와 phase ACT의 공통 원본 | 주방 전체 시연 + 6개 phase 시작·종료 timestamp |
+| `water-kitchen-full-demo-v1_train` | ACT 학습용 파생본 | `split=train`·`include=true` episode만 재색인하고 stats 재집계 |
+| `water-kitchen-phase-<phase>-v1` | phase별 ACT 파생 데이터 | 공통 원본에서 자른 단일 phase, 시작 상태 출처 포함 |
+| `water-table-full-demo-v1` | 테이블 ACT 기준선 원본 | 선반 컵 파지부터 테이블 놓기·팔 복귀 |
+| `water-kitchen-strategy-eval-v1` | 세 전략 공통 평가 기록 | 같은 scenario matrix의 PLANNED_ALL·ACT_ALL·HYBRID 실행 |
+| `water-kitchen-hil-recovery-v1` | 실패 교정 데이터 | 사람 개입 전후 문맥 + 검증된 성공 복구 구간 |
 
 - Nav2 이동은 ACT 데이터셋에 넣지 않는다.
 - policy 1과 policy 2를 한 데이터셋 태스크 문자열만 바꿔 섞지 않는다.
@@ -73,8 +78,10 @@ LeRobot v2와 v3 메타 파일을 같은 repo에 섞지 않는다. 다른 버전
 - 카메라 key·해상도·fps·crop과 관절 순서는 dataset version 동안 바꾸지 않는다.
 - 관측·action timestamp와 실제 제어 주기 지터를 기록한다.
 
-키 규약은 닫혔지만 **본수집 보류 조건은 해제되지 않았다.** `3번 policy` 의미, policy 2
-사용 팔, 시작·종료 상태, 컵·선반·물 양 계약이 먼저 확정돼야 한다.
+키 규약은 닫혔지만 **본수집 보류 조건은 해제되지 않았다.** policy 1은 시작·종료 상태와
+컵·물통·선반·물 양 계약을 먼저 확정해야 한다. policy 2는 회의 본문의 왼팔 동작을 smoke용
+임시 기준으로 쓰되, 괄호의 오른팔 표기와 충돌하므로 본수집 전에 팀 책임자가 사용 팔을
+확정해야 한다. `3번 policy`가 별도 정책인지도 정의되기 전에는 새 dataset을 만들지 않는다.
 
 ## 5. 수집 조건 sidecar
 

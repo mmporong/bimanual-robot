@@ -33,8 +33,12 @@ def main() -> None:
     joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
     issues: list[str] = []
 
+    tabletop = spec["chassis"]["plates"]["tabletop"]
     expected_xyz = {
-        "chassis_top_link": [0.0, 0.0, spec["chassis"]["plates"]["tabletop"]["z_bottom"]],
+        "tabletop_front_left_link": [60.15, 112.65, tabletop["z_bottom"]],
+        "tabletop_front_right_link": [60.15, -112.65, tabletop["z_bottom"]],
+        "tabletop_rear_left_link": [-110.15, 112.65, tabletop["z_bottom"]],
+        "tabletop_rear_right_link": [-110.15, -112.65, tabletop["z_bottom"]],
         "left_base_link": spec["arm_mounts"]["left"]["xyz"],
         "right_base_link": spec["arm_mounts"]["right"]["xyz"],
         "camera_depth_optical_frame": spec["camera"]["optical_center_xyz"],
@@ -49,6 +53,8 @@ def main() -> None:
         "rear_caster_link": spec["navigation"]["ball_casters"]["centers_xyz"][1],
         "battery_link": spec["internal_payloads"]["battery"]["center_xyz"],
         "electronics_link": spec["internal_payloads"]["electronics"]["center_xyz"],
+        "battery_mount_plate_link": spec["printed_mounts"]["battery_plate"]["origin_xyz"],
+        "lidar_mount_plate_link": spec["printed_mounts"]["lidar_plate"]["origin_xyz"],
     }
     column_names = (
         "front_left_frame_column_link",
@@ -85,6 +91,17 @@ def main() -> None:
     if mimic != ["right_finger2_joint"]:
         issues.append(f"mimic 관절 집합 불일치: {mimic}")
 
+    expected_left_gripper = "stock_so101_rotating_jaw_without_tpu_attachment"
+    configured_left_gripper = spec["arm_mounts"]["left"]["gripper"]
+    if configured_left_gripper != expected_left_gripper:
+        issues.append(
+            f"왼손 기계 사양={configured_left_gripper}, expected={expected_left_gripper}"
+        )
+    if spec["left_cup_gripper"]["selected_attachment"] is not None:
+        issues.append("왼손 순정 죠에 추가 부착물이 선택됨")
+    if spec["provenance"]["left_finray_fingers_historical"]["current_build_use"]:
+        issues.append("과거 FinRay 후보가 현행 빌드로 설정됨")
+
     right_proxy_links = ("right_gripper_base_link", "right_finger1_link", "right_finger2_link")
     right_proxy_mass = sum(
         float(links[name].find("inertial/mass").attrib["value"])
@@ -112,6 +129,9 @@ def main() -> None:
     casters = [name for name in links if name in {"front_caster_link", "rear_caster_link"}]
     if len(casters) != 2:
         issues.append(f"볼 캐스터 수={len(casters)}, expected=2")
+    tabletop_panels = [name for name in links if name.startswith("tabletop_") and name.endswith("_link")]
+    if len(tabletop_panels) != 4:
+        issues.append(f"상판 분할 수={len(tabletop_panels)}, expected=4")
 
     cad_collision_meshes = []
     for link in links.values():
@@ -132,8 +152,11 @@ def main() -> None:
             [joint for joint in joints.values() if joint.attrib["type"] in axis_joint_types]
         ),
         "mimic_joints": mimic,
+        "left_gripper": configured_left_gripper,
+        "left_gripper_attachment": spec["left_cup_gripper"]["selected_attachment"],
         "right_gripper_proxy_mass_kg": right_proxy_mass,
         "frame_columns": frame_columns,
+        "tabletop_panels": tabletop_panels,
         "ball_casters": casters,
         "custom_structure_uses_primitive_collision": not cad_collision_meshes,
         "issues": issues,

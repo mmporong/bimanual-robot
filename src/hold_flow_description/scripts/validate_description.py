@@ -92,14 +92,20 @@ def assert_xyz(actual: list[float], expected: list[float], tolerance: float = 1e
 def main() -> None:
     env = os.environ.copy()
     existing = env.get("AMENT_PREFIX_PATH", "")
-    package_prefix = REPO_ROOT / "install/hold_flow_description"
-    env["AMENT_PREFIX_PATH"] = str(package_prefix) + (":" + existing if existing else "")
     ros_python = Path("/opt/ros/jazzy/lib/python3.12/site-packages")
     if ros_python.is_dir():
         existing_python = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = str(ros_python) + (":" + existing_python if existing_python else "")
     with tempfile.TemporaryDirectory(prefix="hold_flow_urdf_") as temp_dir:
-        urdf_path = Path(temp_dir) / "hold_flow.urdf"
+        temp_root = Path(temp_dir)
+        package_prefix = temp_root / "prefix"
+        package_index = package_prefix / "share/ament_index/resource_index/packages"
+        package_index.mkdir(parents=True)
+        (package_index / "hold_flow_description").write_text("", encoding="utf-8")
+        package_share = package_prefix / "share/hold_flow_description"
+        package_share.symlink_to(PACKAGE_ROOT, target_is_directory=True)
+        env["AMENT_PREFIX_PATH"] = str(package_prefix) + (":" + existing if existing else "")
+        urdf_path = temp_root / "hold_flow.urdf"
         expanded_urdf = command_output(["xacro", str(XACRO.relative_to(REPO_ROOT))], env)
         urdf_path.write_text(expanded_urdf, encoding="utf-8")
         check = command_output(["check_urdf", str(urdf_path)], env)
@@ -180,6 +186,17 @@ def main() -> None:
     assert required_links <= link_names, sorted(required_links - link_names)
     assert required_joints <= joint_names, sorted(required_joints - joint_names)
 
+    for link_name in ("right_finger1_link", "right_finger2_link"):
+        link = root.find(f"link[@name='{link_name}']")
+        assert link is not None
+        material_names = {
+            material.attrib.get("name")
+            for material in link.findall("visual/material")
+        }
+        assert "gripper_insert" not in material_names, (
+            f"{link_name}에 폐기된 ggao50 인서트 형상이 남아 있음"
+        )
+
     wheel_origins = {}
     for name in ("left_wheel_joint", "right_wheel_joint"):
         joint = root.find(f"joint[@name='{name}']")
@@ -195,8 +212,8 @@ def main() -> None:
     right_arm_xyz = xyz_of(transforms["right_base_link"])
     assert_xyz(camera_xyz, [-0.110, 0.0, 0.970], tolerance=2e-6)
     assert_xyz(lidar_xyz, [0.100, 0.0, 0.165])
-    assert_xyz(left_arm_xyz, [0.0, 0.075, 0.726])
-    assert_xyz(right_arm_xyz, [0.0, -0.075, 0.726])
+    assert_xyz(left_arm_xyz, [0.020, 0.170, 0.726])
+    assert_xyz(right_arm_xyz, [0.020, -0.170, 0.726])
 
     report = {
         "xacro": str(XACRO.relative_to(REPO_ROOT)),
@@ -213,7 +230,8 @@ def main() -> None:
         "left_arm_base_xyz_from_base_footprint_m": [round(value, 6) for value in left_arm_xyz],
         "right_arm_base_xyz_from_base_footprint_m": [round(value, 6) for value in right_arm_xyz],
         "left_gripper": "stock_so101_rotating_jaw",
-        "right_gripper": "ggao50_parallel_proxy",
+        "right_gripper": "ggao50_parallel_proxy_unmodified_flat_jaws",
+        "right_gripper_insert": "none",
         "right_parallel_gripper_primary_stroke_m": 0.0333,
         "mimic_joints": [
             joint.attrib["name"] for joint in joints if joint.find("mimic") is not None

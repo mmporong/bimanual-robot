@@ -1,0 +1,118 @@
+# 캘리브레이션 상태
+
+현행 왼손은 TPU FinRay가 아니라 SO-101 순정 회전식 죠를 사용한다.
+
+## 현행 양팔 · 2026-10-02
+
+PR [#54](https://github.com/mmporong/bimanual-robot/pull/54)의
+`c75a93d2a173bd9bfff73e739b5b7a6df5f057a4`에서 갱신한 양팔 follower와
+오른쪽 leader JSON을 현행 기준으로 채택했다. 팀원은 그리퍼 축 재조립 후
+여유를 적용한 범위를 기록했다. follower 파일에는 그리퍼 외 관절의 영점·범위
+변경도 있으므로 기존 파일의 그리퍼 항목만 섞지 않고 새 JSON 전체를 사용한다.
+
+| 용도 | 현행 파일 | ID 6 방향 | ID 6 범위 (tick) |
+|---|---|---|---|
+| 왼팔 follower, 순정 죠 | `bi_follower/arms_left.json` | `drive_mode=0` | 1452~2845 |
+| 오른팔 follower, ggao50 | `bi_follower/arms_right.json` | `drive_mode=1` | 1209~3999 |
+| 오른팔 leader | `bi_leader/arms_right.json` | `drive_mode=0` | 2049~3303 |
+
+파일 SHA-256:
+
+- 왼팔 follower: `e4c89b7ef2226a3ce9ae49e5a5cfbc0501705ec62e7fa2aab40f80d1114ee56f`
+- 오른팔 follower: `00bc7e362024ef95a4ee27fe8b9b02210571c1aae5d565933dc9ee2043462f06`
+- 오른팔 leader: `76864f87f603de73557cc372079f0deb9f486c9c5abeff2886f12e8d2f50f90d`
+
+왼팔 leader는 기존 `bi_leader/arms_left.json`을 유지한다. 단일팔 폴더의
+`so_follower/follower.json`, `so_follower_left/follower_left.json`,
+`so_leader/leader.json`은 과거 사본이며 현행 양팔 파일을 덮어쓰는 원본이 아니다.
+양팔 텔레옵·녹화는 `robot.id=arms`, `teleop.id=arms`와 `bi_follower`·`bi_leader`
+폴더를 지정한다. LeRobot 로컬 캐시를 자동으로 교체하지 않는다.
+
+이번 반영은 저장소 파일·문서의 통합이다. EEPROM 재판독·쓰기나 팔 동작으로
+새 JSON과 현재 연결 기체의 일치를 확인한 것은 아니다. 팀원의 커밋에는 오른팔
+ID 6의 `Overload_Torque` 25→80%, `Max_Torque` 500→1000,
+`Protection_Current` 250→320 복원 기록이 있다. 이 설정은 JSON 보정과 별개인
+EEPROM 기록이며, JSON을 받는 것만으로 적용되거나 이번 병합에서 다시 쓰이지 않는다.
+
+기존 IK mapping·joint reference·snapshot·pregrasp 후보·계획 packet은 보정 해시가
+달라졌으므로 재사용하지 않는다. 새 JSON으로 현재 상태와 계획을 다시 생성한다.
+해시 검사나 관절 한계를 완화해서 이전 계획을 통과시키지 않는다. URDF 기하는 보정
+파일 변경만으로 수정하지 않으며 영점·TCP·개구 대응은 별도 확인 대상이다.
+기존 IL 데이터·checkpoint의 정규화도 수집 당시 보정과 대조한 뒤 평가한다.
+
+이전 활성 JSON 3개는 Git의 `9720d6f`와 로컬
+`$HOME/.local/state/bimanual-robot/calibration-pr54-20261002.5K71fR/calibration/`에 보존했다.
+아래 기록의 토크·전원·연결·시험 결과는 각 날짜 당시 상태이며 현재 기체 상태가 아니다.
+
+## 이전 기록 · 2026-09-30
+
+사용자가 중간 자세 설정과 가동 범위 기록을 마쳐 공식 LeRobot
+`SOFollower.calibrate()`의 왼팔 보정을 완료했다. 일반 연결 시 설정 변경은
+실행하지 않았고 기존 게인·Phase를 유지했다. 새 후보와 보드의 offset·범위를
+대조하고 6축 토크 OFF를 확인한 뒤 `bi_follower/arms_left.json`에 반영했다.
+당시 오른팔 보정은 아래 2026-09-29 기록을 유지했다.
+
+- 왼팔 ID 6: `drive_mode=0`, raw `2028~3483`; 손목 롤 범위는 관례값 `0~4095`다.
+- 백업·실측 후보·종료 검증·새 snapshot: `/data/lim/robot-artifacts/restaurant/standard_calibration_20260930_left01/`.
+- 활성 파일 SHA-256: `69b3a38747f7f143670f795808beaeedaeffb6114a5b9b076e6cc330701e7fbe`.
+  공식 후보와 JSON 값은 같고 활성 파일에만 마지막 개행이 있다. 후보·snapshot의
+  바이트 해시는 `9a9328bec2bc350e69d75989bdb0c8c8231c875bf02cb15faafcf86477713873`이다.
+- 보정 기록 완료는 IK 좌표 정밀도나 컵 파지 성공이 아니다. 종료 자세의 어깨 각도는
+  명목 URDF 하한 밖으로 계산되며, URDF 한계나 좌표를 임의 수정하지 않았다.
+- 이전 raw 목표·계획 packet은 재사용하지 않는다. 기존 IL 정책·데이터도 이전
+  보정의 정규화를 사용했으므로 새 보정과의 호환을 검증하기 전 실행하지 않는다.
+  리더·LeRobot 캐시·기존 데이터셋은 변경하지 않았다.
+
+## 이전 기록 · 2026-09-29
+
+2026-09-29 실기체 연결에서 저장소 JSON과 보드의 오프셋 차이를 확인했다.
+사용자 승인으로 양팔 범위를 수동 기록하고 MIN/MAX만 EEPROM에 적용했다.
+IK 실행 준비의 기준은 `bi_follower/arms_left.json`과 `bi_follower/arms_right.json`이다.
+이 JSON은 새 범위와 현재 보드 오프셋을 반영한다. 보드 홈오프셋·Phase·게인은 바꾸지 않았다.
+
+| 팔 | 보드 by-id 끝부분 | 그리퍼 | JSON 방향 | ID 6 Phase | 적용 범위 |
+|---|---|---|---|---|---|
+| 왼팔 | `5B3E088747-if00` | SO-101 순정 | `drive_mode=0` | 12 | 1340~2834 tick |
+| 오른팔 | `5B3D046653-if00` | ggao50 순정 | `drive_mode=1` | 76 | 526~3416 tick |
+
+오른손은 관측 끝점 486~3456 tick에서 양 끝을 40 tick씩 줄였다.
+양팔 wrist_roll은 관례대로 0~4095이며, 롤 끝점을 수동으로 측정한 값은 아니다.
+오프셋·한계값·Phase·P/D/I·잠금 상태를 적용 후 다시 읽어 대조했고, 12개 서보 토크는
+모두 OFF였다. 이 대조는 새 범위의 저장을 확인한 것이며 동작 정밀도를 입증하지 않는다.
+
+현재 상태는 **전원 재인가 후 대조·작은 개폐 시험 통과**다. 사용자의 12V 전원
+재인가 완료 확인 후 양팔 offset·한계·Phase·토크 OFF·잠금을 다시 읽어 대조했다.
+그리퍼 ID 6만 현재 위치에서 열림 방향 128 tick, 시작점 기준 64 tick 위치로 부분
+되닫기했다. 왼손은 raw 증가, 오른손은 raw 감소를 열림 방향으로 사용했다.
+위치 도달 판정의 허용 오차는 16 tick이다. 두 방향의 서보 위치 변화만 확인한 것이며,
+전체 개구·죠의 실제 이동·끝점 여유·TCP·컵 파지 검증을 대체하지 않는다.
+
+오른손 첫 시험은 위치 동작 후 최종 토크가 1로 관측돼 실패 처리했다. OFF 재전송 후
+해제를 확인했고, 설정 복원 뒤 OFF를 마지막으로 보내 대조하는 종료 처리로 보완했다.
+같은 크기의 재시험은 종료까지 통과했다. 최초 실패 원인은 미확정이며 원본 로그를 보존했다.
+현재 양팔 12개 서보는 OFF다. 온도·부하는 기록·적용·작은 개폐 시험에서 읽지 않는다.
+이후 전원 재인가에서도 팔을 받치고, 전원이 켜진 상태에서 서보 연결선을 탈착하지 않는다.
+
+기록·백업·적용 전후 대조는 로컬 `/data/$USER/robot-artifacts/restaurant/calibration_20260929.BVaxly/`
+의 후보 JSON 및 `left_apply01/journal.jsonl`, `right_apply01/journal.jsonl`에 보존했다.
+작은 개폐 결과는 `left_gripper_physical01.json`, `right_gripper_physical01.json`(종료 실패),
+`right_gripper_physical02.json`(재시험 통과)에 있다. 오른손 해제 확인은
+`right_gripper_release01.json`과 `right_gripper_after_release01.json`에 따로 기록했다.
+원시 기록은 Git에 넣지 않는다. 적용 도구와 복구 조건은
+[`tools/servo/README.md`](../tools/servo/README.md#기존-오프셋을-유지하는-범위-갱신)에 있다.
+
+리더 파일, 단일팔 과거 사본, LeRobot 로컬 캐시는 이번에 바꾸지 않았다.
+이들을 새 양팔 기준으로 혼용하거나 과거 IK raw 목표를 재사용하지 않는다.
+새 JSON으로 계획을 다시 만들고, 기존 IL 정책도 관측·action 정규화가 같은지 대조한 뒤 시험한다.
+TCP·카메라 보정과 실물 파지 정밀도 검증은 별도다.
+
+기구를 다시 변경하거나 파일과 실물 설정이 어긋난 경우에만 다음 순서로 갱신한다.
+
+1. 완전 개폐의 기구 간섭과 서보 방향을 확인한다.
+2. 순정 죠의 ID 6 원시 끝점과 안전 여유를 측정한다.
+3. 새 후보 파일에 범위를 기록하고 시작 전 EEPROM 백업과 대조한다.
+4. 한계값 적용·전원 재인가·읽기 대조를 거쳐 양팔 follower JSON을 확정한다.
+5. 마른 컵·젖은 컵 파지와 선반 재파지를 다시 시험한다.
+
+새 측정 없이 참고값이나 추정값을 JSON에 넣지 않는다. 상세 절차와 과거
+값은 [`docs/20260909_그리퍼_캘리브레이션_인계.md`](../docs/20260909_그리퍼_캘리브레이션_인계.md)에 있다.

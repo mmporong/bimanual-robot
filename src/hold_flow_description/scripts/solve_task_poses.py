@@ -123,11 +123,24 @@ def residual(chain: Chain, side: str, q: np.ndarray, frame: str, target: np.ndar
     error = list(target - transforms[frame][:3, 3])
     if axis_target is not None and axis_frame is not None:
         current_axis = transforms[axis_frame][:3, 2]
-        difference = axis_target - current_axis
+        current_axis = current_axis / np.linalg.norm(current_axis)
+        axis_target = axis_target / np.linalg.norm(axis_target)
         basis = np.eye(3) - np.outer(axis_target, axis_target)
         eigenvalues, eigenvectors = np.linalg.eigh(basis)
         tangent = eigenvectors[:, eigenvalues > 0.5].T
-        error.extend(tangent @ difference)
+        cross = np.cross(current_axis, axis_target)
+        cross_norm = np.linalg.norm(cross)
+        dot = float(np.clip(np.dot(current_axis, axis_target), -1.0, 1.0))
+        angle = math.atan2(cross_norm, dot)
+        if cross_norm > 1e-9:
+            rotation_vector = cross / cross_norm * angle
+        elif dot < 0.0:
+            # 정반대 축에서는 외적이 0이라 회전축이 정해지지 않는다. 목표축의
+            # 접선 기저 하나를 택해 pi 오차를 주면 수치 Jacobian이 빠져나올 수 있다.
+            rotation_vector = tangent[0] * math.pi
+        else:
+            rotation_vector = np.zeros(3)
+        error.extend(tangent @ rotation_vector)
     return np.array(error)
 
 
@@ -152,7 +165,9 @@ def solve_ik(chain: Chain, side: str, frame: str, target: np.ndarray,
             jac[:, index] = (residual(chain, side, probe, frame, target, axis_frame, axis_target) - error) / step
         damping = 1e-4
         delta = jac.T @ np.linalg.solve(jac @ jac.T + damping * np.eye(len(error)), error)
-        q = np.clip(q + 0.5 * delta, lower, upper)
+        # jac은 FK가 아니라 residual=(target-current)의 미분이므로
+        # residual을 0으로 줄이려면 Newton step의 음수 방향으로 갱신한다.
+        q = np.clip(q - 0.5 * delta, lower, upper)
     final = residual(chain, side, q, frame, target, axis_frame, axis_target)
     return q, float(np.linalg.norm(final[:3]))
 
@@ -165,13 +180,17 @@ def solve_with_restarts(chain: Chain, side: str, frame: str, target: np.ndarray,
     lower = np.array([chain.limits[n][0] for n in names])
     upper = np.array([chain.limits[n][1] for n in names])
     rng = np.random.default_rng(seed)
-    best_q, best_err = None, float("inf")
+    best_q, best_err, best_margin = None, float("inf"), -float("inf")
     for index in range(restarts):
         start = np.zeros(len(names)) if index == 0 else rng.uniform(lower * 0.7, upper * 0.7)
         q, err = solve_ik(chain, side, frame, target, start,
                           axis_frame=axis_frame, axis_target=axis_target)
-        if err < best_err:
-            best_q, best_err = q, err
+        margin = min(float(value - low) for value, low in zip(q, lower))
+        margin = min(margin, min(float(high - value) for value, high in zip(q, upper)))
+        # 수치 오차가 사실상 같은 해라면 hard limit에 붙은 분기 대신 여유가 큰
+        # 분기를 택한다. 0.5 mm 이내 차이는 실측 보정 오차보다 작다.
+        if err < best_err - 5e-4 or (abs(err - best_err) <= 5e-4 and margin > best_margin):
+            best_q, best_err, best_margin = q, err, margin
     return best_q, best_err
 
 
@@ -188,9 +207,14 @@ def main() -> None:
         "left": np.array([0.06, 0.10, 0.26]),
         "right": np.array([0.06, -0.10, 0.26]),
     }
-    # 붓기: 컵은 오른팔, 병은 왼팔. 병 주둥이가 컵 림 위 24.5 mm 에 오게 한다.
+    # 붓기: 현행 역할은 컵이 왼팔, 병이 오른팔이다. 병 주둥이가 컵 림 위
+    # 24.5 mm 에 오게 한다. 아래 절대 좌표는 작업 셀 재측정 전의 legacy 후보라
+    # 해가 나와도 실물 명령으로 사용하지 않는다.
     cup_rim = np.array([0.150, 0.047, 0.470])
     bottle_cap = cup_rim + np.array([0.0, 0.0, 0.0245])
+    # 왼쪽 stock gripper의 cup_tcp는 tool0와 같으므로, 기존 40 mm 컵 림
+    # 오프셋을 빼서 명목 파지 중심으로 바꾼다.
+    cup_grasp = cup_rim - np.array([0.0, 0.0, 0.040])
     # 병은 수직에서 112.3도 기울고, 그리퍼는 컵 반대쪽(+Y)에 남는다.
     tilt = math.radians(112.3)
     bottle_axis = np.array([0.0, -math.sin(tilt), math.cos(tilt)])
@@ -199,8 +223,8 @@ def main() -> None:
 
     for label, targets, frames in (
         ("transport", transport_targets, {"left": "left_tool0", "right": "right_tool0"}),
-        ("pour", {"left": bottle_cap, "right": cup_rim},
-         {"left": "left_bottle_tcp", "right": "right_cup_tcp"}),
+        ("pour", {"left": cup_grasp, "right": bottle_cap},
+         {"left": "left_cup_tcp", "right": "right_bottle_tcp"}),
     ):
         entry = {}
         for side, target in targets.items():
@@ -208,7 +232,7 @@ def main() -> None:
                 # zero seed 를 유지해 좌우가 같은 분기(팔꿈치 위)로 풀리게 한다.
                 q, err = solve_ik(chain, side, frames[side], target, np.zeros(len(ARM_JOINTS)))
             elif label == "pour":
-                axis = bottle_axis if side == "left" else cup_axis
+                axis = cup_axis if side == "left" else bottle_axis
                 q, err = solve_with_restarts(
                     chain, side, frames[side], target,
                     axis_frame=f"{side}_tool0", axis_target=axis,

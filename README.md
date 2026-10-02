@@ -1,339 +1,306 @@
 # HOLD THE FLOW · 이동형 양팔 물 서빙 로봇
 
-동국대 DAPIER 부트캠프 최종 팀 프로젝트의 공용 저장소다. 현재 목표는 여러 태스크를 하는
-범용 로봇이 아니라, **웹 요청을 받아 물 한 잔을 준비·운반·서빙하고 충전소로 복귀하는
-단일 미션**을 재현 가능하게 완성하는 것이다.
+웹에서 테이블의 물 주문을 받아 주방에서 물을 따르고, 컵을 상판에 싣고 이동해
+테이블에 놓은 뒤 도크로 복귀하는 로봇이다. 동국대 DAPIER 피지컬 AI 부트캠프
+MS Team의 공용 저장소이며, 이동·양팔 조작·관제를 하나의 주문으로 연결한다.
 
-- 시작: 2026-08-19
-- 현행 태스크 확정: 2026-09-07
-- 최종 문서 갱신: 2026-09-09
-- 개발 기준: Ubuntu 24.04 · ROS 2 Jazzy · C++17 · Python 3.12 · LeRobot 0.6.1
-- 시뮬레이터: Isaac Sim 6.0 · ROS 2 Bridge
-- 구현된 모델의 기구 수치: [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) — 아래 실물 변경사항은 아직 미반영
-- 최신 실물 치수·추가 기록: [450×340 mm 하단 프레임 모델링 기록](docs/20260909_하단프레임_실물치수_모델링기록.md) — 설명 수집 중, CAD·URDF 반영 전
-- 상부 구조 제안: [책상 높이 상승 프레임·경량화·구조 검토와 이미지](docs/20260909_상승프레임_경량화_구조검토.md) — 1차 개념안, 실측·접합 해석·주행 시험 전
-- 완성품 외형 후보: [실축 SO101·Astra와 카메라 높이 380/540 mm 비교](docs/20260909_완성품_디자인후보_4안.md) — 물 서빙 전 과정의 시야 역할 포함
-- 시뮬레이션 모델: [300×300 mm·720 mm 양팔 URDF와 Isaac Sim 모델](docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md)
-- 태스크·구현 단일 원본: [물 서빙 로봇 회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md)
-- 팀 보고: [무선 운용·SLAM·PLANNED·ACT 비교](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md)
-- 세션 인계: [양팔 로봇 프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md)
+시뮬레이션의 전체 미션, 실차의 서비스 이동, 양팔 조작을 각각 시험했다.
+실물에서 주문부터 물 서빙·충전까지 이어지는 전체 미션의 반복 검증은 남아 있다.
 
-## 한 줄 정의
+<p align="center">
+  <img src="docs/assets/full_size_frame_20260910/product_concept_imagegen_v2.png" width="720" alt="450×340 mm 프레임의 이동형 양팔 물 서빙 로봇 콘셉트">
+</p>
 
-> 충전소에서 대기하던 이동형 양팔 로봇이 웹 요청을 받고 주방으로 자율주행해 왼팔로 컵을,
-> 오른팔로 물통을 조작해 물을 따른다. 컵을 로봇 선반에 싣고 손님 테이블로 이동해 내려놓은
-> 뒤 충전소로 돌아가 실제 충전 시작을 확인한다.
+그림은 부품 배치를 설명하는 콘셉트다. 제작·충돌·관성 검토에는
+[축척 모델](docs/assets/full_size_frame_20260910/model_overview.png)과 기구 사양을 사용한다.
+실제 조립·센서 배치와 모델의 차이는 아래 하드웨어 항목에서 구분한다.
 
-주행 중에는 컵을 팔로 들지 않는다. 컵은 로봇 선반에 놓고 운반한다. 팔 조작 중에는 베이스를
-정지하고, 베이스 이동 중에는 팔을 운반·정지 자세로 유지한다.
+## 현재 구현과 검증 범위
 
-## 현재 범위
-
-### 포함
-
-- 웹 버튼으로 물·테이블 요청
-- 충전소 이탈, 주방·테이블 자율주행, 장애물 감속·정지·재계획
-- 주방·테이블 앞 RGB-D 정밀 정렬
-- 왼팔 컵, 오른팔 물통의 양팔 조작과 물 붓기
-- YOLO instance segmentation과 컵별 보정표를 이용한 액면·흘림 판정
-- 로봇 선반 운반과 손님 테이블 배치
-- 도크 staging 이동, 최종 도킹, 충전 시작 신호 확인
-- 산업형 `PLANNED`, 전체 `ACT`, phase별 `HYBRID` 조작 비교
-- 실패 근거 보존, 원인 분리, 같은 조건 재시험과 회귀 평가
-
-### 제외
-
-- 양팔 커넥터 체결과 와이어 하네스 조립
-- 범용 `move / handover / pour` 다중 태스크
-- 음성 입력·STT·언어조건 VLA·로컬 LLM 태스크 플래닝
-- 병과 컵을 팔로 든 채 주행하는 구형 시나리오
-- Nav2와 팔 조작을 하나의 학습 정책으로 합치는 구성
-- 미지 공간 자동 탐색을 물 서빙 필수 기능으로 추가하는 것
-
-과거 문서와 사이트는 의사결정 이력으로 보존하지만 현행 구현 범위를 정하지 않는다.
-
-## 미션 흐름
-
-```text
-DOCKED / CHARGING
-  → 웹 요청 접수
-  → 충전소 이탈
-  → Nav2로 주방 이동
-  → RGB-D로 작업대 정밀 정렬·베이스 정지
-  → 왼팔 컵 파지·들기
-  → 오른팔 물통 파지·들기
-  → 컵 위로 이동·물 붓기·물 양 판정
-  → 물통 원위치·컵 선반 적재
-  → Nav2로 손님 테이블 이동·정렬
-  → 선반의 컵을 손님 테이블에 배치
-  → 충전소 staging 이동·도킹
-  → 충전 시작 신호 확인
-```
-
-요청 성공은 HTTP 200이 아니다. 하나의 `request_id/run_id`로 접수, 이동, 정렬, 조작 전략,
-phase별 결과, 물 양, 실패, 도킹과 최종 `CHARGING` 또는 명시적 실패 상태가 연결돼야 한다.
-
-## 시스템 구조
-
-```mermaid
-flowchart LR
-    WEB[웹 요청] --> MISSION[ROS 2 미션 상태기계]
-    MISSION --> NAV[SLAM/AMCL + Nav2]
-    MISSION --> ALIGN[RGB-D 로컬 정렬]
-    MISSION --> ROUTER[조작 phase router]
-    ROUTER --> PLAN[PLANNED<br/>비전·IK·궤적·폐루프]
-    ROUTER --> ACT[ACT<br/>노트북 GPU 추론]
-    PLAN --> MUX[command mux]
-    ACT --> MUX
-    MUX --> SAFE[안전 게이트]
-    SAFE --> ARM[양팔 하드웨어]
-    NAV --> BASE[베이스 제어]
-    CAM[Astra S] --> ALIGN
-    CAM --> FILL[YOLO 액면·흘림]
-    FILL --> ROUTER
-    MISSION --> LOG[미션·episode·failure log]
-```
-
-인지 계층은 actuator 명령을 직접 내리지 않는다. `PLANNED`, `ACT`, `TELEOP` 가운데 하나만
-팔 command lease를 가지며 모든 명령은 같은 중재기와 안전 게이트를 지난다.
-
-## 조작 전략 세 가지
-
-산업용 피킹 조사 결과, 상용 제품은 AI를 주로 인식·깊이·피킹 순서·그립 후보 계산에 쓰고
-모션 계획·정밀 제어·전용 그리퍼·복구 절차를 결합한다. 휴머노이드·범용 로봇은 작업과 환경이
-훨씬 넓어 IL·VLA가 행동과 전신 제어까지 맡는 비중이 커진다. 현재 물 서빙 로봇은 이동형
-양팔이지만 station·컵·물통을 고정하고 조작 중 베이스를 멈추므로 구조화된 산업용 셀에 더
-가깝다. 자세한 근거는 [R33 산업용 피킹과 IL·ACT 적용 경계](research/R33_산업용_피킹과_IL_ACT_적용경계.md)에 있다.
-
-`policy 1`과 `policy 2`는 ACT 모델 이름이 아니라 주방·테이블 조작 구간의 미션 ID다.
-실제 실행 방법은 `control_strategy`와 phase별 `backend`로 구분한다.
-
-| 전략 | 구성 | 목적 |
+| 영역 | 확인된 상태 | 남은 검증 |
 |---|---|---|
-| `PLANNED_ALL` | RGB-D·그립 계산·IK·검증 궤적·그리퍼 피드백·액면 폐루프 | 산업형 기준선 |
-| `ACT_ALL` | 모든 조작 phase를 ACT checkpoint로 실행 | 전체 IL의 가능성과 한계 측정 |
-| `HYBRID` | phase별로 PLANNED 또는 ACT 선택 | 실제 이점이 있는 구간에만 학습 적용 |
+| 웹 주문·관제 | 4테이블·냉수/온수 선택, 주문 큐, 배터리 분기, SQLite 복구, Action 결과 대기 | 물리 미션의 반복 주문·재시작 복구, 실제 배터리·충전 신호 연결 |
+| Isaac 전체 미션 | 도크 출발·양팔 물붓기·상판 운반·재파지·테이블 배치·도크 복귀 1회 통과 | 현행 순정 왼손으로 전체 미션 재시험, 물체 인식 입력, 충전 물리 |
+| 순정 왼손 접촉 | 10 g·등가 질량 210 g 강체 컵의 파지·상승·놓기·손 분리 시험 통과 | 컵 변형·물 유동·이동 중 운반·실물 파지 |
+| JD-AMR 실차 이동 | 물 받는 곳·table_01/table_02 접근과 도크 복귀 기록 확보 | 팔 작업 완료 신호 연결, 현행 양팔 차체·하중의 통합 평가 |
+| 실물 왼팔 IK | 상대 DLS IK·엔코더 피드백으로 컵 동반 상승을 관찰한 기록 | 현행 양팔 보정으로 계획 재생성, 책상 완전 분리·TCP 정밀도·운반·놓기 |
+| SmolVLA 조작 | 정책 파트에서 40개 에피소드 학습 정책의 주방 조작 1회 완주 보고 | checkpoint·영상·보정·데이터 원본 연결, 공통 조건 반복 평가 |
+| 물체·물 양 인식 | 컵 검출·평면 변환·IK 도구, 액면·흘림 판정 설계 | 실물 카메라 보정, 컵별 mL 보정표, 붓기 정지 연동 |
+| 모델 | 58링크·57관절의 URDF/Xacro와 CAD, 정적 계약 검사 | 실측 장착 좌표·접촉·관성·구동 추종의 일치 |
 
-주방 조작 phase는 다음처럼 나눈다.
+시뮬 성공, 팀 보고, 실물 관측을 같은 성과로 합산하지 않는다. 전체 미션 시뮬은
+구형 강체 패드와 정답 물체 좌표를 사용했고, 실차 이동에서는 팔 작업을 대기로 대체했다.
+실물 IK의 컵 동반 상승도 전체 픽앤플레이스 완료를 뜻하지 않는다.
+실험 조건·원본 위치·변경 이력은 [진행 로그](PROGRESS.md)에 기록한다.
+
+<!-- AUTO:PROJECT-STATUS:START -->
+## 단일 원본 자동 요약
+
+> 아래 표는 기계 YAML에서 생성한다. 수정하려면 표가 아니라 연결된 원본 파일을 고친다.
+
+| 항목 | 현행 값 |
+|---|---|
+| 기계 개정 | `2026-09-22_left_stock_so101_gripper_selected` |
+| 상·하부 프레임 | 450×340 mm |
+| 상판 높이 | 720 mm |
+| 왼손 | SO-101 순정 회전식 죠, TPU·오버캡 없음 |
+| 오른손 | `ggao50_SO101_Parallel_Gripper` |
+| RGB-D | Orbbec_Astra_S, 상판 위 250 mm |
+| 베이스 | differential_two_wheel_two_ball_caster, Feetech_STS3215_C018_12V |
+| 모델 상태 | `simulation_model_ready_physical_measurements_pending` |
+
+원본: [`hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
+과거 후보: [`finray_80mm_lip3_selection.yaml`](design/gripper/finray_80mm_lip3_selection.yaml)
+<!-- AUTO:PROJECT-STATUS:END -->
+
+## 미션과 MVP 범위
 
 ```text
-CUP_PICK
-  → JUG_PICK
-  → MOVE_TO_PREPOUR
-  → POUR
-  → JUG_RETURN
-  → SHELF_PLACE
+도크 대기 → 테이블 물 주문 → 주방 이동·정렬·정차
+  → 왼팔 컵 파지 + 오른팔 물통 파지 → 물붓기·물 양 확인
+  → 물통 반환 → 컵 상판 적재·손 분리 → 테이블 이동·정차
+  → 컵 재파지·테이블 배치·손 분리 → 도크 복귀
 ```
 
-첫 HYBRID 후보는 파지·접근·반환·배치를 PLANNED로, `POUR`를 ACT로 실행한다. ACT 파지가
-위치·재질 변화에서 더 낫다는 결과가 나오면 해당 phase만 교체한다.
+컵은 양팔 사이 상판에 놓고 운반한다. 주행 중 팔로 컵을 들지 않으며,
+파지·붓기·놓기 전에 베이스를 정지한다. 도크 도착과 실제 충전 시작은 별도로 판정한다.
 
-phase별 순차 전환에는 세 번째 통합 신경망이 필요하지 않다. 다만 현재 backend 종료,
-관절 속도 0, 목표 자세 허용오차, 남은 ACT chunk 폐기, lease 해제·획득과 다음 backend reset을
-확인해야 한다. IK 명령과 ACT 명령을 동시에 쓰거나 움직이는 중간에 바꾸지 않는다.
+초기 실물 통합 범위는 등록한 작업대·한 종류의 컵과 물통·상온의 물·한 테이블이다.
+웹의 4테이블·냉수/온수 선택 기능이 모든 조합의 물리 검증 완료를 뜻하지 않는다.
+온수 조작, 다중 로봇 배차, 사람과 함께 쓰는 매장 상시 운용, 범용 조립·음성 태스크는
+MVP에서 제외한다. 태스크 결정 원본은 [회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md)다.
 
-`q_command = q_planned + delta_q_learned` 형태의 residual 결합은 출력 의미가 다른 새 정책과
-별도 안정성 검증이 필요하므로 첫 구현 범위에서 제외한다.
+## 하드웨어와 모델
 
-## 데이터 수집과 비교
+- 프레임: 상·하부 450×340 mm, 프로파일 기둥 4개, 4분할 프린팅 상판.
+  상판 높이 720 mm, 바퀴 포함 폭 540 mm가 제작 기준이다.
+- 양팔: SO-101 두 대. 왼손은 순정 회전식 죠를 사용하며 TPU·오버캡을 붙이지 않는다.
+  오른손은 ggao50 순정 평면 죠이며 홈·교체형 인서트를 사용하지 않는다.
+- 실물 조작 관제: 상단 RGB 1대와 손목 RGB 2대. 설계의 Astra S RGB-D와 구분한다.
+  카메라 연결 확인은 영상 좌표와 팔 좌표의 보정 완료가 아니다.
+- 실차 주행: Raspberry Pi 4B 4GB, ESP32, Astra S와 YDLIDAR G4.
+  URDF의 LDS-03·원본 바퀴 배치와 실차 구성의 차이는 통합 전에 맞춰야 한다.
+- 질량·하중: URDF 명목 빈 질량은 7.379 kg. 추가 적재 5 kg의 수동 평지 주행은
+  예비 시험이며 정격 적재량·실측 총질량·연속 운전 성능으로 사용하지 않는다.
 
-전체 시연을 하나의 긴 ACT용 파일로만 만들지 않는다. 모든 episode에 다음 phase의 시작·종료
-timestamp와 성공 조건을 기록한다.
+캘리브레이션은 [양팔 JSON과 보정 상태](calibration/README.md)로 관리한다.
+현행 양팔 follower와 오른쪽 leader는 팀원의 그리퍼 재조립 후 새 보정을 반영한다.
+양팔 실행은 `calibration/bi_follower`·`bi_leader`를 사용하며 단일팔 과거 사본을 섞지 않는다.
+이전 IK 관측은 교체 전 보정의 시험 기록이다. 이전 정책의 수집 보정과 호환은 별도
+확인하며, 보정 변경 뒤 이전 raw 목표·IK mapping·계획 packet을 그대로 재사용하지 않는다.
+영점·TCP·개구 대응과 실물 정밀도는 캘리브레이션 파일 저장 여부와 구분한다.
 
-- `CUP_PICK`
-- `JUG_PICK`
-- `MOVE_TO_PREPOUR`
-- `POUR`
-- `JUG_RETURN`
-- `SHELF_PLACE`
+기구·CAD·모델 생성과 검증은 [450×340 모델 설명](docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md),
+[CAD 출력물](design/cad/README.md), [URDF 설명](src/hold_flow_description/README.md)을 따른다.
 
-같은 원본을 전체 ACT와 phase별 ACT 학습에 재사용한다. PLANNED가 만든 시작 상태와 사람이
-만든 시작 상태의 분포가 다르면 HYBRID rollout에서 해당 phase의 성공 시연이나 검토된 사람
-개입 복구 구간만 보강한다.
+## 이동·관제·조작의 연결
 
-세 전략은 같은 scenario matrix와 holdout에서 비교한다.
+```text
+웹 주문 → 주문 큐·미션 상태기계 → ExecuteManipulationSkill ROS 2 Action
+  → Unix socket JSON → Isaac phase executor → 물리 결과·진행 feedback
+```
 
-- phase별 성공 횟수/전체 횟수
-- 목표 물 양 mL 오차와 `UNDER / OVER / SPILL / UNKNOWN`
-- 사람 개입·리커버리 횟수
-- cycle time
-- 위치·조명·초기 잔량 변화 성능
-- 관측→명령 적용 지연, p95·p99·최댓값과 제어 지터
-- 미학습 범위의 안전 거부
-- 물체·station 변경 시 재설정·재수집 비용
+주문·미션·요청 ID와 phase, backend, checkpoint를 결과에 연결한다.
+Action의 성공·실패·취소·timeout을 확인한 뒤 다음 phase로 진행하고,
+취소된 주문의 늦은 결과가 상태를 다시 전진시키지 않도록 한다.
+ROS 2 Jazzy의 Python 3.12와 Isaac Sim 5.1의 Python 3.11은 프로세스로 분리한다.
+현재 Isaac 실행은 Articulation 제어와 로컬 IPC를 사용하며 ROS Bridge 관절 Topic 실행과 다르다.
 
-ACT가 성공·일반화·복구 또는 변경 비용을 실제로 개선한 phase에만 배포 backend로 채택한다.
-차이가 없으면 설명 가능하고 유지보수하기 쉬운 PLANNED를 기본값으로 둔다.
+### 웹 주문과 실행 모드
+
+주문 ID 중복 방지, 우선순위 큐, 활성 미션 한 건, 재시도·실패 종료를 구현했다.
+연속 주문의 도크 복귀 생략과 저배터리 충전 선행은 관제 로직으로 시험했다.
+SQLite는 주문·큐·명령 이력을 보존하지만, DB 복구만으로 Isaac 물리 world까지 복원되지는 않는다.
+
+| backend | 실행하는 범위 |
+|---|---|
+| `immediate` | CPU 관제 dry-run. 명령을 즉시 성공 처리 |
+| `ros2-mock` | ROS 2 Action의 feedback·result·취소·timeout 계약 |
+| `ros2-planned-artifact` | 저장된 시뮬 산출물의 해시·phase 증거 대조. 새 물리 실행 아님 |
+| `ros2-planned-session` | 상태를 보존하는 executor 세션. 연결한 mock/물리 실행기의 provenance 확인 필요 |
+| `ros2-planned-roundtrip` | 한 Isaac world의 도크 출발·조작·바퀴 주행·서빙·도크 복귀 |
+
+왕복 물리 검증은 1번 테이블 냉수 한 건에 한정한다. 충전 접점·충전 물리,
+반복 주문의 world reset, 다른 테이블·물통 조합은 별도 검증 대상이다.
+HTTP 응답 성공과 주문의 물리 성공을 구분한다.
+실행법은 [웹 관제](docs/20260922_웹주문_미션관제_dry-run.md)와
+[Action·IPC·왕복 executor](docs/20260922_ExecuteManipulationSkill_ROS2_Action.md)에 있다.
+
+### 실차 주행과 시뮬 주행
+
+| 환경 | 지도·경로·추종 | 근거와 한계 |
+|---|---|---|
+| JD-AMR 실차 | Cartographer 지도 생성, 저장 지도 AMCL, NavFn·RPP, Collision Monitor, RGB-D 면 정렬·접근 | 물 받는 곳·테이블·도크 시험. 팔 동작·충전 시작 미포함 |
+| Isaac 식당 | 알려진 배치의 점유격자·A*, lookahead 차동구동 추종·최종 pose 정렬 | 시뮬 좌표·정적 배치 조건. Nav2·실물 SLAM 실행 아님 |
+
+실차 기록의 대표 예시는 table_02 왕복 186.5초, table_01 왕복 175.0초이며
+각 실행의 Nav2 목표 10개가 완료됐다. 위치 오차는 AMCL·odom·센서 TF의 내부 추정이다.
+같은 날 한 명령으로 table_02 → 도크 → table_01 → 도크를 연속 완료한 기록도 있다.
+팔 작업은 각 5초 대기로 대체했고 충전 시작은 포함하지 않았다. 통제구역 시험에서는 RPP 예측 충돌 검사를 끄고
+Collision Monitor를 유지했다. 사람 주변 운용 성능이나 전체 물 서빙 성공으로 확대하지 않는다.
+
+실차 코드와 최신 이동 기록은 [JD-AMR 저장소](https://github.com/mmporong/jdamr_cube_ros)가 관리한다.
+이 저장소의 [선행 이식 문서](docs/20260912_JDAMR_SLAM_실기체이식.md)는 준비 절차이며,
+이후 이동 시험의 미완 상태를 판단하는 최신 근거로 사용하지 않는다.
+지도만 저장하지 않고 station·footprint·TF·센서·도착 정렬을 함께 맞춰야 한다.
+
+## 계획 기반 조작과 모방학습
+
+계획 기반 조작은 FK로 파지점·병 입구의 위치와 자세를 계산하고 DLS IK로 관절 목표를 구한다.
+컵은 몸통 중간에 수평 접근하며, 물붓기에서는 오른쪽 병 입구를 왼쪽 컵 위로 옮기고
+입구 위치·기울기·붓는 방향·관절 연속성을 함께 제한한다. IK는 시연 학습이 필요하지 않다.
+
+| 방식 | 현재 상태 | 비교할 내용 |
+|---|---|---|
+| 계획 기반 `PLANNED_ALL` | Isaac 접촉·붓기·운반 기준선, 실물 상대 IK 시험 | 좌표·보정 오차, 형상·마찰, 재설정 비용 |
+| 모방학습 | SmolVLA 주방 실물 완주의 팀 보고. ACT 데이터 계약·인계 도구 | 같은 물체·시작 조건의 성공 횟수, 개입, 시간, 물 양 |
+| `HYBRID` | phase별 backend 선택 계약 | 공통 평가 뒤 학습이 도움이 되는 phase만 교체 |
+
+`ACT_ALL`은 저장소의 ACT 전략 계약명이다. SmolVLA를 자동으로 실행하는 adapter나
+현행 통합 rollout이 완료됐다는 뜻은 아니다. SmolVLA·ACT 연결 시 모델별 관측·행동 키,
+관절 순서·단위·보정·checkpoint를 맞춰야 한다. 학습 loss와 물리 과업 성공률도 구분한다.
+
+HYBRID 구현 시 기존 backend 종료, 관절 속도 0·허용 자세 확인, 잔여 action chunk 폐기,
+lease 해제 후 제어권 전환을 요구한다. 이 전환의 실물 통합 검증은 아직 남아 있다.
+IK와 정책 명령을 동시에 쓰지 않으며, 어느 phase를 IL로 바꿀지는 동일 평가 조건에서 결정한다.
+학습과 수집은 [양팔 IL·Hub·다른 PC 학습 인계](docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)를,
+실물 IK 계획·mock과 제한 사항은 [픽앤플레이스 준비](docs/20260929_IK_픽앤플레이스_실행전_준비.md)를 따른다.
+
+## 시뮬레이션과 실물 전환
+
+Isaac Sim 5.1에서 URDF를 가져와 독립 강체 컵·병과 그리퍼의 접촉으로 파지한다.
+물체를 손목에 강제로 붙이지 않으며, 물은 PhysX GPU PBD 입자로 모델링한다.
+파지 유지·미끄럼·용기 자세·입자 분포·상판/테이블 지지·손 분리·도착을 검사한다.
+
+전체 왕복 `dock_roundtrip02`는 한 실행에서 12개 phase와 물리 판정을 통과했다.
+시뮬 시간은 473.892초, 최종 입자는 컵 687개·병 227개·외부 4개다.
+운반 중 추가 입자 손실은 없었지만 전체 무유출·실측 mL 정확도를 뜻하지 않는다.
+구형 80 mm 강체 패드·정답 좌표 조건이며 Nav2와 충전 물리는 실행하지 않았다.
+
+현행 순정 왼손은 별도 강체 컵 접촉 시험을 통과했다. 이를 구형 패드의 전체 미션이나
+실물 물붓기 결과로 대체하지 않는다. 실물 상대 IK는 잠정 손목 대응·엔코더 피드백으로
+컵 동반 상승을 관찰한 단계이며, 절대 좌표 정밀도·안정 운반·놓기는 아직 검증 전이다.
+
+실물 전환은 관절·TCP·카메라/작업셀 대응 → 건식 파지·놓기 → 계량 물붓기 →
+상판 운반 → 이동·조작 통합 순서로 확인한다. Isaac 6.0은 목표 계약이며 5.1 실행 근거와 구분한다.
+고정 베이스의 정적 프리뷰도 물리 접촉 시험과 다르다.
+
+- [URDF 프리뷰·순정 죠 접촉 시험](docs/20260918_URDF_Isaac51_작업환경_프리뷰.md)
+- [양팔 PBD 물붓기](docs/20260921_양팔_PBD_물붓기_시뮬레이션.md)
+- [4테이블 식당·상판 운반·영상 생성](docs/20260921_식당_시뮬레이션_환경.md)
 
 ## 물 양 판정
 
-YOLO 바운딩 박스가 곧 mL는 아니다. 첫 POC는 투명하고 옆면이 곧은 컵 한 종류, 물 한 종류,
-고정 카메라·배경으로 좁힌다.
+시뮬레이션은 컵·병·외부 영역의 입자 수로 물 전달과 손실을 평가한다.
+실물의 목표량 정지는 아직 연결 전이며 다음 흐름으로 개발한다.
 
 ```text
-cup_inner·liquid_region·spill_region segmentation
-  → 컵 원근·기울기 보정
-  → 액면 높이 비율
-  → cup_id별 실측 보정표
-  → 여러 프레임 중앙값·신뢰도
-  → UNDER / TARGET / OVER / SPILL / UNKNOWN
+컵·액체·흘림 영역 분리 → 원근·기울기 보정 → 액면/충전율
+  → 컵별 실측 mL 보정표 → UNDER / TARGET / OVER / SPILL / UNKNOWN
 ```
 
-PLANNED 붓기에서는 액면 추정을 기울임 감속·정지의 폐루프 입력으로 쓴다. ACT에서는 액면
-상태를 관측에 포함하는 안과 외부 감독기가 목표 도달 시 종료시키는 안을 비교한다. 어느
-전략에서도 `OVER / SPILL / UNKNOWN`은 추가 기울임을 금지한다. 최종 평가는 저울 또는 눈금
-계량 ground truth와 대조한다.
+YOLO 검출 박스나 액면 높이 비율이 곧 부피는 아니다. 한 종류의 컵과 물부터
+저울·눈금 계량값으로 대조한다. 목표량·허용오차·불확실 관측 처리와 감속·정지 연동을
+정한 뒤 실제 붓기 시험으로 확인한다.
 
-## 무선 운용과 컴퓨트 분담
+## 데이터·실패 기록·평가
 
-| 위치 | 책임 |
+에피소드·영상·가중치·rosbag은 Git 밖의 비공개 Hub 또는 외부 저장소에 보존한다.
+[데이터 인덱스](data/README.md)에는 수집 조건·버전·해시·split·checkpoint 연결을 남긴다.
+정책 파트의 팀 보고를 공용 인덱스·원본 평가 기록에 연결하는 작업은 남아 있다.
+
+원본 시연은 한 번 보존하고 phase 시작·종료와 성공 기준을 표시해 전체·phase 학습에 재사용한다.
+실물과 시뮬 데이터는 구분하고, 실패 원본을 성공 BC 데이터에 무조건 섞지 않는다.
+
+```text
+증상·실행 조건·근거 보존 → 원인 가설/기각 → 확인된 원인
+  → 시스템 수정 또는 시연 보강 → 같은 조건 재시험 → 다른 조건 회귀 평가
+```
+
+하드웨어·연결, 좌표·보정, 로직, 데이터 분포, 측정 문제를 분리한다.
+[failure bank](tools/failure_bank.py)는 근거 보존·해시 검증·집계를 담당하며,
+[실패 규약](data/failures/README.md)에 가설·조치·재시험을 연결한다.
+
+공통 평가에는 전체/phase별 성공 횟수와 전체 시도 수, 개입·재시도, cycle time,
+실측 물 양·흘림, 위치·조명·초기 잔량 변화, 관측 지연을 기록한다.
+한 실행의 12개 phase 통과를 12회 반복 성공으로 쓰지 않으며,
+정책 loss·주행 도착·물체 파지·물 양 정확도를 각각 평가한다.
+
+## 연산·무선 분담
+
+| 위치 | 목표 책임 |
 |---|---|
-| 로봇의 Raspberry Pi 4B 4GB | 센서·TF·SLAM/AMCL·Nav2·미션 상태기계·PLANNED 조작·명령 중재·watchdog·하드웨어 bridge |
-| 외부 노트북 RTX 5050 Laptop 8GB | 웹 UI, ACT 추론, YOLO 제안, 학습·재학습·분석 |
-| 모터 제어보드·서보 | 바퀴·관절의 실제 구동 |
+| GPU 노트북 | 정책 학습·추론, 고부하 비전, 웹 UI·기록 분석 |
+| Raspberry Pi 4B | 센서·TF·Nav2·미션·정렬, 명령 중재·하드웨어 연결 |
+| ESP32·서보 | 바퀴·관절 구동과 상태 전달 |
 
-카메라·LiDAR·모터는 로봇 내부에 유선으로 연결한다. Pi와 노트북 사이를 실험용 로컬
-네트워크로 무선 연결하는 구조다. 노트북은 서보 포트를 직접 열지 않고, Pi는 ACT를 중복
-추론하지 않는다. 추론 포트를 인터넷에 공개하지 않는다.
+카메라·LiDAR·구동계는 로봇 안에서 유선 연결하고 Pi↔노트북을 로컬 네트워크로 연결한다.
+모든 모델의 원격 추론·실행이 통합 검증된 상태는 아니다. 관측/명령 시각·유효기간,
+중복·두절·재연결과 실제 정지 동작을 확인해야 한다.
+Pi 5 전환은 후순위이며 주행·센서·통신 부하를 측정한 뒤 결정한다.
+팀원의 GPU 서버도 모델·학습 조건을 별도 기록하며 장비 확보만으로 성능을 확정하지 않는다.
 
-LeRobot 0.6.1의 비동기 `PolicyServer / RobotClient` 경로를 우선 평가하되, 행동에는 관측 ID,
-checkpoint·계약 버전, 관절 순서·단위·유효기간을 포함한다. 지연·중복·재연결 후 남은 행동은
-Pi에서 폐기하고 안전 hold로 전환한다.
+## 시작하기
 
-## 지도와 자율주행
+개발 기준은 Ubuntu 24.04, ROS 2 Jazzy, C++17, Python 3.12, LeRobot 0.6.1이다.
+시뮬 물리 실행에는 Isaac Sim 5.1의 별도 Python 환경을 사용한다.
+구성 요소별 설치·빌드는 [ROS 패키지 설명](src/README.md)과 각 실행 문서를 따른다.
 
-두 지도 모드는 launch profile을 분리한다.
+CPU 웹 관제만 확인할 때:
 
-| 모드 | 구성 | 현재 판단 |
-|---|---|---|
-| 지도 작성 | `slam_toolbox`로 이동하며 지도 생성·저장 | 지도 제작 세션 |
-| 반복 물 서빙 | 저장 지도 + AMCL + Nav2 | 권장 기준선 |
-| 온라인 SLAM 주행 | `slam_toolbox` + Nav2 | 가능한 대안, 채택 미결 |
-
-지도만 저장한다고 운용 준비가 끝나는 것은 아니다. 초기 자세, 충전소·주방·테이블 station
-pose, 실제 footprint, LiDAR·오도메트리·TF, costmap, DWB, Collision Monitor와 도착 후 로컬
-정렬을 함께 검증한다. 온라인 SLAM은 지도를 갱신하지만 미탐색 영역의 목표 선택이나 “주방”의
-의미를 자동으로 만들지 않는다.
-
-## 실패 데이터
-
-실패는 바로 ACT 재학습에 넣지 않는다.
-
-```text
-관측된 증상
-  → 실행 조건·근거 보존
-  → 원인 가설과 기각 근거
-  → 확인된 원인
-  → 시스템 수정 또는 데이터 보강
-  → 같은 조건 재시험
-  → 다른 조건 회귀 확인
-  → 학습·평가 데이터 사용 결정
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/service_order_server.py \
+  --backend immediate --port 8765 \
+  --state-dir "$HOME/.local/state/hold-flow/service"
 ```
 
-각 실행에는 `scenario_id`, `control_strategy`, phase별 backend, checkpoint 또는 planner·trajectory·controller
-버전, 영상·관절·action window, YOLO 결과, 지연·지터, 안전 상태를 남긴다. Nav2·TF·캘리브레이션·
-기구·서보 원인이면 시스템을 고치고 같은 checkpoint 또는 같은 PLANNED 산출물 버전으로
-재시험한다. 정책 분포 문제로 확인된 경우에만 새 성공 시연 또는 별도 HIL 파생 데이터셋을
-만든다.
+`http://127.0.0.1:8765/`에서 주문·큐·phase·이력을 확인한다. 이 모드는 물리 실행이 아니다.
+종료는 실행한 터미널에서 `Ctrl+C`를 사용한다. Isaac 연동에는
+[Action 실행 문서](docs/20260922_ExecuteManipulationSkill_ROS2_Action.md)의 서버·socket·backend 설정이 추가로 필요하다.
 
-- 규약: [`data/failures/README.md`](data/failures/README.md)
-- 데이터 인덱스: [`data/README.md`](data/README.md)
-- 스키마: [`data/schema/failure_record.schema.json`](data/schema/failure_record.schema.json)
-- 근거 보존·해시 검증·집계: [`tools/failure_bank.py`](tools/failure_bank.py)
+문서·자동 요약과 모델을 검사할 때:
 
-대용량 영상·rosbag·모델은 Git에 커밋하지 않고 외부 저장 위치와 버전을 데이터 인덱스에 남긴다.
-
-## 구현 상태
-
-기술 이름이 적혀 있어도 구현 완료를 뜻하지 않는다.
-
-| 영역 | 현재 확인된 것 | 아직 필요한 것 |
-|---|---|---|
-| 기구 | 300×300 mm 상판, 상판 높이 720 mm, 2020 기둥×4·2륜·2볼캐스터 CAD, 배터리·전자부·배선/체결 여유 포함 명목 질량 모델 6.126 kg | 판재·압출재·체결홀·실제 질량·평탄도 실측, 선반·도크 확정 |
-| URDF | 46링크/45관절, SO-101×2, 왼쪽 기본 죠·오른쪽 ggao50 프록시, Astra S·LDS-03 통합·정적 감사 PASS | 실측 좌표·오른쪽 원본 충돌 형상·작업 자세 충돌·접촉 동역학 검증 |
-| IK | 구형 역할의 solver와 검증 도구 존재, 결함 기록됨 | 왼팔 컵·오른팔 물통 기준 수정과 회귀검증 |
-| ROS 2 실행 | `hold_flow_description` 패키지 존재 | web·navigation·perception·motion·safety·hardware·mission·logging 패키지 |
-| Nav2 | 설계·검증 항목 문서화 | 지도·station·반복 접근·장애물·도킹 실측 |
-| ACT | 리서치·데이터 계약 | 현행 물 서빙 시연·모델·rollout 없음 |
-| PLANNED/ACT/HYBRID | phase·전환·평가 구조 문서화 | router·Action·backend·전환 테스트 구현 |
-| YOLO 물 양 | segmentation·보정 방식 결정 | 카메라 POC·라벨·보정표·실시간 판정 |
-| 무선 | Pi↔노트북 책임과 프로토콜 후보 문서화 | 실제 지연·드랍·두절·재연결·watchdog 검증 |
-| 데이터 도구 | failure bank·스키마·회귀 테스트 존재 | 실제 실행 로그 연결과 담당자 대조 |
-| Isaac Sim | 6.0 공식 importer 스크립트와 정적 가져오기 계약 PASS | Isaac 장비에서 USD 생성·4점 접촉·gain·60초 안정성 검증 |
-
-현재 노트북 VRAM은 8GB이고 Isaac Sim 6.0 공식 최소 VRAM은 16GB다. 이 장비에서 ROS 2 코드와
-자산을 준비할 수 있지만, Isaac Sim 실행은 Compatibility Checker를 통과한 워크스테이션이나
-원격 장비에서 검증한다.
-
-## 현재 우선순위와 미결
-
-### 바로 구현할 순서
-
-1. `policy 1/2` 내부 phase와 `ExecuteManipulationSkill` 계약을 확정한다.
-2. PLANNED_ALL mock·dry-run으로 phase·성공 판정·안전 정지를 먼저 연결한다.
-3. phase 표시 smoke 시연과 ACT 과적합 기준선을 만든다.
-4. ACT_ALL과 로컬 ACT checkpoint를 만든다.
-5. 같은 protocol로 PLANNED_ALL·ACT_ALL·HYBRID를 비교한다.
-6. 원인이 확인된 실패만 시스템 수정 또는 phase 데이터 보강으로 처리한다.
-7. Nav2·정렬·조작을 mock Action부터 실제 backend로 하나씩 교체한다.
-8. 현행 v0.3 URDF를 Isaac Sim 장비에서 USD로 변환하고 접촉·gain·충돌을 검증한 뒤, 승인된 환경에서 실물 건식·물 서빙을 검증한다.
-
-### 본수집을 막는 결정
-
-1. 회의 TODO의 `3번 policy`가 정책 ID인지 안건 번호인지
-2. policy 2의 사용 팔: 회의 본문은 왼팔, 괄호 주석은 오른팔
-3. 컵·물통·선반·테이블의 실측 좌표와 허용 범위
-4. 목표 물 양·허용 오차·컵 재질·YOLO 라벨·계량 ground truth
-5. phase별 시작·종료 허용오차와 세 전략의 공통 scenario matrix
-6. 무선 명령 유효기간·두절·재연결·중단 동작
-7. 충전 도크 접점·검출·충전 시작 신호
-
-## 역할
-
-- `@mmporong`: SLAM/Nav2·장애물 회피, station·반복 접근, PLANNED/ACT phase 연결,
-  v0.3 URDF의 Isaac Sim USD·접촉 동역학 검증
-- 팀 policy lane: phase 표시 시연, ACT_ALL·로컬 ACT 학습·배포, rollout 실패 개선
-- 인지 lane: Astra S POC, YOLO segmentation, 컵별 보정과 실측 물 양 검증
-- 통합 lane: 웹 요청, 미션 상태기계, 조작 router, 무선 adapter, command mux·안전·logging
-- 기구 lane: 컵 선반, 작업 셀 거리, 실측 체결, 도크·전원 인터페이스
-
-세부 담당자는 회의에서 확정한다. GitHub 초대 상태를 역할 확정으로 간주하지 않는다.
-
-## 저장소 구조와 진입점
-
-```text
-bimanual-robot/
-├── design/        기구 파라미터, CadQuery, STEP·STL
-├── docs/          현행 결정·팀 보고·인계·설계 이력
-├── research/      외부 근거와 프로젝트 적용 판정
-├── data/          episode·failure 계약과 외부 데이터 인덱스
-├── src/           ROS 2·IK·ACT·Isaac Sim 구현 경계와 코드
-├── tools/         계산·검증·데이터 도구
-├── PROGRESS.md    날짜별 완료 증거와 남은 작업
-└── CLAUDE.md      저장소 작업 규칙
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/ci/check_local_markdown_links.py
+python3 tools/ci/sync_readme_status.py
+python3 src/hold_flow_description/scripts/validate_description.py
 ```
 
-| 하려는 일 | 먼저 볼 문서 |
+## 다음 통합 작업
+
+1. 현행 보정·그리퍼·카메라·작업셀과 정책 데이터/checkpoint의 대응을 고정한다.
+2. 같은 조건에서 계획 기반/학습 조작의 건식 파지·놓기와 물붓기를 반복 평가한다.
+3. 컵별 물 양 계량·판정·정지 연동, 상판 적재와 테이블 전달을 확인한다.
+4. 실차의 작업 대기를 조작 Action 완료 신호로 바꾸고 주문별 전체 미션을 연결한다.
+5. 반복 주문·실패·취소·재시작·무선 두절을 평가하고 도크 복귀와 충전 시작을 구분한다.
+
+## 역할과 저장소 진입점
+
+| 담당 | 범위 |
 |---|---|
-| 현행 태스크·phase·인터페이스·평가 | [2026-09-07 회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md) |
-| 팀 전체 공유와 무선·SLAM 설명 | [2026-09-08 팀 보고](docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md) |
-| 다른 세션 인계 | [프로젝트 인계](docs/20260904_양팔로봇_프로젝트_인계.md) |
-| 산업용 피킹과 IL·휴머노이드 차이 | [R33 산업용 피킹과 IL·ACT 적용 경계](research/R33_산업용_피킹과_IL_ACT_적용경계.md) |
-| ROS 2 패키지·인터페이스 경계 | [`src/README.md`](src/README.md) |
-| 기구 계산 | [`design/mechanical/hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml) |
-| URDF·Isaac Sim 모델 | [300×300 mm·720 mm 모델 문서](docs/20260908_300mm_720mm_양팔_URDF_IsaacSim_모델.md) |
-| CAD·출력물 | [`design/cad/README.md`](design/cad/README.md) |
-| 실패 저장·재시험·학습 사용 | [`data/failures/README.md`](data/failures/README.md) |
-| 전체 변경 증거 | [`PROGRESS.md`](PROGRESS.md) |
+| 임주영 | SLAM·Nav2·station·도크 복귀, 미션 연결, URDF·Isaac Sim 검증 |
+| 장준서 | 양팔 텔레옵·모방학습·정책 비교·실물 rollout |
+| 지민석 | 컵·물통·액체 인식, 물 양·흘림 판정 |
+| 공통 | 차체·그리퍼·전원·배선, 통합 시험 |
 
-## 안전과 저장소 운영
+| 경로 | 용도 |
+|---|---|
+| [design](design/cad/README.md) | 기구 사양·CAD·출력물 |
+| [src](src/README.md) | description·interfaces·mission 등 ROS 2 코드 경계 |
+| [data](data/README.md) | 에피소드·평가·실패 계약과 외부 데이터 인덱스 |
+| [docs](docs/20260904_양팔로봇_프로젝트_인계.md) | 설계·실행법·팀 인계 |
+| [research](research/R33_산업용_피킹과_IL_ACT_적용경계.md) | 외부 연구의 적용 판단 |
+| [PROGRESS.md](PROGRESS.md) | 날짜별 실험·실패 수정·검증 근거·변경 이력 |
 
-- 실물 팔·베이스는 결정적 차단 장치가 있는 환경에서만 움직인다. 이 Codex 환경에서는
-  로봇 제어를 dry-run까지만 다룬다.
-- 스톨·관절 한계·충돌 위험·통신 timeout·컵 이탈·흘림 위험은 실제 hold/stop으로 연결한다.
-- 안전 정지가 항상 토크 OFF인 것은 아니다. 물체를 든 자세와 고장 원인에 맞는 정지 동작을
-  검증한다.
-- Issue → 기능 브랜치 → Pull Request → 로컬 검증 → `main` 흐름을 사용한다.
-- 스테이징은 변경 파일을 경로별로 명시하고 `git add .` 또는 `git add -A`를 사용하지 않는다.
-- 데이터셋·모델·rosbag 같은 대용량 파일은 저장소에 직접 커밋하지 않는다.
-- 구현 완료 주장은 코드·실행 로그·테스트처럼 재현 가능한 근거가 있을 때만 표시한다.
+## 저장소 운영
+
+제품 상태는 README, 상세 실행 기록은 PROGRESS와 분야별 문서에 둔다.
+변경은 작업 브랜치에서 검증하고 PR로 main에 반영한다. 위험도 라벨은 검토 안내이며,
+Draft가 아닌 PR은 필수 검사 통과 후 자동 병합한다. CODEOWNERS·추가 승인 인원은 요구하지 않는다.
+자동화 안내는 Actions 요약에 남기고 봇 댓글은 만들지 않는다. GitHub 기본 알림은 수신자 설정을 따른다.
+
+실물 동작은 요청된 실행 범위에서 수행하고, 물체를 든 상태의 hold와 토크 해제를 구분한다.
+동시 제어권·관절 한계·충돌·스톨·timeout·흘림의 처리도 실행 환경에서 확인한다.
+파일 단위로 스테이징하며 데이터·모델·대용량 로그는 커밋하지 않는다.

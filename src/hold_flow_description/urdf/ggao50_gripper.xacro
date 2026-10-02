@@ -33,7 +33,7 @@
   <xacro:property name="bottle_cap_offset_z" value="0.090"/>
   <xacro:property name="cup_rim_offset_z" value="0.040"/>
 
-  <!-- 인서트를 붙인 뒤의 유효 개폐. 135도 V홈 기준 86.6 mm -->
+  <!-- 순정 평면 죠 프록시. 스트로크는 실물 재측정 전의 기존 명목값을 유지한다. -->
   <xacro:property name="ggao50_jaw_min" value="0.010"/>
   <xacro:property name="ggao50_jaw_max" value="0.0433"/>
 
@@ -130,15 +130,10 @@
         <geometry><box size="0.012 0.060 0.050"/></geometry>
         <material name="ggao50_printed"/>
       </visual>
-      <!-- 교체형 인서트. 135도 V홈 기준 두께 12.2 mm -->
-      <visual>
-        <origin xyz="${sign * -0.0061} -0.030 0" rpy="0 0 0"/>
-        <geometry><box size="0.0122 0.060 0.050"/></geometry>
-        <material name="gripper_insert"/>
-      </visual>
+      <!-- 현행 실물은 홈·교체형 인서트 없이 순정 평면 죠를 쓴다. -->
       <collision>
-        <origin xyz="${sign * -0.002} -0.024 0" rpy="0 0 0"/>
-        <geometry><box size="0.031 0.072 0.050"/></geometry>
+        <origin xyz="${sign * 0.006} -0.030 0" rpy="0 0 0"/>
+        <geometry><box size="0.018 0.060 0.050"/></geometry>
       </collision>
     </link>
   </xacro:macro>
