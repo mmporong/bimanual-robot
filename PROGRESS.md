@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-02 | 완료 브랜치 정리와 대표 README 통합 최신화
+
+- 사용자 요청으로 로컬 브랜치 7개·원격 브랜치 3개를 정리했다. squash 병합은 PR·파일 내용·patch 대응으로 대조했고, 오래된 통합 스냅샷은 후속 기능 보존을 확인했다. 삭제 전 전체 이력과 refs를 Git 밖의 bundle에 보존하고 verify를 통과했다. 별도 verifier의 PASS 뒤 예상 SHA를 재확인해 원격은 atomic·exact lease 삭제했다. 열린 팀원 PR #54와 JANGJUNSEO, 미푸시 노션 문서 브랜치 2커밋, 연결된 AMMR·PR 정책 작업 폴더는 보존했다. 복구 기록은 `$HOME/.local/state/bimanual-robot/branch-cleanup-20261002.VloVZc/cleanup.md`다.
+- 대표 README의 날짜별 장문·구형 실험·중복 명령을 걷어내고 현재 미션·하드웨어·관제 backend·실차/시뮬 주행·계획/학습 조작·평가·실행 진입점으로 재구성했다. 공식 보정·실물 상대 IK 상태는 관련 기능에 반영하고 상세 원본은 기존 PROGRESS·분야 문서로 연결했다. 기구 YAML 자동 요약은 유지했으며 기구·캘리브레이션·제품 코드는 변경하지 않았다.
+- 사용자 제공 `$HOME/Downloads/양팔로봇_노션_기획보고서_20261001.md`와 현재 코드·원본 결과를 대조했다. Cartographer/AMCL/NavFn/RPP 실차와 Isaac A*/lookahead를 구분하고, SmolVLA 완주 팀 보고와 공용 checkpoint·평가 연결 미완을 분리했다. 구형 패드 전체 왕복, 순정 죠 단독 접촉, 실물 영상상 컵 상승을 서로의 성공 근거로 대체하지 않았다.
+- 시뮬 근거는 `/data/$USER/robot-artifacts/restaurant/dock_roundtrip02/result.json`의 473.892초·최종 컵687/병227/외부4·운반 추가 손실0·Nav2/충전 물리 미실행이다. 실차는 `$HOME/jdamr_data/portfolio_20261001/metrics.json`의 table_02 186.5초와 table_01 175.0초·각 Nav2 목표10개 완료를 확인했다. 주행 인계 `$HOME/jdamr_rgbd_ws/src/jdamr_cube_ros/jdamr_cube_navigation/evaluation/20261001_PORTFOLIO_HANDOFF_FOR_CODEX.md`에는 이후 연속 table_02→도크→table_01→도크 실행도 기록돼 있다. README 수치는 대표 두 실행으로 한정하며 전체 성공률·외부 계측 정확도·실물 물 서빙 성과로 쓰지 않는다.
+- 로컬 링크 95개 문서·README 자동 요약·diff·CLI 옵션·관련 문서 회귀 5개가 통과했다. 독립 검토의 보완 두 건을 반영해 최신 연속 실차 이동을 추가하고 HYBRID 제어권 전환을 구현 완료가 아닌 요구사항으로 명시했다. 이 작업에서 새 로봇·카메라·시뮬 실행, 물리 실험, 봇 댓글·외부 알림은 수행하지 않았다.
+
 ## 2026-09-30 | PR #58 병합 전 CI 테스트 의존성 수정
 
 - 작업 브랜치를 푸시한 뒤 PR #58의 전체 CI에서 805 PASS / 1 FAIL / 12 SKIP를 확인했다. 실패는 `test_execute_uses_exclusive_buses_and_composes_dashboard_monitor`의 `monkeypatch.setattr("serial.Serial", ...)`가 CI에 없는 pyserial을 가져온 것이었다. 실물 IK 동작의 실패가 아니다.
