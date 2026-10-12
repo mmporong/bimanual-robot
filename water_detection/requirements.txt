@@ -1,0 +1,8 @@
+# Python 3.10+
+ultralytics>=8.4      # YOLOE (컵 검출 + 액체 세그멘테이션)
+torch                 # GPU 권장 (CUDA)
+opencv-python
+numpy
+fastapi
+uvicorn
+pydantic
