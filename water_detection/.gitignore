@@ -4,6 +4,7 @@ captures/
 *.log
 # Ultralytics가 YOLOE 텍스트 프롬프트용으로 자동 다운로드하는 파일 (약 250MB)
 mobileclip2_b.ts
-# 모델 가중치는 기본으로 올리지 않는다. 올리려면: git add -f models/water_yoloe.pt (약 23MB)
+# 모델 가중치: water_yoloe.pt(액체 세그멘테이션)만 저장소에 포함하고 나머지는 올리지 않는다
 models/*.pt
+!models/water_yoloe.pt
 /*.pt

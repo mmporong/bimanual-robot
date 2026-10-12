@@ -55,7 +55,7 @@ pip install -r requirements.txt
 
 | 파일 | 내용 | 얻는 방법 |
 |---|---|---|
-| `models/water_yoloe.pt` | 액체 세그멘테이션 (`yoloe-26s-seg`를 직접 라벨링한 탑뷰 사진 56장으로 파인튜닝) | 저장소 Release 또는 직접 학습 |
+| `models/water_yoloe.pt` | 액체 세그멘테이션 (`yoloe-26s-seg`를 직접 라벨링한 탑뷰 사진 56장으로 150 epoch 파인튜닝, 약 23MB) | **저장소에 포함** (팀 데이터 규칙의 예외) |
 | `models/yoloe-26s-seg.pt` | 컵 검출용 YOLOE 기본 모델 | 없으면 Ultralytics가 자동 다운로드 |
 
 처음 실행할 때 Ultralytics가 텍스트 프롬프트용 `mobileclip2_b.ts`(약 250MB)를 현재 폴더에 내려받습니다.
@@ -180,7 +180,7 @@ perception/
   yoloe_detector.py YOLOE 컵 검출 (박스 + 마스크)
   astra_stream.py   Orbbec Astra 컬러 스트림 (OpenNI2 헬퍼)
 tests/              단위 테스트 (합성 컵)
-models/             모델 가중치 (git에 기본 포함 안 함)
+models/             water_yoloe.pt 포함 (yoloe-26s-seg.pt는 자동 다운로드)
 ```
 
 ## 라이선스
