@@ -1,0 +1,83 @@
+diff --git a/src/lerobot/scripts/lerobot_record.py b/src/lerobot/scripts/lerobot_record.py
+index 532a8c60..c5d384d8 100644
+--- a/src/lerobot/scripts/lerobot_record.py
++++ b/src/lerobot/scripts/lerobot_record.py
+@@ -486,11 +486,22 @@ def record(
+                     display_compressed_images=display_compressed_images,
+                 )
+ 
++                # (bimanual-robot local patch, 2026-10-13: 재녹화 키 즉시 반영)
++                # 원래 로직은 재녹화(r) 여부를 "리셋 대기(reset_time_s)"가 끝난 뒤에야 확인했다.
++                # 그래서 r을 눌러 방금 녹화를 멈춘 뒤 리셋 대기 중에 다음(n/→)을 누르면,
++                # 그 n이 리셋 대기만 조기 종료시키고 앞서 눌렀던 r이 뒤늦게 발동해서
++                # 방금 찍은 좋은 테이크까지 같이 버려지는 문제가 있었다. 그래서 record_loop가
++                # 끝나자마자(리셋 대기 전에) 바로 확인해서, r이면 리셋 대기 없이 즉시 재녹화한다.
++                if events["rerecord_episode"]:
++                    log_say("Re-record episode", cfg.play_sounds)
++                    events["rerecord_episode"] = False
++                    events["exit_early"] = False
++                    dataset.clear_episode_buffer()
++                    continue
++
+                 # Execute a few seconds without recording to give time to manually reset the environment
+                 # Skip reset for the last episode to be recorded
+-                if not events["stop_recording"] and (
+-                    (recorded_episodes < cfg.dataset.num_episodes - 1) or events["rerecord_episode"]
+-                ):
++                if not events["stop_recording"] and (recorded_episodes < cfg.dataset.num_episodes - 1):
+                     log_say("Reset the environment", cfg.play_sounds)
+ 
+                     record_loop(
+@@ -507,12 +518,13 @@ def record(
+                         display_mode=cfg.display_mode,
+                     )
+ 
+-                if events["rerecord_episode"]:
+-                    log_say("Re-record episode", cfg.play_sounds)
+-                    events["rerecord_episode"] = False
+-                    events["exit_early"] = False
+-                    dataset.clear_episode_buffer()
+-                    continue
++                    # 리셋 대기 중에도 r을 눌렀을 수 있으니 한 번 더 확인한다.
++                    if events["rerecord_episode"]:
++                        log_say("Re-record episode", cfg.play_sounds)
++                        events["rerecord_episode"] = False
++                        events["exit_early"] = False
++                        dataset.clear_episode_buffer()
++                        continue
+ 
+                 dataset.save_episode()
+                 recorded_episodes += 1
+diff --git a/src/lerobot/utils/keyboard_input.py b/src/lerobot/utils/keyboard_input.py
+index 00c0f53e..275b3c0b 100644
+--- a/src/lerobot/utils/keyboard_input.py
++++ b/src/lerobot/utils/keyboard_input.py
+@@ -423,14 +423,28 @@ def init_keyboard_listener():
+         "stop_recording": False,
+     }
+ 
++    # (bimanual-robot local patch, 2026-10-13: 디바운스 + 진단 로그)
++    # 혹시 모를 하드웨어 레벨 고스트 입력에 대비해, 저장(n/→) 직후 0.5초 내의
++    # 재녹화(r/←) 입력은 무시한다. 재발 시 원인 조사를 위해 모든 키 입력을
++    # 타임스탬프와 함께 남긴다 (지금까지 디바운스가 실제로 발동한 적은 없음 —
++    # 재녹화 키 버그의 진짜 원인은 lerobot_record.py 쪽 타이밍이었다).
++    _last_save_press_t = [0.0]
++    _DEBOUNCE_S = 0.5
++
+     # Accept the single-byte letter equivalents n/r/q alongside the arrow/Esc keys: the
+     # letters are immune to the escape-sequence split/delay/interception that affects arrows
+     # over laggy SSH/VNC links. Case-insensitive so Shift+letter still works.
+     def on_key(name: str) -> None:
++        now = time.perf_counter()
++        print(f"[kbd-probe] raw key={name!r} at t={now:.3f}")
+         key = name.lower()
+         if key in ("right", "n"):
++            _last_save_press_t[0] = now
+             apply_recording_control("right", events)
+         elif key in ("left", "r"):
++            if now - _last_save_press_t[0] < _DEBOUNCE_S:
++                print(f"[kbd-probe] ignored {name!r}: within {_DEBOUNCE_S}s of last save/next press")
++                return
+             apply_recording_control("left", events)
+         elif key in ("esc", "q"):
+             apply_recording_control("esc", events)
