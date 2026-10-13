@@ -17,6 +17,15 @@ pyvirtualcam(OBS Virtual Camera 백엔드)으로 계속 송출해서, lerobot의
 데이터 수집 전에 이 스크립트를 띄워두고, lerobot 쪽 카메라 설정에서
 "OBS Virtual Camera"가 잡히는 index(`output/capture_indexed.py`로 재확인)를
 `--robot.cameras`의 `index_or_path`로 쓰면 된다.
+
+(bimanual-robot local patch, 2026-10-13: 자동 재연결)
+이 센서가 USB 대역폭 경합 등으로 간헐적으로 "멈춘 프레임을 계속 내보내는"
+상태에 빠지는 걸 여러 차례 확인했다 — 에러 없이 조용히 멈추기 때문에,
+실제 녹화 세션 하나(5개 에피소드)의 탑뷰 영상이 전부 정지 화면으로
+망가진 사고가 있었다. 그래서 연속된 프레임이 일정 횟수 이상 완전히
+동일하면(=센서가 멈췄다는 뜻) OpenNI2 연결만 끊었다가 다시 열어서
+스스로 복구하도록 했다 — 가상 카메라(pyvirtualcam) 쪽은 계속 열어두므로
+lerobot 쪽에서는 index가 끊기지 않는다.
 """
 
 import sys
@@ -34,13 +43,13 @@ SDK_BIN = (
 )
 
 FPS = 30
+# 이만큼 연속으로 완전히 동일한 프레임이 오면 "센서가 멈췄다"고 판단한다.
+# 30fps 기준 약 2초치.
+STALE_FRAME_LIMIT = FPS * 2
 
 
-def main() -> None:
-    if not Path(SDK_BIN).is_dir():
-        sys.exit(f"SDK bin 폴더를 찾을 수 없습니다: {SDK_BIN}")
-
-    openni2.initialize(SDK_BIN)
+def _connect_color_stream():
+    """Astra 장치를 열고 컬러 스트림을 시작해 (device, color_stream, width, height)를 반환한다."""
     try:
         device = openni2.Device.open_any()
     except Exception as exc:  # noqa: BLE001 - 진단용으로 원인 그대로 보여준다
@@ -62,7 +71,7 @@ def main() -> None:
         print(
             "노출/화이트밸런스 고정 완료 "
             f"(gain={color_stream.camera.gain}, exposure={color_stream.camera.exposure}). "
-            "이 값은 docs/20261013_뎁스카메라_노출고정_및_트러블슈팅.md 에 기록해두고 "
+            "이 값은 docs/20261013_뎁스카메라_노출_화이트밸런스_고정.md 에 기록해두고 "
             "평가·추론 때도 반드시 동일하게 적용할 것."
         )
     else:
@@ -70,22 +79,71 @@ def main() -> None:
 
     first = color_stream.read_frame()
     width, height = first.width, first.height
-    print(f"Astra 컬러 스트림: {width}x{height} @ {FPS}fps")
+    print(f"Astra 컬러 스트림 연결: {width}x{height} @ {FPS}fps")
+    return device, color_stream, width, height
+
+
+def _disconnect(device, color_stream) -> None:
+    try:
+        color_stream.stop()
+    except Exception:  # noqa: BLE001 - 재연결 과정이니 정리 실패는 무시하고 넘어간다
+        pass
+    try:
+        device.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def main() -> None:
+    if not Path(SDK_BIN).is_dir():
+        sys.exit(f"SDK bin 폴더를 찾을 수 없습니다: {SDK_BIN}")
+
+    openni2.initialize(SDK_BIN)
+
+    device, color_stream, width, height = _connect_color_stream()
 
     with pyvirtualcam.Camera(width=width, height=height, fps=FPS) as cam:
         print(f"가상 카메라 송출 시작: {cam.device} (Ctrl+C로 종료)")
+        last_frame_bytes = None
+        stale_count = 0
         try:
             while True:
-                frame = color_stream.read_frame()
-                buf = frame.get_buffer_as_triplet()
-                rgb = np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3)
+                try:
+                    frame = color_stream.read_frame()
+                    buf = frame.get_buffer_as_triplet()
+                    rgb = np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3)
+                except Exception as exc:  # noqa: BLE001 - 센서 쪽 예외도 재연결로 처리
+                    print(f"[watchdog] 프레임 읽기 실패({exc}), 재연결 시도...")
+                    _disconnect(device, color_stream)
+                    device, color_stream, _, _ = _connect_color_stream()
+                    stale_count = 0
+                    last_frame_bytes = None
+                    continue
+
+                frame_bytes = rgb.tobytes()
+                if frame_bytes == last_frame_bytes:
+                    stale_count += 1
+                else:
+                    stale_count = 0
+                last_frame_bytes = frame_bytes
+
+                if stale_count >= STALE_FRAME_LIMIT:
+                    print(
+                        f"[watchdog] 프레임이 {STALE_FRAME_LIMIT}장 연속 동일 — 센서가 멈춘 것으로 "
+                        "판단해 재연결합니다."
+                    )
+                    _disconnect(device, color_stream)
+                    device, color_stream, _, _ = _connect_color_stream()
+                    stale_count = 0
+                    last_frame_bytes = None
+                    continue
+
                 cam.send(rgb)
                 cam.sleep_until_next_frame()
         except KeyboardInterrupt:
             pass
         finally:
-            color_stream.stop()
-            device.close()
+            _disconnect(device, color_stream)
             openni2.unload()
 
 
