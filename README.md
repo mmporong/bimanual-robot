@@ -40,22 +40,23 @@ MS Team의 공용 저장소이며, 이동·양팔 조작·관제를 하나의 �
 
 | 항목 | 현행 값 |
 |---|---|
-| 기계 개정 | `2026-09-22_left_stock_so101_gripper_selected` |
+| 기계 개정 | `2026-10-14_final_four_wheel_drive_selected` |
 | 상·하부 프레임 | 450×340 mm |
 | 상판 높이 | 720 mm |
 | 왼손 | SO-101 순정 회전식 죠, TPU·오버캡 없음 |
 | 오른손 | `ggao50_SO101_Parallel_Gripper` |
 | RGB-D | Orbbec_Astra_S, 상판 위 250 mm |
-| 베이스 | differential_two_wheel_two_ball_caster, Feetech_STS3215_C018_12V |
+| 베이스 | skid_steer_four_wheel_drive, Feetech_STS3215_C018_12V |
 | 모델 상태 | `simulation_model_ready_physical_measurements_pending` |
 
 원본: [`hold_flow_mechanical_v0_3.yaml`](design/mechanical/hold_flow_mechanical_v0_3.yaml)
 과거 후보: [`finray_80mm_lip3_selection.yaml`](design/gripper/finray_80mm_lip3_selection.yaml)
 <!-- AUTO:PROJECT-STATUS:END -->
 
-자동 요약의 `differential_two_wheel_two_ball_caster`는 기계 YAML과 시뮬레이션 모델의
-현행 값이다. 실제 하단 프레임은 후면 볼캐스터를 떼고 STS3215 두 개와 바퀴를 추가해
-네 바퀴로 주행한다. 이 차이는 실측 기하와 모델을 갱신하기 전까지 유지한다.
+4륜 스키드스티어를 최종 구동안으로 선택했다. 기계 YAML·URDF·Isaac 구동 계약·프리뷰는
+네 구동륜과 캐스터 없는 구성으로 맞췄다. 기존 전륜 실측 간격510 mm와 앞끝에서 축까지
+65 mm를 반영했고, 후륜 대칭 장착은 사용자 확인을 반영했으며 축간210 mm는 기존 전륜 실측에서 환산한 값이다. 상판 높이·센서
+장착 좌표는 기존 명목 모델이며 높아진 실차 구조와의 일치는 재측정 뒤 반영한다.
 
 ## 미션과 MVP 범위
 
@@ -84,13 +85,14 @@ MVP에서 제외한다. 태스크 결정 원본은 [회의 결정과 실행 범�
   카메라 연결 확인은 영상 좌표와 팔 좌표의 보정 완료가 아니다.
 - 실차 주행: Raspberry Pi 4B 4GB, ESP32, Astra S와 YDLIDAR G4. Astra S는 상판
   뒤끝의 약 1 m 높이에서 아래를 보고, LiDAR 위치는 유지했다. 카메라의 정확한 각도와
-  높이, 후륜축과 트레드는 재측정 전이다.
+  높이와 적재 상태 유효 트레드는 재측정 전이다. 후륜은 앞뒤 끝에서 같은 거리로 장착했다는 사용자 확인을 반영한다.
 - 4WD 제어: ESP32가 같은 측 앞뒤 모터 속도를 `SYNCWRITE`로 보내고 네 엔코더를
   따로 읽어 측면 평균을 계산한다. 기존 protocol v2와 Pi 40핀 UART 운영을 유지한다.
   접촉센서는 5 V와 GND만 연결돼 신호 입력은 아직 없다.
-- 모델 차이: URDF의 LDS-03·2륜과 볼캐스터 배치는 현재 실차 구성과 다르다. 근거 없는
-  기구 YAML·URDF 값을 먼저 바꾸지 않고 실측 뒤 맞춘다.
-- 질량·하중: URDF 명목 빈 질량은 7.379 kg. 추가 적재 5 kg의 수동 평지 주행은
+- 모델: URDF는4개 구동륜과 캐스터 없는 최종안을 사용한다. 축간210 mm는 사용자 대칭 장착 확인의 환산값이며, 적재 상태 유효 트레드와
+  높아진 상판·카메라 위치는 미측정이다. LDS-03 센서 프록시도 실차 G4와의 차이를 남겨
+  두며, 모델 좌표를 실차 TF에 자동 적용하지 않는다.
+- 질량·하중: URDF 명목 빈 질량은 7.479 kg. 추가 적재 5 kg의 수동 평지 주행은
   예비 시험이며 정격 적재량·실측 총질량·연속 운전 성능으로 사용하지 않는다.
 
 캘리브레이션은 [양팔 JSON과 보정 상태](calibration/README.md)로 관리한다.

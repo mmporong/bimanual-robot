@@ -43,10 +43,10 @@ def compose(iso_path: Path, front_path: Path, top_path: Path, output: Path) -> N
     canvas = Image.new("RGB", (2000, 1420), WHITE)
     draw = ImageDraw.Draw(canvas)
     draw.text((70, 52), "HOLD THE FLOW · CURRENT GEOMETRY", font=font(23, "bold"), fill=BLUE)
-    draw.text((70, 100), "450×340 mm 전체 모델 · SO-101 좌우 끝 배치", font=font(48, "bold"), fill=INK)
+    draw.text((70, 100), "450×340 mm 모델 · 4륜 구동 최종안", font=font(48, "bold"), fill=INK)
     draw.text(
         (70, 174),
-        "커밋된 URDF·STL 실제 축척 · 잘림 없는 등각·정면·상면도",
+        "커밋 URDF·STL 축척 · 전륜 실측 기준 · 후륜은 사용자 대칭 장착 확인",
         font=font(23),
         fill=MUTED,
     )
@@ -59,7 +59,7 @@ def compose(iso_path: Path, front_path: Path, top_path: Path, output: Path) -> N
         "프레임 450(W)×340(D)",
         "상판 윗면 z=720 mm",
         "팔 중심 (20, ±170, 726)",
-        "Astra 광학 중심 z=970 mm",
+        "4개 구동륜 · 볼캐스터 없음",
     )
     x = 55
     for fact in facts:

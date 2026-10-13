@@ -94,6 +94,28 @@ def test_kinematic_simulation_converges_through_ninety_degree_curve():
     assert pose[2] == pytest.approx(math.pi / 2.0, abs=0.02)
 
 
+def test_zero_offset_four_wheel_center_pose_converges_through_curve():
+    pose = np.array([0.0, 0.0, 0.0], dtype=float)
+    path = np.array([[0.0, 0.0], [0.35, 0.0], [0.35, 0.30]], dtype=float)
+    goal_yaw = math.pi / 2.0
+    dt = 0.02
+
+    for _ in range(3000):
+        command = MODULE.follow_path(pose, path, goal_yaw, axle_offset=0.0)
+        if command["arrived"]:
+            break
+        yaw = float(pose[2])
+        linear = command["linear_m_s"]
+        angular = command["angular_rad_s"]
+        pose[0] += linear * math.cos(yaw) * dt
+        pose[1] += linear * math.sin(yaw) * dt
+        pose[2] = math.atan2(math.sin(yaw + angular * dt), math.cos(yaw + angular * dt))
+
+    assert command["arrived"] is True
+    assert pose[:2] == pytest.approx(path[-1], abs=0.015)
+    assert pose[2] == pytest.approx(goal_yaw, abs=0.02)
+
+
 def test_final_axle_five_mm_boundary_does_not_reverse_turn():
     # Regression for the polar/yaw-only switch: identical bearing, 20 um apart.
     goal = np.array([-1.55, -2.25])

@@ -1,7 +1,7 @@
 schema_version: "0.3"
 design_id: hold_flow_mechanical_v0_3
 status: simulation_model_ready_physical_measurements_pending
-revision: 2026-09-22_left_stock_so101_gripper_selected
+revision: 2026-10-14_final_four_wheel_drive_selected
 units:
   length: mm
   mass: kg
@@ -210,47 +210,91 @@ camera:
     - wrist_and_gripper_occlusion_map
 
 navigation:
-  drive_type: differential_two_wheel_two_ball_caster
+  drive_type: skid_steer_four_wheel_drive
+  selection_status: final_selected_by_user
+  selected_on: 2026-10-14
+  physical_assembly: four_drive_wheels_confirmed_20261013
+  ball_caster_count: 0
   reuse_source:
     repository: https://github.com/mmporong/jdamr_cube_ros
-    checked_commit: 82fa87a257080bd2298bada2b11d60f686c555f1
+    checked_commit: 960c5062e64b68be441fbf8c578fcd6535b0552b
     firmware: firmware/jdamr_cube_fw/jdamr_cube_fw.ino
     motor: Feetech_STS3215_C018_12V
     bus_baud: 1000000
+    host_uart_baud: 115200
     left_servo_id: 2
     right_servo_id: 1
-    host_parameter_source: jdamr_cube_bringup/launch/real_bringup.launch.py
-    old_effective_wheel_separation_mm: 183.6
-    reuse_decision: hardware_reusable_ros_geometry_and_direction_check_required
+    rear_left_servo_id: 3
+    rear_right_servo_id: 4
+    reuse_decision: installed_four_servos_side_synchronous_velocity_individual_encoder_feedback
+  servo_ids_by_corner:
+    front_left: 2
+    front_right: 1
+    rear_left: 3
+    rear_right: 4
+  joint_names_by_corner:
+    front_left: left_wheel_joint
+    front_right: right_wheel_joint
+    rear_left: rear_left_wheel_joint
+    rear_right: rear_right_wheel_joint
+  geometry_provenance:
+    front_axle_from_chassis_center:
+      value: 0.105
+      unit: m
+      measured_at: 2026-09-15
+      valid_for: unchanged_front_axle_and_340mm_lower_frame
+      source: JD-AMR new_base_geometry.yaml frame_length and front_to_wheel_axis
+      method: half_frame_length_minus_front_to_wheel_axis
+    wheel_center_separation:
+      value: 0.510
+      unit: m
+      measured_at: 2026-09-15
+      valid_for: unchanged_front_wheel_assembly
+      source: JD-AMR new_base_geometry.yaml user_tape_measurement
+    rear_axle_from_chassis_center:
+      value: -0.105
+      unit: m
+      modeled_at: 2026-10-14
+      valid_for: four_wheel_final_design_nominal_model_only
+      source: user_confirmed_same_inset_from_front_and_rear_edges
+      confirmed_at: 2026-10-14
+      status: user_confirmed_symmetry_derived_not_tape_measured
+    source_geometry: https://github.com/mmporong/jdamr_cube_ros/blob/960c5062e64b68be441fbf8c578fcd6535b0552b/jdamr_cube_description/config/new_base_geometry.yaml
+  frame_binding:
+    model_base_footprint: chassis_center_on_floor
+    runtime_jdamr_base_footprint: front_axle_projection_on_floor
+    model_from_runtime_translation_m: [0.105, 0.0, 0.0]
+    runtime_tf_changed_by_this_design: false
   wheel:
     measured_diameter: 65.0
     calibrated_effective_radius: 32.9
-    center_xyz_left: [0.0, 160.0, 32.9]
-    center_xyz_right: [0.0, -160.0, 32.9]
-    geometric_center_separation: 320.0
-    effective_separation_status: calibrate_on_physical_chassis
+    radius_status: initial_from_prior_same_wheel_not_four_wheel_load_calibrated
+    center_xyz_left: [105.0, 255.0, 32.9]
+    center_xyz_right: [105.0, -255.0, 32.9]
+    center_xyz_rear_left: [-105.0, 255.0, 32.9]
+    center_xyz_rear_right: [-105.0, -255.0, 32.9]
+    geometric_center_separation: 510.0
+    wheelbase_design: 210.0
+    wheelbase_measured: null
+    rear_center_separation_status: same_lateral_line_design_not_remeasured
+    visual_width: 30.0
+    visual_width_basis: 540mm_outer_width_minus_510mm_center_separation
+    effective_separation_status: four_wheel_skid_steer_calibration_pending
     mass_each: 0.110
+    mass_status: nominal_wheel_link_proxy_not_measured_drive_assembly_mass
     joint_effort: 0.981
     joint_velocity: 4.72
     initial_host_parameters:
       wheel_radius_m: 0.0329
-      wheel_separation_m: 0.320
+      wheel_separation_m: 0.510
       counts_per_rev: 4096
-      note: wheel_separation 0.320 m는 기하 시작값이며 직진·제자리 회전으로 유효값을 재보정
-  ball_casters:
-    ball_radius: 12.5
-    mass_each: 0.060
-    centers_xyz:
-      - [120.0, 0.0, 12.5]
-      - [-120.0, 0.0, 12.5]
-    joint_model: fixed_sphere_contact_proxy
-    physics_limit: urdf_cannot_model_free_rolling_ball_spin_axes
-    isaac_tuning: assign_low_friction_contact_material_after_import
+      note: geometric_start_only_four_wheel_effective_track_requires_calibration
   support_polygon_xy:
-    - [120.0, 0.0]
-    - [0.0, 160.0]
-    - [-120.0, 0.0]
-    - [0.0, -160.0]
+    - [105.0, 255.0]
+    - [-105.0, 255.0]
+    - [-105.0, -255.0]
+    - [105.0, -255.0]
+  support_polygon_status: nominal_four_wheel_contact_centers_not_measured_load_distribution
   lidar_candidate:
     model: ROBOTIS_LDS_03
     center_xyz: [100.0, 0.0, 165.0]
@@ -302,7 +346,7 @@ verification:
     - cad_assembly_placements_match_this_spec
     - all_non_frame_links_have_positive_mass_and_positive_definite_inertia
     - visual_and_collision_sets_match
-    - tabletop_arm_camera_wheel_and_caster_coordinates_match_this_spec
+    - tabletop_arm_camera_and_four_wheel_coordinates_match_this_spec
     - isaac_import_contract_static_check_passes
   physical_measurement_blockers:
     - tabletop_material_and_actual_mass
@@ -310,5 +354,5 @@ verification:
     - so101_mount_hole_pattern
     - left_cup_overcap_jaw_fit
     - right_gripper_wrist_transform_and_exact_collision_mesh
-    - wheel_effective_separation_and_caster_preload
+    - four_wheel_axle_positions_effective_track_contact_heights_and_load_distribution
     - camera_extrinsic_and_intrinsic_calibration

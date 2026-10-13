@@ -149,14 +149,10 @@ def _wheel_cylinders(link: ET.Element) -> list[ET.Element]:
     return cylinders
 
 
-def _caster_radius(link: ET.Element) -> float:
-    spheres = link.findall("./visual/geometry/sphere") + link.findall("./collision/geometry/sphere")
-    if len(spheres) != 2:
-        raise ValueError(f"link {link.get('name')}에 visual/collision sphere가 필요합니다")
-    radii = [_strict_number(float(sphere.get("radius", "nan")), "캐스터 반지름") for sphere in spheres]
-    if not math.isclose(radii[0], radii[1], abs_tol=1e-12):
-        raise ValueError(f"link {link.get('name')}의 visual/collision 반지름이 다릅니다")
-    return radii[0]
+def _strict_vector3(value: object, label: str) -> list[float]:
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(f"{label}: 유한 숫자 3개가 필요합니다")
+    return [_strict_number(item, label) for item in value]
 
 
 def _apply_base_overlay(root: ET.Element, contract: dict[str, Any], provenance: dict[str, str]) -> dict[str, Any]:
@@ -166,78 +162,121 @@ def _apply_base_overlay(root: ET.Element, contract: dict[str, Any], provenance: 
     if not isinstance(target, dict) or not isinstance(measured, dict):
         raise ValueError("base contract에 target_design과 hardware.measured_base_footprint가 필요합니다")
 
+    if target.get("drive_type") != "skid_steer_four_wheel_drive":
+        raise ValueError("현행 프리뷰에는 skid_steer_four_wheel_drive target_design이 필요합니다")
+    if target.get("model_base_frame_definition") != "chassis_center_on_floor":
+        raise ValueError("model_base_frame_definition은 chassis_center_on_floor여야 합니다")
+    if target.get("runtime_base_frame_definition") != "front_axle_projection_on_floor":
+        raise ValueError("runtime_base_frame_definition은 front_axle_projection_on_floor여야 합니다")
+
+    model_from_runtime_m = _strict_vector3(
+        target.get("model_from_runtime_translation_m"), "model_from_runtime_translation_m",
+    )
+    wheelbase_m = _strict_number(target.get("wheelbase_design_m"), "wheelbase_design_m")
     wheel_radius_m = _strict_number(target.get("wheel_radius_initial_m"), "wheel_radius_initial_m")
     separation_m = _strict_number(target.get("wheel_separation_geometric_m"), "wheel_separation_geometric_m")
     wheel_outer_width_m = _strict_number(measured.get("wheel_outer_width_m"), "wheel_outer_width_m")
-    front_m = _strict_number(measured.get("front_m"), "front_m")
-    rear_m = _strict_number(measured.get("rear_m"), "rear_m")
-    if wheel_radius_m <= 0 or separation_m <= 0 or wheel_outer_width_m <= separation_m:
-        raise ValueError("바퀴 반지름·간격·외측 폭의 관계가 올바르지 않습니다")
+    if wheel_radius_m <= 0 or wheelbase_m <= 0 or separation_m <= 0 or wheel_outer_width_m <= separation_m:
+        raise ValueError("바퀴 반지름·휠베이스·간격·외측 폭의 관계가 올바르지 않습니다")
+    if target.get("wheelbase_measured_m") is not None:
+        raise ValueError("별도 축간 계측 전에는 wheelbase_measured_m가 null이어야 합니다")
+    if target.get("rear_axle_geometry_status") not in {
+        "design_assumption_not_measured",
+        "user_confirmed_symmetry_derived_not_tape_measured",
+    }:
+        raise ValueError("rear_axle_geometry_status가 설계 또는 사용자 확인 환산 근거를 보존해야 합니다")
 
-    chassis_center_from_axle_m = (front_m + rear_m) / 2.0
-    axle_x_in_scene_m = -chassis_center_from_axle_m
     wheel_half_y_m = separation_m / 2.0
     wheel_length_m = wheel_outer_width_m - separation_m
     base_origin = _origin_xyz(_named(root, "joint", "base_footprint_joint"))
     base_link_from_floor_m = base_origin[2]
-    wheel_z_m = wheel_radius_m - base_link_from_floor_m
 
+    wheel_specs = (
+        ("left_wheel_joint", "left_wheel_link", wheel_half_y_m, "front_left"),
+        ("right_wheel_joint", "right_wheel_link", -wheel_half_y_m, "front_right"),
+        ("rear_left_wheel_joint", "rear_left_wheel_link", wheel_half_y_m, "rear_left"),
+        ("rear_right_wheel_joint", "rear_right_wheel_link", -wheel_half_y_m, "rear_right"),
+    )
+    expected_joint_names = {spec[0] for spec in wheel_specs}
+    expected_link_names = {spec[1] for spec in wheel_specs}
+    actual_joint_names = {
+        joint.get("name") for joint in root.findall("./joint")
+        if (joint.get("name") or "").endswith("wheel_joint")
+    }
+    actual_link_names = {
+        link.get("name") for link in root.findall("./link")
+        if (link.get("name") or "").endswith("wheel_link")
+    }
+    if actual_joint_names != expected_joint_names or actual_link_names != expected_link_names:
+        raise ValueError("4WD URDF에는 정해진 바퀴 joint/link가 각각 4개 있어야 합니다")
+    if any("caster" in (element.get("name") or "").lower()
+           for tag in ("joint", "link") for element in root.findall(f"./{tag}")):
+        raise ValueError("4WD URDF에는 caster joint/link가 없어야 합니다")
+
+    source_x_by_axle: dict[str, float] = {}
     wheel_changes: dict[str, Any] = {}
-    for side, y_m in (("left", wheel_half_y_m), ("right", -wheel_half_y_m)):
-        joint = _named(root, "joint", f"{side}_wheel_joint")
+    for joint_name, link_name, y_m, position_label in wheel_specs:
+        joint = _named(root, "joint", joint_name)
         before_xyz = _origin_xyz(joint)
-        after_xyz = (axle_x_in_scene_m, y_m, wheel_z_m)
+        axle = "rear" if joint_name.startswith("rear_") else "front"
+        prior_x = source_x_by_axle.setdefault(axle, before_xyz[0])
+        if not math.isclose(before_xyz[0], prior_x, abs_tol=1e-12):
+            raise ValueError(f"{axle} 좌우 바퀴의 source x가 다릅니다")
+        parent = joint.find("parent")
+        parent_link = parent.get("link") if parent is not None else None
+        if parent_link == "base_link":
+            wheel_z_m = wheel_radius_m - base_link_from_floor_m
+        elif parent_link == "base_footprint":
+            wheel_z_m = wheel_radius_m
+        else:
+            raise ValueError(f"{joint_name}의 parent는 base_link 또는 base_footprint여야 합니다")
+        after_xyz = (before_xyz[0], y_m, wheel_z_m)
         _set_origin_xyz(joint, after_xyz)
-        link = _named(root, "link", f"{side}_wheel_link")
+        link = _named(root, "link", link_name)
         for cylinder in _wheel_cylinders(link):
             cylinder.set("radius", f"{wheel_radius_m:.6f}")
             cylinder.set("length", f"{wheel_length_m:.6f}")
-        wheel_changes[side] = {
+        wheel_changes[joint_name] = {
+            "position": position_label,
+            "link_name": link_name,
+            "parent_link": parent_link,
             "joint_xyz_before_m": before_xyz,
             "joint_xyz_after_m": list(after_xyz),
+            "source_design_x_preserved": True,
             "radius_m": wheel_radius_m,
             "length_m": wheel_length_m,
         }
 
-    caster_links = {
-        "front_caster_joint": "front_caster_link",
-        "rear_caster_joint": "rear_caster_link",
-    }
-    caster_y_by_joint = {"front_caster_joint": 0.215, "rear_caster_joint": -0.215}
-    caster_changes: dict[str, Any] = {}
-    for joint_name, link_name in caster_links.items():
-        joint = _named(root, "joint", joint_name)
-        radius_m = _caster_radius(_named(root, "link", link_name))
-        before_xyz = _origin_xyz(joint)
-        after_xyz = (-0.110, caster_y_by_joint[joint_name], radius_m - base_link_from_floor_m)
-        _set_origin_xyz(joint, after_xyz)
-        caster_changes[joint_name] = {
-            "joint_xyz_before_m": before_xyz,
-            "joint_xyz_after_m": list(after_xyz),
-            "sphere_radius_m": radius_m,
-            "basis": "proxy_inference_not_measured",
-        }
+    if not math.isclose(source_x_by_axle["front"], model_from_runtime_m[0], abs_tol=1e-9):
+        raise ValueError("front axle source x가 model_from_runtime_translation_m와 다릅니다")
+    if not math.isclose(
+        source_x_by_axle["front"] - source_x_by_axle["rear"], wheelbase_m, abs_tol=1e-9,
+    ):
+        raise ValueError("source axle x 간격이 wheelbase_design_m와 다릅니다")
 
     return {
         "applied": True,
         "contract_path": provenance["path"],
         "contract_sha256": provenance["sha256"],
         "scene_frame_basis": {
-            "base_footprint": "legacy_design_chassis_center",
-            "navigation_axle_frame": False,
-            "chassis_center_from_navigation_axle_m": chassis_center_from_axle_m,
-            "axle_x_in_scene_m": axle_x_in_scene_m,
+            "base_footprint": target["model_base_frame_definition"],
+            "runtime_base_frame": target["runtime_base_frame_definition"],
+            "model_from_runtime_translation_m": model_from_runtime_m,
+        },
+        "model_geometry": {
+            "drive_type": target["drive_type"],
+            "wheel_count": len(wheel_specs),
+            "caster_count": 0,
+            "wheel_joint_names": [spec[0] for spec in wheel_specs],
+            "axle_x_basis": "source_design_preserved",
+            "rear_axle_geometry_status": target["rear_axle_geometry_status"],
         },
         "changes": {
+            "wheelbase_design_m": wheelbase_m,
             "wheel_separation_m": separation_m,
             "wheel_outer_width_m": wheel_outer_width_m,
             "wheels": wheel_changes,
-            "casters": caster_changes,
-        },
-        "inferred_caster_basis": {
-            "x_m": -0.110,
-            "y_m": [0.215, -0.215],
-            "description": "2026-09-09 후방 프레임 inset과 기존 sphere proxy를 이용한 비실측 프리뷰 추정",
+            "casters": {},
         },
         "untouched_arm_frames": True,
         "untouched_non_base_joint_origins": True,

@@ -11,9 +11,34 @@
     "wheel_separation_effective_m": null,
     "chassis_xy_m": [0.340, 0.450],
     "footprint_scope": "chassis_only_not_arms_or_payload",
-    "base_frame": "base_footprint"
+    "base_frame": "base_footprint",
+    "drive_type": "skid_steer_four_wheel_drive",
+    "selection_status": "final_selected_by_user_20261014",
+    "model_base_frame_definition": "chassis_center_on_floor",
+    "runtime_base_frame_definition": "front_axle_projection_on_floor",
+    "model_from_runtime_translation_m": [0.105, 0.0, 0.0],
+    "wheelbase_design_m": 0.210,
+    "wheelbase_measured_m": null,
+    "rear_axle_geometry_status": "user_confirmed_symmetry_derived_not_tape_measured"
   },
   "hardware": {
+    "selected_four_wheel_drive": {
+      "confirmed_on": "2026-10-13",
+      "final_selection_on": "2026-10-14",
+      "servo_ids_by_corner": {
+        "front_left": 2,
+        "front_right": 1,
+        "rear_left": 3,
+        "rear_right": 4
+      },
+      "control": "same_side_front_rear_synchronous_velocity_individual_encoder_unwrap",
+      "protocol": "v2_two_side_channels_side_encoder_average",
+      "rear_axle_position_measured": false,
+      "rear_mount_symmetry_confirmed_on": "2026-10-14",
+      "rear_inset_basis": "same_as_front_65mm_user_confirmed_symmetry",
+      "four_wheel_effective_track_calibrated": false,
+      "runtime_tf_changed_by_model_update": false
+    },
     "user_plan_confirmed_on": "2026-09-13",
     "target_motor_same_model_confirmed": true,
     "target_motor_origin": "different_chassis",
@@ -50,7 +75,7 @@
       "frame_length_m": 0.340,
       "wheel_outer_width_m": 0.540,
       "measurement_date": "2026-09-15",
-      "valid_for": "현재 조립된 양팔 로봇 하단 차체와 좌우 바퀴",
+      "valid_for": "unchanged_lower_frame_front_wheels_4wd_rear_geometry_pending",
       "width_source": "docs/20260909_하단프레임_실물치수_모델링기록.md",
       "axle_offset_source": "2026-09-15 사용자 실측: 앞 끝에서 65 mm",
       "supersedes_prior_axle_offset_m": 0.060

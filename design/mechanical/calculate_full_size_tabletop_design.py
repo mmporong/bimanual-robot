@@ -97,7 +97,7 @@ def mass_groups(components: list[dict]) -> dict[str, float]:
         "frame_and_tabletop": 0.0,
         "arms_and_grippers": 0.0,
         "battery_electronics_sensors": 0.0,
-        "drive_and_casters": 0.0,
+        "drive_wheels": 0.0,
         "mounts_base_and_allowance": 0.0,
     }
     for component in components:
@@ -109,8 +109,8 @@ def mass_groups(components: list[dict]) -> dict[str, float]:
             groups["arms_and_grippers"] += mass
         elif name in {"battery_link", "electronics_link", "camera_link", "laser_link"}:
             groups["battery_electronics_sensors"] += mass
-        elif name.endswith("wheel_link") or name.endswith("caster_link"):
-            groups["drive_and_casters"] += mass
+        elif name.endswith("wheel_link"):
+            groups["drive_wheels"] += mass
         else:
             groups["mounts_base_and_allowance"] += mass
     return {name: round(mass, 3) for name, mass in groups.items()}
@@ -154,7 +154,7 @@ def main() -> None:
             "camera_optical_xyz_mm": camera["optical_center_xyz"],
             "camera_height_above_tabletop_mm": camera_height,
             "wheel_center_separation_mm": navigation["wheel"]["geometric_center_separation"],
-            "ball_caster_count": len(navigation["ball_casters"]["centers_xyz"]),
+            "wheelbase_design_mm": navigation["wheel"]["wheelbase_design"],
             "profile_ring_outer_xy_mm": [
                 2.0 * float(ring["y_rail_center_x"]) + float(ring["section"][0]),
                 2.0 * float(ring["x_rail_center_y"]) + float(ring["section"][1]),
@@ -189,10 +189,13 @@ def main() -> None:
                 math.isclose(170.0 - float(arm["xyz"][0]), 150.0)
                 for arm in (arms["left"], arms["right"])
             ),
-            "two_drive_wheels": len(
+            "four_drive_wheels": len(
                 [key for key in navigation["wheel"] if key.startswith("center_xyz_")]
-            ) == 2,
-            "two_ball_casters": len(navigation["ball_casters"]["centers_xyz"]) == 2,
+            ) == 4,
+            "caster_free_four_wheel_support": (
+                "ball_casters" not in navigation
+                and navigation.get("ball_caster_count") == 0
+            ),
             "provisional_com_inside_support_polygon": static_margin_m > 0.0,
         },
     }

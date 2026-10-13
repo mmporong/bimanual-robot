@@ -12,11 +12,15 @@ import tempfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+import yaml
+
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PACKAGE_ROOT.parents[1]
 XACRO = PACKAGE_ROOT / "urdf/hold_flow.urdf.xacro"
 COMMITTED_URDF = PACKAGE_ROOT / "urdf/hold_flow.urdf"
+SPEC_PATH = REPO_ROOT / "design/mechanical/hold_flow_mechanical_v0_3.yaml"
+CALIBRATION_PATH = PACKAGE_ROOT / "config/mechanical_calibration.yaml"
 
 
 def command_output(command: list[str], env: dict[str, str]) -> str:
@@ -89,7 +93,47 @@ def assert_xyz(actual: list[float], expected: list[float], tolerance: float = 1e
     )
 
 
+def inertia_values(link: ET.Element) -> dict[str, float]:
+    inertia = link.find("inertial/inertia")
+    assert inertia is not None, f"{link.attrib['name']}: inertia 누락"
+    return {key: float(inertia.attrib[key]) for key in ("ixx", "ixy", "ixz", "iyy", "iyz", "izz")}
+
+
+def assert_drive_limit_contract(
+    root: ET.Element,
+    wheel_spec: dict,
+    drive_config: dict,
+    joint_names: list[str],
+) -> None:
+    """기구 사양, 생성 설정, 네 바퀴 URDF limit의 일치를 검증한다."""
+    expected_effort = float(wheel_spec["joint_effort"])
+    expected_velocity = float(wheel_spec["joint_velocity"])
+    assert math.isclose(
+        float(drive_config["joint_effort_nm"]), expected_effort, abs_tol=1e-12
+    ), (drive_config["joint_effort_nm"], expected_effort)
+    assert math.isclose(
+        float(drive_config["joint_velocity_radps"]), expected_velocity, abs_tol=1e-12
+    ), (drive_config["joint_velocity_radps"], expected_velocity)
+    for joint_name in joint_names:
+        joint = root.find(f"joint[@name='{joint_name}']")
+        assert joint is not None, f"{joint_name}: 관절 누락"
+        limit = joint.find("limit")
+        assert limit is not None, f"{joint_name}: limit 누락"
+        actual_effort = float(limit.attrib["effort"])
+        actual_velocity = float(limit.attrib["velocity"])
+        assert math.isclose(actual_effort, expected_effort, abs_tol=1e-12), (
+            joint_name, "effort", actual_effort, expected_effort,
+        )
+        assert math.isclose(actual_velocity, expected_velocity, abs_tol=1e-12), (
+            joint_name, "velocity", actual_velocity, expected_velocity,
+        )
+
+
 def main() -> None:
+    spec = yaml.safe_load(SPEC_PATH.read_text(encoding="utf-8"))
+    calibration = yaml.safe_load(CALIBRATION_PATH.read_text(encoding="utf-8"))
+    wheel_spec = spec["navigation"]["wheel"]
+    drive_config = calibration["drive"]
     env = os.environ.copy()
     existing = env.get("AMENT_PREFIX_PATH", "")
     ros_python = Path("/opt/ros/jazzy/lib/python3.12/site-packages")
@@ -157,8 +201,10 @@ def main() -> None:
         "camera_depth_optical_frame",
         "camera_color_optical_frame",
         "laser_link",
-        "front_caster_link",
-        "rear_caster_link",
+        "left_wheel_link",
+        "right_wheel_link",
+        "rear_left_wheel_link",
+        "rear_right_wheel_link",
         "front_left_frame_column_link",
         "front_right_frame_column_link",
         "rear_left_frame_column_link",
@@ -167,6 +213,8 @@ def main() -> None:
     required_joints = {
         "left_wheel_joint",
         "right_wheel_joint",
+        "rear_left_wheel_joint",
+        "rear_right_wheel_joint",
         "left_shoulder_pan",
         "left_shoulder_lift",
         "left_elbow_flex",
@@ -185,6 +233,9 @@ def main() -> None:
     }
     assert required_links <= link_names, sorted(required_links - link_names)
     assert required_joints <= joint_names, sorted(required_joints - joint_names)
+    assert not {name for name in link_names | joint_names if "caster" in name}, (
+        "폐기된 캐스터 링크/관절이 남아 있음"
+    )
 
     for link_name in ("right_finger1_link", "right_finger2_link"):
         link = root.find(f"link[@name='{link_name}']")
@@ -197,15 +248,82 @@ def main() -> None:
             f"{link_name}에 폐기된 ggao50 인서트 형상이 남아 있음"
         )
 
-    wheel_origins = {}
-    for name in ("left_wheel_joint", "right_wheel_joint"):
-        joint = root.find(f"joint[@name='{name}']")
-        assert joint is not None
-        xyz = [float(value) for value in joint.find("origin").attrib["xyz"].split()]
-        wheel_origins[name] = xyz
-    separation = abs(wheel_origins["left_wheel_joint"][1] - wheel_origins["right_wheel_joint"][1])
-    assert math.isclose(separation, 0.320, abs_tol=1e-9)
     transforms = link_transforms(root)
+    expected_joint_names = {
+        "front_left": "left_wheel_joint",
+        "front_right": "right_wheel_joint",
+        "rear_left": "rear_left_wheel_joint",
+        "rear_right": "rear_right_wheel_joint",
+    }
+    assert spec["navigation"]["joint_names_by_corner"] == expected_joint_names
+    assert spec["navigation"]["servo_ids_by_corner"] == {
+        "front_left": 2, "front_right": 1, "rear_left": 3, "rear_right": 4,
+    }
+    assert drive_config["servo_ids_by_corner"] == spec["navigation"]["servo_ids_by_corner"]
+    assert math.isclose(
+        drive_config["geometric_wheel_center_separation_m"] * 1000.0,
+        wheel_spec["geometric_center_separation"],
+        abs_tol=1e-9,
+    )
+    assert math.isclose(
+        drive_config["wheelbase_design_m"] * 1000.0,
+        wheel_spec["wheelbase_design"],
+        abs_tol=1e-9,
+    )
+    assert math.isclose(
+        drive_config["visual_width_m"] * 1000.0,
+        wheel_spec["visual_width"],
+        abs_tol=1e-9,
+    )
+    assert_drive_limit_contract(
+        root, wheel_spec, drive_config, list(expected_joint_names.values())
+    )
+    wheel_contract = {
+        "left_wheel_link": wheel_spec["center_xyz_left"],
+        "right_wheel_link": wheel_spec["center_xyz_right"],
+        "rear_left_wheel_link": wheel_spec["center_xyz_rear_left"],
+        "rear_right_wheel_link": wheel_spec["center_xyz_rear_right"],
+    }
+    for link_name, expected_mm in wheel_contract.items():
+        assert_xyz(xyz_of(transforms[link_name]), [value / 1000.0 for value in expected_mm])
+    separation = abs(
+        transforms["left_wheel_link"][1][3] - transforms["right_wheel_link"][1][3]
+    )
+    wheelbase = abs(
+        transforms["left_wheel_link"][0][3] - transforms["rear_left_wheel_link"][0][3]
+    )
+    assert math.isclose(separation * 1000.0, wheel_spec["geometric_center_separation"], abs_tol=1e-6)
+    assert math.isclose(wheelbase * 1000.0, wheel_spec["wheelbase_design"], abs_tol=1e-6)
+    expected_mass = float(wheel_spec["mass_each"])
+    expected_radius = float(wheel_spec["calibrated_effective_radius"]) / 1000.0
+    expected_width = float(wheel_spec["visual_width"]) / 1000.0
+    expected_inertia = {
+        "ixx": expected_mass * (3.0 * expected_radius**2 + expected_width**2) / 12.0,
+        "ixy": 0.0,
+        "ixz": 0.0,
+        "iyy": expected_mass * expected_radius**2 / 2.0,
+        "iyz": 0.0,
+        "izz": expected_mass * (3.0 * expected_radius**2 + expected_width**2) / 12.0,
+    }
+    for link_name in wheel_contract:
+        link = root.find(f"link[@name='{link_name}']")
+        assert link is not None
+        mass = float(link.find("inertial/mass").attrib["value"])
+        assert math.isclose(mass, expected_mass, abs_tol=1e-9), (link_name, mass, expected_mass)
+        actual_inertia = inertia_values(link)
+        assert all(
+            math.isclose(actual_inertia[key], value, rel_tol=1e-6, abs_tol=1e-12)
+            for key, value in expected_inertia.items()
+        ), (link_name, actual_inertia, expected_inertia)
+        cylinder = link.find("collision/geometry/cylinder")
+        assert cylinder is not None
+        assert math.isclose(float(cylinder.attrib["radius"]), expected_radius, abs_tol=1e-9)
+        assert math.isclose(float(cylinder.attrib["length"]), expected_width, abs_tol=1e-9)
+    for joint_name in expected_joint_names.values():
+        joint = root.find(f"joint[@name='{joint_name}']")
+        assert joint is not None and joint.attrib["type"] == "continuous"
+        assert joint.find("axis").attrib["xyz"] == "0 1 0"
+    assert_xyz(xyz_of(transforms["base_link"]), [0.0, 0.0, expected_radius])
     camera_xyz = xyz_of(transforms["camera_depth_optical_frame"])
     lidar_xyz = xyz_of(transforms["laser_link"])
     left_arm_xyz = xyz_of(transforms["left_base_link"])
@@ -225,6 +343,12 @@ def main() -> None:
         "cad_mesh_copies_match_exports": True,
         "committed_urdf_matches_xacro": True,
         "wheel_center_separation_m": separation,
+        "wheelbase_design_m": wheelbase,
+        "wheel_velocity_joints": [
+            "left_wheel_joint", "right_wheel_joint",
+            "rear_left_wheel_joint", "rear_right_wheel_joint",
+        ],
+        "wheel_mass_each_kg": expected_mass,
         "camera_optical_xyz_from_base_footprint_m": [round(value, 6) for value in camera_xyz],
         "lidar_xyz_from_base_footprint_m": [round(value, 6) for value in lidar_xyz],
         "left_arm_base_xyz_from_base_footprint_m": [round(value, 6) for value in left_arm_xyz],

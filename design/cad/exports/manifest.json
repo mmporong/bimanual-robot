@@ -2,6 +2,19 @@
   "schema_version": "0.1",
   "generator": "design/cad/generate_hold_flow_cad.py",
   "source_spec": "design/mechanical/hold_flow_mechanical_v0_3.yaml",
+  "source_revision": "2026-10-14_final_four_wheel_drive_selected",
+  "drive_design": {
+    "drive_type": "skid_steer_four_wheel_drive",
+    "drive_carrier_quantity": 4,
+    "ball_caster_quantity": 0,
+    "rear_axle_geometry_status": "user_confirmed_symmetry_derived_not_tape_measured",
+    "unselected_historical_exports": [
+      "rear_caster_adapter",
+      "rear_caster_shim_1mm",
+      "rear_caster_shim_2mm",
+      "rear_caster_shim_3mm"
+    ]
+  },
   "units": {
     "length": "mm",
     "volume": "cm3",
@@ -139,7 +152,7 @@
       ]
     ]
   },
-  "estimated_total_material_mass_g": 4189.2,
+  "estimated_total_material_mass_g": 4201.9,
   "all_breps_valid": true,
   "all_parts_fit_k1_max": false,
   "all_fdm_parts_safe_fit_k1_max": true,
@@ -406,7 +419,7 @@
     },
     {
       "name": "drive_side_carrier",
-      "quantity": 2,
+      "quantity": 4,
       "valid_brep": true,
       "bounds_mm": [
         82.008,
@@ -421,88 +434,8 @@
       "k1_max_safe_fit": true,
       "step": "design/cad/exports/step/drive_side_carrier.step",
       "stl": "design/cad/exports/stl/drive_side_carrier.stl",
-      "note": "625급 외부 베어링과 C018 장공을 가진 측면 캐리어",
+      "note": "전후 좌우 STS3215 구동륜용 측면 캐리어 후보",
       "measurement_gate": "JD-AMR 휠 허브·C018 혼·625 베어링 축 조합 실측 후 중심공 공차 확정"
-    },
-    {
-      "name": "rear_caster_adapter",
-      "quantity": 2,
-      "valid_brep": true,
-      "bounds_mm": [
-        70.008,
-        52.008,
-        8.021
-      ],
-      "volume_cm3_each": 21.559,
-      "material": "PETG",
-      "estimated_material_mass_g_each": 27.4,
-      "fdm_part": true,
-      "k1_max_fit": true,
-      "k1_max_safe_fit": true,
-      "step": "design/cad/exports/step/rear_caster_adapter.step",
-      "stl": "design/cad/exports/stl/rear_caster_adapter.stl",
-      "note": "전·후 JD-AMR 볼 캐스터용 높이 조절 어댑터",
-      "measurement_gate": "캐스터 볼 지름·플랜지 홀 패턴·접촉 높이 실측 후 최종 홀 확정"
-    },
-    {
-      "name": "rear_caster_shim_1mm",
-      "quantity": 1,
-      "valid_brep": true,
-      "bounds_mm": [
-        70.008,
-        52.008,
-        1.021
-      ],
-      "volume_cm3_each": 2.695,
-      "material": "PETG",
-      "estimated_material_mass_g_each": 3.4,
-      "fdm_part": true,
-      "k1_max_fit": true,
-      "k1_max_safe_fit": true,
-      "step": "design/cad/exports/step/rear_caster_shim_1mm.step",
-      "stl": "design/cad/exports/stl/rear_caster_shim_1mm.stl",
-      "note": "캐스터 높이 1 mm 보정판",
-      "measurement_gate": null
-    },
-    {
-      "name": "rear_caster_shim_2mm",
-      "quantity": 1,
-      "valid_brep": true,
-      "bounds_mm": [
-        70.008,
-        52.008,
-        2.021
-      ],
-      "volume_cm3_each": 5.39,
-      "material": "PETG",
-      "estimated_material_mass_g_each": 6.8,
-      "fdm_part": true,
-      "k1_max_fit": true,
-      "k1_max_safe_fit": true,
-      "step": "design/cad/exports/step/rear_caster_shim_2mm.step",
-      "stl": "design/cad/exports/stl/rear_caster_shim_2mm.stl",
-      "note": "캐스터 높이 2 mm 보정판",
-      "measurement_gate": null
-    },
-    {
-      "name": "rear_caster_shim_3mm",
-      "quantity": 1,
-      "valid_brep": true,
-      "bounds_mm": [
-        70.008,
-        52.008,
-        3.021
-      ],
-      "volume_cm3_each": 8.085,
-      "material": "PETG",
-      "estimated_material_mass_g_each": 10.3,
-      "fdm_part": true,
-      "k1_max_fit": true,
-      "k1_max_safe_fit": true,
-      "step": "design/cad/exports/step/rear_caster_shim_3mm.step",
-      "stl": "design/cad/exports/stl/rear_caster_shim_3mm.stl",
-      "note": "캐스터 높이 3 mm 보정판",
-      "measurement_gate": null
     }
   ]
 }

@@ -61,7 +61,8 @@
   </xacro:macro>
 
   <xacro:macro name="hold_flow_mobile_base">
-    <!-- v0.3은 차체 중심과 구동축 중심의 바닥 투영점을 동일하게 둔다. -->
+    <!-- 모델 원점은 차체 중심이다. 실차 전륜축 원점과의 변환은 mechanical_calibration.yaml에 둔다. -->
+    <xacro:property name="drive_config" value="${xacro.load_yaml('../config/mechanical_calibration.yaml')['drive']}"/>
     <link name="base_footprint"/>
     <link name="base_link">
       <inertial>
@@ -108,45 +109,22 @@
     <xacro:primitive_box_link name="battery_link" parent="base_link" xyz="-0.040 0 0.0611" mass="0.550" sx="0.140" sy="0.080" sz="0.040" material="hold_flow_blue"/>
     <xacro:primitive_box_link name="electronics_link" parent="base_link" xyz="0.030 0 0.0571" mass="0.350" sx="0.160" sy="0.120" sz="0.040" material="hold_flow_dark"/>
 
-    <link name="left_wheel_link">
-      <xacro:wheel_inertial mass="0.110" radius="0.0329" width="0.020"/>
-      <visual><origin rpy="1.570796 0 0"/><geometry><cylinder radius="0.0329" length="0.020"/></geometry><material name="hold_flow_dark"/></visual>
-      <collision><origin rpy="1.570796 0 0"/><geometry><cylinder radius="0.0329" length="0.020"/></geometry></collision>
-    </link>
-    <joint name="left_wheel_joint" type="continuous">
-      <parent link="base_link"/><child link="left_wheel_link"/>
-      <origin xyz="0 0.160 0" rpy="0 0 0"/><axis xyz="0 1 0"/>
-      <limit effort="0.981" velocity="4.72"/><dynamics damping="0.02" friction="0.02"/>
-    </joint>
-
-    <link name="right_wheel_link">
-      <xacro:wheel_inertial mass="0.110" radius="0.0329" width="0.020"/>
-      <visual><origin rpy="1.570796 0 0"/><geometry><cylinder radius="0.0329" length="0.020"/></geometry><material name="hold_flow_dark"/></visual>
-      <collision><origin rpy="1.570796 0 0"/><geometry><cylinder radius="0.0329" length="0.020"/></geometry></collision>
-    </link>
-    <joint name="right_wheel_joint" type="continuous">
-      <parent link="base_link"/><child link="right_wheel_link"/>
-      <origin xyz="0 -0.160 0" rpy="0 0 0"/><axis xyz="0 1 0"/>
-      <limit effort="0.981" velocity="4.72"/><dynamics damping="0.02" friction="0.02"/>
-    </joint>
-
-    <xacro:ball_caster name="front_caster" x="0.120"/>
-    <xacro:ball_caster name="rear_caster" x="-0.120"/>
+    <xacro:drive_wheel name="left_wheel" x="${drive_config['front_axle_x_m']}" y="${drive_config['geometric_wheel_center_separation_m'] / 2}" config="${drive_config}"/>
+    <xacro:drive_wheel name="right_wheel" x="${drive_config['front_axle_x_m']}" y="${-drive_config['geometric_wheel_center_separation_m'] / 2}" config="${drive_config}"/>
+    <xacro:drive_wheel name="rear_left_wheel" x="${drive_config['rear_axle_x_m']}" y="${drive_config['geometric_wheel_center_separation_m'] / 2}" config="${drive_config}"/>
+    <xacro:drive_wheel name="rear_right_wheel" x="${drive_config['rear_axle_x_m']}" y="${-drive_config['geometric_wheel_center_separation_m'] / 2}" config="${drive_config}"/>
   </xacro:macro>
 
-  <!-- URDF의 고정 구는 볼 캐스터 접촉 프록시다. 자유 회전 마찰은 USD에서 조정한다. -->
-  <xacro:macro name="ball_caster" params="name x">
+  <xacro:macro name="drive_wheel" params="name x y config">
     <link name="${name}_link">
-      <inertial>
-        <mass value="0.060"/>
-        <inertia ixx="3.75e-6" ixy="0" ixz="0" iyy="3.75e-6" iyz="0" izz="3.75e-6"/>
-      </inertial>
-      <visual><geometry><sphere radius="0.0125"/></geometry><material name="silver"/></visual>
-      <collision><geometry><sphere radius="0.0125"/></geometry></collision>
+      <xacro:wheel_inertial mass="${config['mass_each_kg']}" radius="${config['wheel_radius_m']}" width="${config['visual_width_m']}"/>
+      <visual><origin rpy="${pi / 2} 0 0"/><geometry><cylinder radius="${config['wheel_radius_m']}" length="${config['visual_width_m']}"/></geometry><material name="hold_flow_dark"/></visual>
+      <collision><origin rpy="${pi / 2} 0 0"/><geometry><cylinder radius="${config['wheel_radius_m']}" length="${config['visual_width_m']}"/></geometry></collision>
     </link>
-    <joint name="${name}_joint" type="fixed">
+    <joint name="${name}_joint" type="continuous">
       <parent link="base_link"/><child link="${name}_link"/>
-      <origin xyz="${x} 0 -0.0204" rpy="0 0 0"/>
+      <origin xyz="${x} ${y} 0" rpy="0 0 0"/><axis xyz="0 1 0"/>
+      <limit effort="${config['joint_effort_nm']}" velocity="${config['joint_velocity_radps']}"/><dynamics damping="0.02" friction="0.02"/>
     </joint>
   </xacro:macro>
 </robot>
