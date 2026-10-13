@@ -327,14 +327,6 @@ def drive_side_carrier() -> cq.Workplane:
     return carrier
 
 
-def rear_caster_adapter(thickness: float = 8.0) -> cq.Workplane:
-    adapter = rounded_box_xy(70.0, 52.0, thickness, 6.0)
-    for x in (-24.0, 24.0):
-        adapter = adapter.cut(cq.Workplane("XY").center(x, 0.0).slot2D(24.0, 4.5, 90.0).extrude(thickness))
-    adapter = adapter.cut(cq.Workplane("XY").circle(15.0).extrude(thickness))
-    return adapter
-
-
 def parts(spec: dict) -> list[Part]:
     frame = spec["chassis"]["vertical_frame"]
     mast = spec["camera"]["mount"]
@@ -413,20 +405,10 @@ def parts(spec: dict) -> list[Part]:
         Part(
             "drive_side_carrier",
             drive_side_carrier(),
-            2,
-            "625급 외부 베어링과 C018 장공을 가진 측면 캐리어",
+            4,
+            "전후 좌우 STS3215 구동륜용 측면 캐리어 후보",
             "JD-AMR 휠 허브·C018 혼·625 베어링 축 조합 실측 후 중심공 공차 확정",
         ),
-        Part(
-            "rear_caster_adapter",
-            rear_caster_adapter(),
-            2,
-            "전·후 JD-AMR 볼 캐스터용 높이 조절 어댑터",
-            "캐스터 볼 지름·플랜지 홀 패턴·접촉 높이 실측 후 최종 홀 확정",
-        ),
-        Part("rear_caster_shim_1mm", rear_caster_adapter(1.0), 1, "캐스터 높이 1 mm 보정판"),
-        Part("rear_caster_shim_2mm", rear_caster_adapter(2.0), 1, "캐스터 높이 2 mm 보정판"),
-        Part("rear_caster_shim_3mm", rear_caster_adapter(3.0), 1, "캐스터 높이 3 mm 보정판"),
     ]
     return generated
 
@@ -595,6 +577,14 @@ def main() -> None:
         "schema_version": "0.1",
         "generator": str(Path(__file__).relative_to(REPO_ROOT)),
         "source_spec": str(SPEC_PATH.relative_to(REPO_ROOT)),
+        "source_revision": spec["revision"],
+        "drive_design": {
+            "drive_type": spec["navigation"]["drive_type"],
+            "drive_carrier_quantity": 4,
+            "ball_caster_quantity": 0,
+            "rear_axle_geometry_status": spec["navigation"]["geometry_provenance"]["rear_axle_from_chassis_center"]["status"],
+            "unselected_historical_exports": ["rear_caster_adapter", "rear_caster_shim_1mm", "rear_caster_shim_2mm", "rear_caster_shim_3mm"],
+        },
         "units": {"length": "mm", "volume": "cm3", "mass": "g"},
         "printer": "Creality K1 Max 300×300×300 mm",
         "material_assumption": "부품별 명목 밀도, 중공 CAD 체적; 실제 출력 infill·판재·압출재 질량은 실측으로 교체",

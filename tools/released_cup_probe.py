@@ -58,7 +58,8 @@ def run_probe(args, source, world, robot, controller, names, q, wheels, arm_indi
             q[ids[side]] = np.radians(command[side+"_joint_deg"])
         q[names.index("left_gripper")] = command["left_gripper_rad"]
         controller.apply_action(ArticulationAction(joint_positions=q[arm_indices], joint_indices=arm_indices))
-        controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
+        controller.apply_action(ArticulationAction(
+            joint_velocities=np.zeros(len(wheels)), joint_indices=wheels))
         world.step(render=args.record and tick % 60 == 0)
         cp, cq = cup.get_world_poses()
         cup_force = cup.get_contact_force_matrix(dt=dt)[0]

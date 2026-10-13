@@ -24,7 +24,13 @@ from pour_geometry import quaternion_matrix
 from restaurant_layout import plan_route
 from cup_contact_model import Chain
 from cup_contact_place import supported_window, placement_gate_failure
-from mobile_service_model import fixed_component_pairs, ground_collision, ground_window_verified
+from mobile_service_model import (
+    fixed_component_pairs,
+    four_wheel_targets,
+    ground_collision,
+    ground_window_verified,
+    wheel_joint_indices,
+)
 
 
 def record_failure(result, exc):
@@ -153,14 +159,12 @@ def _run(args, result):
         if not ok:
             raise RuntimeError("URDF import failed")
         materials = {}
-        for label, coefficient in (("wheel", .9), ("caster", .001), ("grip", .8)):
+        for label, coefficient in (("wheel", .9), ("grip", .8)):
             material = UsdShade.Material.Define(stage, "/World/"+label+"Material")
             api = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
             api.CreateStaticFrictionAttr(coefficient)
             api.CreateDynamicFrictionAttr(coefficient)
             api.CreateRestitutionAttr(0.)
-            if label == "caster":
-                PhysxSchema.PhysxMaterialAPI.Apply(material.GetPrim()).CreateFrictionCombineModeAttr("min")
             materials[label] = material
         rigid = {}
         furniture = []
@@ -180,7 +184,7 @@ def _run(args, result):
                 api.CreateSolverPositionIterationCountAttr(32)
                 api.CreateSolverVelocityIterationCountAttr(8)
             if prim.HasAPI(UsdPhysics.CollisionAPI):
-                kind = "caster" if "caster" in path else "wheel" if "wheel" in path else "grip"
+                kind = "wheel" if "wheel" in path else "grip"
                 UsdShade.MaterialBindingAPI.Apply(prim).Bind(materials[kind],
                     UsdShade.Tokens.weakerThanDescendants, "physics")
                 api = PhysxSchema.PhysxCollisionAPI.Apply(prim)
@@ -232,7 +236,7 @@ def _run(args, result):
                 rigid, furniture, materials, cup_view, cup_filters)
         world.reset()
         names = list(robot.dof_names)
-        wheels = np.array([names.index(n) for n in ("left_wheel_joint", "right_wheel_joint")])
+        wheels = np.array(wheel_joint_indices(names))
         arm_indices = np.array([i for i in range(len(names)) if i not in wheels])
         q = np.zeros(len(names), dtype=np.float32)
         initial = source["plan"]["poses"][0]
@@ -329,8 +333,10 @@ def _run(args, result):
             w, x, y, z = orientation
             yaw = math.atan2(2*(w*z+x*y), 1-2*(y*y+z*z))
             tilt = math.degrees(math.acos(float(np.clip(1-2*(x*x+y*y), -1, 1))))
-            command = follow_path([*position[:2], yaw], path, goal_yaw)
-            velocities = [command["left_rad_s"], command["right_rad_s"]] if step*dt > 2 else [0., 0.]
+            command = follow_path(
+                [*position[:2], yaw], path, goal_yaw, axle_offset=0.0
+            )
+            velocities = four_wheel_targets(command["left_rad_s"], command["right_rad_s"]) if step*dt > 2 else [0.] * 4
             phase = state
             arm = None
             elapsed = max(0., step*dt-state_start)
@@ -351,9 +357,9 @@ def _run(args, result):
                             reason = failure
                             break
                         previous_place_phase = phase
-                    velocities = [0., 0.]
+                    velocities = [0.] * 4
                 if state == "SETTLE_BASE":
-                    velocities = [0., 0.]
+                    velocities = [0.] * 4
                     at_rest = np.linalg.norm(robot.get_linear_velocity()) < .005 and np.linalg.norm(robot.get_angular_velocity()) < .01
                     stopped_s = stopped_s+dt if at_rest else 0.
                     if stopped_s >= .5:
@@ -361,7 +367,7 @@ def _run(args, result):
                         events.append({"state": state, "time_s": step*dt})
                 if state == "BACKOUT":
                     # Reverse straight from the manipulation zone before global planning.
-                    velocities = [-.05/.0329, -.05/.0329]
+                    velocities = four_wheel_targets(-.05/.0329, -.05/.0329)
                 if state == "PICK" and arm["done"]:
                     if len(lift_window) < 120 or not all(
                         s["cup_position_m"][2] > .82 and min(s["cup_contacts_n"][:2]) > .02
@@ -381,7 +387,7 @@ def _run(args, result):
                     events.append({"state": state, "time_s": step*dt})
                 elif state == "DOCK_TABLE" and command["arrived"]:
                     state, state_start = "SETTLE_BASE", step*dt
-                    velocities = [0., 0.]
+                    velocities = [0.] * 4
                     events.append({"state": state, "time_s": step*dt})
             controller.apply_action(ArticulationAction(joint_positions=q[arm_indices], joint_indices=arm_indices))
             controller.apply_action(ArticulationAction(joint_velocities=np.array(velocities), joint_indices=wheels))
@@ -486,7 +492,8 @@ def _run(args, result):
             if not service and step*dt > 2 and command["arrived"]:
                 reason = "arrived"
                 break
-        controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
+        controller.apply_action(ArticulationAction(
+            joint_velocities=np.zeros(len(wheels)), joint_indices=wheels))
         position, orientation = robot.get_world_pose()
         w, x, y, z = orientation
         yaw = math.atan2(2*(w*z+x*y), 1-2*(y*y+z*z))
@@ -501,7 +508,9 @@ def _run(args, result):
             events=events, final_state=state, cup_final=cup_sample if service else None,
             ground_verified=ground_verified, frame_count=frame_count, recording_fps=2,
             assumptions={"wheel_radius_m": .0329, "wheel_track_m": .510,
-                         "caster_model": "low_friction_fixed_spheres", "model_calibrated": False})
+                         "wheelbase_design_m": .210, "drive_model": "four_wheel_skid_steer",
+                         "model_calibrated": False,
+                         "physical_contact_validated": False})
         result["task_pass"] = result["task_pass"] and ground_verified
         if args.record:
             snapshot(output/"final.png")

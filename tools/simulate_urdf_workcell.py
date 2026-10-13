@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--body-plan", type=Path, help="양팔 몸통 중간 수평 파지 후보 보고서")
     parser.add_argument("--state", type=Path, action="append", default=[])
     parser.add_argument("--original-base", action="store_true",
-                        help="현행 하단 기록 보정 없이 기존 URDF 바퀴/캐스터 배치를 표시")
+                        help="계약 overlay 없이 현행 최종4륜 URDF 배치를 표시")
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="새 출력 디렉터리. 기존 증거를 덮어쓰지 않습니다")
     parser.add_argument("--headless", action="store_true")
@@ -343,8 +343,8 @@ def run(args: argparse.Namespace) -> None:
             with panel.frame:
                 with ui.VStack(spacing=5):
                     ui.Label("450 x 340 mm | SO101 x 2", height=22)
-                    ui.Label("BASE: original legacy" if args.original_base else
-                             "BASE: 510 mm track / rear caster proxies", height=20)
+                    ui.Label("베이스: 최종4륜 원본" if args.original_base else
+                             "베이스:4륜 · 트레드510mm · 후륜 설계값", height=20)
                     ui.Label("KINEMATIC REPLAY: base fixed / contacts OFF", height=22)
                     ui.Label("MID-BODY SIDE GRASP" if args.body_plan else "LEGACY POSES / OVERLAP REVIEW", height=20)
                     ui.Label("Red bands = body midpoint / no grasp success claim", height=20)

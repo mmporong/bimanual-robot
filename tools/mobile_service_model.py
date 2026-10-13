@@ -3,7 +3,28 @@ from itertools import combinations
 import math
 import xml.etree.ElementTree as ET
 
-GROUND_LINKS = {"left_wheel_link", "right_wheel_link", "front_caster_link", "rear_caster_link"}
+GROUND_LINKS = {
+    "left_wheel_link",
+    "right_wheel_link",
+    "rear_left_wheel_link",
+    "rear_right_wheel_link",
+}
+WHEEL_JOINTS = (
+    "left_wheel_joint",
+    "right_wheel_joint",
+    "rear_left_wheel_joint",
+    "rear_right_wheel_joint",
+)
+
+
+def four_wheel_targets(left_rad_s, right_rad_s):
+    """Return front-left, front-right, rear-left, rear-right velocity targets."""
+    return [left_rad_s, right_rad_s, left_rad_s, right_rad_s]
+
+
+def wheel_joint_indices(names):
+    """Resolve every wheel DOF; a missing rear joint is a contract failure."""
+    return [names.index(name) for name in WHEEL_JOINTS]
 
 
 def ground_collision(forces, threshold=.05):
@@ -13,9 +34,7 @@ def ground_collision(forces, threshold=.05):
 
 def ground_supported(forces):
     return (not ground_collision(forces)
-            and forces.get("left_wheel_link", 0.) > .1
-            and forces.get("right_wheel_link", 0.) > .1
-            and max(forces.get("front_caster_link", 0.), forces.get("rear_caster_link", 0.)) > .1)
+            and all(forces.get(name, 0.) > .1 for name in GROUND_LINKS))
 
 
 def ground_window_verified(samples, window_count=5):

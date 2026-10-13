@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -22,6 +23,7 @@ IMPORT_SCRIPT = REPO_ROOT / "src/hold_flow_description/scripts/import_isaac_sim.
 URDF_PATH = REPO_ROOT / "src/hold_flow_description/urdf/hold_flow.urdf"
 DESCRIPTION_VALIDATOR = REPO_ROOT / "src/hold_flow_description/scripts/validate_description.py"
 QUALITY_AUDITOR = REPO_ROOT / "src/hold_flow_description/scripts/audit_urdf_quality.py"
+CALIBRATION_PATH = REPO_ROOT / "src/hold_flow_description/config/mechanical_calibration.yaml"
 SO101_LICENSE = REPO_ROOT / "src/hold_flow_description/third_party/so_arm_101/LICENSE"
 
 
@@ -74,12 +76,43 @@ print(xacro.process_file(sys.argv[1]).toxml())
             spec["chassis"]["plates"]["tabletop"]["z_top"]
             + spec["camera"]["mount"]["backing_thickness"],
         )
-        self.assertEqual(len(spec["navigation"]["ball_casters"]["centers_xyz"]), 2)
-        self.assertEqual(spec["navigation"]["reuse_source"]["left_servo_id"], 2)
-        self.assertEqual(spec["navigation"]["reuse_source"]["right_servo_id"], 1)
+        self.assertNotIn("ball_casters", spec["navigation"])
+        self.assertEqual(spec["navigation"]["ball_caster_count"], 0)
+        self.assertEqual(spec["navigation"]["drive_type"], "skid_steer_four_wheel_drive")
+        self.assertEqual(
+            spec["navigation"]["wheel"]["center_xyz_left"], [105.0, 255.0, 32.9]
+        )
+        self.assertEqual(
+            spec["navigation"]["wheel"]["center_xyz_right"], [105.0, -255.0, 32.9]
+        )
+        self.assertEqual(
+            spec["navigation"]["wheel"]["center_xyz_rear_left"], [-105.0, 255.0, 32.9]
+        )
+        self.assertEqual(
+            spec["navigation"]["wheel"]["center_xyz_rear_right"], [-105.0, -255.0, 32.9]
+        )
+        self.assertEqual(spec["navigation"]["wheel"]["wheelbase_design"], 210.0)
+        self.assertEqual(spec["navigation"]["wheel"]["visual_width"], 30.0)
+        self.assertEqual(
+            spec["navigation"]["joint_names_by_corner"],
+            {
+                "front_left": "left_wheel_joint",
+                "front_right": "right_wheel_joint",
+                "rear_left": "rear_left_wheel_joint",
+                "rear_right": "rear_right_wheel_joint",
+            },
+        )
+        self.assertEqual(
+            spec["navigation"]["servo_ids_by_corner"],
+            {"front_left": 2, "front_right": 1, "rear_left": 3, "rear_right": 4},
+        )
         self.assertEqual(
             spec["navigation"]["wheel"]["initial_host_parameters"]["wheel_separation_m"],
-            0.320,
+            0.510,
+        )
+        self.assertEqual(
+            spec["navigation"]["support_polygon_xy"],
+            [[105.0, 255.0], [-105.0, 255.0], [-105.0, -255.0], [105.0, -255.0]],
         )
         self.assertEqual(spec["compute_plan"]["later_raspberry_pi_5"]["priority"], "deferred")
         self.assertEqual(
@@ -147,7 +180,58 @@ print(xacro.process_file(sys.argv[1]).toxml())
         )
         self.assertAlmostEqual(actual_total, expected_total, places=6)
         self.assertAlmostEqual(sum(mass_model["groups_kg"].values()), mass_model["total_kg"], places=3)
-        self.assertEqual(mass_model["task_mass_cases_kg"]["empty_robot"], 7.379)
+        self.assertEqual(mass_model["task_mass_cases_kg"]["empty_robot"], 7.479)
+
+    def test_isaac_contract_uses_four_velocity_joints_without_contact_proxies(self) -> None:
+        config = yaml.safe_load(
+            (REPO_ROOT / "src/hold_flow_description/config/isaac_sim_6.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            config["articulation_contract"]["wheel_velocity_joints"],
+            [
+                "left_wheel_joint",
+                "right_wheel_joint",
+                "rear_left_wheel_joint",
+                "rear_right_wheel_joint",
+            ],
+        )
+        self.assertEqual(config["articulation_contract"]["fixed_contact_proxies"], [])
+
+    def test_wheel_limit_contract_rejects_positive_config_or_urdf_drift(self) -> None:
+        module_spec = importlib.util.spec_from_file_location(
+            "hold_flow_description_validator", DESCRIPTION_VALIDATOR
+        )
+        validator = importlib.util.module_from_spec(module_spec)
+        assert module_spec.loader is not None
+        module_spec.loader.exec_module(validator)
+        mechanical = yaml.safe_load(SPEC_PATH.read_text(encoding="utf-8"))
+        calibration = yaml.safe_load(CALIBRATION_PATH.read_text(encoding="utf-8"))
+        root = ET.parse(URDF_PATH).getroot()
+        joint_names = list(mechanical["navigation"]["joint_names_by_corner"].values())
+        validator.assert_drive_limit_contract(
+            root, mechanical["navigation"]["wheel"], calibration["drive"], joint_names
+        )
+
+        drifted = copy.deepcopy(calibration["drive"])
+        drifted["joint_velocity_radps"] += 0.01
+        with self.assertRaises(AssertionError):
+            validator.assert_drive_limit_contract(
+                root, mechanical["navigation"]["wheel"], drifted, joint_names
+            )
+
+        drifted_root = ET.fromstring(ET.tostring(root))
+        rear_limit = drifted_root.find("joint[@name='rear_right_wheel_joint']/limit")
+        assert rear_limit is not None
+        rear_limit.attrib["effort"] = str(float(rear_limit.attrib["effort"]) + 0.001)
+        with self.assertRaises(AssertionError):
+            validator.assert_drive_limit_contract(
+                drifted_root,
+                mechanical["navigation"]["wheel"],
+                calibration["drive"],
+                joint_names,
+            )
 
     def test_isaac_yaml_is_the_importer_source(self) -> None:
         spec = importlib.util.spec_from_file_location("hold_flow_isaac_import", IMPORT_SCRIPT)

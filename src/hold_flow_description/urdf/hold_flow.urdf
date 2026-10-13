@@ -28,7 +28,6 @@
   <material name="gripper_insert">
     <color rgba="0.90 0.45 0.10 1.0"/>
   </material>
-  <!-- v0.3은 차체 중심과 구동축 중심의 바닥 투영점을 동일하게 둔다. -->
   <link name="base_footprint"/>
   <link name="base_link">
     <inertial>
@@ -621,26 +620,26 @@
   <link name="left_wheel_link">
     <inertial>
       <mass value="0.11"/>
-      <inertia ixx="3.343294166666667e-05" ixy="0" ixz="0" iyy="5.9532549999999996e-05" iyz="0" izz="3.343294166666667e-05"/>
+      <inertia ixx="3.8016275e-05" ixy="0" ixz="0" iyy="5.9532549999999996e-05" iyz="0" izz="3.8016275e-05"/>
     </inertial>
     <visual>
-      <origin rpy="1.570796 0 0"/>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <cylinder length="0.020" radius="0.0329"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
       <material name="hold_flow_dark"/>
     </visual>
     <collision>
-      <origin rpy="1.570796 0 0"/>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <cylinder length="0.020" radius="0.0329"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
     </collision>
   </link>
   <joint name="left_wheel_joint" type="continuous">
     <parent link="base_link"/>
     <child link="left_wheel_link"/>
-    <origin rpy="0 0 0" xyz="0 0.160 0"/>
+    <origin rpy="0 0 0" xyz="0.105 0.255 0"/>
     <axis xyz="0 1 0"/>
     <limit effort="0.981" velocity="4.72"/>
     <dynamics damping="0.02" friction="0.02"/>
@@ -648,73 +647,83 @@
   <link name="right_wheel_link">
     <inertial>
       <mass value="0.11"/>
-      <inertia ixx="3.343294166666667e-05" ixy="0" ixz="0" iyy="5.9532549999999996e-05" iyz="0" izz="3.343294166666667e-05"/>
+      <inertia ixx="3.8016275e-05" ixy="0" ixz="0" iyy="5.9532549999999996e-05" iyz="0" izz="3.8016275e-05"/>
     </inertial>
     <visual>
-      <origin rpy="1.570796 0 0"/>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <cylinder length="0.020" radius="0.0329"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
       <material name="hold_flow_dark"/>
     </visual>
     <collision>
-      <origin rpy="1.570796 0 0"/>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <cylinder length="0.020" radius="0.0329"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
     </collision>
   </link>
   <joint name="right_wheel_joint" type="continuous">
     <parent link="base_link"/>
     <child link="right_wheel_link"/>
-    <origin rpy="0 0 0" xyz="0 -0.160 0"/>
+    <origin rpy="0 0 0" xyz="0.105 -0.255 0"/>
     <axis xyz="0 1 0"/>
     <limit effort="0.981" velocity="4.72"/>
     <dynamics damping="0.02" friction="0.02"/>
   </joint>
-  <link name="front_caster_link">
+  <link name="rear_left_wheel_link">
     <inertial>
-      <mass value="0.060"/>
-      <inertia ixx="3.75e-6" ixy="0" ixz="0" iyy="3.75e-6" iyz="0" izz="3.75e-6"/>
+      <mass value="0.11"/>
+      <inertia ixx="3.8016275e-05" ixy="0" ixz="0" iyy="5.9532549999999996e-05" iyz="0" izz="3.8016275e-05"/>
     </inertial>
     <visual>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <sphere radius="0.0125"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
-      <material name="silver"/>
+      <material name="hold_flow_dark"/>
     </visual>
     <collision>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <sphere radius="0.0125"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
     </collision>
   </link>
-  <joint name="front_caster_joint" type="fixed">
+  <joint name="rear_left_wheel_joint" type="continuous">
     <parent link="base_link"/>
-    <child link="front_caster_link"/>
-    <origin rpy="0 0 0" xyz="0.12 0 -0.0204"/>
+    <child link="rear_left_wheel_link"/>
+    <origin rpy="0 0 0" xyz="-0.105 0.255 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.981" velocity="4.72"/>
+    <dynamics damping="0.02" friction="0.02"/>
   </joint>
-  <link name="rear_caster_link">
+  <link name="rear_right_wheel_link">
     <inertial>
-      <mass value="0.060"/>
-      <inertia ixx="3.75e-6" ixy="0" ixz="0" iyy="3.75e-6" iyz="0" izz="3.75e-6"/>
+      <mass value="0.11"/>
+      <inertia ixx="3.8016275e-05" ixy="0" ixz="0" iyy="5.9532549999999996e-05" iyz="0" izz="3.8016275e-05"/>
     </inertial>
     <visual>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <sphere radius="0.0125"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
-      <material name="silver"/>
+      <material name="hold_flow_dark"/>
     </visual>
     <collision>
+      <origin rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <sphere radius="0.0125"/>
+        <cylinder length="0.03" radius="0.0329"/>
       </geometry>
     </collision>
   </link>
-  <joint name="rear_caster_joint" type="fixed">
+  <joint name="rear_right_wheel_joint" type="continuous">
     <parent link="base_link"/>
-    <child link="rear_caster_link"/>
-    <origin rpy="0 0 0" xyz="-0.12 0 -0.0204"/>
+    <child link="rear_right_wheel_link"/>
+    <origin rpy="0 0 0" xyz="-0.105 -0.255 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.981" velocity="4.72"/>
+    <dynamics damping="0.02" friction="0.02"/>
   </joint>
   <!-- 20×20×240 mm 후방 중앙 마스트. 8 mm 보강판 위 z=728 mm에서 시작한다. -->
   <link name="camera_mast_link">

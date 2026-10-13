@@ -54,7 +54,8 @@ def run_probes(args, world, robot, controller, names, q, wheels, arm_indices,
         maximum_error = 0.
         for tick in range(24):
             controller.apply_action(ArticulationAction(joint_positions=q[arm_indices], joint_indices=arm_indices))
-            controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
+            controller.apply_action(ArticulationAction(
+                joint_velocities=np.zeros(len(wheels)), joint_indices=wheels))
             world.step(render=args.record and tick >= 20)
             forces = np.linalg.norm(contact.get_contact_force_matrix(dt=dt), axis=-1)
             if not np.isfinite(forces).all():

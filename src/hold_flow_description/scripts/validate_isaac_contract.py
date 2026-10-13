@@ -16,6 +16,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PACKAGE_ROOT.parents[1]
 SPEC_PATH = REPO_ROOT / "design/mechanical/hold_flow_mechanical_v0_3.yaml"
 URDF_PATH = PACKAGE_ROOT / "urdf/hold_flow.urdf"
+ISAAC_CONFIG_PATH = PACKAGE_ROOT / "config/isaac_sim_6.yaml"
 sys.path.insert(0, str(Path(__file__).parent))
 from validate_description import link_transforms, xyz_of  # noqa: E402
 
@@ -27,11 +28,30 @@ def close_xyz(actual: list[float], expected_mm: list[float], tolerance_m: float 
 
 def main() -> None:
     spec = yaml.safe_load(SPEC_PATH.read_text(encoding="utf-8"))
+    isaac_config = yaml.safe_load(ISAAC_CONFIG_PATH.read_text(encoding="utf-8"))
     root = ET.parse(URDF_PATH).getroot()
     transforms = link_transforms(root)
     links = {link.attrib["name"]: link for link in root.findall("link")}
     joints = {joint.attrib["name"]: joint for joint in root.findall("joint")}
     issues: list[str] = []
+    expected_wheel_joints = [
+        "left_wheel_joint", "right_wheel_joint",
+        "rear_left_wheel_joint", "rear_right_wheel_joint",
+    ]
+    articulation_contract = isaac_config["articulation_contract"]
+    if articulation_contract["wheel_velocity_joints"] != expected_wheel_joints:
+        issues.append(
+            "Isaac wheel_velocity_joints 불일치: "
+            f"{articulation_contract['wheel_velocity_joints']}"
+        )
+    if articulation_contract["fixed_contact_proxies"]:
+        issues.append(
+            "Isaac fixed_contact_proxies는 4WD 모델에서 비어 있어야 함: "
+            f"{articulation_contract['fixed_contact_proxies']}"
+        )
+    overlap = set(expected_wheel_joints) & set(articulation_contract["arm_position_joints"])
+    if overlap:
+        issues.append(f"팔 position group에 wheel DOF 포함: {sorted(overlap)}")
 
     tabletop = spec["chassis"]["plates"]["tabletop"]
     expected_xyz = {
@@ -49,8 +69,8 @@ def main() -> None:
         "laser_link": spec["navigation"]["lidar_candidate"]["center_xyz"],
         "left_wheel_link": spec["navigation"]["wheel"]["center_xyz_left"],
         "right_wheel_link": spec["navigation"]["wheel"]["center_xyz_right"],
-        "front_caster_link": spec["navigation"]["ball_casters"]["centers_xyz"][0],
-        "rear_caster_link": spec["navigation"]["ball_casters"]["centers_xyz"][1],
+        "rear_left_wheel_link": spec["navigation"]["wheel"]["center_xyz_rear_left"],
+        "rear_right_wheel_link": spec["navigation"]["wheel"]["center_xyz_rear_right"],
         "battery_link": spec["internal_payloads"]["battery"]["center_xyz"],
         "electronics_link": spec["internal_payloads"]["electronics"]["center_xyz"],
         "battery_mount_plate_link": spec["printed_mounts"]["battery_plate"]["origin_xyz"],
@@ -76,6 +96,8 @@ def main() -> None:
     expected_joint_types = {
         "left_wheel_joint": "continuous",
         "right_wheel_joint": "continuous",
+        "rear_left_wheel_joint": "continuous",
+        "rear_right_wheel_joint": "continuous",
         "left_gripper": "revolute",
         "right_finger1_joint": "prismatic",
         "right_finger2_joint": "prismatic",
@@ -126,9 +148,21 @@ def main() -> None:
     frame_columns = [name for name in links if name.endswith("frame_column_link")]
     if len(frame_columns) != 4:
         issues.append(f"프레임 기둥 수={len(frame_columns)}, expected=4")
-    casters = [name for name in links if name in {"front_caster_link", "rear_caster_link"}]
-    if len(casters) != 2:
-        issues.append(f"볼 캐스터 수={len(casters)}, expected=2")
+    casters = [name for name in links | joints if "caster" in name]
+    if casters:
+        issues.append(f"폐기된 캐스터 링크/관절 잔존: {casters}")
+    wheel_links = [
+        "left_wheel_link", "right_wheel_link",
+        "rear_left_wheel_link", "rear_right_wheel_link",
+    ]
+    expected_wheel_mass = float(spec["navigation"]["wheel"]["mass_each"])
+    for name in wheel_links:
+        link = links.get(name)
+        if link is None:
+            continue
+        actual_mass = float(link.find("inertial/mass").attrib["value"])
+        if not math.isclose(actual_mass, expected_wheel_mass, abs_tol=1e-9):
+            issues.append(f"{name}: mass={actual_mass}, expected={expected_wheel_mass}")
     tabletop_panels = [name for name in links if name.startswith("tabletop_") and name.endswith("_link")]
     if len(tabletop_panels) != 4:
         issues.append(f"상판 분할 수={len(tabletop_panels)}, expected=4")
@@ -146,18 +180,21 @@ def main() -> None:
     report = {
         "urdf": str(URDF_PATH.relative_to(REPO_ROOT)),
         "source_spec": str(SPEC_PATH.relative_to(REPO_ROOT)),
+        "isaac_config": str(ISAAC_CONFIG_PATH.relative_to(REPO_ROOT)),
         "target": spec["simulation"]["target"],
         "coordinate_checks": len(expected_xyz),
         "articulated_joints": len(
             [joint for joint in joints.values() if joint.attrib["type"] in axis_joint_types]
         ),
+        "wheel_velocity_joints": articulation_contract["wheel_velocity_joints"],
         "mimic_joints": mimic,
         "left_gripper": configured_left_gripper,
         "left_gripper_attachment": spec["left_cup_gripper"]["selected_attachment"],
         "right_gripper_proxy_mass_kg": right_proxy_mass,
         "frame_columns": frame_columns,
         "tabletop_panels": tabletop_panels,
-        "ball_casters": casters,
+        "wheel_links": wheel_links,
+        "caster_links_or_joints": casters,
         "custom_structure_uses_primitive_collision": not cad_collision_meshes,
         "issues": issues,
         "static_import_contract_ready": not issues,

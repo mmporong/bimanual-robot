@@ -146,68 +146,171 @@ def _joint_origins(root: ET.Element) -> dict[str, str | None]:
     }
 
 
-def test_base_contract_overlay_updates_preview_base_only(tmp_path):
-    source = Path(__file__).parents[1] / "src/hold_flow_description/urdf/hold_flow.urdf"
-    contract_source = Path(__file__).parents[1] / "config/navigation/jdamr_migration.json"
-    contract = json.loads(contract_source.read_text(encoding="utf-8"))
+def _four_wheel_fixture(tmp_path: Path) -> tuple[Path, Path, dict]:
+    package = tmp_path / "hold_flow_description"
+    urdf_dir = package / "urdf"
+    urdf_dir.mkdir(parents=True)
+    (package / "package.xml").write_text("<package/>", encoding="utf-8")
+    wheel_parts = []
+    for joint_name, link_name, x_m, y_m in (
+        ("left_wheel_joint", "left_wheel_link", 0.105, 0.160),
+        ("right_wheel_joint", "right_wheel_link", 0.105, -0.160),
+        ("rear_left_wheel_joint", "rear_left_wheel_link", -0.105, 0.160),
+        ("rear_right_wheel_joint", "rear_right_wheel_link", -0.105, -0.160),
+    ):
+        wheel_parts.append(
+            f'<link name="{link_name}">'
+            '<visual><geometry><cylinder radius="0.030" length="0.020"/></geometry></visual>'
+            '<collision><geometry><cylinder radius="0.030" length="0.020"/></geometry></collision>'
+            '</link>'
+            f'<joint name="{joint_name}" type="continuous">'
+            f'<parent link="base_link"/><child link="{link_name}"/>'
+            f'<origin xyz="{x_m} {y_m} -0.0029"/></joint>'
+        )
+    source = urdf_dir / "robot.urdf"
+    source.write_text(
+        '<robot name="x"><link name="base_footprint"/><link name="base_link"/>'
+        '<joint name="base_footprint_joint" type="fixed">'
+        '<parent link="base_footprint"/><child link="base_link"/><origin xyz="0 0 0.0329"/>'
+        '</joint><link name="left_arm_mount"/><link name="right_arm_mount"/>'
+        '<joint name="left_mount_joint" type="fixed">'
+        '<parent link="base_link"/><child link="left_arm_mount"/><origin xyz="0.01 0.02 0.03"/>'
+        '</joint><joint name="right_mount_joint" type="fixed">'
+        '<parent link="base_link"/><child link="right_arm_mount"/><origin xyz="0.01 -0.02 0.03"/>'
+        '</joint>' + "".join(wheel_parts) + '</robot>',
+        encoding="utf-8",
+    )
+    contract = {
+        "target_design": {
+            "drive_type": "skid_steer_four_wheel_drive",
+            "model_base_frame_definition": "chassis_center_on_floor",
+            "runtime_base_frame_definition": "front_axle_projection_on_floor",
+            "model_from_runtime_translation_m": [0.105, 0.0, 0.0],
+            "wheelbase_design_m": 0.210,
+            "wheelbase_measured_m": None,
+            "rear_axle_geometry_status": "design_assumption_not_measured",
+            "wheel_radius_initial_m": 0.0329,
+            "wheel_separation_geometric_m": 0.510,
+        },
+        "hardware": {"measured_base_footprint": {"wheel_outer_width_m": 0.540}},
+    }
+    return source, tmp_path / "preview" / "robot.urdf", contract
+
+
+def test_base_contract_overlay_updates_all_four_wheels_and_preserves_design_axles(tmp_path):
+    source, output, contract = _four_wheel_fixture(tmp_path)
     contract_path = tmp_path / "jdamr_migration.json"
     _write_json(contract_path, contract)
-    output = tmp_path / "hold_flow.preview.urdf"
     source_before = source.read_bytes()
-    before_root = ET.fromstring(source_before)
-    before_origins = _joint_origins(before_root)
-    assert [float(value) for value in before_origins["left_wheel_joint"].split()] == [0.0, 0.160, 0.0]
-    assert [float(value) for value in before_origins["right_wheel_joint"].split()] == [0.0, -0.160, 0.0]
-    assert [float(value) for value in before_origins["front_caster_joint"].split()] == [0.12, 0.0, -0.0204]
-    assert [float(value) for value in before_origins["rear_caster_joint"].split()] == [-0.12, 0.0, -0.0204]
+    before_origins = _joint_origins(ET.fromstring(source_before))
 
     result = MODULE.materialize_urdf(source, output, base_contract=contract_path)
     after_root = ET.parse(output).getroot()
+    after_origins = _joint_origins(after_root)
 
     assert source.read_bytes() == source_before
     overlay = result["base_overlay"]
     assert overlay["applied"] is True
     assert overlay["contract_sha256"] == hashlib.sha256(contract_path.read_bytes()).hexdigest()
-    assert overlay["scene_frame_basis"]["axle_x_in_scene_m"] == pytest.approx(0.105)
+    assert overlay["scene_frame_basis"] == {
+        "base_footprint": "chassis_center_on_floor",
+        "runtime_base_frame": "front_axle_projection_on_floor",
+        "model_from_runtime_translation_m": [0.105, 0.0, 0.0],
+    }
+    assert overlay["model_geometry"]["drive_type"] == "skid_steer_four_wheel_drive"
+    assert overlay["model_geometry"]["wheel_count"] == 4
+    assert overlay["model_geometry"]["caster_count"] == 0
+    assert overlay["model_geometry"]["rear_axle_geometry_status"] == "design_assumption_not_measured"
+    assert overlay["changes"]["casters"] == {}
     assert overlay["untouched_arm_frames"] is True
     assert overlay["inertias_updated"] is False
     assert overlay["dynamics_validated"] is False
     assert overlay["contact_stability_validated"] is False
 
-    after_origins = _joint_origins(after_root)
-    changed = {
-        name for name in before_origins
-        if before_origins[name] != after_origins[name]
+    wheel_origins = {
+        "left_wheel_joint": [0.105, 0.255, 0.0],
+        "right_wheel_joint": [0.105, -0.255, 0.0],
+        "rear_left_wheel_joint": [-0.105, 0.255, 0.0],
+        "rear_right_wheel_joint": [-0.105, -0.255, 0.0],
     }
-    assert changed == {
-        "left_wheel_joint", "right_wheel_joint", "front_caster_joint", "rear_caster_joint",
-    }
+    for joint_name, expected_xyz in wheel_origins.items():
+        xyz = [float(value) for value in after_origins[joint_name].split()]
+        assert xyz == pytest.approx(expected_xyz)
+        assert xyz[0] == pytest.approx(float(before_origins[joint_name].split()[0]))
+        change = overlay["changes"]["wheels"][joint_name]
+        assert change["source_design_x_preserved"] is True
+
     assert after_origins["base_footprint_joint"] == before_origins["base_footprint_joint"]
     assert after_origins["left_mount_joint"] == before_origins["left_mount_joint"]
     assert after_origins["right_mount_joint"] == before_origins["right_mount_joint"]
-
-    left_xyz = [float(value) for value in after_origins["left_wheel_joint"].split()]
-    right_xyz = [float(value) for value in after_origins["right_wheel_joint"].split()]
-    assert left_xyz == pytest.approx([0.105, 0.255, 0.0])
-    assert right_xyz == pytest.approx([0.105, -0.255, 0.0])
-    assert left_xyz[1] - right_xyz[1] == pytest.approx(0.510)
-    measured = contract["hardware"]["measured_base_footprint"]
-    expected_axle_x = -(measured["front_m"] + measured["rear_m"]) / 2.0
-    assert left_xyz[0] == pytest.approx(expected_axle_x)
-
-    for link_name in ("left_wheel_link", "right_wheel_link"):
+    assert not any("caster" in (element.get("name") or "") for element in after_root.iter())
+    for link_name in (
+        "left_wheel_link", "right_wheel_link", "rear_left_wheel_link", "rear_right_wheel_link",
+    ):
         link = after_root.find(f"./link[@name='{link_name}']")
         cylinders = link.findall("./visual/geometry/cylinder") + link.findall("./collision/geometry/cylinder")
         assert [float(item.get("radius")) for item in cylinders] == pytest.approx([0.0329, 0.0329])
         assert [float(item.get("length")) for item in cylinders] == pytest.approx([0.030, 0.030])
 
-    front_caster = [float(value) for value in after_origins["front_caster_joint"].split()]
-    rear_caster = [float(value) for value in after_origins["rear_caster_joint"].split()]
-    assert front_caster == pytest.approx([-0.110, 0.215, -0.0204])
-    assert rear_caster == pytest.approx([-0.110, -0.215, -0.0204])
-    assert all(
-        caster["basis"] == "proxy_inference_not_measured"
-        for caster in overlay["changes"]["casters"].values()
+
+@pytest.mark.parametrize("bad", [True, "0.105", float("nan"), float("inf")])
+def test_base_contract_overlay_rejects_bad_frame_translation_numbers(tmp_path, bad):
+    source, output, contract = _four_wheel_fixture(tmp_path)
+    contract["target_design"]["model_from_runtime_translation_m"][0] = bad
+    contract_path = tmp_path / "jdamr_migration.json"
+    _write_json(contract_path, contract)
+
+    with pytest.raises(ValueError):
+        MODULE.materialize_urdf(source, output, base_contract=contract_path)
+    assert not output.exists()
+
+
+def test_base_contract_overlay_rejects_caster_or_missing_rear_wheel(tmp_path):
+    source, output, contract = _four_wheel_fixture(tmp_path)
+    contract_path = tmp_path / "jdamr_migration.json"
+    _write_json(contract_path, contract)
+    text = source.read_text(encoding="utf-8")
+    source.write_text(text.replace(
+        '</robot>', '<link name="rear_caster_link"/><joint name="rear_caster_joint" type="fixed">'
+        '<parent link="base_link"/><child link="rear_caster_link"/><origin xyz="0 0 0"/></joint></robot>',
+    ), encoding="utf-8")
+    with pytest.raises(ValueError, match="caster"):
+        MODULE.materialize_urdf(source, output, base_contract=contract_path)
+
+    source, output, contract = _four_wheel_fixture(tmp_path / "missing")
+    contract_path = tmp_path / "missing" / "jdamr_migration.json"
+    _write_json(contract_path, contract)
+    source.write_text(source.read_text(encoding="utf-8").replace(
+        'rear_right_wheel_joint', 'missing_rear_right_joint',
+    ), encoding="utf-8")
+    with pytest.raises(ValueError, match="각각 4개"):
+        MODULE.materialize_urdf(source, output, base_contract=contract_path)
+
+
+def test_repository_four_wheel_urdf_and_contract_materialize_without_geometry_regression(tmp_path):
+    repository = Path(__file__).parents[1]
+    source = repository / "src/hold_flow_description/urdf/hold_flow.urdf"
+    contract = repository / "config/navigation/jdamr_migration.json"
+    output = tmp_path / "hold_flow.preview.urdf"
+    source_before = source.read_bytes()
+    before_root = ET.fromstring(source_before)
+
+    result = MODULE.materialize_urdf(source, output, base_contract=contract)
+    after_root = ET.parse(output).getroot()
+    overlay = result["base_overlay"]
+
+    assert source.read_bytes() == source_before
+    assert overlay["model_geometry"]["wheel_count"] == 4
+    assert overlay["model_geometry"]["caster_count"] == 0
+    assert overlay["changes"]["casters"] == {}
+    for joint_name in overlay["model_geometry"]["wheel_joint_names"]:
+        before = [float(value) for value in _joint_origins(before_root)[joint_name].split()]
+        after = [float(value) for value in _joint_origins(after_root)[joint_name].split()]
+        assert after == pytest.approx(before)
+        assert overlay["changes"]["wheels"][joint_name]["source_design_x_preserved"] is True
+    assert not any(
+        "caster" in (element.get("name") or "").lower()
+        for tag in ("joint", "link") for element in after_root.findall(f"./{tag}")
     )
 
 

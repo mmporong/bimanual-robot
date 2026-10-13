@@ -14,7 +14,7 @@ from bimanual_pour_plan import sample_plan
 from cup_contact_model import Chain
 from cup_contact_place import supported_window, placement_gate_failure
 from mobile_service_control import follow_path
-from mobile_service_model import ground_collision, ground_window_verified
+from mobile_service_model import four_wheel_targets, ground_collision, ground_window_verified
 from pour_geometry import liquid_counts, quaternion_matrix, preclose_violation, inward_pour_direction
 from restaurant_layout import load_layout, plan_route
 from restaurant_roundtrip import load_roundtrip_config, roundtrip_routes, station_rest_verified
@@ -365,7 +365,7 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
         yaw = math.atan2(rotation[1, 0], rotation[0, 0])
         phase = state
         command = None
-        velocities = [0., 0.]
+        velocities = [0.] * len(wheels)
         nav = None
         if state in plans:
             command = sample_plan(plans[state], max(0., t-state_start))
@@ -379,11 +379,13 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
                     if phase.startswith(side.upper()) or (side == "left" and state in {"DEPOSIT", "SERVE"}):
                         q[idx[side]] = touchdown[key]
         elif state == "BACKOUT":
-            velocities = [-.05/.0329]*2
+            velocities = four_wheel_targets(-.05/.0329, -.05/.0329)
         elif state in {"NAVIGATE", "DOCK"}:
             path = route if state == "NAVIGATE" else [[-1.75, -2.25]]
-            nav = follow_path([*position[:2], yaw], path, math.pi)
-            velocities = [nav["left_rad_s"], nav["right_rad_s"]]
+            nav = follow_path(
+                [*position[:2], yaw], path, math.pi, axle_offset=0.0
+            )
+            velocities = four_wheel_targets(nav["left_rad_s"], nav["right_rad_s"])
         elif state in {"GO_KITCHEN", "KITCHEN_ALIGN", "RETURN_HOME"}:
             if state == "GO_KITCHEN":
                 path, target = outbound_route, layout['waypoints']['kitchen']
@@ -400,10 +402,13 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
                 tolerances = {
                     'position_tolerance_m': roundtrip_config['dock_position_tolerance_m'],
                     'yaw_tolerance_rad': roundtrip_config['dock_yaw_tolerance_rad']}
-            nav = follow_path([*position[:2], yaw], path, target[2], **tolerances)
-            velocities = [nav['left_rad_s'], nav['right_rad_s']]
+            nav = follow_path(
+                [*position[:2], yaw], path, target[2], axle_offset=0.0, **tolerances
+            )
+            velocities = four_wheel_targets(nav['left_rad_s'], nav['right_rad_s'])
         elif state == "RETURN_CLEAR":
-            velocities = [-roundtrip_config['exit_speed_m_s']/.0329]*2
+            reverse = -roundtrip_config['exit_speed_m_s']/.0329
+            velocities = four_wheel_targets(reverse, reverse)
 
         if executor is not None:
             requested_phase = phase_for_tick(state, phase, t, roundtrip=roundtrip)
@@ -687,7 +692,8 @@ def execute_water_service(args, source, scene, world, robot, controller, names, 
             stopped = 0.
             touchdown = {}
             window = []
-    controller.apply_action(ArticulationAction(joint_velocities=np.zeros(2), joint_indices=wheels))
+    controller.apply_action(ArticulationAction(
+        joint_velocities=np.zeros(len(wheels)), joint_indices=wheels))
     if args.record or cinema is not None:
         get_active_viewport().camera_path = "/PresentationCameras/cinematic" if cinema is not None else "/PresentationCameras/wide"
         for _ in range(3):
