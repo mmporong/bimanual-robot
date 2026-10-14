@@ -4,21 +4,21 @@ index bdcc7e17..6df78aec 100644
 +++ b/src/lerobot/cameras/opencv/camera_opencv.py
 @@ -118,6 +118,7 @@ class OpenCVCamera(Camera):
          self.new_frame_event: Event = Event()
- 
+
          self.rotation: int | None = get_cv2_rotation(config.rotation)
 +        self.mirror: bool = config.mirror
          self.backend: int = config.backend
- 
+
          self.capture_width: int | None = None
 @@ -449,6 +450,9 @@ class OpenCVCamera(Camera):
          if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180]:
              processed_image = cv2.rotate(processed_image, self.rotation)
- 
+
 +        if self.mirror:
 +            processed_image = cv2.flip(processed_image, 1)
 +
          return processed_image
- 
+
      def _read_loop(self) -> None:
 diff --git a/src/lerobot/cameras/opencv/configuration_opencv.py b/src/lerobot/cameras/opencv/configuration_opencv.py
 index 8ae57fe3..59f8c7c8 100644
