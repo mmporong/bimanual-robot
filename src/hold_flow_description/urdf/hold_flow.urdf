@@ -725,23 +725,24 @@
     <limit effort="0.981" velocity="4.72"/>
     <dynamics damping="0.02" friction="0.02"/>
   </joint>
-  <!-- 20×20×240 mm 후방 중앙 마스트. 8 mm 보강판 위 z=728 mm에서 시작한다. -->
+  <!-- 후방 중앙 마스트의 시각 프록시. 높이 근거는 design/mechanical/hold_flow_mechanical_v0_3.yaml camera.mount를 따른다. -->
   <link name="camera_mast_link">
     <inertial>
-      <origin rpy="0 0 0" xyz="0 0 0.12"/>
+      <origin rpy="0 0 0" xyz="0 0 0.265"/>
       <mass value="0.044"/>
-      <inertia ixx="0.00021266666666666664" ixy="0" ixz="0" iyy="0.00021266666666666664" iyz="0" izz="2.9333333333333333e-06"/>
+      <inertia ixx="0.0010314333333333334" ixy="0" ixz="0" iyy="0.0010314333333333334" iyz="0" izz="2.9333333333333333e-06"/>
     </inertial>
     <visual>
+      <origin xyz="0 0 0.265"/>
       <geometry>
-        <mesh filename="package://hold_flow_description/meshes/cad/camera_mast_segment.stl" scale="0.001 0.001 0.001"/>
+        <box size="0.020 0.020 0.530"/>
       </geometry>
       <material name="hold_flow_dark"/>
     </visual>
     <collision>
-      <origin xyz="0 0 0.120"/>
+      <origin xyz="0 0 0.265"/>
       <geometry>
-        <box size="0.020 0.020 0.240"/>
+        <box size="0.020 0.020 0.530"/>
       </geometry>
     </collision>
   </link>
@@ -771,8 +772,8 @@
   <joint name="camera_mount_joint" type="fixed">
     <parent link="camera_mast_link"/>
     <child link="camera_link"/>
-    <!-- 광학 중심 (-110,0,970) mm를 만들도록 35도 하향 자세에서 역산한 본체 중심. -->
-    <origin rpy="0 0.6108652382 0" xyz="-0.006383 0 0.253472"/>
+    <!-- 광학 중심과 기존 자세의 본체 중심 관계는 design/mechanical/hold_flow_mechanical_v0_3.yaml camera를 따른다. -->
+    <origin rpy="0 0.6108652382 0" xyz="-0.006383 0 0.543472"/>
   </joint>
   <link name="camera_cradle_link">
     <inertial>

@@ -18,9 +18,16 @@ coordinate_convention:
 provenance:
   tabletop_height:
     selected_design_datum: 720.0
-    evidence: 710_to_865_mm_accessible_work_surface_range
-    source: https://www.access-board.gov/ada/ada-ibc-comparison/chapter-9/
-    confidence: design_assumption_not_measured_average
+    actual_top_z: 720.0
+    evidence: operator_confirmation_floor_to_tabletop_top_height_72cm
+    confirmed_on: 2026-10-14
+    confidence: user_confirmed
+  camera_height:
+    height_above_tabletop: 540.0
+    evidence: user_confirmed_camera_optical_center_height_above_tabletop
+    confirmed_on: 2026-10-14
+    absolute_z_basis: operator_confirmed_tabletop_top_z_720mm_plus_confirmed_relative_height
+    confidence: user_confirmed_relative_and_absolute_height
   so101:
     source: https://github.com/TheRobotStudio/SO-ARM100
     checked_commit: eecbe3e0a9ebb23e25ad7b2759b03884c6660903
@@ -190,8 +197,8 @@ camera:
   model: Orbbec_Astra_S
   design_envelope: [40.0, 165.0, 48.0]
   mass: 0.310
-  optical_center_xyz: [-110.0, 0.0, 970.0]
-  height_above_tabletop: 250.0
+  optical_center_xyz: [-110.0, 0.0, 1260.0]
+  height_above_tabletop: 540.0
   pitch_down: 35.0
   depth_range: [400.0, 2000.0]
   depth_fov_hv: [58.4, 45.5]
@@ -201,11 +208,14 @@ camera:
     mast_section: [20.0, 20.0]
     mast_z_bottom: 728.0
     mast_length: 240.0
+    mast_length_status: legacy_cad_candidate_not_current_physical_mast
+    mast_visual_proxy_length: 530.0
+    mast_visual_proxy_status: derived_from_optical_height_not_physical_mast_measurement
     backing_footprint: [55.0, 55.0]
     backing_thickness: 8.0
-    body_center_xyz: [-126.383, 0.0, 981.472]
+    body_center_xyz: [-126.383, 0.0, 1271.472]
   physical_measurement_gates:
-    - actual_optical_center_from_mount
+    - actual_camera_x_y_and_orientation_from_mount
     - selected_camera_serial_intrinsics
     - wrist_and_gripper_occlusion_map
 

@@ -58,7 +58,7 @@ def compose(iso_path: Path, front_path: Path, top_path: Path, output: Path) -> N
     facts = (
         "프레임 450(W)×340(D)",
         "상판 윗면 z=720 mm",
-        "팔 중심 (20, ±170, 726)",
+        "카메라 상판 위 540 mm",
         "4개 구동륜 · 볼캐스터 없음",
     )
     x = 55
@@ -88,8 +88,8 @@ def main() -> None:
         iso_path = temporary / "iso.png"
         front_path = temporary / "front.png"
         top_path = temporary / "top.png"
-        render_urdf(iso_path, positions, view="iso", parallel_scale=650)
-        render_urdf(front_path, positions, view="front", parallel_scale=590)
+        render_urdf(iso_path, positions, view="iso", parallel_scale=950)
+        render_urdf(front_path, positions, view="front", parallel_scale=900)
         render_urdf(top_path, positions, view="top", parallel_scale=430)
         compose(iso_path, front_path, top_path, OUTPUT_DIR / "model_overview.png")
     print(OUTPUT_DIR / "model_overview.png")

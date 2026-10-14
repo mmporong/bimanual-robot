@@ -1,14 +1,16 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="hold_flow_sensors">
-    <!-- 20×20×240 mm 후방 중앙 마스트. 8 mm 보강판 위 z=728 mm에서 시작한다. -->
+    <!-- 후방 중앙 마스트의 시각 프록시. 높이 근거는 design/mechanical/hold_flow_mechanical_v0_3.yaml camera.mount를 따른다. -->
     <link name="camera_mast_link">
-      <xacro:box_inertial mass="0.044" x="0.020" y="0.020" z="0.240"/>
+      <!-- 실물 마스트 재질·질량은 미측정이므로 기존 명목 질량을 유지한다. -->
+      <xacro:box_inertial mass="0.044" x="0.020" y="0.020" z="0.530"/>
       <visual>
-        <geometry><mesh filename="package://hold_flow_description/meshes/cad/camera_mast_segment.stl" scale="0.001 0.001 0.001"/></geometry>
+        <origin xyz="0 0 0.265"/>
+        <geometry><box size="0.020 0.020 0.530"/></geometry>
         <material name="hold_flow_dark"/>
       </visual>
-      <collision><origin xyz="0 0 0.120"/><geometry><box size="0.020 0.020 0.240"/></geometry></collision>
+      <collision><origin xyz="0 0 0.265"/><geometry><box size="0.020 0.020 0.530"/></geometry></collision>
     </link>
     <joint name="camera_mast_joint" type="fixed">
       <parent link="base_link"/><child link="camera_mast_link"/>
@@ -26,8 +28,8 @@
     </link>
     <joint name="camera_mount_joint" type="fixed">
       <parent link="camera_mast_link"/><child link="camera_link"/>
-      <!-- 광학 중심 (-110,0,970) mm를 만들도록 35도 하향 자세에서 역산한 본체 중심. -->
-      <origin xyz="-0.006383 0 0.253472" rpy="0 0.6108652382 0"/>
+      <!-- 광학 중심과 기존 자세의 본체 중심 관계는 design/mechanical/hold_flow_mechanical_v0_3.yaml camera를 따른다. -->
+      <origin xyz="-0.006383 0 0.543472" rpy="0 0.6108652382 0"/>
     </joint>
 
     <link name="camera_cradle_link">

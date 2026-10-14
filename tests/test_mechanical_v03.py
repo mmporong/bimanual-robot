@@ -69,7 +69,18 @@ print(xacro.process_file(sys.argv[1]).toxml())
         self.assertFalse(
             spec["provenance"]["left_finray_fingers_historical"]["current_build_use"]
         )
-        self.assertEqual(spec["camera"]["height_above_tabletop"], 250.0)
+        self.assertEqual(spec["camera"]["height_above_tabletop"], 540.0)
+        self.assertEqual(spec["camera"]["optical_center_xyz"], [-110.0, 0.0, 1260.0])
+        self.assertEqual(spec["camera"]["mount"]["mast_visual_proxy_length"], 530.0)
+        self.assertEqual(
+            spec["camera"]["mount"]["mast_length_status"],
+            "legacy_cad_candidate_not_current_physical_mast",
+        )
+        self.assertEqual(
+            spec["camera"]["optical_center_xyz"][2]
+            - spec["chassis"]["plates"]["tabletop"]["z_top"],
+            spec["camera"]["height_above_tabletop"],
+        )
         self.assertEqual(spec["camera"]["mount"]["mast_z_bottom"], 728.0)
         self.assertEqual(
             spec["camera"]["mount"]["mast_z_bottom"],

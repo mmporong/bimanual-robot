@@ -183,7 +183,7 @@ def main() -> None:
             ),
             "tabletop_is_four_printable_panels": len(tabletop["quadrant_names"]) == 4,
             "tabletop_is_720_high": math.isclose(float(tabletop["z_top"]), 720.0),
-            "camera_is_20_to_30cm_above_tabletop": 200.0 <= camera_height <= 300.0,
+            "camera_is_540mm_above_tabletop": math.isclose(camera_height, 540.0),
             "both_arms_fit_tabletop_without_envelope_overlap": min(clearances.values()) > 0.0,
             "arm_bases_are_150mm_from_front_edge": all(
                 math.isclose(170.0 - float(arm["xyz"][0]), 150.0)

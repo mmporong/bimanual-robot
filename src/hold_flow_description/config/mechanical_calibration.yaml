@@ -55,9 +55,13 @@ camera:
   optical_target_from_chassis_frame_m:
   - -0.11
   - 0.0
-  - 0.97
+  - 1.26
+  height_above_tabletop_m: 0.54
+  height_provenance: user_confirmed_relative_to_tabletop_2026_10_14
+  tabletop_top_from_floor_m: 0.72
+  absolute_z_status: user_confirmed_tabletop_0_720m_plus_relative_height_0_540m
   nominal_pitch_down_rad: 0.6108652381980153
-  physical_mount_gate: measure_actual_camera_body_and_m6_location
+  physical_mount_gate: measure_actual_camera_x_y_orientation_body_and_m6_location
 lidar:
   model: ROBOTIS LDS-03
   center_from_chassis_frame_m:
