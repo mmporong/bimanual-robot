@@ -1,0 +1,52 @@
+diff --git a/src/lerobot/rollout/strategies/base.py b/src/lerobot/rollout/strategies/base.py
+index e47b6520..180244dc 100644
+--- a/src/lerobot/rollout/strategies/base.py
++++ b/src/lerobot/rollout/strategies/base.py
+@@ -52,6 +52,17 @@ class BaseStrategy(RolloutStrategy):
+         engine.resume()
+         logger.info("Base strategy control loop started")
+ 
++        # (bimanual-robot local patch, 2026-10-14: 카메라 일시 stale은 틱만 건너뛴다)
++        # OpenCVCamera.read_latest()가 500ms 넘게 오래된 프레임에 TimeoutError를 던지면,
++        # 패치 전에는 이 예외가 그대로 전파되어 run()이 죽고 teardown()의 disconnect()가
++        # (disable_torque_on_disconnect 기본값 때문에) 토크를 급격히 끊어 쥐고 있던 물체를
++        # 떨어뜨렸다. 간헐적 카메라 지연 한 틱 때문에 그릴 이유가 없으므로, 짧은 지연은
++        # 그냥 한 틱 건너뛰고(새 명령을 안 보내 마지막 목표를 계속 유지) 계속 돈다.
++        # 연속으로 너무 오래 끊기면(약 5초) 그때는 진짜 멈춘 것으로 보고 루프를 빠져나간다 —
++        # 이 경우에도 안전한 동작은 disable_torque_on_disconnect=false로 호출자가 보장한다.
++        consecutive_obs_failures = 0
++        max_consecutive_obs_failures = int(5.0 / control_interval) if control_interval > 0 else 150
++
+         while not ctx.runtime.shutdown_event.is_set():
+             loop_start = time.perf_counter()
+ 
+@@ -59,7 +70,28 @@ class BaseStrategy(RolloutStrategy):
+                 logger.info("Duration limit reached (%.0fs)", cfg.duration)
+                 break
+ 
+-            obs = robot.get_observation()
++            try:
++                obs = robot.get_observation()
++            except TimeoutError as exc:
++                consecutive_obs_failures += 1
++                logger.warning(
++                    "Observation read failed (%d/%d consecutive): %s — holding last commanded "
++                    "position and skipping this tick.",
++                    consecutive_obs_failures,
++                    max_consecutive_obs_failures,
++                    exc,
++                )
++                if consecutive_obs_failures >= max_consecutive_obs_failures:
++                    logger.error(
++                        "Observation read failed %d times in a row (~5s) — stopping rollout. "
++                        "Robot will NOT be commanded to move; torque is left as configured.",
++                        consecutive_obs_failures,
++                    )
++                    break
++                precise_sleep(control_interval)
++                continue
++            consecutive_obs_failures = 0
++
+             obs_processed = self._process_observation_and_notify(ctx.processors, obs)
+ 
+             if self._handle_warmup(cfg.use_torch_compile, loop_start, control_interval):
