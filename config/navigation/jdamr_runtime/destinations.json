@@ -1,0 +1,72 @@
+{
+ "frame": "aligned map",
+ "face_xy": "box front-face centre",
+ "normal_deg": "outward face normal (robot approaches from this side)",
+ "box_assumed_m": [
+  0.4,
+  0.3
+ ],
+ "destinations": {
+  "water_station": {
+   "face_xy": [
+    0.06,
+    -1.27
+   ],
+   "normal_deg": 0,
+   "source": "2026-10-06 re-measured after the box was put back: LiDAR face line centre y -1.283 (11:44) and -1.257 (14:09), depth face centre y -1.252 / -1.284 (run table_02_20261006_141141); mean -1.27. x kept at 0.06 (LiDAR 0.050/0.097, depth 0.068/0.099 vary with AMCL x). Before: depth-camera face from run table_02_20260930_150238 (0.06, -1.21)"
+  },
+  "table_01": {
+   "face_xy": [
+    1.438,
+    -1.817
+   ],
+   "normal_deg": 180,
+   "source": "LiDAR box corner fit from the dock (aligned/box_scan_150112.json) after the operator moved the boxes; face width 0.31 m assumed from table_02"
+  },
+  "table_02": {
+   "face_xy": [
+    0.689,
+    -2.591
+   ],
+   "normal_deg": 90,
+   "source": "LiDAR box corner fit from the dock (aligned/box_scan_150112.json) after the operator moved the boxes; face width 0.31 m assumed from table_02"
+  }
+ },
+ "layout_check": {
+  "all_criteria": "PASS (layout_eval.py: box area, box spacing, rotation clearance 0.514 m at 13 poses, straight corridors, dock reverse corridor, transit connectivity)",
+  "placement_tolerance_0p10m": "passes except water_station moved 0.10 m west (box within 0.10 m of the mapped object behind it) and table_02 moved 0.10 m west (0.510 m < 0.514 m)",
+  "camera_cone_occupied_within_1p5m": {
+   "water_station": [
+    19,
+    1.2
+   ],
+   "table_01": [
+    15,
+    1.28
+   ],
+   "table_02": [
+    0,
+    null
+   ]
+  }
+ },
+ "layout_check_measured": {
+  "pre_m": 1.05,
+  "observe_m": 0.58,
+  "result": "rotation clearance >= 0.50 m everywhere (water_station.align 0.50, table_01.pre 0.50; chassis radius 0.414 m); operator confirmed enough room",
+  "camera_cone_within_1p5m": {
+   "water_station": [
+    24,
+    0.67
+   ],
+   "table_01": [
+    7,
+    0.92
+   ],
+   "table_02": [
+    14,
+    1.08
+   ]
+  }
+ }
+}

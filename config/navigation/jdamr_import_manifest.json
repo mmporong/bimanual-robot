@@ -1,0 +1,3821 @@
+{
+  "source_repository": "https://github.com/mmporong/jdamr_cube_ros",
+  "source_commit": "2e25c423926d02badd8e3461a32c587912f5dd0a",
+  "destination": "src/jdamr",
+  "authority": "bimanual-robot is the maintained source after import",
+  "scope": "all ROS packages, drivers, firmware, launch/config, evaluation code and operator scripts",
+  "excluded": "agent/editor runtime state, unrelated portfolio/reference records, sensor recordings and videos/weights",
+  "uncommitted_source_rviz_imported": false,
+  "files": [
+    {
+      "source_path": ".gitattributes",
+      "sha256": "084abf32c8b61d85c60d35704b3acfff6e013b898584964926657f242ba6c426"
+    },
+    {
+      "source_path": ".gitignore",
+      "sha256": "49c520d22e4ad38fe1eb5cdfa07267e6f1b6b377cb7004387749c210097c9452"
+    },
+    {
+      "source_path": "AGENTS.md",
+      "sha256": "0262afac2c432dbe87a5d9fa3039ffad14925cd9abe63bad43dcc7dac15109c1"
+    },
+    {
+      "source_path": "README.md",
+      "sha256": "463189e703983a4d0ef1951658b74a297defe0b21fc6e60c610f9b5a543056c7"
+    },
+    {
+      "source_path": "README_JDAMR.md",
+      "sha256": "0f94873371cedac8f1e05b02cae87cf16dd8e83f1c7ecc320c303e537a2c40cd"
+    },
+    {
+      "source_path": "README_SLAM_PORTFOLIO.md",
+      "sha256": "02f8c43a5446407daa43bc535af18dafd224ca963517dd947101efc40ac599d2"
+    },
+    {
+      "source_path": "README_UPSTREAM.md",
+      "sha256": "25b2816492bc9aac88b2100a163da0728e0bac12418c30f88b9c904eccf4e6f1"
+    },
+    {
+      "source_path": "arm_control.bat",
+      "sha256": "531b28bbe5c64dfa6b82d592cc891c39222f227a97bc255b32567a2a34dc2d93"
+    },
+    {
+      "source_path": "capstone_pick/REVIEW_BRIEF.md",
+      "sha256": "ca580db178ca4320acf75a255f5f39c2cfd70937148530e5eeb9c51755fca9aa"
+    },
+    {
+      "source_path": "capstone_pick/capstone_pick/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "capstone_pick/capstone_pick/kinematics.py",
+      "sha256": "e3cc5017d2ca76aa56b804c0b0c22798d737fd828d94b110ca7cef44a6ee477c"
+    },
+    {
+      "source_path": "capstone_pick/capstone_pick/pick_node.py",
+      "sha256": "514302dcbb57481ca63e1b8db1a09d36376c4bec887e071b1037b328ec2187eb"
+    },
+    {
+      "source_path": "capstone_pick/package.xml",
+      "sha256": "fbef3a4b2fa90a0c016eff51921bdf362a33a629af6f9c9e6fe8f5b0c4ec2558"
+    },
+    {
+      "source_path": "capstone_pick/resource/capstone_pick",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "capstone_pick/setup.cfg",
+      "sha256": "85cd1f5e9ffe738726e3a5408a3508b840645dc9b42b36093b7bc74151625f09"
+    },
+    {
+      "source_path": "capstone_pick/setup.py",
+      "sha256": "6d254da09472601b2402beadcc81ccfa37a4b17fbd121cf83d02ca963abdfa18"
+    },
+    {
+      "source_path": "capstone_pick/test/test_kinematics.py",
+      "sha256": "e6710f78e679a49084a2e796764a809c91300706a0e3158d860fd25cdaa2fdcf"
+    },
+    {
+      "source_path": "capstone_pick/tools/act_eval.py",
+      "sha256": "ee7506759c44237b7da61242e6568f5b89295c1643859fc0e5ff33b43947124d"
+    },
+    {
+      "source_path": "capstone_pick/tools/armonly_pick.py",
+      "sha256": "0b491e5fec0037d02cd859b2fa8ffb44a89f608e4b1030a4f36d44df5b058c92"
+    },
+    {
+      "source_path": "capstone_pick/tools/armonly_stage.py",
+      "sha256": "0bc30aa11791f33a3474a1f9104e4cffa23bc43aef66cd9b1db46b55d57f5573"
+    },
+    {
+      "source_path": "capstone_pick/tools/aruco_probe.py",
+      "sha256": "039bd915a333f706ff4c4464e26abef1216f27947fb1796d8f24158c3d5f31e6"
+    },
+    {
+      "source_path": "capstone_pick/tools/capstone_gui.py",
+      "sha256": "b074d0e1a40b83daddf4d696699c02199b09baca4b24e80cbc8f4ed1b43ea532"
+    },
+    {
+      "source_path": "capstone_pick/tools/carry_pan_probe.py",
+      "sha256": "68be500973482dd72c1b6c053a6f986bf4698edf4250b45a89d6e7d4e822257f"
+    },
+    {
+      "source_path": "capstone_pick/tools/check_takes.sh",
+      "sha256": "e7a8d63bde71366dece1186621d244743823417523726547b1762b10c4731d99"
+    },
+    {
+      "source_path": "capstone_pick/tools/check_tilted.sh",
+      "sha256": "d7830bc6a9c85d3ef98f9fdad960d1b72d680f4649097f41bedaeb7ab9f72cf1"
+    },
+    {
+      "source_path": "capstone_pick/tools/collect_yaw45.sh",
+      "sha256": "0c136ab28c82a1daaf3ea4f596b9c86e85d4ffacb6d9c98f743782fd8dc42835"
+    },
+    {
+      "source_path": "capstone_pick/tools/demo.sh",
+      "sha256": "184a38b3d3e6ba58f5d2b657ef8dab036bcc5c3f6c95043a174b6f443a2228f4"
+    },
+    {
+      "source_path": "capstone_pick/tools/descend_probe.py",
+      "sha256": "eaf5f91e993ce3dc6c0fdb7402f2b3d9d9ee033da7d516b89b75d00eec5ff930"
+    },
+    {
+      "source_path": "capstone_pick/tools/diag_fail.sh",
+      "sha256": "67e1b395385fdae90c2ca129b05089ffeefce17b381fd90c0ab7e0cf74fd8664"
+    },
+    {
+      "source_path": "capstone_pick/tools/doctor.sh",
+      "sha256": "dd417cdf9a42483e3bdef17cf71615f4b9cf940779ec5fa6586b6b7d6a1a961d"
+    },
+    {
+      "source_path": "capstone_pick/tools/drop_path_probe.py",
+      "sha256": "9925f8faefc7998be2f71264049cbb96d537cbad8cce99ddc73f11f034c5756c"
+    },
+    {
+      "source_path": "capstone_pick/tools/drop_probe.py",
+      "sha256": "da042cbc46e3c4c7edfd298e6b889b25226559ef932c730e69707aec3360421b"
+    },
+    {
+      "source_path": "capstone_pick/tools/eval_trend.sh",
+      "sha256": "0900cff59257ebbf8eeb893400365502ab6f3662b6ccdaf94938929cef5ddfe6"
+    },
+    {
+      "source_path": "capstone_pick/tools/floor_stage.py",
+      "sha256": "9d8b956196891df62a746743e09a59c69aba6045e8891ef34fd0f1751414596b"
+    },
+    {
+      "source_path": "capstone_pick/tools/gate10.sh",
+      "sha256": "d6f8db3696941850ff2bd828e991ced03135830e6ef7bffcae1e35fd836e0355"
+    },
+    {
+      "source_path": "capstone_pick/tools/gate2.sh",
+      "sha256": "33679da06c4da8394fb5fdb5a0c34784879ca7161b5f24d579b7d43839c825ca"
+    },
+    {
+      "source_path": "capstone_pick/tools/gate_chain.sh",
+      "sha256": "64aaab18fb45c44642d4ba603b9342b6c1ee4fe9cdf7fa2ddbfea07cad0f54ce"
+    },
+    {
+      "source_path": "capstone_pick/tools/gate_subset.sh",
+      "sha256": "6af22bb8ac0c850512910afbb80c2be8ffc21249dc48b4cf6a2b08fd159a4526"
+    },
+    {
+      "source_path": "capstone_pick/tools/gen_aruco_sdf.py",
+      "sha256": "234ef296c66290823f97ed6f943b79f7b9bb51a2878e488d15acaf5b832251ed"
+    },
+    {
+      "source_path": "capstone_pick/tools/gen_dataset.py",
+      "sha256": "80b2e375a1c5338d06f9463679bbfc779ce31e78036fed78380709af3121e72c"
+    },
+    {
+      "source_path": "capstone_pick/tools/grasp_geom_probe.py",
+      "sha256": "a37e8da84da6338c1b1628a8d41f8939620643338a57266433f0e77a88670e99"
+    },
+    {
+      "source_path": "capstone_pick/tools/grasp_ref_scan.py",
+      "sha256": "27f2de0b836ed9d179238ca68ec4eb1747d0e5fa67b001202b71fbfce804e7e4"
+    },
+    {
+      "source_path": "capstone_pick/tools/grip_signal_probe.py",
+      "sha256": "c7c88b17e3f4c3cf71b0a89b571acb7d84e312dc191415d2f58a8dc96e1cbe97"
+    },
+    {
+      "source_path": "capstone_pick/tools/grip_stage.py",
+      "sha256": "b341dff3539995a91119b901e3a3c5be42d4b006dcb1b7f8fce54257ec3465bd"
+    },
+    {
+      "source_path": "capstone_pick/tools/gui_demo.sh",
+      "sha256": "82a9287001dc0e02c62025b1a532aff541eb220fc011c0a1f4e355f4738899be"
+    },
+    {
+      "source_path": "capstone_pick/tools/hold_probe.py",
+      "sha256": "66d70080e8ea7fed4090cfd721966b644767b1eac662ca8d7260a887bb813771"
+    },
+    {
+      "source_path": "capstone_pick/tools/ik_grasp_probe.py",
+      "sha256": "09f780c700e35287ef4fd01a7ae0922e45d0198d3badca8eadbbecb0a6361cc6"
+    },
+    {
+      "source_path": "capstone_pick/tools/jaw_contact_probe.py",
+      "sha256": "03656dd70408560ce6b48e829d7d3fcc8545a1d05170951ed7f3a79cd294665a"
+    },
+    {
+      "source_path": "capstone_pick/tools/jaw_frame_probe.py",
+      "sha256": "8ba8ed0581cc61b44d0d25dd97851c35ad61bc66e1783fdf2aafce1bdc3fb0aa"
+    },
+    {
+      "source_path": "capstone_pick/tools/lerobot_collect_all.sh",
+      "sha256": "3109a926858bc9c56a6263a61a5fd3375711d335f13c8c9cfa4642ac6613afb2"
+    },
+    {
+      "source_path": "capstone_pick/tools/lerobot_extract.py",
+      "sha256": "c55d15340caca03eb8a87c4b3817d67095b9e96afa7c282ea39997f7a5f35607"
+    },
+    {
+      "source_path": "capstone_pick/tools/lerobot_pack.py",
+      "sha256": "9111f0d18c08ef2b6c15bd96abdbb45b9b38b043229855efca037a70eb83da53"
+    },
+    {
+      "source_path": "capstone_pick/tools/lerobot_replay.py",
+      "sha256": "32b47018664fc240adfdb43bb7e974e41a6648ee343ad910f10b005d742c43af"
+    },
+    {
+      "source_path": "capstone_pick/tools/lift_probe.py",
+      "sha256": "ce592f8934762156a929a34ec196b500fa7b9500f44e4899d5dc0a29f156834a"
+    },
+    {
+      "source_path": "capstone_pick/tools/make_gif.py",
+      "sha256": "256f3e1baa9b364628aabd06ec574d4be8df006a9ad6a2a51a1669bb99838a77"
+    },
+    {
+      "source_path": "capstone_pick/tools/marker_orbit_probe.py",
+      "sha256": "d725cf77ee0faf5234f7bcc51fe6e75be53af26842e40ccafccac65be8918188"
+    },
+    {
+      "source_path": "capstone_pick/tools/marker_range_probe.py",
+      "sha256": "a88c9b65805ddb3ceb07dcc03f3df633d402754d927be72bc1a81558ca6aa30f"
+    },
+    {
+      "source_path": "capstone_pick/tools/nav_goto.py",
+      "sha256": "451e98f19175947825cc9c93a11e3e4d6f24eb036240892838312ef3cdbc7840"
+    },
+    {
+      "source_path": "capstone_pick/tools/nav_pick_demo.py",
+      "sha256": "f819257990e3a9432cbd650c52616ce298f401b1a2bf04b4df4b1ab86a669768"
+    },
+    {
+      "source_path": "capstone_pick/tools/night_chain.sh",
+      "sha256": "e0196eacab7b0d3c36dbdd738480a15c27a585368d6679a2fe08dd8cc333a407"
+    },
+    {
+      "source_path": "capstone_pick/tools/night_verify.sh",
+      "sha256": "926b1bad9f6e04f49d0ab53c2a6786d076621b0d1410240cb70550efe94a01dc"
+    },
+    {
+      "source_path": "capstone_pick/tools/odom_check.py",
+      "sha256": "36e5092e71b6a4e5c71f45bc78747082c948e9b637f7181cbf3522d1e9d80b9d"
+    },
+    {
+      "source_path": "capstone_pick/tools/pan_grasp_probe.py",
+      "sha256": "3807d86d4da1d8b22774e0097973eb1623392e967bbf38f8e2067eeecf77517b"
+    },
+    {
+      "source_path": "capstone_pick/tools/parallel_collect.sh",
+      "sha256": "f03493c5504af2ece03d79bbb727bb4f13be93e158b8073786127075068575cc"
+    },
+    {
+      "source_path": "capstone_pick/tools/pick_ui.py",
+      "sha256": "338616a64d4016575bc85953d0174142fce176dd63505fb8854e39144edf5064"
+    },
+    {
+      "source_path": "capstone_pick/tools/pocket_scan.py",
+      "sha256": "3633cf072c50b3da55968a6896c3bd8afcebdd515af21b0cc58e416b197f5424"
+    },
+    {
+      "source_path": "capstone_pick/tools/record_demos.sh",
+      "sha256": "9b6231ac13aa0de1082dfece965e5230811a54eef75d26acfb0a1bd8410f93bf"
+    },
+    {
+      "source_path": "capstone_pick/tools/record_one.sh",
+      "sha256": "06c0345a01aac11041fb5b4b323118f32eab440f4fc64eb1fa066bffce031ff4"
+    },
+    {
+      "source_path": "capstone_pick/tools/recorder.py",
+      "sha256": "5ef9a05b229e57bba4ac32fcfb2c6ece18d78d8600fef959608e1a3f494196c9"
+    },
+    {
+      "source_path": "capstone_pick/tools/red_stage.py",
+      "sha256": "946da6669bc2a4d8679fb8d3edf44b9917630942f8488f547c2f3e5535f60499"
+    },
+    {
+      "source_path": "capstone_pick/tools/reset_and_stage.py",
+      "sha256": "085ea1ae9ac99a80422738d99d6fe264c183910d2dbb1ced41aff35f809119e2"
+    },
+    {
+      "source_path": "capstone_pick/tools/roll_convention_probe.py",
+      "sha256": "1a2e13b5d305a2e653a14a16dd5c68989f5194cf364b059569349c7aec200c58"
+    },
+    {
+      "source_path": "capstone_pick/tools/roll_probe.py",
+      "sha256": "90a5b0db8d1d4f336b710ed0a85a12d4c80dc4e717c69c99348a799c9e16b09b"
+    },
+    {
+      "source_path": "capstone_pick/tools/rule_collect.py",
+      "sha256": "d3e949fd50b4d1d9af205ff564cdc8ebe1298e0f2c6ddeee6d48601e88f94745"
+    },
+    {
+      "source_path": "capstone_pick/tools/smoke_test.py",
+      "sha256": "b9776d2693743bfd99ab8b6bf92e92ee7036a19bcfbe8f2739966eb37bd90dd3"
+    },
+    {
+      "source_path": "capstone_pick/tools/start_stack.sh",
+      "sha256": "85c4d86e91770ff84a4144c6b7ba50c037605774331b0ea73a3705844ae8c372"
+    },
+    {
+      "source_path": "capstone_pick/tools/stop_stack.sh",
+      "sha256": "5c3414cac55a2fb0a9badec2d4059302bd1e0d80cc58cf58d2b4910b02aeafdd"
+    },
+    {
+      "source_path": "capstone_pick/tools/test_scan.sh",
+      "sha256": "f1683ab26eeb24811d87333ef807ce79c71164d04c3577089260421772e078a4"
+    },
+    {
+      "source_path": "capstone_pick/tools/test_trash_line.sh",
+      "sha256": "7a23cdc68d69a1fe3699891af31b37a4cfe63f85b2ebb7a1309aa46dc9773be0"
+    },
+    {
+      "source_path": "capstone_pick/tools/trace_table.py",
+      "sha256": "e399ad0135ea1b1368dfc30f1123ec90c71494a751d7e43c0299b1b5837a4d7b"
+    },
+    {
+      "source_path": "capstone_pick/tools/train_watch.sh",
+      "sha256": "b29f93567d0ad4f91444a95945d09cee2b65f221b66764a86b9e7f9b828fcf09"
+    },
+    {
+      "source_path": "capstone_pick/tools/traj_diag.py",
+      "sha256": "54116d5b27fcb8e1367d0b12964f39c89a38258a70e3992e0b3087e73288f9fb"
+    },
+    {
+      "source_path": "capstone_pick/tools/trash_demo_stage.py",
+      "sha256": "155c5073f3dedf4791fc578def83fbc19fa6d1a07574c7cc026a501d13075797"
+    },
+    {
+      "source_path": "capstone_pick/tools/trash_probe.py",
+      "sha256": "f176bdd28963be63e870c9987ca838ff4454934835c2fce534231c3b91f09608"
+    },
+    {
+      "source_path": "capstone_pick/tools/tricolor_stage.py",
+      "sha256": "a40453373c42b5b5cfd30d10e248af892e4c5226e3c4b0766bd6c709f380ac33"
+    },
+    {
+      "source_path": "capstone_pick/tools/turn_probe.py",
+      "sha256": "929b8b0f192d6655e76e4cc1325ba7d9aa98243b682474872b027ef880a4ac37"
+    },
+    {
+      "source_path": "capstone_pick/tools/verify_colors.sh",
+      "sha256": "50992474733fbd9a07604d062c5a7333192ef3461cc0471af20a77f434cb0259"
+    },
+    {
+      "source_path": "capstone_pick/tools/verify_trash.sh",
+      "sha256": "ce67ebfb700be16b4863dd3bbc4610cf4024e7797ac77bde7615acd2ead7e39a"
+    },
+    {
+      "source_path": "capstone_pick/tools/wait_gpu_train.sh",
+      "sha256": "378cacc1a2a7b70f6a65de13e6010ca374a0da01b18db17372995eb34883a6c1"
+    },
+    {
+      "source_path": "capstone_pick/tools/wait_stack.sh",
+      "sha256": "95b3d28e84f24f9481d0c4fab34669f6fa1a7296abf8d350a6e3dc78f927fe88"
+    },
+    {
+      "source_path": "capstone_pick/tools/watch_quality.sh",
+      "sha256": "c498e0261263c91ab37fc39182af3af593600b2b26306c3c0402b9cf23efb686"
+    },
+    {
+      "source_path": "capstone_pick/tools/wrist_aruco_probe.py",
+      "sha256": "baaca310001a9641d5ffb488b01283a289b322eb0df02584e3e20f2a023b86ac"
+    },
+    {
+      "source_path": "capstone_pick/tools/wrist_calib.py",
+      "sha256": "98b3622c291f6485a9cb99dac00054fa6568ef68695ff1353d474521a9f5b309"
+    },
+    {
+      "source_path": "capstone_pick/tools/wrist_fov_probe.py",
+      "sha256": "90d192332ee83c01fb16a364b6448457e4322fb5e68bfd504fc82369d8971f82"
+    },
+    {
+      "source_path": "capstone_pick/tools/wrist_servo_probe.py",
+      "sha256": "66eaae942c0b0e90368cace9563a25008527d018aa8623e0e6037cf98c28c5c1"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/AK09918.cpp",
+      "sha256": "be4b9fc6a8fc2524892e882f0863a1a41c861c5301125812d53d6707aa1cc2ca"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/AK09918.h",
+      "sha256": "038293ed4a5dd887fbc4837376b2a6371525294c70146728c1aafb33fb902c68"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/IMU.cpp",
+      "sha256": "d7b746ca9333df84c7f7880280e2db1ae2263c0b3c0964845488baec9c8924fd"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/IMU.h",
+      "sha256": "87b8b3bd6a92bf2a9a423621c03e00ef6f6888bb14ac02a31540364d46ad3a45"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/QMI8658.cpp",
+      "sha256": "f906962a206193d853e512637990bb282ede76d975e37fd076a868df72535b98"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/QMI8658.h",
+      "sha256": "3b62f7d460f83f07e7d0c182d17bc253a86c668d142d2ef8906ae1fa7df294d4"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/QMI8658reg.h",
+      "sha256": "23750102c81eb3d78c48c71e87b202b43168829bf62250b5a7736e2985036b93"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/STSServoDriver.cpp",
+      "sha256": "02a35a6510dbdc49d49d4938a1b0f41eed7cf0f6e12276490b89f532169678a3"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/STSServoDriver.h",
+      "sha256": "814e5a2eb2d17e662f95380a5b1313379bd3519edc8a59e2617fece709f1a295"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/imu_packet_units.h",
+      "sha256": "135f2987647cabc9484196c213b560acd6fb27d7beacacb35657ce80211409c5"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/imu_stationary_calibration.h",
+      "sha256": "c4d86c96fcb76ff720378408341d4a83f2a12a76b9837ec5426933e5b8eb559a"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/jdamr_cube_fw.ino",
+      "sha256": "7c4a8bac2552b674f0bda31797daf19f2cee1ddaa8210326692f63313e11beca"
+    },
+    {
+      "source_path": "firmware/jdamr_cube_fw/wheel_layout.h",
+      "sha256": "e845d52f389522cac6051f4a7c0a9da793771a4c9b85c960d4b92c7e2175d525"
+    },
+    {
+      "source_path": "firmware/test/test_imu_packet_units.cpp",
+      "sha256": "f43eef5f6f09f65dec6201a0bfca46d2ffe0b865b8b8288d3a53430834785a2f"
+    },
+    {
+      "source_path": "firmware/test/test_wheel_layout.cpp",
+      "sha256": "ea8f04c6b36a340734d24784d5141f1097ba5a50f867097ef7a98de13094e40e"
+    },
+    {
+      "source_path": "goto_pose.bat",
+      "sha256": "2aa62c1544c35bb0b42bea6b1c595b8f4f836c6fbff53d8518d0121a7950ca72"
+    },
+    {
+      "source_path": "jdamr_base_driver/CMakeLists.txt",
+      "sha256": "cc42297b9e45ceb0c36bbe68efdb4d8e4b0d753e0076fb35d085203969c0c8ca"
+    },
+    {
+      "source_path": "jdamr_base_driver/include/jdamr_base_driver/estop_latch.hpp",
+      "sha256": "c71f1cd9f38ac7babd9b0f09f081fc1b0fd69b82f99afef60d55acb07892f280"
+    },
+    {
+      "source_path": "jdamr_base_driver/include/jdamr_base_driver/geometry.hpp",
+      "sha256": "30c5d96fb3ea57a908cc2f69869f669c121bbd07c80cc62895bf6e2a8eebcf7c"
+    },
+    {
+      "source_path": "jdamr_base_driver/include/jdamr_base_driver/protocol.hpp",
+      "sha256": "1f9280481fc05ccd6679d05bb9049f1a5dd60e036d2b51c86040c29cf7e7b9fb"
+    },
+    {
+      "source_path": "jdamr_base_driver/include/jdamr_base_driver/serial_port.hpp",
+      "sha256": "6e2cdd337a93f7c6a037a8379b0437f75fe32febd356b70662efc911c40f7eb0"
+    },
+    {
+      "source_path": "jdamr_base_driver/package.xml",
+      "sha256": "51f3fed53b36327b1aae578ce039ccbdebe290f602698bb844acc3eb955cb906"
+    },
+    {
+      "source_path": "jdamr_base_driver/src/base_driver_node.cpp",
+      "sha256": "441ba8ac3d70bc2f1947cf1ffaf871bbe7c7f82eaedcb8372db4622c5920e0cf"
+    },
+    {
+      "source_path": "jdamr_base_driver/src/serial_port.cpp",
+      "sha256": "8e29cecdfefa57e0c03e5ab5c150e158dd2e2329536ef6a781018d5e28b2852f"
+    },
+    {
+      "source_path": "jdamr_base_driver/test/test_estop.cpp",
+      "sha256": "a496409bced4c44d4814a0833c7b9e821af88cdd2699656dfbb9dd144988b997"
+    },
+    {
+      "source_path": "jdamr_base_driver/test/test_geometry.cpp",
+      "sha256": "405eb7a8a75ddb0688d711bda27a10bea2389a70595b4d6bd8968431d7a9e412"
+    },
+    {
+      "source_path": "jdamr_base_driver/test/test_protocol.cpp",
+      "sha256": "cd7df86c804a52666b2e6678d06f8a554404066e631a4294c6b6fe00ab1533ac"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/config/self_filter_columns_20261012.yaml",
+      "sha256": "1ec5ffc28f3cf1189594445fe88fbb5225f5ac3758b0dbee88a6106a53b7e46f"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/config/self_filter_hold_flow_model.yaml",
+      "sha256": "eb319a10777fd54294f4ea50c5cea04dd94ad7a3b0d812189d0e4989fd25a36d"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/jdamr_cube_bringup/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/jdamr_cube_bringup/scan_self_filter.py",
+      "sha256": "d2754250ada201068ab20b22384cd46fc17367d9a22bcffb3284325ab60953f5"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/launch/jdamr_cube_bringup.launch.py",
+      "sha256": "c552e56f335da19af79d070bca6f891ce8ea7bf90eeb5959a6576d6be411c90e"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/launch/real_bringup.launch.py",
+      "sha256": "db8bcb7db58e53e43e3c920b53df3fdc50a18b9fb9bc58eb35445a23ba6645d6"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/package.xml",
+      "sha256": "dda04119495821c2d5227b70b5da4b8fb7ac0922feabe6a7068164a0a7173101"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/resource/jdamr_cube_bringup",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/scripts/install_astra_boot_recovery.sh",
+      "sha256": "c00d1438eeef215c620fe02a9a892852afe48f5144000758b5d0e47e1c841425"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/scripts/jdamr-astra-usb-recover",
+      "sha256": "d6ff74990b611e2ca7af5094fad1e7a268929951d1f91d303581265d08f5694e"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/scripts/jdamr-launch-supervisor",
+      "sha256": "f07b15f2df4a4f3bafb8954400781cf71254573964689806e1ff8894034c5a4b"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/scripts/jdamr-ros-run",
+      "sha256": "7e79088f533690fce1bf212130e136bd4803d2571a87c68c3213249d37b564e9"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/setup.cfg",
+      "sha256": "f3f7587a1d51796c872421326aa1fe968563d61ca32ea70f7fffbc867aad68a7"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/setup.py",
+      "sha256": "56ec0da5d19865ba5b29cbb1e025b5d71f367af401aac1bdb993111d188d2083"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/10-measured-geometry.conf",
+      "sha256": "3b5b9ed04d9ee5e1666f11e6e3ef5d2e19a4437103405a7aa95fb9da7bb2a548"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/10-webteleop-dds.conf",
+      "sha256": "6a97f68a4d2e0efcc3ccacc7da708fde9c417fbe639a2ba2b37a386b577d6a7d"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/jdamr-ammr-dashboard.service.d/20-background-priority.conf",
+      "sha256": "29e0cec4c48311dee380dce2d59d0d4279122ddc31eaa0c4244ac39d7e0f6012"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/jdamr-astra-usb-recover.service",
+      "sha256": "1cae712cc694845c8e06fc75dfe9edbdd9abc9a43a3d5bd172be0ca06bf824ac"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/jdamr-base.service.d/15-astra-usb-recover.conf",
+      "sha256": "9c959aa3c30dd0068a5b257d0859b0a3916b4bb861d40cfca927371d5dd0f21a"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/jdamr-base.service.d/20-control-priority.conf",
+      "sha256": "6b291cf6246df6c845c7135b6136f18b8c1ac3dd4d17bfdcd985ac58bf7de28f"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/jdamr-box-rgbd.service",
+      "sha256": "cc0e7c175dc2023ca3a288c16740c81c178586bde2af0a7f03d435b5044428fc"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/jdamr-operator-mapping.service",
+      "sha256": "8e557bee0f6f39a2e2ddb05c58c232e0937f871fd36a76c6cc032cccc378ac4a"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/systemd/jdamr-webteleop.service.d/20-control-priority.conf",
+      "sha256": "7860740f8f2cf242394335cfc19495ad82146650f4cc92bd30a1120fb7e7f1ba"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_astra_boot_install.py",
+      "sha256": "c1a02222bb6c58a47ef0b6aafd7b9277c3555a85bfba5da80e5a78675273a9a6"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_astra_usb_recovery.py",
+      "sha256": "7278f4d4460d54463486981cdc97b17186276b2f9d8dcce86ca2d40dc7135366"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_bringup_transport_config.py",
+      "sha256": "0732e5b221207025b1aca9ccce48aa74d74e2b8baca127721d4b9c3e74d4ca68"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_launch_supervisor.py",
+      "sha256": "76ba8c25811412989f7f4d3553c423aa8a5fd8ea5371f1fa0b02c08c3cdf71c9"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_ros_run_wrapper.py",
+      "sha256": "ac7ffb9adf2b305623e03185f44656ed681a04fd9d8b11bff995c3f9d87ec313"
+    },
+    {
+      "source_path": "jdamr_cube_bringup/test/test_scan_self_filter.py",
+      "sha256": "ff95422a786da490bae30553514df1e73c1aa985abdbae1f4bf7d406e3388e6f"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/config/jdamr_cube_2d.lua",
+      "sha256": "6c0e833c8672ac48b56390b38cfeea88acf782add6c192d1b567435a5242148e"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/config/jdamr_cube_2d_corridor.lua",
+      "sha256": "1c3b6945e1f0815437b950aa1ec3b1e36dbbc9906ac9fec8c3d5c8f93caeb24a"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/config/jdamr_cube_2d_real.lua",
+      "sha256": "51d9ec30095bc32c42f0831d73719164f84579a24c105f446196e01c0a2e0b45"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/jdamr_cube_cartographer/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/launch/cartographer.launch.py",
+      "sha256": "7bf2f8820731227a2a3643259207c9021add5636e546f08f26af43c3a9309fef"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/launch/cartographer_real.launch.py",
+      "sha256": "22e1d6032ef5e456317e3e1e3206d55d7581c2c372cdd87ea669e3499e4f72b6"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/package.xml",
+      "sha256": "46affa470a6fbee1dddde72fae369760c9f847c5105c6d1067547870be69e681"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/resource/jdamr_cube_cartographer",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/rviz/jdamr_cube_cartographer.rviz",
+      "sha256": "09e42f8e09a9752a489585927df34cc5255a7c0e3b3500038e78c065879998cb"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/scripts/reset_map.sh",
+      "sha256": "4da1e82254476615e4bb9264ac7e8d585a6ee3174c9f8a7dba357c5027a30798"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/setup.cfg",
+      "sha256": "582bfa7fc971557c069b907e0d8c1e046b2d0a8f0a895abbd774f156678ca4a9"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/setup.py",
+      "sha256": "c2c0b2c0bde4c174e5cf997b1f82c059f312f37f59483ecc1257522f760d37ef"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/test/test_cartographer_transport_config.py",
+      "sha256": "daf6f7252cb2f7548c202c64f15d755692ded963ace98bf39985a3196cf76174"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_cartographer/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_description/config/new_base_geometry.yaml",
+      "sha256": "0d1866e9ac020bd7cf05506f833ad5aea571ed94c6a8b3b6b7672098cae1e746"
+    },
+    {
+      "source_path": "jdamr_cube_description/config/so101_controllers.yaml",
+      "sha256": "969c40268febc3c2eabaf1e830d03e46f40b37b2d8055633f06e2367a827793b"
+    },
+    {
+      "source_path": "jdamr_cube_description/jdamr_cube_description/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_description/launch/display.launch.py",
+      "sha256": "a8471a4661892fd92c14ad00b75e73c01cc1bcafe66a64c0aa3951dd3233dfc5"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/NOTICE.md",
+      "sha256": "d5f4cd38c5cac42996ba9cee98b1ff5d4a8c0502b1613f8e873a495ffa5632af"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/base_motor_holder_so101_v1.stl",
+      "sha256": "8cd2f241037ea377af1191fffe0dd9d9006beea6dcc48543660ed41647072424"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/base_so101_v2.stl",
+      "sha256": "bb12b7026575e1f70ccc7240051f9d943553bf34e5128537de6cd86fae33924d"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/motor_holder_so101_base_v1.stl",
+      "sha256": "31242ae6fb59d8b15c66617b88ad8e9bded62d57c35d11c0c43a70d2f4caa95b"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/motor_holder_so101_wrist_v1.stl",
+      "sha256": "887f92e6013cb64ea3a1ab8675e92da1e0beacfd5e001f972523540545e08011"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/moving_jaw_so101_v1.stl",
+      "sha256": "785a9dded2f474bc1d869e0d3dae398a3dcd9c0c345640040472210d2861fa9d"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/rotation_pitch_so101_v1.stl",
+      "sha256": "9be900cc2a2bf718102841ef82ef8d2873842427648092c8ed2ca1e2ef4ffa34"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/sts3215_03a_no_horn_v1.stl",
+      "sha256": "75ef3781b752e4065891aea855e34dc161a38a549549cd0970cedd07eae6f887"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/sts3215_03a_v1.stl",
+      "sha256": "a37c871fb502483ab96c256baf457d36f2e97afc9205313d9c5ab275ef941cd0"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/under_arm_so101_v1.stl",
+      "sha256": "d01d1f2de365651dcad9d6669e94ff87ff7652b5bb2d10752a66a456a86dbc71"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/upper_arm_so101_v1.stl",
+      "sha256": "475056e03a17e71919b82fd88ab9a0b898ab50164f2a7943652a6b2941bb2d4f"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/waveshare_mounting_plate_so101_v2.stl",
+      "sha256": "e197e24005a07d01bbc06a8c42311664eaeda415bf859f68fa247884d0f1a6e9"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/wrist_roll_follower_so101_v1.stl",
+      "sha256": "4b17b410a12d64ec39554abc3e8054d8a97384b2dc4a8d95a5ecb2a93670f5f4"
+    },
+    {
+      "source_path": "jdamr_cube_description/meshes/so101/wrist_roll_pitch_so101_v2.stl",
+      "sha256": "6c7ec5525b4d8b9e397a30ab4bb0037156a5d5f38a4adf2c7d943d6c56eda5ae"
+    },
+    {
+      "source_path": "jdamr_cube_description/package.xml",
+      "sha256": "6ed93081a2c061ce8ec0c2985f9e9791d45b524a127f7cd1d1f3e318c932291e"
+    },
+    {
+      "source_path": "jdamr_cube_description/resource/jdamr_cube_description",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_description/setup.cfg",
+      "sha256": "abdaf84ec0cdb0cd2f0d4d574e24137f468c130a43681e90e99d764f002a8812"
+    },
+    {
+      "source_path": "jdamr_cube_description/setup.py",
+      "sha256": "4bf646fd80f8ce0ed6217fced99ee9edfdbbf0e52b4e07ccd6366d3f4a59908f"
+    },
+    {
+      "source_path": "jdamr_cube_description/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_description/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_description/test/test_new_base_real_geometry.py",
+      "sha256": "1a7f752324a6af2acdc945b1fa16648cbfc0c1ffc857948a0f8d7b97bcdc2140"
+    },
+    {
+      "source_path": "jdamr_cube_description/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_description/urdf/jdamr_cube.urdf",
+      "sha256": "71ebc4dfd3c0a5e69511eb99858aac5133ea8f9ef6ab653e713cd31ce66eb443"
+    },
+    {
+      "source_path": "jdamr_cube_description/urdf/jdamr_cube.urdf.bak_cam",
+      "sha256": "449e4fa704c7ff0447174264dde4732bd29d43ed33f5d7bff47965aef19e5f6b"
+    },
+    {
+      "source_path": "jdamr_cube_description/urdf/jdamr_cube.urdf.bak_wheel",
+      "sha256": "fcf368fc4c0998939a6f00e83ffcefe72bd46cd1c9ba1fb984fa1e7d93dac06e"
+    },
+    {
+      "source_path": "jdamr_cube_description/urdf/jdamr_cube2.urdf",
+      "sha256": "d80275f4b4313229001a55836529fdf2747917bb49fc6c8490195ff42f0d7634"
+    },
+    {
+      "source_path": "jdamr_cube_description/urdf/new_base_real.urdf",
+      "sha256": "36ede09f49bf621ee7e1ac38e81f33da70865eee48adde3d45bfcd7486ce147e"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/jdamr_cube_gazebo/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/launch/gazebo.launch.py",
+      "sha256": "e2f468f156b80c9e6e3ee4335f2da38b35a9c47e13ea7562ddd2a66847062eda"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/package.xml",
+      "sha256": "41f6879f2d24318222f06e1a71d8e473974f82f90a3b78098f195619837e6ded"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/params/bridge.yaml",
+      "sha256": "ec14d6e38320892b1a1f620e35f54883fec3281b81ca566012697c49b50b6e8e"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/resource/jdamr_cube_gazebo",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/setup.cfg",
+      "sha256": "615b0d7a5916a78c1188630135fdceb68d671d75f6589f94755243bd65a7844d"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/setup.py",
+      "sha256": "91eaf1e992a4ded56276afb652a876ed15f3e3a4c9a5c6ed8966de7f211142d7"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/test/test_slam_ground_truth.py",
+      "sha256": "04fb9299ee2e2ff3487b18d23f9d6291724ed22d5996d664e4d22dc078f669b3"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/worlds/empty.world",
+      "sha256": "c530bd17eba457db69b3603e7d5d24844c07dda2bb43c51447e4a6f2637d1470"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/worlds/room.world",
+      "sha256": "569e8c3fb1895ed657f635c8ece4f58276e41f0062fa0464d8e44f85f08d6866"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/worlds/room.world.bak-4cm",
+      "sha256": "3f5610582dfd9ddd5daf3a3e859e8823118074c32b5455fb49414d3e4fbbf27c"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/worlds/room.world.bak4cm",
+      "sha256": "846f0793cd996a6f73cd6329a74e982bfd76d8fa3bd65d4f78cd2cdde4e2e9f1"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/worlds/room.world.bak_before_near",
+      "sha256": "2f6e666798a7932c385e63a25d1e01a856a4bb729af0b2e8a34fec82ea5c2906"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/worlds/room.world.bak_full",
+      "sha256": "ddf2d744a36e698c9a806d6092f408e77978264e2dd5fa2657a053d51c009bb9"
+    },
+    {
+      "source_path": "jdamr_cube_gazebo/worlds/slam_corridor.world",
+      "sha256": "7b91c38d999473b368a8ab1339b96649674c4154566297fbb0cc261a4f727fad"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/config/jdamr_cube.srdf",
+      "sha256": "7c491b145279785ef81e5fccae49380bc1f4747fe147e1582d8a99d239a1ad37"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/config/joint_limits.yaml",
+      "sha256": "a3a2758b4393c2ed567ae88c45dc595d403473d32c89c80e140a40ec92a5aebd"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/config/kinematics.yaml",
+      "sha256": "aef272c375e6e47d84232e84e2a564b800f5eff7ce682318bb1258e1594597a5"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/config/moveit_controllers.yaml",
+      "sha256": "08ce4eb3f3de91934216f81cfee102e5a1b741c5083f9751b7d4fd2ba2496359"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/config/ompl_planning.yaml",
+      "sha256": "9386e508a0bcd5ef3dce968ce90b1d0a6d6b5a09c1b6612c2044b5645cbbf517"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/jdamr_cube_moveit_config/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/launch/move_group.launch.py",
+      "sha256": "6f20245459b419bd0623c4e0f78b9532f7649d15a2ae355420fd459756b38f57"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/package.xml",
+      "sha256": "24ca8500ad02de59f8fbe7df958cc151cf33229bf22f24e066e5e2535c2c3cf8"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/resource/jdamr_cube_moveit_config",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/setup.cfg",
+      "sha256": "90faf39948b7e58d36ece22a3f751f7c86cdd205e0f2de0413f742d12681506f"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/setup.py",
+      "sha256": "b4f4aa0dd0c5b81837843a31dae25462d5068574cf3c4694b10b72a5e9323cdf"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_moveit_config/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/README_JDAMR.md",
+      "sha256": "5ff8ccc3b7bffec7a83773843ac898f11c43060f8318384b3bc49b5ac321f8a6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_through_poses_transit.xml",
+      "sha256": "27de57d0774365d46c7e0d7dc8fe21b7d2633b8f301aeacd43321fae9e41d631"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_through_poses_transit_navfn_mppi.xml",
+      "sha256": "79160bcceb66c28b16829793c854c8c70f842daa4f6fa7e053f65b13e5ba9792"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_through_poses_transit_rpp.xml",
+      "sha256": "772a60b1a07feecc1e366cc256854f0c3f1dfe242832f4a2d8900be460ef7651"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_alignment.xml",
+      "sha256": "d32ffa23c9a401e254f78b199eccaf714544882a537feead0ea7bc61e8a351d8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_corridor_fail_fast.xml",
+      "sha256": "cc3ea5fbb6b40350d602be8f84bcea11c68e7dcd6daefa5edaa2008fbcd64324"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_dynamic_obstacle_eval.xml",
+      "sha256": "07f18484e60b55cf3c224c9f866473b57ebacafd768659d9a9b215850ad00509"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_face_alignment.xml",
+      "sha256": "f5e23dbf1ddfb910a5ecfae7f092d368a6d88d357b0f7f62ba60920a65622226"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_new_base_revisit.xml",
+      "sha256": "efed29dbf425dd9fb94a688a82b678cec146c2618fabd218ccaab1dc3912f01c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_parking.xml",
+      "sha256": "fb56e80ccee6d9976a69c3283a60c21a21e8c69adabb5164fb7f4db14a80ca2a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_safe_mapping.xml",
+      "sha256": "049784d73d92bc4a045e6c83c6daad45dcb99a44bb518bbb01a0ee9b47faf30d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_staging.xml",
+      "sha256": "2a81f34609761a552903a61d86ef562aec3f7b96893fe5b3c0b9a7eff2f96cfd"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_staging_navfn_mppi.xml",
+      "sha256": "6231c006e0e7fafc9951e9d86d9e4f80567a10935b0faa69b4ae96a105a94a86"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/behavior_trees/navigate_to_pose_staging_rpp.xml",
+      "sha256": "c76a3389b8c7c65ffc98ff7668413c86faa14e1da7fa01d9d7a35cf579c0147d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/base_obstacle_protection.yaml",
+      "sha256": "1290c2489b37212482199517e4559fee8622644d9c1c46783f688dc95c58c477"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/box_parking_contract.yaml",
+      "sha256": "29af3feefda6cc0b498138de0c9b42b2a3dac4b3b27ed6fd49cb49fbf66f672a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/camera_mount_current.yaml",
+      "sha256": "2047a34e883955985a734cf7655137e33edc0c8b23c4b9468a1aeec58c1559c5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/camera_mount_derived_20261012.yaml",
+      "sha256": "af7f65f6e362f33db4f39ba9429bf779e5a4fdaf000e976a9d3f859e189ef47a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/camera_mount_table_candidate_20261013.yaml",
+      "sha256": "033f39f2ecd99143e76c2b384fe5c0259453f6b592cf2a28858cf2ae695b61a4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/corridor_roundtrip.autonomous_20260826.yaml",
+      "sha256": "be8e644a9f93bd0cc69a7f9392165d3bc3e82353a0577a26ac4c734a2a47a6f3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/depth_box_parking.yaml",
+      "sha256": "dc29330e7daf917646283b10aadb44cf5f961ccb22de09217c59d9eb2bbafcab"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/depth_obstacles.yaml",
+      "sha256": "24dfec57f06a40a407c0202bdf1c9c04be36f2f0e1dd3decdf19f244597304d0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/ekf_odom_imu.yaml",
+      "sha256": "5cc0442ad73ffe8c9c3d8ecdf713bb8bd8ca659abd148ed339c2c5917f1251df"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/fastdds_wifi_operator.xml",
+      "sha256": "182c76e211412c96e4937de78863b57face5966fe4324f98b9ee027390bacf40"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/keepout_zones.autonomous_20260826.yaml",
+      "sha256": "8a5e280710b724edd3771fa5e3d42c118a79f9acf11441847f39d1c26a0ae0cf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/keepout_zones.example.yaml",
+      "sha256": "d5dc4e64fcc2bba1763584e9b87fede92fc655e4bc73245869749b6499909733"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/mobile_manipulator_protection.yaml",
+      "sha256": "c9e27729646b76cdcab4f8b8039ada7f118e5834f607b216c0aed2065047e727"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/nav2_params.yaml",
+      "sha256": "99db2ca2ca6790c6f27ba2a56a55c12ac1146dec29a4913a4d73d9948a7da50c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/new_base_nav2_params.yaml",
+      "sha256": "b3c56753bab866bd006f125b0e147519660501087da3db4b627720ea513fc92e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/parking_contract.yaml",
+      "sha256": "8cd71406bac2578184f711e14eac69041326f7d362d697e94bb95efdcb61b303"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/restaurant_service_contract.yaml",
+      "sha256": "df68bba7bade2bde2f94ff3901239f5931ab338c20e7c161400b74ad97e36c41"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/config/slam_toolbox_corridor.yaml",
+      "sha256": "60a8d93d3cee47de30914e321ce9249508e8c53c9082ef9343433d494533f83e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260901_CORRIDOR_KEEPOUT_RUN.md",
+      "sha256": "0d70b095d6d19a6b1d07a6d5537a5e206830181ca6dc3f846e8813acd8279941"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260904_CORRIDOR_LOCALDDS_SUCCESS.md",
+      "sha256": "a5d219d04cf1514b74f6ec748b077d1466f0f067a195b12c71ef75dc879a6770"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260904_HANDOFF.md",
+      "sha256": "5ea931cd03e16a47f4676e441ffd4ad1d93ff1f2ed3c4e4440c79429f8719737"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260904_PORTFOLIO_HANDOFF.md",
+      "sha256": "c21a1245716eef09a792aae172e3b8088e312f92ce99dfbfc950dd4353804f4f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260904_SLAM_TOOLBOX_ROOT_CAUSE.md",
+      "sha256": "c1ed7c1428fb9ddb2d4894146432c7628541c6ebe857e17acbd6ad29256ca59a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260907_G005_VERTICAL_READINESS.md",
+      "sha256": "78109e8a7cb1f3d8f6adeca5d048c50dcb019f63e4dc8581392d265c1de72e0d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260907_SLAM_ADVANCEMENT_PLAN.md",
+      "sha256": "7985fdf2a5f8dc77c6197336c005cba46ceed22f8fb0f83e7497150212ddc332"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260908_DYNAMIC_OBSTACLE_READINESS.md",
+      "sha256": "4613184e0c6b8f046fc87f1473601bbccb7438aeca92cd9c517b50b4f782d927"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260908_PARKING_READINESS.md",
+      "sha256": "d2efc46fc61847ab75a59e0e8d7c10061ba7575ac7ef09c61012a218a40b95fe"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260908_PURPOSE_AND_RUNTIME_AUDIT.md",
+      "sha256": "93ba31cb2e2b0df380612ffcdfa390096cef97fd547a4e9e62211bb2ddb44a56"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260909_FIXED_CAMERA_HANDOFF.md",
+      "sha256": "4a4e0444e56dd0dcc3668382ea2762720f0ae7635c32058108f59c63506c6630"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260909_REAL_COMBINED_TRIAL.md",
+      "sha256": "eefe7d205f752b05989ffa7f591dd37a07e033d4bb5c6ab022efdc6f170ba3f1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260911_RESTAURANT_SAFETY_ADVANCEMENT.md",
+      "sha256": "bb591e4628442d0ed0f2feee6ed6f4c1b387ad4b1dbe63293405325da7afeefd"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260912_2_5D_DIGITAL_TWIN_PORTFOLIO_HANDOFF.md",
+      "sha256": "909bef66c55d5c29dbc3d344266bbc033280c06005d6d5cbf4f2bdcfe268abdf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260916_NEW_BASE_REVISIT_FAILURE.md",
+      "sha256": "fd1c5c0f972f4e4a3cfb886eb1b4317bdd40266124febacef8e43303407fc16c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260917_DEPTH_BOX_PARKING_DESIGN.md",
+      "sha256": "72cd9b1c35eea457b060ea9cde272d39f7257b059eb6dd61b2916d4cc89cb9b3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260917_RESTAURANT_SERVICE_DESTINATION_BACKLOG.md",
+      "sha256": "2addd26fc14eb94da0deb65a518ebf5a7bcf8ad62bb7155649f2318d0b46a1b7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260918_DEPTH_OBSTACLE_INTEGRATION.md",
+      "sha256": "bd99fe3e85c847ef7056a515d7a07c20a800cf664a84c5f1008d07a110a33f49"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260918_NEW_BASE_COLLISION_FIX.md",
+      "sha256": "1cd81b222c050227bad6bf178816efc6bdef9e08f4ef58e24de502ede025775b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260918_RESTAURANT_SERVICE_IMPLEMENTATION.md",
+      "sha256": "a51f235e2f0ae3815c596f0c7cfd44cf67ec331649f8dc641ccc13ff04a59606"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260921_NAVIGATION_JD_GAP_ROADMAP.md",
+      "sha256": "d71ccc938ca6cc452fc27a4ca5f1b41470cbcc44977bdd8a899cd3cf6d7301ce"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260922_SERVICE_DEPARTURE_FAILURES.md",
+      "sha256": "35f2648f298c86bce8558bcd09203d9bf88109e401f2aa0d1d8a601d7e499f28"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260922_SERVICE_PORTFOLIO_HANDOFF.md",
+      "sha256": "c048e4557e4e1d7147ca444169411649d416e4203c9fdf4f52487b7e6c7e9f33"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260929_DEPARTURE_PREPARATION.md",
+      "sha256": "cb87666c7ec5f33b451090c6c40af4060391dc1d96220dd2f929f786f7d8537e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260929_NAV2_PLATFORM_RESEARCH.md",
+      "sha256": "6dda7a3051914f899c70129b751ea0a8abfd03a09f3605ce2f0369e03cd2489d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260929_PARKING_FAILURES.md",
+      "sha256": "fd92072ff4e96503dff0f7dac0bd894565a2369bb49575f1ff601a11c95b52b4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260929_RUNTIME_ROOT_CAUSE.md",
+      "sha256": "8d7db4cc3129cce1e7143772f39dccfac097304cf44fde7837a6a2a4ebdb6df1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260930_CLAUDE_HANDOFF.md",
+      "sha256": "6912245cfa06545042e0961ec84b9fb591d729887f48cee9d209892c5c611a4f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260930_CLAUDE_NAVIGATION_PORTFOLIO_PLAN.md",
+      "sha256": "06b8e97f5bc0b8b431c13a4705729dfa579d64236656c36c14034cc126025c35"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260930_DOCK_RETURN_PORTFOLIO_HANDOFF.md",
+      "sha256": "4ea223dcce5905ed9eacb78eed364f960731f21fdd70e97a9dee7dbd02555611"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260930_EVENING_E2E_PORTFOLIO_NOTES.md",
+      "sha256": "2fb85c28393c7eb8e1b4a53c8976b51678007a431504763a163a00c5b2a38012"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20260930_MAP_BOX_LAYOUT_PLAN.md",
+      "sha256": "0c94c8982a7cbc0f7913be4944f0ced813f8f4bd6805069ce8389f25c4273b1e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261001_PORTFOLIO_HANDOFF_FOR_CODEX.md",
+      "sha256": "3925c8496b9553199cf74385a1ce305f122d1fbd3f455c4764aa467078b0691f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261002_ANOMALY_HANDLING_RESEARCH.md",
+      "sha256": "cda8276f552bcb5e79bd78a004638f631513e630d5e71e86fb1772d6d4e79b90"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261002_TROUBLESHOOTING_HANDOFF_FOR_CODEX.md",
+      "sha256": "569a95c9455393e73549fe76c37fb4227301671d8f9010faf5e668c416c7397e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261002_TROUBLESHOOTING_SUMMARY.md",
+      "sha256": "d7765871b363d87fcf66e6f9f1b4cb214b94b43259eef0c111bba6a4ffe10c8a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261005_DRIVE_ROOT_CAUSE_AND_PRECISION_PLAN.md",
+      "sha256": "48f463b69b79e472a88394ff9c5eb2f6952aafcf40bd6bda047e6bcb6382b35d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261006_CODE_REVIEW.md",
+      "sha256": "1d1b2362862e28270e80723c9f834ebfbb23ca373af8799d66024f3d78db1e48"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261006_CONTROLLER_SELECTION_GARDEN_HANDOFF.md",
+      "sha256": "12efc95d2a01f93ff957b51ff355c25c150ad29b8014a4fb9c799fcea0af4bc2"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261006_CONTROLLER_SELECTION_PORTFOLIO_HANDOFF.md",
+      "sha256": "7df1c592ba776972fc8d2a29bc2268e33bbd1b9e9021ddd03b6ad72bb884c744"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261006_RESEARCH_NAV2_PAPERS.md",
+      "sha256": "cbe764b71c07d22567019d34031455fb18bc37c1bb639e8fbbc20d9568b4aa16"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261006_TABLE_EDGE_DOCKING_PLAN.md",
+      "sha256": "5cc03b757d06a9a430ff3fd2e270e328f2aabd5d869cf6343683849566d166e5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261012_STATE_AND_NEXT_FOR_CODEX.md",
+      "sha256": "3a17df49bb2906b16f8ca2614f894a2d5aec3890d71cbeaeeb7e4d63e663240d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/20261013_TABLE_PARKING_AND_4WD_TRANSITION.md",
+      "sha256": "97652aa959eb8c911f4d6bc7807243a95fc4f62f62aabb7bb86d24107eb374fe"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/NEW_BASE_REVISIT_CAPTURE.md",
+      "sha256": "f42be561eb72a65dd20a63f0ab6a2091a4ab08d745cee5ffa46086d59a04a571"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/README.md",
+      "sha256": "a7b4ef16c0fbfc8c09ffa87345496bcdfbc497009c87598cb0143bf37ff40407"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/amcl_fault_contract.py",
+      "sha256": "86b057d0d2f7c6d9a561bd97b0aa894ce08954d177ed5cf5d1404c92d7a51ae1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/amcl_particle_observer.py",
+      "sha256": "039384bd0335cb4cba8d0e608662eca9a3647fb8f5f5f945c78a69eeacab282d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/archive/20260921_BOX_APPROACH_SHADOW.md",
+      "sha256": "08cda9e044bec465c04504063275a8c98be77ab613bca724fa1b0ff911acb6f4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/axis_b_kidnapped_driver.py",
+      "sha256": "2f6bd81842486f0688ab417e9bd4c6390f083e3292d5efbcc4dbc8ccf7cad150"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/build_g006_candidate_bundle.py",
+      "sha256": "8a79ed755d1cdccda1dceb8cad06b052c327604b256d8cfd6e714f0104f98cfd"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/calibration_registry.yaml",
+      "sha256": "47212076e0fe91a2bc311a3c79173e9352fdeca5c87f86cefb1e01dbda8117e8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/canonical_evidence_tree.py",
+      "sha256": "4fe89bd3bfe256f842c3b77534c2ffecc8e1a50733de9e0f5a6acf55ae8017a3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/capture_depth_alignment.py",
+      "sha256": "f38cdd94725d56f9649379b15a5706009fba87ca68358e283615cf8aaae911cf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/classify_amcl_axis_b_failures.py",
+      "sha256": "cbcaeaa29d3255c9e0214d940632232db29725ea06b7bf64b4b9c8851576706f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/compare_sim_slam_experiments.py",
+      "sha256": "786735a23f40cc65ee16a2c41556c5f698b3a5685b0a0806d599f0faf126253a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/compare_slam_runs.py",
+      "sha256": "f5f91e92a3100f100b3eeabc27b9a448e93577058fd24bdd670c660f1cf0d404"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/corridor_run_media.py",
+      "sha256": "b789730b59bc663a3cf52677c85d50ab4d3f005a1c9f4333eac549dd868d54a3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/datasets.yaml",
+      "sha256": "a646b0c5ae8f5a8f7a7d69d526bb6b6188d98915d4fa90c6c5dc06bd80e7125d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/depth_box_parking_provenance.yaml",
+      "sha256": "8283e0bdffcf99acfa6ffc6d0492f9a6afbd60a31895fea5b6cfbdcf1ebdcc83"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/dock_return_20260930_figures.py",
+      "sha256": "20e25de2dc75bd924aeb3f32164af6804958009d5751abd55c215cca594f03ab"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/estimate_wheel_calibration.py",
+      "sha256": "a68fcdd7ce9bfbee16469a56570933c88e96a2397e71cffac336b85abeb3c32d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_amcl_axis_a.py",
+      "sha256": "744e7e886c088baffac77a5bb5c975e05c6df06c908860c9171e65ad32614086"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_amcl_axis_b.py",
+      "sha256": "c7f7795ff852d406ef7eb334cf50d066b50884867bf7c9bc0e935ffc3a6b7028"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_frontier_policy.py",
+      "sha256": "410fb804d14f1cd535455d30cd2e182fcd311500ab02da460638de89b9708cd8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_real_stop_latency.py",
+      "sha256": "c497d2cc8b5d8ab975763741faf9bc8256f578df4ba700f347baded09fb37ade"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_same_goal_bag.py",
+      "sha256": "354eda7ccdfe72c7ff59f229ef09c71536d3b75c18bb0c114c668aead6db1c4e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_sim_collision_monitor.py",
+      "sha256": "8d93ef636a3f196bff0a4a76822b032cd553de8ae3dbee6cb09ea5b4271a89a9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_sim_nav_obstacle.py",
+      "sha256": "63a240d19915848e5fbf754f17784f9305ca9f56081767fc5b0d4f3d371d4a09"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/evaluate_sim_slam.py",
+      "sha256": "86ae088965466fe7f2789b4fc21357dc599b54a39f8acce90c8e2366eb75c525"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/experiment_manifest.schema.json",
+      "sha256": "b522f0a0e352616e949a269ff90f318eec1ab31513ad1132b29807591f636fbb"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/export_dashboard_replay.py",
+      "sha256": "7eebd0d1c1f7c19796db0b305ba0d64bf59692ccdb61acf769dfdc4de5f800ec"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/finalize_cartographer_replay.py",
+      "sha256": "dca879eedacf15d4ce30f16aa7f4c27121a3e3fd12561b52f1423624357d723d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/finalize_sim_collision_monitor_eval.py",
+      "sha256": "08502793ab9875a049d206f66f47509bf899669ca30fe4ad27561f5638408384"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/fit_box_alignment_candidate.py",
+      "sha256": "ee30ea33ee02a8986ea6b957fbc312ad39572a03ced8fe75d9b1200b3bd2a197"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/frontier_policy_contract.py",
+      "sha256": "0cf59f54bc05c746d8b93a3c0567f6a73ea25f15ee7520fd7cb980d5237d12fe"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/g002_tf_sanitizer.py",
+      "sha256": "e6d9519a404c0f0860ee7abf8d845c1defca134aa3195f0d9ae5d525ce5ac17a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/g005_oracle.py",
+      "sha256": "c9bc77418bd2f2f3293263d771f1093c6ac568889266c47c15b9572086b025cd"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/g006_candidate_contract.py",
+      "sha256": "632b4322dbab6cd9a847c4b3cc1f5c67d2e722c462e140d398e6fb58a85d7983"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/generate_amcl_axis_b_input.py",
+      "sha256": "2be89c2500b9a7a428dfa43db232c2b3de10a1eba7abdf40cc69f974311fe2b0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/generate_frontier_policy_assets.py",
+      "sha256": "9329748546e00a045931a851b6347eeb19bfc3ff0c41b5365d3d042fc57c6491"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/generate_sim_nav_obstacle_assets.py",
+      "sha256": "076ccc734cdda5967dc9794dfd243dfaea80639957fcc68a4202542b55c92f67"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/inspect_mcap.py",
+      "sha256": "170df909a03ba97b7bcf61c223558be1b6528c3678d5e67a7d1d58031665bed0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/ledger.py",
+      "sha256": "b5143044ffbb1aa0412e7d53c3c6473b7bed0da9c3537fd6463290edad935ff1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/make_sim_sensor_variant.py",
+      "sha256": "90fdcfeb728f50eb0be577b1d4cf6a2abf955de3d50fe370fd029c3c776240d0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/make_slam_toolbox_ablation.py",
+      "sha256": "0d1aafaf5fd32a0dc0db546b8dfe34e96a7a7fc20b7df83d433774b082f2b543"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/map_registry.yaml",
+      "sha256": "519c0ebf1fea12984af09014ca3f28b2143075713d77c15d58d836f5368af5a0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/mcap_writer_options.yaml",
+      "sha256": "527cdca86c115386cc65a6b1dcdf8ae13a3d92ed739aba8f1bf0368aa19fc6c9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/amcl_trajectory.csv",
+      "sha256": "3c2e36c001327918fdf44c82e64a08fe069faeb52c239466bf9d66535dbd4213"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/continuity_comparison.csv",
+      "sha256": "8a84304c9c880908f99e98f59f7785a8954a78cdd94d9a68ec0562f67b90f21c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/continuity_comparison.png",
+      "sha256": "11a0f113e74014c114a75c630ddca204e92fe35c6861fa428cffac6ac7e53da3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/corridor_roundtrip.gif",
+      "sha256": "76fa40b962197d05c1fce584fd42490e1471cb2900957649acc461a5735a95bf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/media_manifest.yaml",
+      "sha256": "ab857abea81f83dbe9f5debdd018a3f52478d3c3c18920cbaf131bcb50a2cc2b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/metrics.json",
+      "sha256": "4510038ab4b85dd992c750e2629cdf0451df9802915213645d4580b8d9927ea6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/metrics.yaml",
+      "sha256": "5ea63ae5561c71f5576d99dbaabbe0ce3ce7da9d361eed9ba8c6637c4768fbfc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/route_evidence.png",
+      "sha256": "3f4d48e1a8070ad625077fb5cb64cfa46d4f0d93d683f2a7317822b4bf91aee5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/route_progress.csv",
+      "sha256": "55efa911a5e0f432922afa4a75d8f08acb182400d73ae2956f421a7df4189bf1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/sensor_profile.json",
+      "sha256": "8e9e259d364b1f39efc5742d4142c6124aed5ebc99b685523a1c8fcc1c780f03"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/sensor_profile.md",
+      "sha256": "3f7b708907a87a0b87a368d451263f1d474825f04b3399b7c938f8afd4743d96"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/sensor_profile.png",
+      "sha256": "90359bf6200cf317e41899f4822fbfb1b17ae676021f2af2811a998c73dbef4d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/sensor_profile.yaml",
+      "sha256": "e670e17453dbb8ae956703ec2150e72727eabd28606056728c95f5216d383461"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/slam_backend_comparison.json",
+      "sha256": "df20425799f25e78405fef9314e2ef0733541fc3262993ed69f70e148bc69d31"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/slam_backend_comparison.md",
+      "sha256": "fe45610b9f55daafcc87fe2cfc0a8a8d6ee81ca38322ddf7d0e38caf19a55e91"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/slam_backend_comparison.png",
+      "sha256": "4591bbaaa1323f4fbdf8614b5c5cbaf6887ae99aad33daf64d4d4e0777ff99a4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/slam_toolbox_ablation.json",
+      "sha256": "9bedfabb45558bc1cba51c7a9399835cf7f2a9454bd85e9071d409df7db673c8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/slam_toolbox_ablation.md",
+      "sha256": "72c2d211c83ad6f6bb975fd574afc790e8380e92d5d0fcfe866e5ebbd33c41b2"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/slam_toolbox_ablation.png",
+      "sha256": "d71029767eb0d9077c754470dc100765aba7903715d6d330a98af7b1d99b56f0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/success_card.png",
+      "sha256": "9c242cfa6e8e5f506b73e17456da29d97129cace778a75dfcf2ff89a7e133e9a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/telemetry.png",
+      "sha256": "01127567c7394b554c6508657e057a6a0ff3440bf192e1d2cbccb2f12a5e299e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/timing_profile.png",
+      "sha256": "36e27d600a5520077029fe3290c842e081674099f042c98784166704dd3ffa8b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_corridor_crossing_20260908/README.md",
+      "sha256": "4a5620cec8121833c358b6754332c6ddbca2317427b7b6bd62399c8779867505"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_corridor_crossing_20260908/gazebo_dynamic_obstacle_highlight.gif",
+      "sha256": "230c349aab31e788b39519690d5a7532dab64b1d9a072bd9966c85228ec983d9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_corridor_crossing_20260908/gazebo_goal_arrival.png",
+      "sha256": "ca6b96ff2b2330e400886412e759cff8fdef6605c1168e127345994eb72721e0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_corridor_crossing_20260908/gazebo_obstacle_stop.png",
+      "sha256": "7fc8d595a1f50d166cc67744a8130067afe5ac6dac8bd0fc554b17498897db8a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_corridor_crossing_20260908/portfolio_media_manifest.json",
+      "sha256": "c41a8e3c69d5017cc6a38e1e68b464c91db4404175d4f3c35d4f9cacf74929ae"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/README.md",
+      "sha256": "dc15398aba15d96ad3b7fd20d5151ddf2e22ce9dfc2a9aa95c54dc1a37a33dba"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/browser_verification.json",
+      "sha256": "a98343d21ee0af603d21bbd348a963b7360b8a25f01e90d4b42e98fab0c766c0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/dashboard_portfolio_manifest.json",
+      "sha256": "fdd2eddf12bc07d23ae16c671e40458e0dd3e200539be671442478033e78b0b9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/detailed_events.json",
+      "sha256": "a97a4a06a629af0b34c81bf191d9120a59c1b563ea219e50bf034693019cd60e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_keepout_detour.png",
+      "sha256": "0f79575cf670906accb6b78c775edb2a9b53059b17cb467b6ffc2342e82eb02c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_lidar_pedestrian_stop.png",
+      "sha256": "66425d6eda43d7d98183368b5690dd18bd13daf97b5e562e32a666bf7fa3988b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_scene_trim3.timing.json",
+      "sha256": "fb9e6ca9447af09899f68801c8d3c1054b6dd979b8dfdded5fd44d0d533fd086"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_scene_walltime.timing.json",
+      "sha256": "4bf7d5e2cddeb6e9e4ff5c592653a3db3ee6bcdf5cd89d680eb488a5a75bcd61"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_sensor_dashboard_highlight.gif",
+      "sha256": "06537f228af860571892780ecc31d76ebc7fc945ecb343ec358bbc5781c82ab6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_sensor_goal_arrival.png",
+      "sha256": "792fc9470721b18f192c1770a38660762f2092a8aa7c3814180f38801048785a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/render_manifest.json",
+      "sha256": "4e15bd2c7e1f750cfed5254d38b8f755b74cdcb5408b10025e8a7c7e27ac8d58"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/verified_run.json",
+      "sha256": "3295c024c3df93e77dcfbdd7f313cf32551cc4dc9c50ca989f49b984109fb30b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/white_dashboard_desktop.png",
+      "sha256": "45565de963dd1efaf52865e99a1f49f72ed640d46c26f5b25543b13d1a8cbf26"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/README.md",
+      "sha256": "c42d5271797c5186be605c06a167a119d239efcc2b4ad2ccb9a5111d45271153"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/browser_verification.json",
+      "sha256": "d284f9aea25860fe3c654843265bad97c9689a195073aa666bb413c5c72da9e2"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/gazebo_keepout_detour.png",
+      "sha256": "07a338ecd03d7f413ff7af74c38efab99b3182613829879d36f843c2c84a3ecc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/gazebo_lidar_pedestrian_stop.png",
+      "sha256": "87b33864ef7a9bf144630acb6c66f16a6418cecdf8800940192f05d13d770e51"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/gazebo_sensor_dashboard_highlight.gif",
+      "sha256": "795946b2105dc8c1ebd1679f458af061a53b924e7add5af0281c7f663245b8cc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/gazebo_sensor_goal_arrival.png",
+      "sha256": "f48fce99e0492a8515b20200e84f7eca45eeaf95ab2cf9166c0c067611b26d47"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/render_manifest.json",
+      "sha256": "34b0bea68b2e646d8d59741e057875e879056200ab64919cc4214be75f42b1c4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/verification.json",
+      "sha256": "4d63fe40bff5f6fb7f67def43b41e588c664b314ca669cefde2fbca8f660ef75"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/verified_run.json",
+      "sha256": "306ed1db90b52523065a95862552d9e95a960be7448333c0428df9afb980a22d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/white_dashboard_desktop.png",
+      "sha256": "dadd4ea6e45fab4c678ee1becada539265f7906314580382fe9dc0670c77423f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/mujoco_nav2_combined_20260908/README.md",
+      "sha256": "361e3a8532bd87492cb574ce14cf9f72e62ca75101f38139e4e77c3889bd8b88"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/mujoco_nav2_combined_20260908/jdamr_nav2_portfolio_scene.xml",
+      "sha256": "084fa347ded7f243ef98e8170727705b85e3f5ea743f46ca9bbc50f3d96010a0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/mujoco_nav2_combined_20260908/mujoco_nav2_obstacle_challenge.gif",
+      "sha256": "ee79966ea1657e004d1d771a1468722d1c2e3689c6ddf5b08638fa616f7b6373"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/mujoco_nav2_combined_20260908/mujoco_nav2_obstacle_challenge.jpg",
+      "sha256": "3d35db98fd0d290ab33f5eeab129ee9f80a94b311b3c88b79d2b456afe5f5778"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/mujoco_nav2_combined_20260908/mujoco_portfolio_manifest.json",
+      "sha256": "5775b184ac137ac5e05c5bb011337b953941e8f223de298d2282b3349b729cdc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/README.md",
+      "sha256": "255518dc9b1d692050dfbb5d3825c01df6983c58ed065cf4a6af6b0f0f6cf76c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/gazebo_dynamic_obstacle_highlight.gif",
+      "sha256": "0723f4a65a7cea83ab8c41291b85e82c8b346ad6a89d2c34109c1e35ae7867d9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/gazebo_goal_arrival.png",
+      "sha256": "3479976c1bf9b829f8ff6010f2b9092f5332c2d147c79e49a35069edb6f66ac3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/gazebo_obstacle_stop.png",
+      "sha256": "c4156114841122f42de5543220a359807c3ddb76adac5071c4241fcd84f10364"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/gazebo_obstacle_stop_right.png",
+      "sha256": "18b7d4710773d9be4a6f1fa5250cb2a1005ac16023be9da1ac32df7cf4ca022a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/portfolio_media_manifest.json",
+      "sha256": "2702ac3024b3af4ec91660bdc67e17829379db752333b81d087627b2a44d6d1d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/sim_slam_corridor_gt_20260904/media_manifest.json",
+      "sha256": "3b821e32885d23e7c9a7ebe35b1321913068396b1d79d61fab2e6d82270cebff"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/sim_slam_corridor_gt_20260904/sim_slam_robustness.json",
+      "sha256": "78dece436908e92b424fa9cfc6c8244483f51cc5f1f86df47a0c8e413ae9231e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/sim_slam_corridor_gt_20260904/sim_slam_robustness.md",
+      "sha256": "5ee9fda2c9d8a96f6761b68914b06cc18828aa1222b30ddaf72cb60cb46ec4ff"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/media/sim_slam_corridor_gt_20260904/sim_slam_robustness.png",
+      "sha256": "81b0870699b217223e7e5cf07b19f4de042090ec03ab5a0fbe53f79cc477513c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/navigation_dashboard.html",
+      "sha256": "5085edf94722cd777c54e886fa02ef6baf19637454fa795c12203ef6a0ac59e3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/navigation_dashboard.py",
+      "sha256": "6c0609f96e42e85c23c86668ba9fe78f78e0d66947106febe226b3e32246d4d7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/navigation_mcap_reader.py",
+      "sha256": "9e360c5fcc9d1ef434771009735a8733eba31e3611e4ac3f7e3186e4028fee7b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/normalize_map_yaml.py",
+      "sha256": "692651c58b260e6cdf204226b334c883d12ab93e53233201d2586a1c762b42c7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/normalize_scan_bag.py",
+      "sha256": "69d5e18116ddcbb6228378b38fbd770126bacbba2a947d4ae6598ec0dede52f1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/onboard_stop_contract.py",
+      "sha256": "52506b032d486a39124a76635a955f562a24c3b0941348684055f3f2007a832c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/phase0_status.yaml",
+      "sha256": "6b4036685ab25dbd9327e444f577b47b22f1ac7862d7e0096b0f438e7655b879"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/portfolio_capture_world.py",
+      "sha256": "4e90ad1c6e56d38bc9b9139bc5d9038eeda09647462f1d3047d03cdc472773bc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/prepare_actual_map_restaurant_sim.py",
+      "sha256": "d855c24e73b40dac24682d97e3c36baa725dafc1a738bbdaf0bd842d225d7a87"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/prepare_amcl_fault_benchmark.py",
+      "sha256": "17f1614af3ffe3ec2f8d166109fcb44dfcc90e3fb816d1528999270ca1988e04"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/prepare_amcl_source_overlay.py",
+      "sha256": "10a85075ee49f90b9e006a1fd3d91d37cc8ac1b842a18a5bb3b30d81e79d48d8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/prepare_parking_params.py",
+      "sha256": "cc43b58f3efe67c8d2e5fc9da5738bc019dea8bd420e0e5131adf2b1121f231e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/prepare_restaurant_traction_sim.py",
+      "sha256": "3f0ab2f5a2f505124092a1dec4da977aa61b5b874df732f2ab41ed265e1133b5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/prepare_sim_collision_monitor_run.py",
+      "sha256": "f045a860f1ba7e433a37b8b0eadc3bbe117a4b54f183fbe397526ffb0cf61793"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/prepare_sim_nav_obstacle_run.py",
+      "sha256": "6839beed2fc15b70c89c4cf3dd73eee8fd2bed2bc9ce7c25695c559272225a2f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/probe_g006_candidate_bundle.py",
+      "sha256": "30e434979f86eaa9e3ca93d21e1acf88eac1f5c396999e9bc27f4f394bf6e58f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/probe_live_sensor_latency.py",
+      "sha256": "cd61998aa2e62e1eaf503be06fc358fabe32c52f5ee5b04c2897d81e43a6bb53"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/probe_nav2_startup_topology.py",
+      "sha256": "33245bedd78520bdd300e281fc8456da9a773c30b4118d714254d294a3576e14"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/profile_sensor_streams.py",
+      "sha256": "28de639b1942d0d1eead29976fa76d84c1497e24905ffd240d376ec2b3aaac1b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/qos_overrides.yaml",
+      "sha256": "8a4387d9df8d39c462cd5faebfa7ef4b1fa7aa5cc3534b8a3e199eed8d49d822"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/real_scan_reference_g4.json",
+      "sha256": "8a54f6b94b4bd06c4d3c4c12b69f8e332355703556c2ab663db3367e6a6f6d87"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/record_simulator_camera.py",
+      "sha256": "edf4e12054b536668d3e3518ba3435ef3dab9f991d7d399da021bb9ae4f4de8f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/reevaluate_keepout_evidence.py",
+      "sha256": "bef053ab0e0a5e2e4441c29718aad5bf5ec062d81f10337bbd1f7d6375ff0d01"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_bidirectional_reel.py",
+      "sha256": "7adee79cc0bb54850456ffe5d409bfa0b61cd6d257e3a312b42ed37b61a7fac5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_mujoco_nav2_evidence.py",
+      "sha256": "48dfe790cdea5cc156cfa0b692bab0318aa548ab28f79729e2f2fe105d102c25"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_new_base_mapping.py",
+      "sha256": "308c54c2fbd9e8e80993cd080041f8a7ec2bca6a18060fbf2679140a8cd72a75"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_onboard_sudden_stop_media.py",
+      "sha256": "89cb96506a9eecf8221975ad42de16f4f2327307fd4faa3897b8f7464c35a25a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_parking_media.py",
+      "sha256": "41dabea8b0c2e7abd5b98a45c2b0beb9f0e806f3bc6faeb88429948e644f96fb"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_restaurant_replay_media.py",
+      "sha256": "d90bdb49d2c9fa05e84213ae38e7fedda0acfaa870ef987d35059980f2a129d0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_route_map.py",
+      "sha256": "623ff8f7e0742028a83fd27ed93f617b61e7ed3fd64b726e9b38f121006ae800"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_sim_collision_monitor_media.py",
+      "sha256": "a1fb2be88e8e226b9f441344728a96fee699df62a9c3a2c1f17971b53eb62881"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_sim_nav_obstacle_portfolio.py",
+      "sha256": "169493aa1cf0243613177eb355461b49934eae9014458d8f9ae629b1bdd0fa4d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/render_simulator_portfolio_media.py",
+      "sha256": "d8a8e57f2138d255242f6a54ce019f9a40b24075d50418055ac34a1892f3e8dc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/replay_depth_obstacles.py",
+      "sha256": "e4d0baf8056725a8ff9f05319e4c43d2e2f887ccebbebcbf75c15d3ee5c66cbe"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/replay_new_base_collision.py",
+      "sha256": "d40ee5fa5ddb79de74eafe13139a27cb5ec1686ec833576782320b6cca48e7a9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/replay_service_evidence.py",
+      "sha256": "836c817abc5bf2d4f796b424eeb01bb6b8421594eb26d774493ddf40ec7c6de0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/reproject_keepout_mask.py",
+      "sha256": "64d8d2d06d0af7174470213d835d05987161e2ddb8cbd6250e10f94e666a7900"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/requirements-mujoco.txt",
+      "sha256": "e287e1cc2ee0e2ad321ff8af573bdb70405582d455f96a77984d0ff6de76ee22"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/requirements.txt",
+      "sha256": "3fad74d682d36e000f037015ab5c6b55dc16bc38094ea758d77f3c55b46a8211"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/resynchronize_restaurant_video.py",
+      "sha256": "2b125187add44205ad728b69cc8995178c6febe1e8e271ca8aebd7308b5a82d9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/robot_stow_envelope.py",
+      "sha256": "232564023ad91fc339c9617c734c1a669f3d1650ed1492cef1c0ddb1850e4c0f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/rotation_sweep_polygon.py",
+      "sha256": "b66d0ebf7baf15a97c6def2a0d62df5d427f1a7c277ed851a191860bc47a6070"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_amcl_axis_a.py",
+      "sha256": "2a05b0c0e5923bb1b6a73bee407864fc6557305e54d02adc788ecada422c6f22"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_amcl_axis_b.py",
+      "sha256": "eb3ee5f673ca4704989e0e624894d6b3b164f689f63392f37080af0d84601cd5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_amcl_determinism_preflight.py",
+      "sha256": "c4a99b728817bbc5cc0687215f201aa332d76fd381474059d9c099b0845b0b7e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_cartographer_subdivision_ab.py",
+      "sha256": "a8165fdd43c6d0ee7a78efa70c0b5256d1a95b265f8b60cdfe24b0fec51dbfe5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_frontier_policy_full.py",
+      "sha256": "a88d5818f2473279c6fef6a3dd20723cc4904c869338d39753f0ac93f422e491"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_frontier_policy_smoke.py",
+      "sha256": "421116cd09abf58111712e448d63ba288a4ad6213fa0388e3d1cdd2a1926aa10"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_mujoco_portfolio_render.sh",
+      "sha256": "24da9b41e6871620f7848a9442c719e11592758520734503e3145f01c173062d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_onboard_candidate_smoke.py",
+      "sha256": "15a86ea8a918c1202ae291e67cffc58bee3253d54cc0ee988553f85a2c6e9ed8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_parking_smoke.py",
+      "sha256": "4b50792c83af7430ec218a6d923bcfecb9b9d2f35877dcc159795586c23eef7f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_restaurant_replay_sim.py",
+      "sha256": "bb84774b4487422753ff46635802f2e1690c0a8ccecf45881421e0b6a3474aef"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_sim_collision_monitor_eval.py",
+      "sha256": "899d41891be47a77a0916986583046547bf6d861522d826867b3e17194125f22"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_sim_nav_obstacle_eval.py",
+      "sha256": "dddf7093e1289e74b6951ab1b93ccc4c23784de4163a872d002198562f01142c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_sim_slam_experiment.py",
+      "sha256": "6fe0af61eb78e59faaba1ad67323391a49ff56dcaf89769f54da4b92832e14d0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/run_sim_slam_robustness.py",
+      "sha256": "dff3729014ed6c9682b1c0c2ddd571a545a6e334a2e0d1c159f9ecc83bbf057f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/same_goal_resume_evidence.py",
+      "sha256": "9e1f4d37aa8007badf38d19af43529cd2b1247996a3d0e829dff0393d9164651"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/sample_process_group_resources.py",
+      "sha256": "0b305f77bcdbb2a72383cc4496353f9b5fc86e0b2cfc360ac2e1bd35e31b5878"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/scan_replay_processes.py",
+      "sha256": "86312c7ce38b42de4f96582a0f3e2626a1bdb328334b0343a6b75852574cfb35"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/setup_mujoco_renderer.sh",
+      "sha256": "4e216045236c46e7269288ffe1af7c360c07a893c6a884cb19f1edfc96ae7899"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/sim_collision_monitor_contract.py",
+      "sha256": "3cfec283924d6d82ac4b694b0895a2c6eea2c0b990886e23d6f2ab916147f847"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/sim_nav_obstacle_contract.py",
+      "sha256": "6ae6d2f150b748f2d39e1dac4e48e55c681a540fd82d876e8fdb766545bf8456"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/smoke_depth_voxel_layer.py",
+      "sha256": "72eda586673ebb888c980bb0c514594247e97ef9ec685abfd1b6012814fbc792"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/smoke_new_base_collision_monitor.py",
+      "sha256": "100fd093ed0f6c8b0dddad2d7571353edc79c998f2f2ff3bbc936fece4124fc1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/evaluation/validate_g006_candidate_bundle.py",
+      "sha256": "5abb3bb568d4811c5217a63543862391fff562d5df8816ef5e86df3e0513d32c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/activate_navigation.py",
+      "sha256": "f6f247436ab14fbca4616b9e39f901585384f4b9888df98959ba96df1eb63f26"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/box_docking_target.py",
+      "sha256": "9d785b07bd8d410771a373ceb3a0b06d977aa50b29e2ae4c39b899b3e00bc151"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/box_lidar_witness.py",
+      "sha256": "f4393a5e939803684fc728243ed114f97d45841c6df960c6a1cc2ec6761474da"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/box_service.py",
+      "sha256": "d43c292be21af6d1639c65557dfb120c9495257aff23ab311f4c3423bcb6a523"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/box_top_detection.py",
+      "sha256": "9d325a27a5d855eca2fe244986e0b450afe846171aa989037d684eec9d34fb5b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/corridor_route.py",
+      "sha256": "c56274737e7e307fda217174fb65fc8def001319447bb5b5306a4fd47f409f39"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/costmap_evidence.py",
+      "sha256": "6a99707333aebe839c49bf48d7787b301091a46159fb00c4fe0eede644817941"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/depth_box_parking.py",
+      "sha256": "2205071bd0ad3f748b899791296934fc768190a60ba8a6976ec284121753f435"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/depth_navigation_config.py",
+      "sha256": "39cd7aedda515cd94de78776e0049fde6e480a5eb1c110ab9f52f0ab405f5c48"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/depth_obstacle_core.py",
+      "sha256": "df8fb74b4187d3459ea645e698fba1512acced2850235b1b7de60ce6a218ca55"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/depth_obstacle_filter.py",
+      "sha256": "2e38d078e54eb1402b03840f5ddc814f1bc90999e86681d9dd6c8483755c4fff"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/docking_stop_profile.py",
+      "sha256": "d5d6f27a194139f6980af282cc126a95cef0448961235733d4eee658e9bcc27d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/frontier_core.py",
+      "sha256": "d988e0edc685312421d3dc204b53649d835464f0298c32756bf8fbbfe3210f26"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/frontier_explorer.py",
+      "sha256": "fa649116547c0edf32d249ec75c5d5f54fa5f77ca61ccf55fbb711cba8121769"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/g005_frontier_coordinator.py",
+      "sha256": "5903f3786684e3b5ff7c06f8f653c7db0ed265fc3d9a2e3db7410f4f608df6b5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/g005_frontier_observer.py",
+      "sha256": "15e96340d5dfada50d3c4bbd99dcbc2bfea7653d1ed1e89d48b71e035a7b50ed"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/g005_ground_truth_localization.py",
+      "sha256": "51ca1b82175be1a404e77cdd0a2a40e1dff2e137dd6bbd5460df358af1eb8b96"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/goto_pose.py",
+      "sha256": "8d43a3a6609bf1c9a7bef309dc4dd2f4b54fa68648c18e5a61369a3ef92a722e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/imu_bias_relay.py",
+      "sha256": "88586747f3d839f4e23352f550efd27210c52193a2d3466717a51505f642b57d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/keepout_mask.py",
+      "sha256": "06589fcd084d30b88ee4fe2c84de7e5c5166d33064b1690f792fadfe0505d660"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/keepout_zone_capture.py",
+      "sha256": "8e36517f9cd018d472734320a025ee70f3decb96d06c4566d99c06d8c165a6ba"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/mobile_manipulator_protection.py",
+      "sha256": "179d5c96a5be27bf2fc7a17fef6de210172feed05da66bfe51636fd6b236013d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/nav2_liveness_guard.py",
+      "sha256": "5bfac65b854c86661c2a5357dd73a98e04d6197870d4da8b436de9b9cb67f14c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/new_base_contract.py",
+      "sha256": "ef06c59529017414719d93ff7a139c623904a9e2e802240971a32b4e8bb5c980"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/onboard_recording.py",
+      "sha256": "28f98bfe03a602b27373d48c52031ab40b5a3ed17e0168453ec96a260a92d374"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/operator_mapping_preflight.py",
+      "sha256": "2e82ba00d036013a3f54b1ca69556266a3bdaefd05cc63639594ffe5f8c56bf1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/parking.py",
+      "sha256": "54c627cc5f81c096e0486329ed49c95afa92ecb2692b513c622af0e262dfead7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/restaurant_service.py",
+      "sha256": "ae2c5a6ec51be4f1d0886f6a557e53eedb1f843d0c2f5d11f8f45eaaf7dc8003"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/reverse_parking.py",
+      "sha256": "a0d660ece903e76b879c5fc5e9f177be3ef07dbca74dc2ccf9a3e1bb1812308f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/rviz_display_relay.py",
+      "sha256": "aff5b1e48834ca90396602daf5104dbc7e72fe67921c3bb8893dad50e960ad7b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/service_destinations.py",
+      "sha256": "024ac8022a6d46359dc2f4ab63ca7d5183fad0f03855260e7cf4e5c1b18678a2"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/service_visualization.py",
+      "sha256": "580b782d32ccf66766e91eb039ebf0db576264c3426393a570ab1d0686d1b903"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/sim_collision_monitor_scenario.py",
+      "sha256": "e52b8c3f819cc8e46a8dffd5ad77ec83b325acd25e840f7761d6c2a15ba70d90"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/sim_fault_injector.py",
+      "sha256": "afec6f20182fcf6a3b0291b55436196c593699f96be42d395a9b9bd72f432b06"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/sim_nav_obstacle_scenario.py",
+      "sha256": "6b070f60f712d1d67b07b32af0a077e7052083255f86f9a855bf31190f7f7981"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/sim_restaurant_replay_scenario.py",
+      "sha256": "33bb88dd65306a561a5df0a53d79cb7a19b312a2e63b29aee642618533d3cb32"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/sim_scan_gate.py",
+      "sha256": "14ca016dc186eb8ea8c9f612d3ccb334f3e20d1f37816816bb8823f77834b252"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/sim_slam_route.py",
+      "sha256": "0fd6e64282deb8e7b0d3147ccad5df4849f1c5ae3d4a559671ad857e14308ecf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/soak_metrics.py",
+      "sha256": "ed7ba0dfadf9162d313d194cc5003e85ad24a0ecf574ad024b867972b3105bc3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/table_edge_detection.py",
+      "sha256": "59b321cd8a6d2590f35501bbaaedcf2bacaf9ba9fbd6ffa8de23a61d810817d9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/table_edge_target.py",
+      "sha256": "728d919bd842bcbeb5013c197f18d981d37c150a21e01d14547d4cdf8d8ac661"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/tf_replay_filter.py",
+      "sha256": "a1f17192efde2bb2285cec79f0a617e650ff00b59b83419f7cd936c9099206b9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/jdamr_cube_navigation/traction_velocity_guard.py",
+      "sha256": "4a4b1e1ff2dc6cd78e5e584a54d453b496a46cb21bfce9ac589975078123ed5e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/autonomous_mapping.launch.py",
+      "sha256": "b9b5e5959efbbc83085df4b8dbbd3dfd0d050755e43676bb066832f212efbc7c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/depth_box_parking.launch.py",
+      "sha256": "033badba765428ce673487bb682a72dae3262f2b5c2d8455b635ab4af61e59bb"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/depth_obstacle_navigation.launch.py",
+      "sha256": "bd57b8b097429e5613aefd48ecbf14385ef28cdd88c06d3e53e61db7cb83fce5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/ekf_odom_imu.launch.py",
+      "sha256": "5421505630a0d6f387ce32af20e15be7ea06b20de327c2895d430f653c26c556"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/g005_frontier_eval.launch.py",
+      "sha256": "c0c60851a061fb4d87f3a2686dfd76e2575b55285e4d9a63dcbe00a6be84e854"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/g005_frontier_runtime.launch.py",
+      "sha256": "8b0c3f7bfd3fb2c866c903c330be8c4710614a5bd754b5035635075195cc8e1d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/keepout_capture.launch.py",
+      "sha256": "2c3ca61e3b055d72a2aed078e83c7024766b47ad5be580f192c556c0645d45d4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/keepout_navigation.launch.py",
+      "sha256": "2d006e6aaba72d903618d63f5dfd03eaa10170db550552f24526e55cae10cba6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/keepout_operator_view.launch.py",
+      "sha256": "9cc36f8ea75a68289668cfe45d4ddb5005dc9ae3190af8e70277e15488322ac3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/navigation.launch.py",
+      "sha256": "1e2d6f2789bc94dc46a3b702d46da62f89b436db45d023ff85a8646d26db0e2b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/offline_replay_guard.launch.py",
+      "sha256": "cb2ad20505eba655fe5a46531cb03fe9e3769b28935c6fff7cf1557d6b548737"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/onboard_keepout_navigation.launch.py",
+      "sha256": "7082e38055a8c44d85aa77cc05aa5bda05dc7f8604a2d811137189fba25c89c9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/onboard_nav2_core.launch.py",
+      "sha256": "9d1ef73c1d0e267f7bb91736008352226747c934de080240605f2d30849936b7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/operator_mapping.launch.py",
+      "sha256": "60b085476374c81faeee02a085543eefb2aa931ebce62d20e589defa408497f9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/launch/restaurant_service.launch.py",
+      "sha256": "24017ef7d6b5f7c19be248e892562f55c75105ca03ef9afcf4e53fca81139d38"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/package.xml",
+      "sha256": "b0b1802e09e76581f06962d21d0be60ff3bd0c19c441a6d43defa453a4aa2f4b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/resource/jdamr_cube_navigation",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/rviz/keepout_navigation.rviz",
+      "sha256": "c310da23f873636043eeda1591841d0eaeb2f2d6e6739e7653cc960a6387a5ab"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/rviz/restaurant_service.rviz",
+      "sha256": "5c06ba6dc176629971f0e5a33355cb9bc2d53ad4d92ac5ab18b1e17ea25bade1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/scripts/corridor_autorun.sh",
+      "sha256": "8ed31eb952e4750f8886a6887f345d21701c2aeafc0d4c47438da03214c42008"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/scripts/corridor_preflight.sh",
+      "sha256": "5c6a39d7bc9ef73e5d6a26eb65f278cc68a92356b455b4993715a72dbd54128f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/scripts/offline_slam_replay.sh",
+      "sha256": "8e8e45e0f96e18a72a8d0edd179bf1a97c67fa742ea9d1db138a46c856144189"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/scripts/restaurant_session.sh",
+      "sha256": "9da5070e0084291367f28bda667bf993d78d69698cdb79460807d15959851b52"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/setup.cfg",
+      "sha256": "5214432d9ee9566b4d3f124ced736c03b9a7cd7f74769dd6bc775cda40fb9dbf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/setup.py",
+      "sha256": "571c6158104f68c520f9e4b3f9ab2650486b387568965ed711301664f2cbfa5b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/conftest.py",
+      "sha256": "dd031e2989409cf253192079a9c8133ed040ab7b83ee91356134d3b8b6e885a3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/dashboard_browser_check.mjs",
+      "sha256": "f21cad484ec4e18df4c890b99dd0de9589e4eda11c0abb6563382064b196a80c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/dashboard_speed_signal_check.mjs",
+      "sha256": "13f09d9b26ae007293a3decaef97966a6b0e7516862990f7e374b37212f16bf5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/restaurant_service_contract_gated.yaml",
+      "sha256": "826781007f365e862689232a92efe68fb07c2001caee025b187819d6f107d9f6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g005_5c84289/jdamr_cube_cartographer/config/jdamr_cube_2d.lua",
+      "sha256": "6c0e833c8672ac48b56390b38cfeea88acf782add6c192d1b567435a5242148e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g005_5c84289/jdamr_cube_description/urdf/jdamr_cube.urdf",
+      "sha256": "5a19b69adda290467f8ca38e5b6f1bfac0420e310408241623f891b251084444"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g005_5c84289/jdamr_cube_navigation/config/nav2_params.yaml",
+      "sha256": "99db2ca2ca6790c6f27ba2a56a55c12ac1146dec29a4913a4d73d9948a7da50c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g005_5c84289/jdamr_cube_navigation/jdamr_cube_navigation/frontier_core.py",
+      "sha256": "d988e0edc685312421d3dc204b53649d835464f0298c32756bf8fbbfe3210f26"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g005_5c84289/jdamr_cube_navigation/jdamr_cube_navigation/frontier_explorer.py",
+      "sha256": "f0dee2f7c7f790742b381a2a22c10099b8dc2aa9c9f1d58a3816241d847120f4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_bringup/launch/real_bringup.launch.py",
+      "sha256": "7c639957bdfecb818c3685c369f362e1a7bbad0d73c5c8406b2476ee33814683"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_bringup/package.xml",
+      "sha256": "6d4cf43551b11339e48332753840cbe2772f17425acc44f10ca36d4e89bb9579"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_cartographer/config/jdamr_cube_2d_real.lua",
+      "sha256": "51d9ec30095bc32c42f0831d73719164f84579a24c105f446196e01c0a2e0b45"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_cartographer/launch/cartographer_real.launch.py",
+      "sha256": "713f29c33d1ef590039332c42fa97285bc0f7a6c95f6ad9557c4e2416fec8d70"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_cartographer/package.xml",
+      "sha256": "46affa470a6fbee1dddde72fae369760c9f847c5105c6d1067547870be69e681"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_description/package.xml",
+      "sha256": "6ed93081a2c061ce8ec0c2985f9e9791d45b524a127f7cd1d1f3e318c932291e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_description/urdf/jdamr_cube.urdf",
+      "sha256": "5a19b69adda290467f8ca38e5b6f1bfac0420e310408241623f891b251084444"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/behavior_trees/navigate_to_pose_corridor_fail_fast.xml",
+      "sha256": "cc3ea5fbb6b40350d602be8f84bcea11c68e7dcd6daefa5edaa2008fbcd64324"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/behavior_trees/navigate_to_pose_safe_mapping.xml",
+      "sha256": "a828a440e36e42b033f139dc189314a7087e74cc6e07a9d9c28e7b5b5d8933d6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/config/nav2_params.yaml",
+      "sha256": "99db2ca2ca6790c6f27ba2a56a55c12ac1146dec29a4913a4d73d9948a7da50c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/evaluation/mcap_writer_options.yaml",
+      "sha256": "527cdca86c115386cc65a6b1dcdf8ae13a3d92ed739aba8f1bf0368aa19fc6c9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/evaluation/qos_overrides.yaml",
+      "sha256": "e7c940fb59baa6351bc5856bb0c203f56af182beba07305d886423b095e38890"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/jdamr_cube_navigation/frontier_explorer.py",
+      "sha256": "f0dee2f7c7f790742b381a2a22c10099b8dc2aa9c9f1d58a3816241d847120f4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/jdamr_cube_navigation/keepout_mask.py",
+      "sha256": "06589fcd084d30b88ee4fe2c84de7e5c5166d33064b1690f792fadfe0505d660"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/jdamr_cube_navigation/nav2_liveness_guard.py",
+      "sha256": "7d3520a9de743f1e3a5af678b58a55fada6751ce05cf36c2297a0642db7b0303"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/jdamr_cube_navigation/onboard_recording.py",
+      "sha256": "1ea2f42d513709ed5c9cb1dbf990090dc4183d7d4966c6666321c02ff8c2b2be"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/launch/autonomous_mapping.launch.py",
+      "sha256": "ceab0c6b275d706a91716ab94e0b13d95709a553fee834f252d26990526a5b7f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/launch/onboard_keepout_navigation.launch.py",
+      "sha256": "ccafcbac729c0b73b30fb9a25cd70af166c893495cd4c3eeaae0e7e4a2da7983"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/launch/onboard_nav2_core.launch.py",
+      "sha256": "14946e92c4e5c8cc22eeaf4dc067ecb9f8325cc301f64a3643969dc70d1e409f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/package.xml",
+      "sha256": "5c74a43bc158a075960314b59d3acbbc21b18cf4ffdc0ca70179e72e4d788848"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_navigation/setup.py",
+      "sha256": "c4a00d61fbd2f4a570355423be735ccaac544cae7cd52b037c50b4c64ad64079"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/fixtures/table_edge_alignment_20261013.json",
+      "sha256": "e25517358f873b835ec2e88c4ca82c14b4f57183e542977ec925c65370b9a2b1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/sealed_inputs.py",
+      "sha256": "6775cc7735dfe7bb0774b958aa7aa8a55a7841e97aff14d42100084691b8bb00"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_activate_navigation.py",
+      "sha256": "c8cf77acbe0e7195223c94dd4b33ecff39cd476c6b4bbc89448126c9aa0bc83d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_amcl_axis_a.py",
+      "sha256": "e9ae6869b99fa44b0d9646ab27d39be6224b6a6921b9607d2d9e2fcd518b0bd5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_amcl_axis_b.py",
+      "sha256": "001134cee40652e56ac69a69b660e518cf1580a2d9322416bd579dce9b9ae3d4"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_amcl_determinism_preflight.py",
+      "sha256": "142a6b45d35e99114023cd9e32dbedbafb32088ee8a5f9900da3f9665939c4c9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_amcl_fault_benchmark.py",
+      "sha256": "8a1f60bd5822756926775c75e656ce734022e0065e9d10e3fe1b795f11da54d1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_autonomous_mapping_config.py",
+      "sha256": "fa509764d22686ab1043f7af6b72b81999257e4e2ab6f3e765f698b2393d9cc8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_box_docking_target.py",
+      "sha256": "e2334d62ecca60417e492bdb20cc7c8b810aecaeaa1abffd86c4a5e20c6c2431"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_box_lidar_witness.py",
+      "sha256": "444c30199c097b00cbc12258dc0beda27b94dde343cf365f3cdffea9a1ae9e23"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_box_parking_observer.py",
+      "sha256": "7010b17941cd6f3f2bb79cc8815b55c7f1f10b3aa916dc87b350864a0444dda3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_box_service.py",
+      "sha256": "bff7110fbede9d8fee7b70080b757a57e7bb15266cd0d1ad2401214fa61f3ecc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_box_top_detection.py",
+      "sha256": "0c1f395bc51e513629d7e3abc7fdc28ca08285cee9526bacc6536304d7b0f1cc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_capture_depth_alignment.py",
+      "sha256": "556172c12d2e63e25bc052b744884d397f8fb67863a51216a4837bfdc98eb365"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_cartographer_subdivision_ab.py",
+      "sha256": "92a7fee782cb10962342949bce9f15e310425ccbc3861ea76516b27dd497b1d7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_classify_amcl_axis_b_failures.py",
+      "sha256": "132bfbc211a47dae7d708db35cc2c085ae9080d7680d0ff1c29d1ea15c7546d5"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_compare_sim_slam_experiments.py",
+      "sha256": "5808a1cf2b7504da4123e30038bda38136a934585791f7927ae9b4b9ddf3f0ad"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_corridor_run_media.py",
+      "sha256": "68ed5090afbc7bb655970588f9344f62c9ee0a605c86d3713e89ef2b5ddd0065"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_depth_navigation_config.py",
+      "sha256": "944247642078cb12b0242ca2858c16feb04250af1bbc389999a2bb923a6a77c3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_depth_obstacle_core.py",
+      "sha256": "6ba01250cbd58f66828cf21c8cdd99afea66ff492f5f54375e574b1ffa952e9c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_depth_obstacle_filter.py",
+      "sha256": "5b8ceffbf7b1c4b1271fde32cc7a8c90e74287e494f71d7e602556d1bfc942d2"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_depth_obstacle_replay.py",
+      "sha256": "91e6c036732333b5e63db40e8e2fb31397880bb185fa63195884493bb073d15c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_depth_voxel_smoke_lifecycle.py",
+      "sha256": "d33433f27abe2c9f856b4d8739891ac05b6ab9a033354598f7662515e62759bf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_docking_stop_profile.py",
+      "sha256": "2e1a1c54eb36008abd17187ee047a4ddf399e4da95e8c23bc420fd460f002c98"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_estimate_wheel_calibration.py",
+      "sha256": "f78d068998e921cf0eb0a45d1db1117fcc58e8567c719ac7f9b1b357d4ba4029"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_evaluation_config.py",
+      "sha256": "23b27babe447f33e6f1c160cf47b9d4b1d4e23525ca409c8123f608720a4cd7b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_fit_box_alignment_candidate.py",
+      "sha256": "0910ca226a9a141b0e51aed9f4a5f28bd3c3c458962e3bbdc4b38e97282f70a1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_flake8.py",
+      "sha256": "18a9f0b53466ff004b15d16ab419d36e7aafea875d5392b165bc3155efcf7760"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_frontier_core.py",
+      "sha256": "1ef4ffbe45992b65fb3010f951c2f2743308989b2ee98fe6a8eb1397dd456d35"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_frontier_policy.py",
+      "sha256": "16a4ae54dbcedbff48f47d0a4ed1d62c310e897312f45cf72c7a52f0b689813b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_frontier_policy_eval.py",
+      "sha256": "90bb6ce79663c3e4420d160c7f6a80fb434680d679254949787962e994efb8f7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_frontier_policy_full.py",
+      "sha256": "aec414da26dbed7cab05652d610d0cfecb73097caba3eabb01e12086b690a786"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g005_frontier_coordinator.py",
+      "sha256": "cbd28691966e0fe941da198f6e03218cc26aa4e79f4c8b0eef9fa85063623531"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g005_frontier_launch.py",
+      "sha256": "3c5c7f3512fd297ad880e76e641e77645978a2e343eee4501605293ecd423b71"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g005_frontier_observer.py",
+      "sha256": "2777d6353837863ab0e0701d04371251fb4c044207c9b8b901421bdb80f9afc6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g005_frontier_runtime_launch.py",
+      "sha256": "fbf50320dbc555e2ac957f5f10399e2704d02cd0ee7213b0b7e292184fe347f0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g005_ground_truth_localization.py",
+      "sha256": "bb9d8323fa7485f1776f4b3f6af97afa1374d569c00c65093584821f9eae24b7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g005_oracle.py",
+      "sha256": "c64a615c96e52625aa082ae76fb8b3b48c2c738915b1bbef51e69c141b0ead89"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g005_runtime_diagnostic.py",
+      "sha256": "0e05d1f62225b84632482d8a3191ba926f3da74d55091fa4e2a7e6667d21884d"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_g006_candidate_bundle.py",
+      "sha256": "c59411db96219a2b170c89b82191761ed4ff0ed6529af89ac9524b3492b4f132"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_imu_bias_relay.py",
+      "sha256": "f36a8254fcf5a8b34d8811555158a2a7279d00a2b0e40aa18f0fca29b86f5ea0"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_input_recovery.py",
+      "sha256": "dfe200b0b34c3f71795bf5df7fd700be120ce3734c72218bc9c5f60e0e6c3686"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_keepout_config.py",
+      "sha256": "90dca00f9407e5d9af335c9fe159bacfaf958c49760fe2b0e53460708908a736"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_ledger.py",
+      "sha256": "a2b4de62f1b7e32f00d35cb03269666949b738f43cf6fd388177513ae62740a2"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_live_sensor_latency.py",
+      "sha256": "e088d1305ea63fdbda462f3f16542d0ec1bf13189c04ac02e71ea48923c4b863"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_mobile_manipulator_protection.py",
+      "sha256": "ccee0b38d6e348d3c42ced3e6310491e2d3d3aa1c2119ae6825744d22877a66c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_navigation_dashboard.py",
+      "sha256": "44851f5586ce4be2162b76d7f479073de4bde2ca8f344c4368e9f82900ea4680"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_navigation_mcap_reader.py",
+      "sha256": "ca719be7b8c3045c0186735bb2901fc4bbb354a73537dd657c8eca2e4fc1835c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_new_base_collision_replay.py",
+      "sha256": "d4090c52558dc5468c48130c0463b04621de6223a16b3dfe4c7fdefaf2d4853c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_new_base_nav2_config.py",
+      "sha256": "21a159d72defbd8e84c7d6485ebc501b442497ee2a1c35f35224420983b064df"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_onboard_candidate_smoke.py",
+      "sha256": "04ad4bc2bbd354f6671b8126bbcc955c15f900d8f82c3ad665b8ef3fa77cdebd"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_onboard_load.py",
+      "sha256": "e88102ecec56abe90ce2cb765e2b267f755e3e29ff86489d652bdad2e07857f1"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_operator_mapping_launch.py",
+      "sha256": "4a9b99b3cf1c8b41c657416bc9b127fc38e1423a2aa14eda4e76fcb8a9c23bf8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_operator_mapping_preflight.py",
+      "sha256": "e4cc921681c55a61310ab914a21ef68095bc025f4088ccd30335ac9a5415b578"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_parking_contract.py",
+      "sha256": "1694f3930fed8fc2271e8126e587a80c236cb89785cb8629def1a3a1c6102555"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_parking_integration.py",
+      "sha256": "204e40b15c1ac1a7f6295807ee119c5e5d6adb1d1bc9ddb5cf3d12db1b42fabf"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_parking_smoke.py",
+      "sha256": "0dcc5b3e18f5ae15064fbbe35bd450bc5014571bcceb306e5501ba0a1a664735"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_pep257.py",
+      "sha256": "fb2b563f5e13e28f6272e110419bcbe68d6d40219c17f721bb2be9a60aeb3499"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_portfolio_capture.py",
+      "sha256": "4a6e2b0c88b82a3ad38e1b58a5706a5e140da6aea58bfcab567201d35c2b1590"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_prepare_actual_map_restaurant_sim.py",
+      "sha256": "fef985017a4b7233349143cde0991a9dba8a6fe845a555359951e902dca1de7c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_real_stop_latency.py",
+      "sha256": "5707e652029736631ed0ab484b7c51c041eb37e6f41c29356bc9705b6b6df67f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_record_simulator_camera.py",
+      "sha256": "760cdf64d45431d49dcaf1aaf54a21a7ec458ee9dc42dad462b8177bfa435cc9"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_render_new_base_mapping.py",
+      "sha256": "57a582e141dc7303b6d5f7017466f712324649bfa1fc1147fce6fb23a2fd5098"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_render_restaurant_replay_media.py",
+      "sha256": "f71491c9a67cc98fd9716fdeb90123141149261f5afe608d03bce9288efbdecc"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_render_sim_nav_obstacle_portfolio.py",
+      "sha256": "9f74e383cb9893fca50b268eb4d4d06526854aa4cf271cdb809977b49282ce0c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_replay_service_evidence.py",
+      "sha256": "ba79d8e22bf2066c05955d4f21350860fe448b33cee1353170496c8091a6182b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_reproject_keepout_mask.py",
+      "sha256": "8120ececf56cc9895e29a377aeb308edde30f662bb856b47d76973b003c6927a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_restaurant_service.py",
+      "sha256": "c649da6264c1549faef779eae22bd1d5ed9044f648a0f27d96d8c6d3d5402821"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_restaurant_session.py",
+      "sha256": "5d4e8210425d99d23f1b32a55be8fec3719de4b70b884c6a2bedc7b6274ec8e6"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_restaurant_traction_sim.py",
+      "sha256": "fe6764be0598553e242a4998560d771277bb59f35667d4798c5d72f0c72b0e15"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_reverse_parking.py",
+      "sha256": "e3005a210887bd1b818d31710f6275ad65872b7c6fbe09e73932f98e2b8ee8a7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_route_clearance.py",
+      "sha256": "aa1ecb4ab3c38ff58dd416e912099ee37ef725706094c2eb2c9f5d05d9347783"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_run_restaurant_replay_sim.py",
+      "sha256": "053a89a8babe77d69ee70661d71d1e3b47c4c351b7c8c270f852ff77c6380917"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_rviz_display_relay.py",
+      "sha256": "923038cabb2b9e023d784b47ea7af47bd60bfdae2dd4754418e0bafd071f7010"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_same_goal_resume_evidence.py",
+      "sha256": "667af53486544200b4c3c4608b7e50add45195b4dfa2641577d3834db9b55ec7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_scan_bag_normalization.py",
+      "sha256": "aca41f66de8fe71a6473032eea8aa5c4cebf12d29966c7737070b4a8f366c53c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sensor_profile.py",
+      "sha256": "8ff1d4c1e99180567a68205af29ac4546d7a40f5c6d4085438efadddd68bcb84"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_service_departure_battery.py",
+      "sha256": "33d7a010fd37e6c4fcf7b837b722bf4092fe8dbdc3fbfaca5ad9f5386f1252e7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_service_destinations.py",
+      "sha256": "7aa971e618269f1546f2b8c8dcdd8ee186bd99fc375c0d41368d3d2002ac5e50"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_service_visualization.py",
+      "sha256": "68f58c448ad13d57227724373bcca3183e7f9fd0afd63e2e0b91000d3ec4d29b"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_collision_monitor_eval.py",
+      "sha256": "fc0b263a04697d24c9dc4dce1e8cc05d47a8210e70e50ed5ba9623c088d817c3"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_fault_injector.py",
+      "sha256": "20a55f162faaa83abda1136ca79d4ac3d5cb9695536da0f3b3f6000ab02a6890"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_nav_obstacle_eval.py",
+      "sha256": "bcad5e6c1695642b9137541109e7dd7cd7a3d2e352cd639bd76f2868f776392e"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_restaurant_replay_scenario.py",
+      "sha256": "1de245e46bee0f033b0cf7a470096b75d04b049b92ab80ed0e3fce630d98920c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_sensor_variant.py",
+      "sha256": "73f454e099570d6d1b6caf10f02a981751af17f386e1eab2800f0e002cf08018"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_slam_evaluation.py",
+      "sha256": "694810aa8c547c878f8bcc98a34e0eef4ade28bfd40e88d1f10b6c6bb78cbe0a"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_slam_experiment.py",
+      "sha256": "4d88b207b2947003ee2354821d8052bc525d36c4b6bddddae4078f00c64d4fe2"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_slam_robustness.py",
+      "sha256": "e52bb1ec97b971e42ff6f49306e794e786ef5584899aba107db7f9ca2f09fca7"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_sim_slam_route.py",
+      "sha256": "7ba1859be030083c1f9ccf2295d9f9e02507ed5c013113f71a38c5b59bb8c34c"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_slam_comparison.py",
+      "sha256": "2a0e0e9b3de77887f5c330391849a62b341655bc3543b8417e6e17a0ca73b057"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_slam_toolbox_ablation.py",
+      "sha256": "7a693d827e02e66dde40fa7b301a1d646a1dbd3ffb2e0e863a60594212a42b4f"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_table_edge_detection.py",
+      "sha256": "6ab61f3fdc81a0fda6c5873776b05081e40f9e15c2f29bdecfc8c777f3856996"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_table_edge_target.py",
+      "sha256": "6ca1756149a4c473c8e9639972fc6ff3b5fb3f45702a3ce6fb3cc087d54b1fa8"
+    },
+    {
+      "source_path": "jdamr_cube_navigation/test/test_traction_velocity_guard.py",
+      "sha256": "d2d05548fe5e7162f3d4e52cc349d87b4edad93bb87ff9a3f085df17ea180359"
+    },
+    {
+      "source_path": "jdamr_cube_node/jdamr_cube_node/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_node/jdamr_cube_node/jdamr_cube_node.py",
+      "sha256": "1e66d886a09171d72aa9bd09f7d7bae999823d3ac78f9e755994e80aeb1b4743"
+    },
+    {
+      "source_path": "jdamr_cube_node/jdamr_cube_node/loop_eval.py",
+      "sha256": "e443b5ec3be0c389b348ec53abd70e3f3a974eb25536978eb73ae6420cdf568e"
+    },
+    {
+      "source_path": "jdamr_cube_node/jdamr_cube_node/motion_probe.py",
+      "sha256": "fe94506dc50d0a389b15fff4188ea7559f9c34dab7d6b0e8d99de22caca0c8a4"
+    },
+    {
+      "source_path": "jdamr_cube_node/jdamr_cube_node/protocol.py",
+      "sha256": "e66ca8906cb69c3748aac68311004cdb5c42bb1133b2e4ab44d044e5b6fd7f70"
+    },
+    {
+      "source_path": "jdamr_cube_node/jdamr_cube_node/web_teleop.py",
+      "sha256": "5e9eae3ec6b4560607fc206281de40032953dc74e5c8ff65c810077ae1442d61"
+    },
+    {
+      "source_path": "jdamr_cube_node/jdamr_cube_node/wheel_calibration.py",
+      "sha256": "7247c95384e70727fc2193b2e4bccf978c1eed937e18f8501431fd0412daa0cc"
+    },
+    {
+      "source_path": "jdamr_cube_node/package.xml",
+      "sha256": "d934e5eb790fdf1be6ee5f185bd5d0d10849f40685d10ec203919b75f054c91b"
+    },
+    {
+      "source_path": "jdamr_cube_node/resource/jdamr_cube_node",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_node/setup.cfg",
+      "sha256": "08855d61c326fbb6992b327124fc9efae0151e605a398de5c72805196aeaddbc"
+    },
+    {
+      "source_path": "jdamr_cube_node/setup.py",
+      "sha256": "f905536b7232fc124af3eb24a2953fee3b5bb3f7d7dbc666eda19f03de284ac5"
+    },
+    {
+      "source_path": "jdamr_cube_node/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_node/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_node/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_node/test/test_protocol.py",
+      "sha256": "4e9febcd635b22a36f3c00ec8dc70ebc3baf15d5da8735c4b2f9ec45284a93c8"
+    },
+    {
+      "source_path": "jdamr_cube_node/test/test_web_teleop.py",
+      "sha256": "52d709d100f229684878df44c075076e1cd2d4d7d6c60bdd402deef37942b681"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/jdamr_cube_so101_arm/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/jdamr_cube_so101_arm/joint_control.py",
+      "sha256": "9cc5b073ff2f5f41f515e4311c57ba4404aa03b80f64d46631a0fb1bacf248c1"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/package.xml",
+      "sha256": "cadb8beb54e807ca14989cb6dbc62f76f300a482163405247c99446374f2ea36"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/resource/jdamr_cube_so101_arm",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/setup.cfg",
+      "sha256": "f45d100bfc762b881e700820fb8c36625511edb2dee482880f3d39244d3d456b"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/setup.py",
+      "sha256": "9455452773718ee4feb6b7869d90d16feb1c4f15b070fdc79cd0738cdc2258a8"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_so101_arm/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/jdamr_cube_teleop/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/jdamr_cube_teleop/jdamr_cube_teleop.py",
+      "sha256": "e562be24a6cdf6203a1b5f52667ee97bb3782abb0a243510640f780dd85b66fc"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/package.xml",
+      "sha256": "c9ff0b764d68d7531cc8a085baecca0ea0a154fb925ad76c831e9d0c9d385dd7"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/resource/jdamr_cube_teleop",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/setup.cfg",
+      "sha256": "7425a79f4ea6331e957d646b32e0b247577c096783469be549e192a2c51243b5"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/setup.py",
+      "sha256": "8606be6ef0eaf2763f9739daff895f568d4ba754c8fd34e93f0fc201920b3e98"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/test/test_copyright.py",
+      "sha256": "ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/test/test_flake8.py",
+      "sha256": "37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2"
+    },
+    {
+      "source_path": "jdamr_cube_teleop/test/test_pep257.py",
+      "sha256": "e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/.gitignore",
+      "sha256": "09b8bff34979acf95b1081762b577b1edb31db9e9308107824ac203cc18a7eaa"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/README.md",
+      "sha256": "6bb04e138b94fc00e847ac3c69d0d8d9602a877c2a6532e65cc2d451ebcfbaea"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/config/accuracy_protocol.yaml",
+      "sha256": "28a11bbd411e9370a2093ce60c9201db1dfded0a781bc238b4e9d50a87f81d09"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/config/astra_s_rgbd.yaml",
+      "sha256": "5c6f25f57cd03694829a91bb025d1574bc73497494fe9200ca9d1a1eedee7650"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/config/camera_mount.yaml",
+      "sha256": "41d190deb00ddd24b339dccb8e615b8faedff6dfa8aa10b611eb53989d9e8a72"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/config/rosbag_qos_overrides.yaml",
+      "sha256": "fff4a5bc64442a4b9f7411939bbd767809f3e24cb7a253eb8c8e8bdef62fce01"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/evaluation/20260916_RGBD_ODOM_FUSION_90TURN.md",
+      "sha256": "2c438bd45877af6c866f57422fe4da20200d15cb64a6a3a49758bd7b07ecdd34"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/evaluation/20260916_RGBD_VSLAM_PTURN.md",
+      "sha256": "1cb129c690867b5dd2b956b4984b4aa49711d956c69c55762ad40aefc580d117"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/evaluation/20260916_RGBD_VSLAM_SMOKE.md",
+      "sha256": "903c281c68fab71864a70f5d4e63697286a0f7eeace8d182269e7a2c0b296a0d"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/evaluation/20260917_RGBD_CLOSED_LOOP_PROBE.md",
+      "sha256": "d7736c5bcefeb3d4d473bfbea7c6e77ed018bdf3aaefb5f327b3422d3cd02b78"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/evaluation/20260917_RGBD_VSLAM_NEXT_RUN.md",
+      "sha256": "836b99a7642b2404884f3aa10a7b10615e2227599f6e7b0f9a761b04919b4d89"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/evaluation/20260917_RGBD_WHEEL_ASSISTED_AB.md",
+      "sha256": "96d6adf5f68efda8c45a4952884a6d5d23c09c8a0c3fea21581c490fecb10655"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/evaluation/20260921_RGBD_RECORDED_RETURN.md",
+      "sha256": "bf36345bd7815dd7f3d26adf803b1ed0f8b9233f61cf373a3a3dc8e088c8e020"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/jdamr_cube_vslam/__init__.py",
+      "sha256": "0d1fd687606b71106a9e1e5b25d567979db65569a04ec29ad78cfb5c4e0e09af"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/jdamr_cube_vslam/downsample_rgbd_bag.py",
+      "sha256": "8f757df55b43e616b33a1a4dd24cbf7de6f21690dcafd32aec6bd1be95353fa0"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/jdamr_cube_vslam/fuse_rgbd_odom.py",
+      "sha256": "277ff3b07745fb23a2f5f33932525d8d4b5193b62f3346857e957d32dcd0add5"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/jdamr_cube_vslam/rgbd_snapshot_ply.py",
+      "sha256": "5b3e77ff95619f85c301cb8e93951a6fdb6e85f5ebd627d2a89348efd4627285"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/jdamr_cube_vslam/trajectory_accuracy.py",
+      "sha256": "d3edc14e066f43b835fcaef937a3b50b85a566eda487f2ac4be83f4fa0a3d0b2"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/jdamr_cube_vslam/trajectory_csv_recorder.py",
+      "sha256": "94f78f9681226ef60edc10288a031d2d665e3ba7614734af2b07c19f101d949e"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/launch/rtabmap_rgbd.launch.py",
+      "sha256": "006cbf3b0cde2ef0b530742b7e44c9eac650c3ceaead322d93fda40612fb4737"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/package.xml",
+      "sha256": "6f56b16517f1ad24f9aa44a0bc54112fad40764d668ea5deb882747327a50722"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/resource/jdamr_cube_vslam",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/scripts/capture_rgbd_bag.sh",
+      "sha256": "f821c8b8d0d2e5a8fda6ce214f96742aa6642872442810d49eb7b3e7b98f8765"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/scripts/export_3d_assets.sh",
+      "sha256": "a606cc14606ce30606fee48b3890355330e3c17fe2a7fb5ab9f92b3c0a646ad0"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/scripts/prepare_visual_replay.py",
+      "sha256": "9824f85cf1361be122bb845fc395e8f7823a14ec08a798ef229fb74a3cc9d71a"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/scripts/process_rgbd_bag_in_container.sh",
+      "sha256": "3315d680e32069e4a0a641068bbe937c9266ed7facd7e0bcd2bb69b1f8f7e155"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/scripts/run_rtabmap_docker.sh",
+      "sha256": "8b70e2dcd1949e21836bbbf190d98ce16b081ee373531ba7002b3591ca1576b2"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/scripts/wait_for_tf.py",
+      "sha256": "21f793ab971fbef66fe2c805533841d211b726b1da6aafd05ad882b073a085c2"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/setup.cfg",
+      "sha256": "b044d15a3640b610dae648b353be319c5925b11ffdfce42e524e754ec4740c3a"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/setup.py",
+      "sha256": "112998db32bc742f64c1f9490062701204ca4d16aefe730278fec48d96cc917e"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_downsample_rgbd_bag.py",
+      "sha256": "cce122ee95656c3ba5f7d5c7894786f7026cff7819c71c2915c4744bbea9346e"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_flake8.py",
+      "sha256": "c8527bf4b222a5e255bc6f828027f798c723a39141357ba58fd87e01cea2ecba"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_fuse_rgbd_odom.py",
+      "sha256": "4aa886a1dca2bb04eda72ae99c1bf19eefd6e9f7bd56bf778a3d8d365777a90d"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_pep257.py",
+      "sha256": "ae37f49a61180fdec930fe83355d7eb29c05ce4aa3f55dd277c960702de41004"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_prepare_visual_replay.py",
+      "sha256": "fc7c4f2598cbcd50e84debc38f1ab299a540621afc40a163ff0b6d912b10d320"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_rgbd_snapshot_ply.py",
+      "sha256": "8061e5d98cc2bf5daa00ade5daeb415ec006d9ced7fa5fbb5d664cb00f5cf344"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_runtime_contract.py",
+      "sha256": "9252cfdeef5af52131967826317cd8ebf8449b327b8e2de423a05b36ee78b97c"
+    },
+    {
+      "source_path": "jdamr_cube_vslam/test/test_trajectory_accuracy.py",
+      "sha256": "ab3801f9707b011d60bc0f62065e941999af671919108d2394594e1dcda48c69"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/CMakeLists.txt",
+      "sha256": "f947450521ba8651b9d956a66fe5937c5fb5065bba37301f2833d5568d1c9add"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/LICENSE",
+      "sha256": "9a73e53bf9966dfe69c0f8723d7db4b06ff8e81cfa2ea39b9d89f86565282950"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/include/ros2_api.h",
+      "sha256": "c092606682647c40166f1f51760b3113a38760b9925498b7427618994b50fca3"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/include/scan_utils.hpp",
+      "sha256": "c2e0195213704db260c6a5bae45604000fe9a591945246c4499637d9dbf21be1"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/launch/ld14.launch.py",
+      "sha256": "64b5c40fce30a6cf927ed1c19b92c2526db20b476aa4bf116e1515f66ce0b3e1"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/launch/ld14p.launch.py",
+      "sha256": "f2ab756e42c7ed909109b4d1e207a167aa28c25b25d501042f6774fad0e90037"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/launch/viewer_ld14.launch.py",
+      "sha256": "db4522673043cd06dbcfe744a3dd6518e0572b4592a710da9d52de1560598486"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/launch/viewer_ld14p.launch.py",
+      "sha256": "85271bc5aa6dd9c3cd887152d10647068c52e53346a8993d009a17b7c36f333f"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/include/ldlidar_datatype.h",
+      "sha256": "d1f7b23207af71fbdb12d143c49b9b3da38e4eacaa9840c0f29ae4623c78f18e"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/include/ldlidar_driver.h",
+      "sha256": "0cf107a45fb3f4df80798dee73e959fa41ea0c96ae862a27a4bd40737470734f"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/include/lipkg.h",
+      "sha256": "5742f116541478015a3e6a757cf1cdb4e270e779a91ab6730e0395e40dda349a"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/include/log_module.h",
+      "sha256": "115e43a8c846a3f6f51cf034ebbfcdffac373f2d43c4ea608200a4d70cd44c5b"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/include/serial_interface_linux.h",
+      "sha256": "b10a946d4b73c514fb71a891462a652a2b78e8d2f9fa161d6ea7faf4561cb809"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/include/sl_transform.h",
+      "sha256": "349ba78d50e94989dc912a8bdf6b0fe4e3a0dc2eb5a10b545be033ac9d530c4e"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/include/slbf.h",
+      "sha256": "7872d1fb9c410f9c0ec9de9410887928f75816a3e975c5badf694ccf2d7b3dbb"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/src/ldlidar_driver.cpp",
+      "sha256": "2b04f2793436e885a9bfb9907c2f0154578b4f63e796c531f68a3ea86cfb1abc"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/src/lipkg.cpp",
+      "sha256": "59f4e273a2ae5a4d2690a31503e850259f28ba7d21b51472e9ef0d3e37e27167"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/src/log_module.cpp",
+      "sha256": "d9b10c23d089fef8c487137a8f45a6e3ed03db110fa9d35b61ab87c5397bf136"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/src/serial_interface_linux.cpp",
+      "sha256": "282e4499342a44a47ca1ad36cf3be9fde9c80cb075131fd86faa0b4678745889"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/src/sl_transform.cpp",
+      "sha256": "93fe5aefa28b40fb4321bff9f53592a18b7f8770d55be544a7fe39a5e9180128"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/ldlidar_driver/src/slbf.cpp",
+      "sha256": "95d41e9c17866dd92cccbac1b18b7a34433d63eb26bc11c0f66f9b634a53205e"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/package.xml",
+      "sha256": "3d77d0904c3ffd79995bdb3176ab2e76e89b8528799dc3f3e6b3d47447559203"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/rviz2/ldlidar.rviz",
+      "sha256": "e26ea97c473c7377cd80ac1b966f46c34205ceab1d2d3937003a7659849b5c7b"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/scripts/create_udev_rules.sh",
+      "sha256": "eed88ca0aa27188d32ec5e04972dc6c38895fd07f5b7fb0a78c7bde7c0b429d9"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/scripts/delete_udev_rules.sh",
+      "sha256": "301cd24ee18ba24c35f6ab80422dce21ab1da2215b88667c4f308bb94ec32ada"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/scripts/ldlidar.rules",
+      "sha256": "605b8f5a6f1f7038c31e31ba4a7551b5842414a11fa49fa0803333ed4affa116"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/src/demo.cpp",
+      "sha256": "9995eebc284f4e284727475e2165fd5cc9fdf144b4d2ac3879c62417394ca483"
+    },
+    {
+      "source_path": "ldlidar_sl_ros2/test/scan_utils_test.cpp",
+      "sha256": "583ab12679a9a9eac0cd6048a91f4349d7335c52aa47c58b9bc925a98b11ada9"
+    },
+    {
+      "source_path": "run_gazebo_slam.bat",
+      "sha256": "5803f44d0aade1e131000ea4332e6488ec8b971cff15861037f10313977f67c7"
+    },
+    {
+      "source_path": "run_kill.bat",
+      "sha256": "dc9c65a8b75c251373062fc51e4b58750cd3c133faf1ed58e59c51ce63aa5e1a"
+    },
+    {
+      "source_path": "run_navigation.bat",
+      "sha256": "4e437655c554a63e0d1418b5422b5e2d7a1201a6774f830ea29e69af87e1de90"
+    },
+    {
+      "source_path": "save_map.bat",
+      "sha256": "4e3865617ffe5de9861b7bf45815974f339964d86b4fdda31acb6e0a3780b0cf"
+    },
+    {
+      "source_path": "scripts/deploy_navigation_to_pi.sh",
+      "sha256": "bbbe3ff1225927c435286aedbcccef60511788c37119b54423b498df7afd7804"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/README.md",
+      "sha256": "e1bf164e1c00462a8f126a607c844c178ed54ec3f5e7128622b6c926c58ed1de"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/analyze_load.py",
+      "sha256": "5f94d5d6b0e7985835642cf690eb8a7b7a5052e85a33b3ecb3875ba8f83c207e"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/analyze_run.py",
+      "sha256": "9f977e0aae2e133e3b28142925d0165525d3a2e6c82a305058d20a47cd2c4411"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/box_escape_once.py",
+      "sha256": "755d8fb7cbb0e452e4064f74aff320b272243308385ae520ff186e707ce0c8bf"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/compare_runs.py",
+      "sha256": "b6576fcf015c686317817a0aaa24079b0da4702f4b127c66a32a57a159001565"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/dds_probe.py",
+      "sha256": "203d9ea5c2d13a743cef92b542aaf7287e7366060022c71f1d0c48f6161e2a17"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/ekf_replay.sh",
+      "sha256": "1fa0addf4090fff8f1b42dbde0ce3df980b451ffef5331cdb5273304043c523a"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/imu_axes.py",
+      "sha256": "d1c929e5849d7b7819f7a4595359910e15e64f7cb4d571fe1d11a06c63bc5425"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/imu_check.sh",
+      "sha256": "cafadddb87971c9b36aa6ccab0d90626998b62b14b8060e5b21ddf7cfe245cfb"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/jdamr_depart.py",
+      "sha256": "1bbc313d756d4d07532064bacb3464b57174497b01d29db02329c8d570e0bd7f"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/layout_eval.py",
+      "sha256": "799b8974ae2f41a9290bb78824be6201929351ec4bb37c85248973cd41dfe2d7"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/mapping_display_relay.py",
+      "sha256": "6f49c53b9b47f1dd41a0e4d7e7c75d8a4648762e6705f227922d84ac1834c624"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/pi_load_profile.py",
+      "sha256": "ab65b732564a68eea1ff881f9d9b0d43168202ae76698bf5ac8af8a5c0749eab"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/plan_compare.py",
+      "sha256": "4fd20e2a9da4c2f5b895d2c11efeed6c247efb529cf3e12d673987cac818d2eb"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/rotation_truth.py",
+      "sha256": "02234914542d10078657a1b039358c2e41469c031ec6506ea5863dc16b81b9f1"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/table_click_capture.py",
+      "sha256": "9759e3a0fde653c539ec9449e2575744b16f438b5bfaed5f35e8f666869d36fd"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/test_imu_axes.py",
+      "sha256": "2d10faeb5b59884dc83bb16f3eba26a95b380013613f1b6850dcb478e4438b16"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/test_jdamr_depart_flow.py",
+      "sha256": "4a96530e18b7850c63429cbd6fd7763076b9e677f23a5a2a8c575da15e804b30"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/test_load_profile.py",
+      "sha256": "178c157163954f58b9b56662290b8f11fef931f633e9b03d93ee118114336542"
+    },
+    {
+      "source_path": "scripts/map_20260930_manual/udp_drop_monitor.py",
+      "sha256": "a2793eb51ac6a3abd4c60c9a58613d668b28ef42ea1280bcfb9f35837af8cf71"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/README.md",
+      "sha256": "822da0214219dbc0bf9b8d6c94fb42fe35420a11ff11980f28f6c4529e5ecbfa"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/capture_scan2.py",
+      "sha256": "2a555850ee02098d3ee232114611fc7819de95d2ed1fea4052a8a9cab837efcd"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/dock_survey.py",
+      "sha256": "d4ad53c64814e722a2aec864069b5b359ecc81e89c1ef6bef1f217d3c7a94160"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/geometry_check.py",
+      "sha256": "0fb959da57335c4fd3da3ce16a4718bae072d617dbbb69f06834fc18ae287436"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/initialpose_capture.py",
+      "sha256": "d97d1e1c94fdc3dc21250bd4c3d4346887685793af7ada5254fbe45d529e0968"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/jdamr_depart.py",
+      "sha256": "f69c85b9dfb3d12f8442b9e4fb07f4e35ecccfa221ed604e55ef6d96b07ed012"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/layout_prototypes/layout_joint.py",
+      "sha256": "e8b722fc0429597c65f4f2aa55c8a8b3942e487e7eab34c1161a6124534fe4d5"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/layout_prototypes/layout_probe.py",
+      "sha256": "7ac7259fa333442dda3118a1eb80cf0efbef3c360f0e27bcb520dd25b9688c82"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/layout_prototypes/layout_search.py",
+      "sha256": "2a6bdd1eeb267b0769b82ec15a387e1afbeae43c02be52540e1dc0d051e77441"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/pose_scan_probe.py",
+      "sha256": "afea43eaa8c77e0f5d4a484cb1346f6fb4a7146ed6bedc8f64419a80e957a930"
+    },
+    {
+      "source_path": "scripts/phase2_20260930/scan_match.py",
+      "sha256": "8526d7bde710a3d173ab1e35baf34395ebdb6e4e64287a37d4c7dae5be2d2043"
+    },
+    {
+      "source_path": "scripts/wsl_arm_control.sh",
+      "sha256": "7af0f43c2d855122ae9ea8fe7759fa145b9a1bd2c603f1fe243cbeec360a1809"
+    },
+    {
+      "source_path": "scripts/wsl_build.sh",
+      "sha256": "c05ca9bcbf51a42544d2a4829410a685d70af271b1458ea369243daf3ed8470d"
+    },
+    {
+      "source_path": "scripts/wsl_goto_pose.sh",
+      "sha256": "6cdb75874d5ad0937fd9745202bd5552ad3a09717b820fdf1a29be2d17cd4a90"
+    },
+    {
+      "source_path": "scripts/wsl_kill.sh",
+      "sha256": "8e2bffc403b91d5b1a1ddccaf7aaaa12c1c1a65c597d49093b3d4350929ddf19"
+    },
+    {
+      "source_path": "scripts/wsl_run_cartographer.sh",
+      "sha256": "ad37d81e8377bae621e8f4a4793fb8230bf15b7d7afe36e111a344b511e65eee"
+    },
+    {
+      "source_path": "scripts/wsl_run_gazebo.sh",
+      "sha256": "1d99bc79edfd6baa8a19f9df20513fab5ac78c9b0641a9968093fca0a6673cb4"
+    },
+    {
+      "source_path": "scripts/wsl_run_navigation.sh",
+      "sha256": "daedb8fc0dc1d334566b19a76ea152fe6dc9d7b803323639a3e57b1d7b7dec89"
+    },
+    {
+      "source_path": "scripts/wsl_run_teleop.sh",
+      "sha256": "f0a956d7e799efdb18c5ab7743d99c1ad428f6fad783fff567b59db9ccbb5e6c"
+    },
+    {
+      "source_path": "scripts/wsl_save_map.sh",
+      "sha256": "118e77f102be2c904f8bebf652347cb1d663000b82bd971d9313af1231462ca3"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/CMakeLists.txt",
+      "sha256": "aba5e5b2212ffc4a5a0caa34a9cad295682b49a38a026f4332b80c21d162213e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/README.md",
+      "sha256": "06a77a1e2ca495803b658dfa1120013a15d2129e8e06dace79e7467b653b376e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/include/ydlidar_config.h",
+      "sha256": "78cd645ed52b69bc1063efe093303644e119bdf62e6b410b410d082cf1ec3372"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/include/ydlidar_g4_ros2/scan_utils.hpp",
+      "sha256": "0f2d90f91301b343413e6b7cf312cbf2b6520b66592b7fd4573454a2e052f8ed"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/launch/ydlidar_g4.launch.py",
+      "sha256": "54ba1478361a8cf13edb4595cdf4bd901d843d6bc115e8dad109a720c67fe5c0"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/package.xml",
+      "sha256": "96dde6cf024f210d5a5fc531b29e59391b8613d244002570da7198a54f9ba918"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/src/ydlidar_g4_node.cpp",
+      "sha256": "26628732e5fba468b087f268e5b7ea51cadc8be6f0bb4361f22c8fd2a0541ac3"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/test/scan_utils_test.cpp",
+      "sha256": "6bc66d2fe20e2e68b3263862341d56b5f79dc7b9a002d2ce58425ad4656a9c47"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/udev/99-ydlidar-g4.rules",
+      "sha256": "e8117fffb1a5ce81971cdeccd40c1020cfc72332c1772d584b2e0c24dc3d63a9"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/LICENSE.txt",
+      "sha256": "b2fdea07aa91e86111f65ce603856051c8eee9a802385e3c41bc6f01c80bf64a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/CMakeLists.txt",
+      "sha256": "d97c3c60852b96b1dbac29317436a86d20b1b8cf49949b17c5e1470e60e4fd5b"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/CMakeLists.txt",
+      "sha256": "6505cb146eb39f89353ac1ae9c5396707617f28256630e5f27bcbf9353ce694e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/datatype.h",
+      "sha256": "0e9d8f47d3ded16ec4c5e005c0eff6cda4cf20b19a5d93f02c16a1a0b27d4dd1"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/locker.h",
+      "sha256": "b1d0b9eba92cf663438e9a724365bbef6efe360bbe315edf838bbfcf8bd4f91f"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/thread.h",
+      "sha256": "358fc7be2ada0de4d6d51471131b84009631aef37d787704d0876d27793fd58a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/timer.cpp",
+      "sha256": "9c967553c6107296a849ddb57775c1c628ef3bc5795ecbbac255219b751a70fe"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/timer.h",
+      "sha256": "6f3a668ecdf36f9cf0efe8f777eea4039d83abf8da747d6cb6e2bd0bfd994a15"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/typedef.h",
+      "sha256": "cbd91503b776153bd7752f20bc1be986673f8989e1b58be64d4690f21306ea74"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/utils.h",
+      "sha256": "2f692e1ec2dd384872977752a1834bcc7966604a9cc8b891e88751afb5eda18f"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/v8stdint.h",
+      "sha256": "d012c95faadc22442d20b6379bbad02e8d94c4223250c2d2872d09f3b30bb7b6"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/base/ydlidar.h",
+      "sha256": "775781d2b5952f05310140fc2c8908c1f9e6ed34892044d45ffd1f582357c6f5"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/CMakeLists.txt",
+      "sha256": "ceabe150d34fc715a145a9316d2615a6d9aa0c9067b285587a536d5f6458f40a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/ChannelDevice.h",
+      "sha256": "00f052c8742d51d2cc560ec3df5f37354540e9ee47e0df93e65ed475ec5f2b3b"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/DriverInterface.h",
+      "sha256": "e8442ea9357e307fea918d8ab16845dd5e5e708e4da3d0044e57d2f735f11239"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/YdDataStream.cpp",
+      "sha256": "4d549a6f900f0c21b4d820f1f7777dbf86a3a7cdc531c76bfc94fccbe4c8a2c5"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/YdDataStream.h",
+      "sha256": "b718dca7c0a33515ca3abebe91df99cef57c2388a133fe9f8c4a3a0eb2c4902d"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/ydlidar_datatype.h",
+      "sha256": "8ef378b12b2b1d7456626c563e18a8a3bc69513c43561c5eacb519fbf767ff0d"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/ydlidar_def.cpp",
+      "sha256": "2f977b7f1e68ef894445ce8ff3e6fe8aa398874aabbfabf07d3310dc95bcde4d"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/ydlidar_def.h",
+      "sha256": "7565e77a109830261b3daa772d6a8c887364d01244f99305e5dda787672129d3"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/ydlidar_help.h",
+      "sha256": "7516a1c78939840dd4de81b75fef0734b67cbfc61d839c8baf9d4f542a781837"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/common/ydlidar_protocol.h",
+      "sha256": "2336cd03bb5b5eeb88fa6c277e01805486f75bfde2771c67b37cb4dcbdc6a3a9"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/json/CMakeLists.txt",
+      "sha256": "ceabe150d34fc715a145a9316d2615a6d9aa0c9067b285587a536d5f6458f40a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/json/cJSON.c",
+      "sha256": "d0b57cd375105cc81a78e64d12c147ff7a0a9697b2d8598eec327ebe1726951c"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/json/cJSON.h",
+      "sha256": "6fdbda3b180088601e466650064c6d7ec9d8cee6e2198a0aafbd36a56f4e1eb3"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/math/CMakeLists.txt",
+      "sha256": "ceabe150d34fc715a145a9316d2615a6d9aa0c9067b285587a536d5f6458f40a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/math/angles.h",
+      "sha256": "50a31ab9a04c05d3cea1a53598bd89749817200d39c6bee87d62517812a95dcb"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/ActiveSocket.cpp",
+      "sha256": "267a645749f1cdaa67ad49558b0a0f91f1a34ffaf479cd8ea184f6e67b33be88"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/ActiveSocket.h",
+      "sha256": "a121e497675108caa5ad8d60ee833cd2f032469f0543d11cbff60da3f6e3fd0d"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/CMakeLists.txt",
+      "sha256": "9d54cab7c8dd87646b6f3aee62789790f8da13b5c13f7b8c3ab959aaae78ba6e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/PassiveSocket.cpp",
+      "sha256": "26b8f1b23254353b9abca1d8bc395df4b70a602e37d3c68daa609e951522156c"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/PassiveSocket.h",
+      "sha256": "92a4a5359b253f39030eb78387d9fd50d7f47802e218b92f56c346e2862a588e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/SimpleSocket.cpp",
+      "sha256": "09948180949588cdaa054f32afb8ef4544a18edc0a1ef2724c9dc289fec407d5"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/SimpleSocket.h",
+      "sha256": "cf1f6f63f3e57333dbc60de4e611f6525f3642f63bdddf710e5216a575be0eb0"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/network/StatTimer.h",
+      "sha256": "6ac14e58c29b0fa314669594b4380274c324609b802ff7efc22a8f03a3b36542"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/CMakeLists.txt",
+      "sha256": "6a4fac12be7d63d14999446fd02edb0f6308433c7e2b9f7ea263909b195d0877"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/common.h",
+      "sha256": "9400bba61599ff69f2d0eac88dbbc5a85038b6c50ed0268bfa553bf726abb8c3"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/CMakeLists.txt",
+      "sha256": "529ad3781e7bb299803b924f6d30aa6507a9a4ab01455912925a42ee3e0de79d"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/unix/CMakeLists.txt",
+      "sha256": "610acf306103a95915cdeebf5116c52efb18c9093ff0d06be586a97048bb5579"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/unix/list_ports_linux.cpp",
+      "sha256": "7e3942dbda6db80b0d145f35860196a3ae3d1bfed2c782f3e5b5b8aa5d221d04"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/unix/lock.c",
+      "sha256": "9088daab22d18afacd2305e9cd5477d394962bc7727f8aa66982bea3344c7bc0"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/unix/lock.h",
+      "sha256": "26dc878967751962721398d226288adbcf9b3b3b3ff656f65910bbdbf5d6a234"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/unix/unix.h",
+      "sha256": "3070bb5d727bdf7b9dd52b5509072178b730985709b17ad4b01a1e5f6cd154e4"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/unix/unix_serial.cpp",
+      "sha256": "28085dd1603f1bc24e7902a8b6474dd484368531ac53f7e8c938fecf4dec94a5"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/unix/unix_serial.h",
+      "sha256": "0764401c632ec47802918ee570c04193f8ad02e99a8de25f98b2d50c20de7e8e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/windows/CMakeLists.txt",
+      "sha256": "28f5959724c52cde5996614a41cd3c93b29e8a703939b0d27d9a324d5cf5a013"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/windows/list_ports_win.cpp",
+      "sha256": "c7d3d84e312e00122dcdf3700fea318deb41b2109dd6359042bc2a4677f5a1c5"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/windows/win.h",
+      "sha256": "578b9dd6f507d50eb129d68364c941504c56bd053c13367da3474bd5990ccf1f"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/windows/win_serial.cpp",
+      "sha256": "997f2273f87ddb01e545f97ea3c9a4c93b92bc6c4722a58e07683c5ad7573697"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/impl/windows/win_serial.h",
+      "sha256": "5fa09f867049cb85c82db3500e3da81216f340320885c16ff836ed0cecaef6fc"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/serial.cpp",
+      "sha256": "30466d993a0ff6155486d279a6d6ed3b6b72b29f55d2e646910dbd5c0333f07c"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/core/serial/serial.h",
+      "sha256": "9d456f8240399720545b7883b4e2fa46ed8d0fdaa568abd80463587b365fd7dd"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/CMakeLists.txt",
+      "sha256": "cd288dd12f7f6e576d5e3839239cc415b7ae8c457fa3b5f0f9019453478e6970"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/CYdLidar.cpp",
+      "sha256": "719672b0cc88c8247758f6f486fed5bca6239fb12a45a3dc8f6dec8c9679c0c7"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/CYdLidar.h",
+      "sha256": "4e9b4d5dfdf1fa21ec035fbd39639394cd80d6ab15b8822f6bd60bd4dbc68d3a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/DTSLidarDriver.cpp",
+      "sha256": "78a977e44e79f9765b7df326d1515927b71bbf82eead1c8b350a1a4c17427223"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/DTSLidarDriver.h",
+      "sha256": "5ca81b0b03f438b797a851432d0cc0926ec3f8e54caab9d1da7e77ed4417ded1"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/ETLidarDriver.cpp",
+      "sha256": "8f3b999fe8a0fa83fa7dcb3d84f2ee29034bc5af7a92b988cedabc649f6204bb"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/ETLidarDriver.h",
+      "sha256": "0e3bd57ae4e8b629b803e53c23ec00f568be07af4d9d960654599ecb842b5c46"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/GSLidarDriver.cpp",
+      "sha256": "fa55ff3ec7ecceab358f9aef6180ae6c1671e8b6247aec7ec234b1d3fcdc998e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/GSLidarDriver.h",
+      "sha256": "61eb210f6fcc27a0c75fb36aa63b4f73eb95440e3bc0de25d582c8f4e4fab8c1"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/SDMLidarDriver.cpp",
+      "sha256": "2d16fde6e82a0dccde1b954f6560212644ec0a2eb0e6913fbd3714056800f33a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/SDMLidarDriver.h",
+      "sha256": "7f3f00e95f19dd7ee4b8c79b635f943827b7d1ae18af62ca82dfd9ddb44a193a"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/TiaLidarDriver.cpp",
+      "sha256": "5216b306142baff96e0fefdf3ec2744434f887797c496cc4e7419c1d6bd9e1ba"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/TiaLidarDriver.h",
+      "sha256": "a66f63fc3872a53099fa4a01a3dab8657210ea0ffa37f769fcb6928e4f6a9a2e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/YDlidarDriver.cpp",
+      "sha256": "94cf668ae429dea2e23a0b4e68ca32d383444610a19e309c71f05e20a5b0148e"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/YDlidarDriver.h",
+      "sha256": "ef7c5802b8319e325bb94e1de1950b105da7e3d52af9b7ddd69d78722e6a654c"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/filters/CMakeLists.txt",
+      "sha256": "610acf306103a95915cdeebf5116c52efb18c9093ff0d06be586a97048bb5579"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/filters/FilterInterface.h",
+      "sha256": "4b1aa0ed20f5de611f5a00b979e209fa8d7999e832f786ecdb0206ca0cfc34b7"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/filters/NoiseFilter.cpp",
+      "sha256": "0cbc0f267dd787982e6d7410eeeb7d4524c51c0c6b7ce65a818c82b3ad9e4065"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/filters/NoiseFilter.h",
+      "sha256": "e6e79bcee464433ac25b064f545371aa8689b2f5a068d398758ee8f52be06420"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/filters/StrongLightFilter.cpp",
+      "sha256": "c0e00c04ae8b8a0595749aa52883b3469d3b7a71e5cbb7cd2d6e0da8f07f540c"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/filters/StrongLightFilter.h",
+      "sha256": "f5e9e6d71f8098aa9df7957485eb017e3cc65600be22384e99f5fe696d391074"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/ydlidar_sdk.cpp",
+      "sha256": "989980b26b436d898498f65ac9da8c1a8f711e89681709df577ea1c5916494fd"
+    },
+    {
+      "source_path": "ydlidar_g4_ros2/vendor/YDLidar-SDK/src/ydlidar_sdk.h",
+      "sha256": "6798b85485c435691b0a91ca3ba8bf2bbb82615d6c581ec7ccfa5876a2b0c087"
+    }
+  ],
+  "omitted_paths": [
+    ".omx/context/HANDOFF-so101-systemic-assurance.md",
+    ".omx/context/final-verification-so101-systemic-assurance.md",
+    ".omx/context/ralplan-architect-review-so101-systemic-assurance-iteration-1.md",
+    ".omx/context/ralplan-architect-review-so101-systemic-assurance-iteration-2.md",
+    ".omx/context/ralplan-architect-review-so101-systemic-assurance-iteration-3.md",
+    ".omx/context/ralplan-architect-review-so101-systemic-assurance-iteration-4.md",
+    ".omx/context/ralplan-consensus-so101-systemic-assurance.md",
+    ".omx/context/ralplan-critic-review-so101-systemic-assurance-iteration-1.md",
+    ".omx/context/ralplan-critic-review-so101-systemic-assurance-iteration-2.md",
+    ".omx/context/research-so101-lerobot-v061.md",
+    ".omx/context/so101-systemic-assurance-20260807T032752Z.md",
+    ".omx/plans/prd-jdamr-slam-portfolio.md",
+    ".omx/plans/prd-so101-systemic-assurance.md",
+    ".omx/specs/test-spec-so101-systemic-assurance.md",
+    ".omx/state/so101-systemic-assurance.json",
+    ".omx/ultragoal/brief.md",
+    ".omx/ultragoal/goals.json",
+    ".omx/ultragoal/ledger.jsonl",
+    ".vscode/settings.json",
+    "IMU_DEBUG_HANDOFF_20260825.md",
+    "PORTFOLIO_20260826.md",
+    "SLAM_DEBUG_HANDOFF_20260824.md",
+    "capstone_pick/tools/yolo_cubes.pt",
+    "jdamr_cube_navigation/evaluation/media/corridor_localdds_armed_20260904T152036/corridor_roundtrip.mp4",
+    "jdamr_cube_navigation/evaluation/media/gazebo_corridor_crossing_20260908/gazebo_dynamic_obstacle_highlight.mp4",
+    "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/dashboard_portfolio_1x.mp4",
+    "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_scene_trim3.mp4",
+    "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_scene_walltime.mp4",
+    "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/gazebo_sensor_dashboard_highlight.mp4",
+    "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/gazebo_sensor_dashboard_highlight.mp4",
+    "jdamr_cube_navigation/evaluation/media/mujoco_nav2_combined_20260908/mujoco_nav2_obstacle_challenge.mp4",
+    "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/gazebo_dynamic_obstacle_highlight.mp4",
+    "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/gazebo_dynamic_obstacle_right.mp4",
+    "jdamr_cube_navigation/evaluation/media/onboard_dynamic_obstacle_20260908/gazebo_pedestrian_bidirectional_reel.mp4",
+    "omx_wiki/index.md",
+    "omx_wiki/jd-amr-general-driver-펌웨어-업로드와-imu-복구.md",
+    "omx_wiki/log.md",
+    "portfolio_data/README.md",
+    "portfolio_data/analysis/amcl_pose_covariance.csv",
+    "portfolio_data/analysis/extract_amcl_tf.py",
+    "portfolio_data/analysis/slam_backend_comparison.json",
+    "portfolio_data/analysis/summary_stats.json",
+    "portfolio_data/analysis/tf_map_odom_latency.csv",
+    "portfolio_data/figures/corridor_route_map.png",
+    "portfolio_data/figures/corridor_route_with_drive.png",
+    "portfolio_data/figures/dock_return_20260930_dock_detail.png",
+    "portfolio_data/figures/dock_return_20260930_overview.png",
+    "portfolio_data/figures/dock_return_20260930_timeline.png",
+    "portfolio_data/maps/autonomous_20260826T161908.pgm",
+    "portfolio_data/maps/autonomous_20260826T161908.yaml",
+    "portfolio_data/maps/autonomous_20260826T161908_keepout_multi.json",
+    "portfolio_data/maps/autonomous_20260826T161908_keepout_multi.pgm",
+    "portfolio_data/maps/autonomous_20260826T161908_keepout_multi.yaml",
+    "portfolio_data/maps/autonomous_20260826T161908_keepout_zones_multi.yaml",
+    "reference/JDAMR_Cube_조사기록.md",
+    "reference/instructor_original/107_protocol.ino",
+    "reference/instructor_original/107_protocol.py",
+    "reference/instructor_original/carto.launch.py",
+    "reference/instructor_original/carto.lua",
+    "reference/instructor_original/jdamr200.urdf",
+    "reference/instructor_original/jdamr200_node.py",
+    "reference/instructor_original/jdamr_teleop.py",
+    "reference/instructor_original/ld14.launch.py",
+    "reference/instructor_original/ldlidar_datatype.h",
+    "reference/instructor_original/lipkg.h",
+    "reference/instructor_original/oled.ino",
+    "reference/instructor_original/ros_firmware.ino",
+    "reference/instructor_original/speed_control.ino",
+    "reference/instructor_original/volt.ino",
+    "capstone_pick/capstone_pick/install/.colcon_install_layout",
+    "capstone_pick/capstone_pick/install/COLCON_IGNORE",
+    "capstone_pick/capstone_pick/install/_local_setup_util_ps1.py",
+    "capstone_pick/capstone_pick/install/_local_setup_util_sh.py",
+    "capstone_pick/capstone_pick/install/local_setup.bash",
+    "capstone_pick/capstone_pick/install/local_setup.ps1",
+    "capstone_pick/capstone_pick/install/local_setup.sh",
+    "capstone_pick/capstone_pick/install/local_setup.zsh",
+    "capstone_pick/capstone_pick/install/setup.bash",
+    "capstone_pick/capstone_pick/install/setup.ps1",
+    "capstone_pick/capstone_pick/install/setup.sh",
+    "capstone_pick/capstone_pick/install/setup.zsh",
+    "capstone_pick/capstone_pick/log/COLCON_IGNORE",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_15-32-19/events.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_15-32-19/logger_all.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_15-42-33/events.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_15-42-33/logger_all.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_15-49-42/events.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_15-49-42/logger_all.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_16-02-00/events.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_16-02-00/logger_all.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_17-25-01/events.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_17-25-01/logger_all.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_17-32-45/events.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-07_17-32-45/logger_all.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-11_09-27-53/events.log",
+    "capstone_pick/capstone_pick/log/build_2026-08-11_09-27-53/logger_all.log"
+  ],
+  "omitted_symlinks": [
+    "capstone_pick/capstone_pick/log/latest",
+    "capstone_pick/capstone_pick/log/latest_build"
+  ],
+  "initial_integration_adjustments": [
+    {
+      "path": ".gitattributes",
+      "original_sha256": "084abf32c8b61d85c60d35704b3acfff6e013b898584964926657f242ba6c426",
+      "imported_sha256": "27b21a2622d72bbb69f75864c01c3f91c8049b166ae50296d9cb7f0fe72a19d2"
+    },
+    {
+      "path": ".gitignore",
+      "original_sha256": "49c520d22e4ad38fe1eb5cdfa07267e6f1b6b377cb7004387749c210097c9452",
+      "imported_sha256": "d6a40d47516f4af8859c1139bc2530e312aceee0c07471d8238aae7346226155"
+    },
+    {
+      "path": "README.md",
+      "original_sha256": "463189e703983a4d0ef1951658b74a297defe0b21fc6e60c610f9b5a543056c7",
+      "imported_sha256": "46a8cb5f0acd2aeaa43e8396c36ca169c447932bee885fec5d25de97eb8de6e7"
+    },
+    {
+      "path": "README_SLAM_PORTFOLIO.md",
+      "original_sha256": "02f8c43a5446407daa43bc535af18dafd224ca963517dd947101efc40ac599d2",
+      "imported_sha256": "51851775a0917b3cbb98e663b4a2fc47f0e388fab70a241aea8c742fcf48d1fc"
+    },
+    {
+      "path": "jdamr_cube_navigation/evaluation/20261006_TABLE_EDGE_DOCKING_PLAN.md",
+      "original_sha256": "5cc03b757d06a9a430ff3fd2e270e328f2aabd5d869cf6343683849566d166e5",
+      "imported_sha256": "0f5777a9682f6fb6f6491155f0bfea5984220052b2197e2f5010354049c8fdad"
+    },
+    {
+      "path": "jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/README.md",
+      "original_sha256": "dc15398aba15d96ad3b7fd20d5151ddf2e22ce9dfc2a9aa95c54dc1a37a33dba",
+      "imported_sha256": "0f796da804d409baf00b6789df98d65218fb78ff5b48cad51c47187ffd426939"
+    },
+    {
+      "path": "jdamr_cube_navigation/evaluation/media/gazebo_keepout_dashboard_20260909/README.md",
+      "original_sha256": "c42d5271797c5186be605c06a167a119d239efcc2b4ad2ccb9a5111d45271153",
+      "imported_sha256": "1ef70732b56e6a3a11e02b7d15c97e30ef44b1cc0cb3c5c5cf5c32ea372da24b"
+    },
+    {
+      "path": "jdamr_cube_navigation/test/test_depth_navigation_config.py",
+      "original_sha256": "944247642078cb12b0242ca2858c16feb04250af1bbc389999a2bb923a6a77c3",
+      "imported_sha256": "91e97dfd28b793ccf5f67632d82fc5f333574a14977c6509a42066cc77a31b2a"
+    },
+    {
+      "path": "scripts/deploy_navigation_to_pi.sh",
+      "original_sha256": "bbbe3ff1225927c435286aedbcccef60511788c37119b54423b498df7afd7804",
+      "imported_sha256": "5120d0dcdd03b7f31156a41ed83ba17bc7b76ed6410676d25704772834dde7ab"
+    },
+    {
+      "path": "scripts/map_20260930_manual/README.md",
+      "original_sha256": "e1bf164e1c00462a8f126a607c844c178ed54ec3f5e7128622b6c926c58ed1de",
+      "imported_sha256": "5952a7cee74e145ac896309530ee0ccfe6c914c5cfdc0dfd6d055f62c3e32c0d"
+    },
+    {
+      "path": "scripts/map_20260930_manual/jdamr_depart.py",
+      "original_sha256": "1bbc313d756d4d07532064bacb3464b57174497b01d29db02329c8d570e0bd7f",
+      "imported_sha256": "00baf125193d95bd6913cb511fc90cf79b3ae558e96ec8d9d6498b230fac23e4"
+    },
+    {
+      "path": "scripts/map_20260930_manual/test_jdamr_depart_flow.py",
+      "original_sha256": "4a96530e18b7850c63429cbd6fd7763076b9e677f23a5a2a8c575da15e804b30",
+      "imported_sha256": "eec993a28bb875dc7370a4944080fabea8ecbb4484ddb705356e6a16d2e336ae"
+    }
+  ],
+  "additional_inputs": {
+    "operational_tools": "tools/jdamr/provenance.json",
+    "runtime_assets": "config/navigation/jdamr_runtime",
+    "pi_astra_systemd_dashboard": "src/jdamr/deployment/provenance.json",
+    "generated_regression_fixtures": {
+      "generator": "src/jdamr/jdamr_cube_navigation/evaluation/generate_sim_nav_obstacle_assets.py",
+      "output": "src/jdamr/jdamr_cube_navigation/evaluation/assets/nav_obstacle",
+      "purpose": "small deterministic world/map/URDF fixtures required by existing regression tests",
+      "files": {
+        "asset_manifest.json": "1b9a3ee43072c58efe60d5ed00ecdb055ea8f5dd9848838e369512fec77c7baa",
+        "jdamr_cube_nav_eval.urdf": "0f126a17677ee9f7b1bdeb7b08c2f35115c6fc8768f0a891f2f789bbbdd90acc",
+        "slam_corridor_contact.world": "9a65b877a28c0de5db4a8d5aa2893367f493e5033ab298ce76a885e8e2c2b849",
+        "slam_corridor_eval.pgm": "07d58064a697c2406fa81ee0c97663afd89069f787e8950e95e3014588bd0cda",
+        "slam_corridor_eval.yaml": "b3a706cd490a2709f5d30243aef2fa974d2fce0ce440826b0ed314641e6346be"
+      }
+    }
+  },
+  "source_preservation_notes": [
+    "Core runtime algorithms, real URDF, four-wheel firmware and calibration bytes preserved; path/entrypoint and test-fixture adjustments are listed separately.",
+    "Legacy whitespace attributes preserve upstream source bytes, sealed fixture hashes and unified patch context. New runtime tools keep the default whitespace checks.",
+    "AMCL Axis B five known failing tests are retained without changing their decision-pending behavior."
+  ]
+}

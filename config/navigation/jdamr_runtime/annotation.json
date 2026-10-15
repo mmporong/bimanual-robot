@@ -1,0 +1,27 @@
+{
+ "source_map_sha256": "f97acff6cbb5d3cc449b44dcb98b75b7f3dac089bf268c4f0d7f975d0628c226",
+ "markers": {
+  "table_1": {
+   "approximate_map_xy_m": [
+    1.438,
+    -1.817
+   ],
+   "role": "table box front-face centre (operator click)"
+  },
+  "table_2": {
+   "approximate_map_xy_m": [
+    0.689,
+    -2.591
+   ],
+   "role": "table box front-face centre (final)"
+  },
+  "water_station": {
+   "approximate_map_xy_m": [
+    0.06,
+    -1.21
+   ],
+   "role": "water station box front-face centre"
+  }
+ },
+ "note": "face centres from destinations.json (LiDAR/depth measurement 15:01-15:27)"
+}

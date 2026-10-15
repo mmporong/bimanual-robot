@@ -1,0 +1,8 @@
+{
+ "rotation_deg": 5.7,
+ "transform": "p_aligned = R(+5.7 deg) * p_cartographer about the map origin; yaw_aligned = yaw + 5.7 deg",
+ "basis": "wall-cell projection sharpness maximum at -5.7 deg (0.1 deg search, components >= 40 cells); Hough cross-check 5.5-5.7 deg",
+ "user_request": "\uc9c0\ub3c4\ub3c4 \uae30\uc6b8\uc5b4\uc838\uc788\uc73c\ub2c8\uae4c \uac01\ub3c4 \uc678\ubd80\uc640\ub3c4 \ub9de\ucd94\uace0 (2026-09-30)",
+ "source_map": "map.yaml",
+ "resample": "nearest, unknown(205) fill"
+}

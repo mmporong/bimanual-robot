@@ -158,12 +158,19 @@ Collision Monitor를 유지했다. 사람 주변 운용 성능이나 전체 물 
 나눈 값이 아니며 1 cm 반복 성공을 뜻하지 않는다. 근접 접근의 마지막 경계 검출 소실과
 RPP의 1 cm XY 허용 오차로 목표에 못 미친 문제는 JD-AMR에서 수정·검증해 Pi에 반영했으며,
 수정 후 실물 시험은 아직 하지 않았다. 상세 조건과 측정 한계는
-[책상 주차와 4WD 전환 기록](https://github.com/mmporong/jdamr_cube_ros/blob/main/jdamr_cube_navigation/evaluation/20261013_TABLE_PARKING_AND_4WD_TRANSITION.md)에 있다.
+[책상 주차와 4WD 전환 기록](src/jdamr/jdamr_cube_navigation/evaluation/20261013_TABLE_PARKING_AND_4WD_TRANSITION.md)에 있다.
 
-실차 코드와 최신 이동 기록은 [JD-AMR 저장소](https://github.com/mmporong/jdamr_cube_ros)가 관리한다.
-이 저장소의 [선행 이식 문서](docs/20260912_JDAMR_SLAM_실기체이식.md)는 준비 절차이며,
-이후 이동 시험의 미완 상태를 판단하는 최신 근거로 사용하지 않는다.
-지도만 저장하지 않고 station·footprint·TF·센서·도착 정렬을 함께 맞춰야 한다.
+SLAM·실차 주행의 현행 소스는 이 저장소의 [src/jdamr](src/jdamr/README.md)다.
+Cartographer·Nav2·면 정렬·정밀 주차·베이스와 라이다 드라이버·4륜 펌웨어를 함께 관리하며,
+[운영 도구](tools/jdamr/README.md)로 PC 빌드·Pi 배포·기존 출발 경로를 연결한다.
+기존 ROS 패키지명과 실차 전륜축 기준 TF를 유지한다. 양팔 설계 모델의 차체 중심 원점과는
+105 mm 차이가 있으므로 두 모델을 동시에 같은 TF로 발행하지 않는다.
+원본 JD-AMR 저장소와 외부 데이터 폴더의 코드 보존 사본은 이후 수정 기준으로 사용하지 않는다.
+
+새 작업은 이 저장소의 최신 `main`에서 브랜치를 만들어 검증·PR 병합한다.
+실행법과 설치 범위는 [주행 통합 사용법](docs/JDAMR_RUNTIME.md)에 있다.
+[선행 이식 문서](docs/20260912_JDAMR_SLAM_실기체이식.md)는 과거 준비 기록으로 보존한다.
+지도·도크·station·footprint·TF·센서·도착 정렬은 같은 실행 자산을 사용한다.
 
 준비된 실차 세션에서 출발을 요청하면 기존 실행기로 이동·정렬·최종 접근을 이어간다.
 테스트·리뷰·문서 작업은 수정 단계에서 마치고 출발할 때 반복하지 않는다.

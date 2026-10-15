@@ -1,0 +1,81 @@
+"""수집물(logs/collect/ep*) → LeRobot v3 데이터셋 패킹.
+
+성공 에피소드만(기본) 골라 로컬 데이터셋을 만든다 — 학습(lerobot-train)의 입력.
+사용 (conda lerobot 환경):
+  python lerobot_pack.py [--all] [--limit N] [--out logs/lerobot_ds]
+"""
+import glob
+import json
+import os
+import sys
+
+import cv2
+import numpy as np
+
+TOOLS = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(TOOLS, 'logs',
+                   sys.argv[sys.argv.index('--out') + 1] if '--out' in sys.argv else 'lerobot_ds')
+LIMIT = int(sys.argv[sys.argv.index('--limit') + 1]) if '--limit' in sys.argv else 10**9
+SRC = sys.argv[sys.argv.index('--src') + 1] if '--src' in sys.argv else 'collect'
+TASK = "Pick up the cube and place it aside."
+JOINTS = ['shoulder_pan', 'shoulder_lift', 'elbow_flex', 'wrist_flex', 'wrist_roll', 'gripper']
+
+
+def detect_cams(ep_dir):
+    """에피소드 폴더에 실제로 있는 이미지 디렉터리로 카메라 피처를 정한다.
+
+    소스 폴더 이름으로 분기하던 예전 방식은 이름이 바뀌자(rule_collect→rule_std)
+    존재하지 않는 카메라를 찾아 0프레임을 만들고 조용히 죽었다. 실물을 본다.
+    """
+    cams = sorted(os.path.basename(p) for p in glob.glob(os.path.join(ep_dir, '*'))
+                  if os.path.isdir(p) and glob.glob(os.path.join(p, '*.jpg')))
+    if not cams:
+        sys.exit(f'카메라 디렉터리를 찾지 못함: {ep_dir}')
+    return {c: f'observation.images.{c}' for c in cams}
+
+
+def main():
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    eps = []
+    for m in sorted(glob.glob(os.path.join(TOOLS, 'logs', SRC, 'ep*', 'meta.json'))):
+        meta = json.load(open(m))
+        if '--all' in sys.argv or meta.get('success') or meta.get('lifted'):
+            eps.append((os.path.dirname(m), meta))
+    eps = eps[:LIMIT]
+    if not eps:
+        sys.exit('패킹할 에피소드 없음 (성공 0건이면 --all)')
+    print(f'패킹 대상 {len(eps)}개: ' + ', '.join(os.path.basename(d) for d, _ in eps))
+    CAMS = detect_cams(eps[0][0])
+    print(f'카메라: {", ".join(CAMS)}')
+
+    if os.path.exists(OUT):
+        import shutil
+        shutil.rmtree(OUT)
+    features = {k: {'dtype': 'video', 'shape': (480, 640, 3),
+                    'names': ['height', 'width', 'channels']} for k in CAMS.values()}
+    features['observation.state'] = {'dtype': 'float32', 'shape': (6,), 'names': JOINTS}
+    features['action'] = {'dtype': 'float32', 'shape': (6,), 'names': JOINTS}
+    ds = LeRobotDataset.create('local/so101_rule_pick', fps=20, features=features,
+                               root=OUT, robot_type='so101_sim', use_videos=True)
+    for d, meta in eps:
+        state = np.load(os.path.join(d, 'state.npy')).astype(np.float32)
+        action = np.load(os.path.join(d, 'action.npy')).astype(np.float32)
+        files = {cam: sorted(glob.glob(os.path.join(d, cam, '*.jpg'))) for cam in CAMS}
+        n = min([len(state), len(action)] + [len(v) for v in files.values()])
+        if n == 0:
+            sys.exit(f'{os.path.basename(d)}: 프레임 0 — 패킹 중단 '
+                     f'(state={len(state)} action={len(action)} '
+                     f'{ {c: len(v) for c, v in files.items()} })')
+        for i in range(n):
+            frame = {CAMS[cam]: cv2.cvtColor(cv2.imread(files[cam][i]), cv2.COLOR_BGR2RGB)
+                     for cam in CAMS}
+            frame.update({'observation.state': state[i], 'action': action[i], 'task': TASK})
+            ds.add_frame(frame)
+        ds.save_episode()
+        print(f'  {os.path.basename(d)}: {n}프레임 저장 (success={meta.get("success")})')
+    print(f'완료 → {OUT}')
+
+
+if __name__ == '__main__':
+    main()

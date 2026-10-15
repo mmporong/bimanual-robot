@@ -1,0 +1,39 @@
+# Preserve the vendored YDLidar SDK exactly as imported from upstream.
+ydlidar_g4_ros2/vendor/** -whitespace
+
+# 초기 통합에서 원본 바이트·봉인 fixture 해시와 diff patch 문맥을 보존한다.
+# 신규 운영 도구와 나머지 파일에는 저장소의 기본 공백 검사를 적용한다.
+deployment/patches/ros2_astra_camera-f7e71d9-pi.patch -whitespace
+firmware/jdamr_cube_fw/AK09918.h -whitespace
+firmware/jdamr_cube_fw/IMU.cpp -whitespace
+firmware/jdamr_cube_fw/IMU.h -whitespace
+jdamr_cube_cartographer/launch/cartographer.launch.py -whitespace
+jdamr_cube_description/launch/display.launch.py -whitespace
+jdamr_cube_description/urdf/jdamr_cube.urdf -whitespace
+jdamr_cube_description/urdf/jdamr_cube.urdf.bak_cam -whitespace
+jdamr_cube_description/urdf/jdamr_cube.urdf.bak_wheel -whitespace
+jdamr_cube_description/urdf/jdamr_cube2.urdf -whitespace
+jdamr_cube_gazebo/worlds/room.world.bak4cm -whitespace
+jdamr_cube_gazebo/worlds/room.world.bak_full -whitespace
+jdamr_cube_navigation/config/slam_toolbox_corridor.yaml -whitespace
+jdamr_cube_navigation/test/fixtures/sealed_g005_5c84289/jdamr_cube_description/urdf/jdamr_cube.urdf -whitespace
+jdamr_cube_navigation/test/fixtures/sealed_g006_84b9128/jdamr_cube_description/urdf/jdamr_cube.urdf -whitespace
+jdamr_cube_node/jdamr_cube_node/jdamr_cube_node.py -whitespace
+ldlidar_sl_ros2/CMakeLists.txt -whitespace
+ldlidar_sl_ros2/include/ros2_api.h -whitespace
+ldlidar_sl_ros2/launch/ld14.launch.py -whitespace
+ldlidar_sl_ros2/launch/ld14p.launch.py -whitespace
+ldlidar_sl_ros2/launch/viewer_ld14.launch.py -whitespace
+ldlidar_sl_ros2/launch/viewer_ld14p.launch.py -whitespace
+ldlidar_sl_ros2/ldlidar_driver/include/ldlidar_datatype.h -whitespace
+ldlidar_sl_ros2/ldlidar_driver/include/ldlidar_driver.h -whitespace
+ldlidar_sl_ros2/ldlidar_driver/include/lipkg.h -whitespace
+ldlidar_sl_ros2/ldlidar_driver/include/log_module.h -whitespace
+ldlidar_sl_ros2/ldlidar_driver/include/serial_interface_linux.h -whitespace
+ldlidar_sl_ros2/ldlidar_driver/include/sl_transform.h -whitespace
+ldlidar_sl_ros2/ldlidar_driver/src/ldlidar_driver.cpp -whitespace
+ldlidar_sl_ros2/ldlidar_driver/src/lipkg.cpp -whitespace
+ldlidar_sl_ros2/ldlidar_driver/src/log_module.cpp -whitespace
+ldlidar_sl_ros2/ldlidar_driver/src/sl_transform.cpp -whitespace
+ldlidar_sl_ros2/scripts/ldlidar.rules -whitespace
+ldlidar_sl_ros2/src/demo.cpp -whitespace

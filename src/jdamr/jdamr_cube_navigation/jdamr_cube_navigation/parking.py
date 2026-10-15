@@ -1,0 +1,354 @@
+"""Pure helpers for an opt-in, not-yet-validated precision parking target."""
+
+from __future__ import annotations
+
+import math
+from copy import deepcopy  # noqa: I100
+from pathlib import Path
+from typing import Any, Sequence
+
+import yaml
+
+
+REQUIRED_CONTRACT = {
+    'schema_version', 'reference_frame', 'robot_base_frame',
+    'xy_tolerance_m', 'yaw_tolerance_deg', 'stopped_linear_mps',
+    'stopped_angular_radps', 'hold_s', 'observation_timeout_s',
+    'sample_max_age_s', 'desired_linear_mps',
+    'min_approach_linear_mps', 'rotate_angular_radps', 'target_basis',
+    'physical_validation',
+}
+POSITIVE_FIELDS = {
+    'xy_tolerance_m', 'yaw_tolerance_deg', 'stopped_linear_mps',
+    'stopped_angular_radps', 'hold_s', 'observation_timeout_s',
+    'sample_max_age_s', 'desired_linear_mps',
+    'min_approach_linear_mps', 'rotate_angular_radps',
+}
+# Optional: the box contract sets the front gap its final approach closes to.
+OPTIONAL_CONTRACT = {'target_front_gap_m'}
+# Without it a contract keeps the 5 cm target used until 2026-10-06. The final gap
+# is judged within +-1 cm, so a target below 1 cm would accept a front inside the face.
+DEFAULT_FRONT_GAP_M = 0.05
+MINIMUM_FRONT_GAP_M = 0.01
+MAXIMUM_FRONT_GAP_M = 0.10
+COMMAND_ZERO_EPSILON = 1e-9
+# Requirement/candidate bounds, not measured calibration constants. A custom
+# contract may tighten them but must not silently weaken the accepted target.
+STAGING_XY_TOLERANCE_M = 0.15
+# The dock reverse ends on position; the heading is turned in place afterwards.
+DOCK_POSITION_TOLERANCE_M = 0.02
+# Box face alignment only squares the base before the straight final approach.
+FACE_ALIGNMENT_XY_TOLERANCE_M = 0.10
+# The heading turned in front of the dock before the straight entry. The 3 deg
+# alignment checker stopped just inside 3 deg and the 0.25 m reverse added about
+# 1 deg: 3.97 deg at the dock (2026-10-02 08:50). One 10 Hz step at 0.2 rad/s is
+# 1.15 deg, so a 1.5 deg band is reached without hunting.
+ENTRY_HEADING_TOLERANCE_DEG = 1.5
+MAXIMUM_CONTRACT_VALUES = {
+    'xy_tolerance_m': 0.05,
+    'yaw_tolerance_deg': 3.0,
+    'stopped_linear_mps': 0.01,
+    'stopped_angular_radps': 0.02,
+    'sample_max_age_s': 0.5,
+    'desired_linear_mps': 0.08,
+    'min_approach_linear_mps': 0.02,
+    'rotate_angular_radps': 0.2,
+}
+MINIMUM_HOLD_S = 1.0
+
+
+def _finite_number(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'{name} must be a finite number')
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f'{name} must be a finite number')
+    return number
+
+
+def load_parking_contract(path: Path) -> dict:
+    """Load and strictly validate the user-accepted parking target."""
+    document = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    if not isinstance(document, dict):
+        raise ValueError('parking contract must be a mapping')
+    missing = REQUIRED_CONTRACT - document.keys()
+    unknown = document.keys() - REQUIRED_CONTRACT - OPTIONAL_CONTRACT
+    if missing or unknown:
+        raise ValueError(
+            f'parking contract keys invalid: missing={sorted(missing)}, '
+            f'unknown={sorted(unknown)}')
+    if (isinstance(document['schema_version'], bool)
+            or not isinstance(document['schema_version'], int)
+            or document['schema_version'] != 1):
+        raise ValueError('parking contract schema_version must be 1')
+    if document['reference_frame'] != 'map':
+        raise ValueError('parking reference_frame must be map')
+    if document['robot_base_frame'] != 'base_link':
+        raise ValueError('parking robot_base_frame must be base_link')
+    if document['target_basis'] != 'USER_ACCEPTED_TARGET':
+        raise ValueError('parking values must be user-accepted targets')
+    if document['physical_validation'] != 'NOT_PHYSICALLY_VALIDATED':
+        raise ValueError('parking values must remain physically unvalidated')
+    for name in POSITIVE_FIELDS:
+        document[name] = _finite_number(document[name], name)
+        if document[name] <= 0.0:
+            raise ValueError(f'{name} must be positive')
+    for name, maximum in MAXIMUM_CONTRACT_VALUES.items():
+        if document[name] > maximum:
+            raise ValueError(f'{name} exceeds the accepted parking bound')
+    if document['hold_s'] < MINIMUM_HOLD_S:
+        raise ValueError('hold_s is below the accepted parking bound')
+    if document['min_approach_linear_mps'] > document['desired_linear_mps']:
+        raise ValueError('minimum approach speed exceeds desired speed')
+    if document['observation_timeout_s'] <= document['hold_s']:
+        raise ValueError('observation timeout must exceed hold duration')
+    if document['yaw_tolerance_deg'] > 180.0:
+        raise ValueError('yaw_tolerance_deg must not exceed 180')
+    document['yaw_tolerance_rad'] = math.radians(
+        document['yaw_tolerance_deg'])
+    gap_m = _finite_number(document.get('target_front_gap_m', DEFAULT_FRONT_GAP_M),
+                           'target_front_gap_m')
+    if not MINIMUM_FRONT_GAP_M <= gap_m <= MAXIMUM_FRONT_GAP_M:
+        raise ValueError('target_front_gap_m must be in [0.01, 0.10] m')
+    document['target_front_gap_m'] = gap_m
+    return document
+
+
+def parking_controller_overrides(
+        nav2_document: dict, contract: dict) -> dict:
+    """Return an opt-in controller parameter copy with parking plugins."""
+    try:
+        original = nav2_document['controller_server']['ros__parameters']
+        goal_checkers = original['goal_checker_plugins']
+        controllers = original['controller_plugins']
+        follow_path = original['FollowPath']
+    except (KeyError, TypeError) as error:
+        raise ValueError('invalid Nav2 controller document') from error
+    if not all(isinstance(value, list)
+               for value in (goal_checkers, controllers)):
+        raise ValueError('Nav2 plugin inventories must be lists')
+    if not isinstance(follow_path, dict):
+        raise ValueError('FollowPath configuration must be a mapping')
+    if (follow_path.get('plugin') != (
+            'nav2_regulated_pure_pursuit_controller::'
+            'RegulatedPurePursuitController')):
+        raise ValueError('parking requires Regulated Pure Pursuit')
+    if ('Parking' in controllers or 'Parking' in original
+            or 'parking_goal_checker' in goal_checkers
+            or 'parking_goal_checker' in original):
+        raise ValueError('parking plugins already exist')
+
+    configured = deepcopy(original)
+    configured['controller_plugins'].append('Parking')
+    configured['goal_checker_plugins'].append('parking_goal_checker')
+    configured['goal_checker_plugins'].append('alignment_goal_checker')
+    configured['alignment_goal_checker'] = {
+        'plugin': 'nav2_controller::SimpleGoalChecker',
+        'stateful': True,
+        'xy_goal_tolerance': MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'],
+        'yaw_goal_tolerance': math.radians(MAXIMUM_CONTRACT_VALUES['yaw_tolerance_deg']),
+    }
+    parking = deepcopy(configured['FollowPath'])
+    parking.update({
+        'desired_linear_vel': contract['desired_linear_mps'],
+        'min_approach_linear_velocity': contract[
+            'min_approach_linear_mps'],
+        'regulated_linear_scaling_min_speed': contract[
+            'min_approach_linear_mps'],
+        'rotate_to_heading_angular_vel': contract['rotate_angular_radps'],
+        'use_rotate_to_heading': True,
+        'allow_reversing': False,
+        'stateful': False,
+        # Slow down only over the last 0.15 m and ignore the box's own cost: from
+        # 0.6 m the straight 0.44 m approach never left the minimum speed
+        # (2026-10-01). The goal checker and the StopZone front end the stop.
+        'approach_velocity_scaling_dist': 0.15,
+        'regulated_linear_scaling_min_radius': 0.9,
+        'use_cost_regulated_linear_velocity_scaling': False,
+    })
+    configured['Parking'] = parking
+    # Graceful (Park-Kuipers smooth control law, the law Nav2 docking uses)
+    # converges position and heading together for the last box approach.
+    configured['controller_plugins'].append('GracefulParking')
+    configured['GracefulParking'] = graceful_parking(contract, allow_backward=False)
+    # Staging is judged by position; the heading is turned once afterwards.
+    configured['goal_checker_plugins'].append('staging_position_checker')
+    # The curved dock reverse takes out a staging offset, so the staging leg
+    # need not chase the last centimetres: within 5 cm the remaining path pointed
+    # sideways and the base turned right, left and right for 14 s (2026-10-01).
+    configured['staging_position_checker'] = {
+        'plugin': 'nav2_controller::PositionGoalChecker',
+        'stateful': True,
+        'xy_goal_tolerance': STAGING_XY_TOLERANCE_M,
+    }
+    # Nav2 RPP rejects use_rotate_to_heading with allow_reversing, so the reverse
+    # controller cannot turn at its goal: 0.1 cm from the dock but 4.4 deg off it
+    # shuttled +-2 cm/s for 10 s until 105 (2026-10-01 14:45). The dock reverse is
+    # judged by position only and the forward Parking controller turns afterwards.
+    # Within 5 cm of the alignment pose the last few centimetres of path pointed
+    # sideways: 0.30 m of travel took 30 s and 125 deg left plus 129 deg right at
+    # table_02 (2026-10-01 16:23). 10 cm, then the heading only.
+    configured['goal_checker_plugins'].append('face_alignment_checker')
+    configured['face_alignment_checker'] = {
+        'plugin': 'nav2_controller::SimpleGoalChecker',
+        'stateful': True,
+        'xy_goal_tolerance': FACE_ALIGNMENT_XY_TOLERANCE_M,
+        'yaw_goal_tolerance': math.radians(MAXIMUM_CONTRACT_VALUES['yaw_tolerance_deg']),
+    }
+    configured['goal_checker_plugins'].append('dock_position_checker')
+    configured['dock_position_checker'] = {
+        'plugin': 'nav2_controller::PositionGoalChecker',
+        'stateful': True,
+        'xy_goal_tolerance': DOCK_POSITION_TOLERANCE_M,
+    }
+    configured['goal_checker_plugins'].append('entry_heading_checker')
+    configured['entry_heading_checker'] = {
+        'plugin': 'nav2_controller::SimpleGoalChecker',
+        'stateful': True,
+        'xy_goal_tolerance': MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'],
+        'yaw_goal_tolerance': math.radians(ENTRY_HEADING_TOLERANCE_DEG),
+    }
+    configured['parking_goal_checker'] = {
+        'plugin': 'nav2_controller::SimpleGoalChecker',
+        'stateful': False,
+        'xy_goal_tolerance': contract['xy_tolerance_m'],
+        'yaw_goal_tolerance': contract['yaw_tolerance_rad'],
+    }
+    return configured
+
+
+def graceful_parking(contract: dict, allow_backward: bool) -> dict:
+    """Return Graceful controller parameters at the parking contract speeds."""
+    return {
+        'plugin': 'nav2_graceful_controller::GracefulController',
+        'transform_tolerance': 0.5,
+        'min_lookahead': 0.1,
+        'max_lookahead': 0.3,
+        'k_phi': 2.0,
+        'k_delta': 1.0,
+        'beta': 0.4,
+        'lambda': 2.0,
+        'v_linear_min': contract['min_approach_linear_mps'],
+        'v_linear_max': contract['desired_linear_mps'],
+        'v_angular_max': contract['rotate_angular_radps'],
+        'v_angular_min_in_place': contract['rotate_angular_radps'] / 2.0,
+        'slowdown_radius': 0.3,
+        'initial_rotation': False,
+        'prefer_final_rotation': False,
+        'allow_backward': allow_backward,
+    }
+
+
+def pose_errors(target_xyz: Sequence[float],
+                actual_xyz: Sequence[float]) -> tuple[float, float]:
+    """Return planar distance and shortest absolute yaw error."""
+    try:
+        sizes = len(target_xyz), len(actual_xyz)
+    except TypeError as error:
+        raise ValueError('parking poses must be finite sequences') from error
+    if sizes != (3, 3):
+        raise ValueError('parking poses must contain x, y, and yaw')
+    target = tuple(_finite_number(value, 'target_pose')
+                   for value in target_xyz)
+    actual = tuple(_finite_number(value, 'actual_pose')
+                   for value in actual_xyz)
+    distance_m = math.hypot(actual[0] - target[0], actual[1] - target[1])
+    yaw_delta_rad = actual[2] - target[2]
+    yaw_error_rad = abs(math.atan2(
+        math.sin(yaw_delta_rad), math.cos(yaw_delta_rad)))
+    return distance_m, yaw_error_rad
+
+
+class ParkingHold:
+    """Confirm fresh, stationary in-tolerance observations for a full hold."""
+
+    def __init__(self, contract: dict):
+        """Create an empty hold timeline from a validated contract."""
+        self.contract = deepcopy(contract)
+        self._hold_started_s: float | None = None
+        self._last_observation_s: float | None = None
+
+    def _result(self, reason: str, position_error_m: float | None = None,
+                yaw_error_rad: float | None = None, hold_s: float = 0.0,
+                confirmed: bool = False) -> dict:
+        return {
+            'confirmed': confirmed,
+            'reason': reason,
+            'position_error_m': position_error_m,
+            'yaw_error_rad': yaw_error_rad,
+            'hold_s': hold_s,
+            'physical_accuracy': 'NOT_MEASURED',
+        }
+
+    def _reset(self) -> None:
+        self._hold_started_s = None
+
+    def observe(
+            self, now_s: float, target_pose: Sequence[float],
+            actual_pose: Sequence[float], linear_mps: float,
+            angular_radps: float, cmd_linear_mps: float,
+            cmd_angular_radps: float, sample_age_s: float) -> dict:
+        """Update the hold using one caller-guaranteed unique sample."""
+        try:
+            now = _finite_number(now_s, 'now_s')
+            sample_age = _finite_number(sample_age_s, 'sample_age_s')
+            motion = tuple(_finite_number(value, 'velocity') for value in (
+                linear_mps, angular_radps, cmd_linear_mps,
+                cmd_angular_radps))
+            position_error_m, yaw_error_rad = pose_errors(
+                target_pose, actual_pose)
+        except (TypeError, ValueError):
+            self._reset()
+            self._last_observation_s = None
+            return self._result('non_finite_or_invalid_observation')
+
+        if (self._last_observation_s is not None
+                and now < self._last_observation_s):
+            self._reset()
+            self._last_observation_s = now
+            return self._result(
+                'time_regression', position_error_m, yaw_error_rad)
+        if (self._last_observation_s is not None
+                and now - self._last_observation_s
+                > self.contract['observation_timeout_s']):
+            self._reset()
+            self._last_observation_s = now
+            return self._result(
+                'observation_timeout', position_error_m, yaw_error_rad)
+        if (self._last_observation_s is not None
+                and now - self._last_observation_s
+                > self.contract['sample_max_age_s']):
+            self._reset()
+            self._last_observation_s = now
+            return self._result(
+                'observation_gap', position_error_m, yaw_error_rad)
+        self._last_observation_s = now
+        if sample_age < 0.0 or sample_age > self.contract['sample_max_age_s']:
+            self._reset()
+            return self._result(
+                'stale_sample', position_error_m, yaw_error_rad)
+
+        conditions = (
+            ('position_out_of_tolerance',
+             position_error_m <= self.contract['xy_tolerance_m']),
+            ('yaw_out_of_tolerance',
+             yaw_error_rad <= self.contract['yaw_tolerance_rad']),
+            ('odometry_not_stopped',
+             abs(motion[0]) <= self.contract['stopped_linear_mps']
+             and abs(motion[1]) <= self.contract['stopped_angular_radps']),
+            ('command_not_zero',
+             abs(motion[2]) <= COMMAND_ZERO_EPSILON
+             and abs(motion[3]) <= COMMAND_ZERO_EPSILON),
+        )
+        for reason, satisfied in conditions:
+            if not satisfied:
+                self._reset()
+                return self._result(reason, position_error_m, yaw_error_rad)
+
+        if self._hold_started_s is None:
+            self._hold_started_s = now
+        held_s = max(0.0, now - self._hold_started_s)
+        confirmed = held_s >= self.contract['hold_s']
+        return self._result(
+            'confirmed' if confirmed else 'holding', position_error_m,
+            yaw_error_rad, held_s, confirmed)

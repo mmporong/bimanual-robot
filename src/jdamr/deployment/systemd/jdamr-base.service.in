@@ -1,0 +1,14 @@
+[Unit]
+Description=JD-AMR base driver (cmd_vel - ESP32 - odom/TF)
+After=multi-user.target
+
+[Service]
+User=@RUN_USER@
+Environment=ROS_DOMAIN_ID=12
+Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+ExecStart=/bin/bash -c "source /opt/ros/jazzy/setup.bash && source @JDAMR_WS@/install/setup.bash && exec ros2 launch jdamr_cube_bringup real_bringup.launch.py wheel_radius:=0.0329 wheel_separation:=0.1836"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

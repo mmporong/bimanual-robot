@@ -1,0 +1,1213 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>JDAMR 주행 관제</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #fff;
+        --surface: #f3f6fa;
+        --ink: #182b42;
+        --muted: #536579;
+        --line: #dce3eb;
+        --blue: #235fd1;
+        --teal: #007e87;
+        --mask: #a53381;
+        --amber: #9b6300;
+        --red: #b72f39;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--surface);
+        color: var(--ink);
+        font-family: "Noto Sans CJK KR", "Noto Sans KR", sans-serif;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      button,
+      select {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:focus-visible,
+      summary:focus-visible,
+      a:focus-visible,
+      video:focus-visible {
+        outline: 3px solid var(--blue);
+        outline-offset: 3px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 6px 16px;
+        background: var(--paper);
+        border-bottom: 1px solid var(--line);
+      }
+      h1 {
+        font-size: 19px;
+        letter-spacing: -0.06em;
+        margin: 0;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 0;
+      }
+      p {
+        margin: 0;
+      }
+      small,
+      .muted {
+        color: var(--muted);
+      }
+      header small {
+        display: block;
+        font-size: 12px;
+      }
+      .source-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .header-title {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+      .playback-control { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+      #playback-rate { font: inherit; color: var(--ink); background: white; border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+      .header-title span {
+        font-size: 12px;
+      }
+      @media (max-width: 760px) {
+        .header-title {
+          flex-wrap: wrap;
+          gap: 4px 10px;
+        }
+      }
+      main {
+        max-width: 1720px;
+        margin: auto;
+        padding: 10px 16px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 12px;
+      }
+      .scene {
+        min-width: 0;
+      }
+      .source-note {
+        font-size: 12px;
+      }
+      .video-shell {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+        position: relative;
+      }
+      video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16/9;
+        background: var(--surface);
+      }
+      .empty {
+        padding: 40px;
+        text-align: center;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .telemetry {
+        display: flex;
+        gap: 0;
+        align-items: center;
+        flex-wrap: wrap;
+        padding: 6px 12px;
+        background: var(--paper);
+        border-top: 1px solid var(--line);
+      }
+      .telemetry div {
+        padding-right: 28px;
+        min-width: 150px;
+      }
+      .telemetry small {
+        display: block;
+        font-size: 12px;
+      }
+      .telemetry strong {
+        font-size: 22px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .unit {
+        font-size: 12px;
+        color: var(--muted);
+        margin-left: 4px;
+      }
+      .signal {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin-left: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #52647a;
+      }
+      .signal::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        flex-shrink: 0;
+      }
+      .signal[data-tone="good"] { color: #14733c; }
+      .signal[data-tone="caution"] { color: #946000; }
+      .signal[data-tone="stop"] { color: #bd2737; }
+      .state-panel {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .speed-history { margin-top: 4px; border-top: 1px solid var(--line); padding-top: 2px; }
+      .speed-history h3 { margin: 0; font-size: 12px; }
+      .speed-history p { margin: 2px 0; font-size: 10px; color: var(--muted); }
+      #speed-history { display: block; width: 100%; height: 48px; }
+      @media (min-width: 1100px) and (min-height: 700px) and (max-height: 740px) {
+        #speed-history { height: 36px; }
+      }
+      .state-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .state-title span {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      #behavior {
+        font-size: 30px;
+        font-weight: 650;
+        letter-spacing: -0.055em;
+        margin: 6px 0 4px;
+        color: var(--blue);
+      }
+      #reason {
+        min-height: 52px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        border-top: 1px solid var(--line);
+        padding-top: 12px;
+        margin-top: 12px;
+        font-size: 12px;
+      }
+      .radar-title {
+        display: flex;
+        justify-content: space-between;
+        margin: 10px 0 6px;
+      }
+      .radar-title span {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 240px;
+        background: var(--surface);
+        border-radius: 8px;
+      }
+      .scan-values {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 14px;
+        margin-top: 12px;
+      }
+      .scan-values small {
+        font-size: 11px;
+        display: block;
+      }
+      .scan-values strong {
+        font-size: 17px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      .scan-empty {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+      .lower {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 340px;
+        gap: 12px;
+        margin-top: 8px;
+      }
+      .flow-panel,
+      .events-panel {
+        background: var(--paper);
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      .flow-panel > p {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 3px 0 6px;
+      }
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .node {
+        border-left: 3px solid var(--line);
+        padding: 6px 10px;
+        background: var(--surface);
+        min-width: 0;
+      }
+      .node.received {
+        border-left-color: var(--teal);
+      }
+      .node b {
+        display: block;
+        font-size: 12px;
+      }
+      .node code {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .node span {
+        display: block;
+        font-size: 11px;
+        color: var(--teal);
+        margin-top: 5px;
+      }
+      .pipeline {
+        margin-top: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-size: 12px;
+      }
+      .pipeline b {
+        font-weight: 500;
+        padding: 3px 6px;
+        background: var(--surface);
+      }
+      .pipeline i {
+        font-style: normal;
+        color: var(--muted);
+      }
+      .pipeline-note {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 8px;
+      }
+      .events-panel {
+        max-height: 285px;
+        overflow: auto;
+      }
+      .events-panel ol {
+        list-style: none;
+        margin: 10px 0 0;
+        padding: 0;
+      }
+      .event-detail { display: block; font-size: 11px; line-height: 1.45; color: var(--muted); margin-top: 3px; }
+      .events-panel button {
+        display: flex;
+        gap: 14px;
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 5px 0;
+        text-align: left;
+        background: transparent;
+        color: var(--ink);
+        font-size: 12px;
+      }
+      .events-panel time {
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+        min-width: 52px;
+      }
+      footer {
+        color: var(--muted);
+        font-size: 11px;
+        margin-top: 6px;
+      }
+      .pill {
+        font-size: 11px;
+        color: var(--teal);
+        padding: 4px 8px;
+        background: #eaf5f5;
+        border-radius: 5px;
+      }
+      .error {
+        color: var(--red);
+      }
+      .scene-map {
+        margin-top: 6px;
+      }
+      .scene-map canvas {
+        height: 140px;
+      }
+      .map-caption {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 7px;
+      }
+      .map-caption em {
+        font-style: normal;
+        color: var(--mask);
+      }
+      @media (min-width: 1100px) and (min-height: 700px) {
+        header {
+          height: 44px;
+        }
+        main {
+          height: calc(100dvh - 44px);
+          max-width: none;
+          display: flex;
+          flex-direction: column;
+          padding: 8px 16px;
+        }
+        .layout {
+          flex: 1;
+          min-height: 0;
+          grid-template-columns: minmax(0, 1fr) 310px;
+        }
+        .scene {
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+        .video-shell {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        video {
+          flex: 1;
+          height: 0;
+          min-height: 0;
+          aspect-ratio: auto;
+          object-fit: contain;
+          background: white;
+        }
+        .telemetry {
+          flex: none;
+        }
+        .telemetry strong {
+          font-size: 19px;
+        }
+        .scene-map {
+          flex: none;
+        }
+        .scene-map canvas {
+          height: 70px;
+        }
+        .map-caption {
+          margin-bottom: 2px;
+        }
+        .state-panel {
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .state-panel > * {
+          flex-shrink: 0;
+        }
+        .state-panel .speed-history {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        .state-panel #speed-history {
+          flex: 1;
+          height: 0;
+          min-height: clamp(36px, calc(100dvh - 704px), 48px);
+        }
+        #behavior {
+          font-size: 25px;
+        }
+        #reason {
+          min-height: 0;
+          font-size: 12px;
+        }
+        .meta-row {
+          margin-top: 6px;
+          padding-top: 6px;
+        }
+        #radar {
+          height: clamp(90px, calc(100dvh - 648px), 220px);
+        }
+        .scan-values {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin-top: 6px;
+          gap: 4px 10px;
+        }
+        .scan-empty {
+          margin-top: 6px;
+          font-size: 11px;
+        }
+        .lower {
+          flex: none;
+          height: 188px;
+          grid-template-columns: minmax(0, 1fr) 310px;
+        }
+        .flow-panel,
+        .events-panel {
+          min-height: 0;
+        }
+        .events-panel {
+          max-height: none;
+        }
+        .flow-panel > .pipeline-note {
+          margin-bottom: 0;
+          font-size: 10px;
+        }
+        footer {
+          flex: none;
+          font-size: 10px;
+        }
+      }
+      @media (max-width: 1080px) {
+        .layout,
+        .lower {
+          grid-template-columns: minmax(0, 1fr) 300px;
+        }
+        main {
+          padding: 16px;
+        }
+        .telemetry div {
+          min-width: 125px;
+          padding-right: 14px;
+        }
+        .flow {
+          grid-template-columns: 1fr 1fr;
+        }
+        header {
+          padding: 16px;
+        }
+      }
+      @media (max-width: 760px) {
+        header {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .layout,
+        .lower {
+          grid-template-columns: 1fr;
+        }
+        .telemetry strong {
+          font-size: 18px;
+        }
+        .telemetry div {
+          min-width: 45%;
+          margin: 4px 0;
+        }
+        .source-controls {
+          width: 100%;
+          justify-content: space-between;
+        }
+        .events-panel {
+          max-height: 240px;
+        }
+        .scan-values {
+          grid-template-columns: repeat(3, 1fr);
+        }
+        canvas {
+          height: 220px;
+        }
+        main {
+          padding: 12px;
+        }
+        h1 {
+          font-size: 21px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          scroll-behavior: auto !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-title">
+        <h1>JDAMR 주행 관제</h1>
+        <span class="source-note muted" id="source-note">Gazebo recording</span>
+      </div>
+      <label class="playback-control">재생 속도
+        <select id="playback-rate" aria-label="영상 재생 속도">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="minute">1분 재생</option>
+        </select>
+      </label>
+    </header>
+    <main>
+      <div class="layout">
+        <section class="scene">
+          <div class="video-shell">
+            <video
+              id="video"
+              controls
+              autoplay
+              muted
+              playsinline
+              preload="auto"
+              aria-label="가제보 주행 기록"
+            ></video>
+            <p class="empty" id="video-empty" hidden>
+              이 실행에는 영상이 연결되지 않았습니다.
+            </p>
+            <div class="telemetry">
+              <div>
+                <small>명령 속도</small><strong id="cmd">미수신</strong
+                ><span class="unit">m/s</span>
+                <span id="cmd-status" class="signal" data-tone="neutral">미수신</span>
+              </div>
+              <div>
+                <small>차체 측정 속도</small><strong id="speed">미수신</strong
+                ><span class="unit">m/s</span>
+                <span id="speed-status" class="signal" data-tone="neutral">미수신</span>
+              </div>
+              <div>
+                <small>차체 회전 속도</small><strong id="turn">미수신</strong
+                ><span class="unit">rad/s</span>
+              </div>
+              <div>
+                <small id="clock-label">영상 시점</small
+                ><strong id="clock">0.0</strong><span class="unit">s</span>
+              </div>
+            </div>
+          </div>
+          <div class="scene-map" id="map-panel" hidden>
+            <p class="map-caption">
+              저장 지도와 현재 관측 · 파랑은 계획 경로 · 청록은 LiDAR ·
+              <em>자홍은 진입 금지 구역</em>
+            </p>
+            <canvas
+              id="map"
+              aria-label="저장 지도 위 실제 계획 경로와 LiDAR 관측"
+            ></canvas>
+          </div>
+        </section>
+        <aside class="state-panel">
+          <div class="state-title">
+            <h2>현재 관측 상태</h2>
+            <span>제어 명령을 보내지 않음</span>
+          </div>
+          <p id="behavior" aria-live="polite">기록 확인 중</p>
+          <p id="reason">
+            영상과 같은 시점의 센서·명령·목표 상태를 불러옵니다.
+          </p>
+          <div class="meta-row">
+            <span>목표 action</span><b id="goal">미수신</b>
+          </div>
+          <div class="radar-title">
+            <h2>LiDAR 감지</h2>
+            <span id="scan-age">미수신</span>
+          </div>
+          <canvas
+            id="radar"
+            aria-label="로봇 전방 기준 실제 LiDAR 감지점"
+          ></canvas>
+          <div class="scan-values">
+            <div>
+              <small>전방 최소</small><strong id="front">미수신</strong>
+            </div>
+            <div>
+              <small>전체 최소</small><strong id="minimum">미수신</strong>
+            </div>
+            <div>
+              <small>최근접 방향</small><strong id="angle">미수신</strong>
+            </div>
+          </div>
+          <p class="scan-empty" id="scan-note">
+            센서 기록을 기다리고 있습니다.
+          </p>
+          <section class="speed-history" aria-label="명령과 실제 속도 변화">
+            <h3>최근 8초 속도 변화</h3>
+            <p>파랑 실선: 명령 · 초록 점선: 차체 측정</p>
+            <canvas id="speed-history" aria-label="현재 시점 이전의 명령 속도와 차체 측정 속도 추이"></canvas>
+          </section>
+        </aside>
+      </div>
+      <div class="lower">
+        <section class="flow-panel">
+          <h2>ROS 데이터 흐름</h2>
+          <p>
+            수신 근거가 있는 항목만 표시합니다. 기록 재생은 현재 로봇의 연결
+            상태가 아닙니다.
+          </p>
+          <div class="flow">
+            <div class="node" data-topic="scans">
+              <b>주변 감지</b><code>/scan</code><span>미수신</span>
+            </div>
+            <div class="node" data-topic="plans">
+              <b>경로 계획</b><code>/plan</code><span>미수신</span>
+            </div>
+            <div class="node" data-topic="monitor">
+              <b>충돌 감시</b><code>/collision_monitor_state</code
+              ><span>미수신</span>
+            </div>
+            <div class="node" data-topic="odom">
+              <b>실제 움직임</b><code>/odom</code><span>미수신</span>
+            </div>
+          </div>
+          <div class="pipeline" aria-label="실제 속도 명령 처리 구조">
+            <b title="설정상 역할: 경로에 맞는 속도 계산">경로 추종기</b><i>→</i><b title="설정상 역할: 가속·감속 조절">속도 평활화</b><i>→</i><b id="pipeline-monitor" class="signal" data-tone="neutral">충돌 감시 · 대기</b
+            ><i>→</i><b id="pipeline-command" class="signal" data-tone="neutral">최종 명령 · 대기</b>
+          </div>
+          <p class="pipeline-note">
+            앞 두 단계는 처리 순서입니다. 색상과 수치는 기록된 충돌 감시 상태·최종 명령에 따라 바뀝니다.
+          </p>
+        </section>
+        <section class="events-panel">
+          <h2>관측 상태 변경</h2>
+          <p class="muted" id="event-note" style="font-size: 12px">
+            현재 재생 시점까지의 변경만 표시합니다.
+          </p>
+          <ol id="events"></ol>
+        </section>
+      </div>
+      <footer>
+        <a href="https://github.com/mmporong/jdamr_cube_ros/blob/main/jdamr_cube_navigation/evaluation/media/gazebo_fixed_dashboard_20260909/README.md#주행-시나리오" target="_blank" rel="noopener noreferrer">주행 시나리오</a> ·
+        기록 모드에서는 영상 탐색·일시정지에 관측값이 함께 맞춰집니다. 카메라
+        수신 시각과 MCAP 수신 시각을 사용하며 전송 지연은 포함될 수 있습니다.
+      </footer>
+    </main>
+    <script>
+      "use strict";
+      const $ = (id) => document.getElementById(id),
+        video = $("video");
+      let replay = null,
+        mode = "recorded",
+        liveState = null,
+        transitions = [],
+        lastLiveKey = null;
+      const finite = (v) => typeof v === "number" && Number.isFinite(v);
+      const number = (v, d = 3) => (finite(v) ? v.toFixed(d) : "미수신");
+      const goals = {
+        EXECUTING: "수행 중",
+        ACTIVE: "수행 중",
+        ACCEPTED: "수락됨",
+        SUCCEEDED: "도착",
+        ABORTED: "실패",
+        CANCELED: "취소",
+        CANCELING: "취소 중",
+        NO_DATA: "미수신",
+        NO_GOAL: "목표 없음",
+      };
+      function observation(s) {
+        if (s.observation_unavailable)
+          return [
+            "관측 대기",
+            "ROS 센서 연결이 없거나 관측이 오래됐습니다. 마지막 값을 현재 상태로 표시하지 않습니다.",
+          ];
+        const nav = s.navigation?.status,
+          action = s.monitor?.action,
+          cmd = s.command?.linear_mps,
+          turn = s.command?.angular_rps;
+        if (nav === "SUCCEEDED")
+          return [
+            "도착",
+            "NavigateToPose action에서 목표 도달을 보고했습니다.",
+          ];
+        if (nav === "ABORTED" || nav === "CANCELED")
+          return [
+            nav === "ABORTED" ? "주행 실패" : "목표 취소",
+            "목표 action의 종료 상태를 확인했습니다.",
+          ];
+        if (!finite(cmd))
+          return [
+            "관측 대기",
+            "이 시점에는 최종 속도 명령이 아직 기록되지 않았습니다.",
+          ];
+        const moving =
+          Math.abs(cmd) > 0.005 || (finite(turn) && Math.abs(turn) > 0.005);
+        if (action === "STOP" && !moving)
+          return [
+            "충돌 감시 정지",
+            "Collision Monitor의 STOP과 최종 정지 명령이 관측됐습니다. 차체 측정 속도로 실제 감속 여부를 확인하세요.",
+          ];
+        if (action === "STOP" && moving)
+          return [
+            "관측 시각 확인",
+            "STOP 상태와 이동 명령이 함께 보입니다. 서로 다른 토픽의 수신 시각 차이를 확인해야 합니다.",
+          ];
+        if (moving)
+          return [
+            action === "SLOWDOWN" ? "감속 주행" : "주행 중",
+            action === "SLOWDOWN"
+              ? "Collision Monitor가 감속을 요청했습니다."
+              : "최종 속도 명령이 전달되고 있습니다. 경로 추종과 재계획은 Nav2가 수행합니다.",
+          ];
+        return [
+          "정지 명령",
+          "최종 명령 속도가 0에 가깝습니다. 이 값만으로 사람 감지나 고장을 단정하지 않습니다.",
+        ];
+      }
+      function latest(time) {
+        const a = replay?.samples || [];
+        let lo = 0,
+          hi = a.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (a[mid].time_s <= time) lo = mid + 1;
+          else hi = mid;
+        }
+        return lo ? a[lo - 1] : {};
+      }
+      function canvasContext(id) {
+        const canvas = $(id),
+          rect = canvas.getBoundingClientRect(),
+          ratio = Math.min(window.devicePixelRatio || 1, 2);
+        if (!rect.width || !rect.height) return null;
+        const w = Math.round(rect.width * ratio),
+          h = Math.round(rect.height * ratio);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        const c = canvas.getContext("2d");
+        c.setTransform(ratio, 0, 0, ratio, 0, 0);
+        c.clearRect(0, 0, rect.width, rect.height);
+        return [c, rect.width, rect.height];
+      }
+      function radar(scan) {
+        const result = canvasContext("radar");
+        if (!result) return;
+        const [c, w, h] = result,
+          cx = w / 2,
+          cy = h / 2 + 5,
+          r = Math.min(w, h) / 2 - 25;
+        c.strokeStyle = "#dce3eb";
+        c.fillStyle = "#536579";
+        c.font = "11px sans-serif";
+        for (let n = 1; n <= 3; n++) {
+          c.beginPath();
+          c.arc(cx, cy, (r * n) / 3, 0, Math.PI * 2);
+          c.stroke();
+          c.fillText(n + "m", cx + 4, cy - (r * n) / 3 + 11);
+        }
+        c.fillText("전방", cx - 11, 13);
+        c.strokeStyle = "#dce3eb";
+        c.beginPath();
+        c.moveTo(cx - r, cy);
+        c.lineTo(cx + r, cy);
+        c.moveTo(cx, cy - r);
+        c.lineTo(cx, cy + r);
+        c.stroke();
+        c.fillStyle = "#007e87";
+        for (const [a, d] of scan?.points || []) {
+          if (!finite(a) || !finite(d) || d > 3) continue;
+          const rad = (a * Math.PI) / 180;
+          c.beginPath();
+          c.arc(
+            cx - (Math.sin(rad) * r * d) / 3,
+            cy - (Math.cos(rad) * r * d) / 3,
+            2,
+            0,
+            Math.PI * 2,
+          );
+          c.fill();
+        }
+        c.fillStyle = "#235fd1";
+        c.beginPath();
+        c.moveTo(cx, cy - 8);
+        c.lineTo(cx - 5, cy + 6);
+        c.lineTo(cx + 5, cy + 6);
+        c.closePath();
+        c.fill();
+      }
+      function drawMap(s) {
+        if (mode !== "recorded" || !replay?.map_points?.length) {
+          $("map-panel").hidden = true;
+          return;
+        }
+        $("map-panel").hidden = false;
+        const result = canvasContext("map");
+        if (!result) return;
+        const [c, w, h] = result,
+          xy = (x, y) => [((x + 8) / 16) * w, h / 2 - (y / 5) * h];
+        c.fillStyle = "#97a4b3";
+        for (const [x, y] of replay.map_points) {
+          const [u, v] = xy(x, y);
+          c.fillRect(u, v, 1.4, 1.4);
+        }
+        c.fillStyle = "#a53381";
+        for (const [x, y] of replay.keepout_points || []) {
+          const [u, v] = xy(x, y);
+          c.fillRect(u, v, 2, 2);
+        }
+        if (s.plan?.length) {
+          c.strokeStyle = "#235fd1";
+          c.beginPath();
+          s.plan.forEach(([x, y], i) => {
+            const [u, v] = xy(x, y);
+            i ? c.lineTo(u, v) : c.moveTo(u, v);
+          });
+          c.stroke();
+        }
+        if (s.scan_pose) {
+          const [x, y, yaw] = s.scan_pose;
+          c.fillStyle = "#007e87";
+          for (const [a, d] of s.scan?.points || []) {
+            const rad = yaw + (a * Math.PI) / 180;
+            const [u, v] = xy(x + Math.cos(rad) * d, y + Math.sin(rad) * d);
+            c.fillRect(u, v, 2, 2);
+          }
+        }
+        if (s.map_pose) {
+          const [u, v] = xy(s.map_pose[0], s.map_pose[1]);
+          c.fillStyle = "#235fd1";
+          c.beginPath();
+          c.arc(u, v, 5, 0, Math.PI * 2);
+          c.fill();
+        }
+      }
+      function speedSignal(s, kind) {
+        const measured = kind === "speed";
+        const value = measured ? s.pose?.linear_mps : s.command?.linear_mps;
+        if (s.observation_unavailable || !finite(value)) return ["neutral", "미수신"];
+        const angular = measured ? s.pose?.angular_rps : s.command?.angular_rps;
+        // Match the existing observation deadband; units are m/s and rad/s respectively.
+        const moving = Math.abs(value) > 0.005 || (finite(angular) && Math.abs(angular) > 0.005);
+        if (s.monitor?.action === "STOP")
+          return moving ? ["caution", measured ? "정지 확인 중" : "관측 확인"] : ["stop", measured ? "정지 관측" : "충돌 감시 정지"];
+        if (["ABORTED", "CANCELED"].includes(s.navigation?.status)) return ["caution", "목표 종료 확인"];
+        if (s.navigation?.status === "SUCCEEDED") return moving ? ["caution", "정지 확인 중"] : ["good", "도착 · 정지"];
+        if (!moving) return ["neutral", measured ? "정지 관측" : "정지 명령"];
+        if (s.monitor?.action === "SLOWDOWN") return ["caution", measured ? "감속 요청 중" : "감속 명령"];
+        if (measured && finite(s.command?.linear_mps) && Math.abs(s.command.linear_mps) <= 0.005 && finite(s.command?.angular_rps) && Math.abs(s.command.angular_rps) <= 0.005)
+          return ["caution", "정지 확인 중"];
+        return ["good", measured ? "주행 관측" : "주행 명령"];
+      }
+      function detailedEvent(sample, label, previous = null) {
+        const action = sample.monitor?.action || "NO_DATA";
+        const region = sample.monitor?.polygon ? ` · 요청 영역 ${sample.monitor.polygon}` : "";
+        let reason = observation(sample)[1];
+        if (["SLOWDOWN", "APPROACH", "LIMIT"].includes(action))
+          reason = `충돌 감시 ${action}${region}.`;
+        if (action === "STOP")
+          reason = `소프트웨어 보호 정지: 충돌 감시 STOP${region}.`;
+        if (action === "DO_NOTHING" && ["STOP", "SLOWDOWN", "APPROACH", "LIMIT"].includes(previous?.monitor?.action))
+          reason = `충돌 감시가 ${previous.monitor.action}에서 DO_NOTHING으로 변경됐습니다. 감시 제한 해제 보고이며 실제 이동 재개는 이후 속도로 별도 확인합니다.`;
+        if (label === "속도 감소 관측")
+          reason = `명령 속도 감소: ${number(previous?.command?.linear_mps)} → ${number(sample.command?.linear_mps)} m/s.`;
+        if (label === "정지 후 이동 재개")
+          reason = "선속도·각속도 정지 명령 이후 이동 명령이 다시 전달됐습니다.";
+        if (sample.navigation?.status === "SUCCEEDED")
+          reason = "목표 도착: NavigateToPose action이 SUCCEEDED를 보고했습니다.";
+        const evidence = [];
+        if (finite(sample.command?.linear_mps)) evidence.push(`명령 ${number(sample.command.linear_mps)} m/s`);
+        if (finite(sample.pose?.linear_mps)) evidence.push(`측정 ${number(sample.pose.linear_mps)} m/s`);
+        if (finite(sample.scan?.front_minimum_m)) evidence.push(`전방 ${number(sample.scan.front_minimum_m, 2)} m`);
+        if (!["NO_DATA", "UNKNOWN"].includes(action)) {
+          const age = sample.ages_s?.monitor;
+          evidence.push(`감시 마지막 보고 ${action}${finite(age) ? ` (${number(age, 1)}초 전)` : ""}`);
+        }
+        return {
+          time_s: sample.time_s, label,
+          detail: `${reason} ${evidence.join(" · ")}`.trim(),
+        };
+      }
+      function buildEventLog(samples, maskPoints = []) {
+        const events = [];
+        let previous = null, previousLabel = null, nearMask = null, decreasing = false;
+        for (const sample of samples) {
+          const label = observation(sample)[0];
+          if (label !== previousLabel || sample.monitor?.action !== previous?.monitor?.action)
+            events.push(detailedEvent(sample, label, previous));
+          const cmd = sample.command?.linear_mps, oldCmd = previous?.command?.linear_mps;
+          const fresh = (s) => finite(s?.ages_s?.cmd) && s.ages_s.cmd <= 1 && s.ages_s.cmd >= 0;
+          // Display-only change threshold in m/s; it does not alter robot control.
+          const slowing = fresh(sample) && fresh(previous) && finite(cmd) && finite(oldCmd) && Math.abs(oldCmd) - Math.abs(cmd) > 0.02;
+          if (slowing && !decreasing && !["STOP", "SLOWDOWN", "APPROACH", "LIMIT"].includes(sample.monitor?.action))
+            events.push(detailedEvent(sample, "속도 감소 관측", previous));
+          const oldTurn = previous?.command?.angular_rps, turn = sample.command?.angular_rps;
+          if (fresh(sample) && fresh(previous) && finite(cmd) && finite(oldCmd) && finite(oldTurn) && finite(turn) && Math.abs(oldCmd) <= 0.005 && Math.abs(oldTurn) <= 0.005 && (Math.abs(cmd) > 0.005 || Math.abs(turn) > 0.005))
+            events.push(detailedEvent(sample, "정지 후 이동 재개", previous));
+          if (sample.map_pose?.slice(0, 2).every(finite) && maskPoints.length) {
+            const [x, y] = sample.map_pose;
+            const distances = maskPoints.filter(p => p.length >= 2 && p.slice(0, 2).every(finite)).map(([mx, my]) => Math.hypot(mx - x, my - y));
+            if (distances.length) {
+              const distance = Math.min(...distances);
+              // Display-only proximity to sampled mask points in metres, not footprint clearance.
+              const near = distance <= 0.6;
+              if ((near && nearMask !== true) || (!near && nearMask === true))
+                events.push({ time_s: sample.time_s, label: near ? "마스크 인근 진입" : "마스크 인근 이탈", detail: `기록된 위치 기준점과 표시용 마스크 점의 최근접 거리 ${distance.toFixed(2)} m (인근 표시 기준 0.60 m, 차체 여유 거리와는 다름).` });
+              nearMask = near;
+            }
+          }
+          decreasing = slowing; previous = sample; previousLabel = label;
+        }
+        return events;
+      }
+      function speedHistorySamples(samples, time) {
+        return samples.filter((sample) => finite(sample.time_s) && sample.time_s >= time - 8 && sample.time_s <= time);
+      }
+      function speedHistoryValue(sample, key) {
+        const age = sample.ages_s?.[key === "command" ? "cmd" : "odom"];
+        // History freshness limit in seconds; held stale values are not measurements.
+        return finite(age) && age >= 0 && age <= 1 ? sample[key]?.linear_mps : null;
+      }
+      function drawSpeedHistory(time) {
+        const context = canvasContext("speed-history");
+        if (!context) return;
+        const [c, w, h] = context;
+        const samples = mode === "recorded" ? speedHistorySamples(replay?.samples || [], time) : [];
+        const values = samples.flatMap((s) => [speedHistoryValue(s, "command"), speedHistoryValue(s, "pose")]).filter(finite);
+        c.font = "10px sans-serif";
+        c.fillStyle = "#536579";
+        if (!values.length) {
+          c.fillText(mode === "recorded" ? "이 시점의 속도 기록 없음" : "기록 재생에서 제공하는 추이입니다", 0, 30);
+          return;
+        }
+        const low = Math.min(0, ...values), high = Math.max(0.05, ...values);
+        const x = (t) => 36 + (t - (time - 8)) / 8 * (w - 40);
+        const y = (v) => 6 + (high - v) / (high - low) * (h - 24);
+        c.strokeStyle = "#dce3eb";
+        c.beginPath(); c.moveTo(36, y(0)); c.lineTo(w, y(0)); c.stroke();
+        c.fillText(high.toFixed(2), 0, 10);
+        c.fillText(low.toFixed(2), 0, h - 18);
+        c.fillText("m/s", 0, h - 2);
+        c.fillText("−8 s", 36, h - 2);
+        c.fillText("현재", w - 24, h - 2);
+        for (const [key, color, dash] of [["command", "#235fd1", []], ["pose", "#14733c", [3, 2]]]) {
+          c.strokeStyle = color; c.fillStyle = color; c.setLineDash(dash); c.beginPath();
+          let previous = null;
+          for (const sample of samples) {
+            const value = speedHistoryValue(sample, key);
+            if (!finite(value)) { previous = null; continue; }
+            // Do not bridge missing samples or recording gaps longer than one second.
+            if (previous === null || sample.time_s - previous > 1) c.moveTo(x(sample.time_s), y(value));
+            else c.lineTo(x(sample.time_s), y(value));
+            previous = sample.time_s;
+          }
+          c.stroke(); c.setLineDash([]);
+          for (const sample of samples) {
+            const value = speedHistoryValue(sample, key);
+            if (finite(value)) { c.beginPath(); c.arc(x(sample.time_s), y(value), 1.2, 0, Math.PI * 2); c.fill(); }
+          }
+        }
+      }
+      function render(s, time) {
+        const [label, reason] = observation(s);
+        $("behavior").textContent = label;
+        $("reason").textContent = reason;
+        const monitor = $("pipeline-monitor"), command = $("pipeline-command");
+        const action = s.observation_unavailable ? "NO_DATA" : s.monitor?.action;
+        const monitorLabels = { STOP: "보호 정지", SLOWDOWN: "감속 요청", APPROACH: "접근 속도 조절", LIMIT: "속도 제한", DO_NOTHING: "제한 없음" };
+        monitor.textContent = "충돌 감시 · " + (monitorLabels[action] || "대기");
+        monitor.dataset.tone = action === "STOP" ? "stop" : ["SLOWDOWN", "APPROACH", "LIMIT"].includes(action) ? "caution" : action === "DO_NOTHING" ? "good" : "neutral";
+        const monitorAge = s.ages_s?.monitor;
+        monitor.title = finite(monitorAge) ? `마지막 상태 보고 ${number(monitorAge, 1)}초 전` : "상태 수신 대기";
+        command.dataset.tone = speedSignal(s, "cmd")[0];
+        command.textContent = "/cmd_vel · " + (finite(s.command?.linear_mps) && !s.observation_unavailable ? number(s.command.linear_mps) + " m/s" : "대기");
+        $("goal").textContent =
+          goals[s.navigation?.status] || s.navigation?.status || "미수신";
+        $("cmd").textContent = number(s.command?.linear_mps);
+        $("speed").textContent = number(s.pose?.linear_mps);
+        for (const kind of ["cmd", "speed"]) {
+          const [tone, text] = speedSignal(s, kind);
+          const badge = $(kind + "-status");
+          badge.dataset.tone = tone;
+          badge.textContent = text;
+        }
+        $("turn").textContent = number(s.pose?.angular_rps);
+        $("clock").textContent = number(time, 1);
+        drawSpeedHistory(time);
+        const scan = s.scan;
+        $("front").textContent = finite(scan?.front_minimum_m)
+          ? number(scan.front_minimum_m, 2) + " m"
+          : "미수신";
+        $("minimum").textContent = finite(scan?.minimum_m)
+          ? number(scan.minimum_m, 2) + " m"
+          : "미수신";
+        $("angle").textContent = finite(scan?.closest_angle_deg)
+          ? number(scan.closest_angle_deg, 1) + "°"
+          : "미수신";
+        const age = s.ages_s?.scans ?? s.freshness_s?.scan;
+        $("scan-age").textContent = finite(age)
+          ? "수신 후 " + number(age, 1) + " s"
+          : "기록 없음";
+        $("scan-note").textContent = scan
+          ? "로봇 전방 기준 · 3 m 범위 표시 · 사람 분류 기능 아님"
+          : "해당 시점에 LiDAR 관측이 없습니다. 미래 스캔을 대신 표시하지 않습니다.";
+        radar(scan);
+        drawMap(s);
+        for (const node of document.querySelectorAll("[data-topic]")) {
+          const key = node.dataset.topic,
+            age = s.ages_s?.[key];
+          node.classList.toggle("received", finite(age));
+          node.querySelector("span").textContent = finite(age)
+            ? "마지막 관측 " + number(age, 1) + " s 전"
+            : "기록 없음";
+        }
+        const list = $("events");
+        list.replaceChildren();
+        for (const event of transitions
+          .filter((e) => e.time_s <= time)
+          .reverse()) {
+          const li = document.createElement("li"),
+            button = document.createElement("button"),
+            t = document.createElement("time"),
+            text = document.createElement("span");
+          t.textContent = number(event.time_s, 1) + " s";
+          text.textContent = event.label;
+          const detail = document.createElement("small");
+          detail.className = "event-detail";
+          detail.textContent = event.detail || "상세 근거 미수신";
+          text.append(detail);
+          button.append(t, text);
+          button.disabled = mode !== "recorded";
+          button.onclick = () => {
+            video.currentTime = event.time_s;
+          };
+          li.append(button);
+          list.append(li);
+        }
+      }
+      function switchMode(next) {
+        mode = next;
+        $("clock-label").textContent =
+          next === "recorded" ? "영상 시점" : "관측 세션";
+        if (next === "live") {
+          video.pause();
+          $("source-note").textContent =
+            "영상은 저장 기록이며 실시간 ROS 장면이 아닙니다.";
+          transitions = [];
+        } else {
+          transitions = buildEventLog(replay?.samples || [], replay?.keepout_points || []);
+          $("source-note").textContent = replay?.capture_view?.includes(
+            "follow",
+          )
+            ? "기존 촬영 · 고정 구도 재촬영 대기"
+            : "Gazebo recording";
+        }
+        update();
+      }
+      function update() {
+        if (mode === "recorded")
+          render(latest(video.currentTime), video.currentTime);
+        else render(liveState || {}, liveState?.uptime_s || 0);
+      }
+      video.addEventListener("timeupdate", update);
+      video.addEventListener("seeked", update);
+      video.addEventListener("pause", update);
+      window.addEventListener("resize", update);
+      async function poll() {
+        try {
+          const response = await fetch("/api/state");
+          if (!response.ok) throw Error("state");
+          const raw = await response.json(),
+            f = raw.freshness || {};
+          const fresh = (age) => finite(age) && age <= 1.0,
+            available = raw.live === true;
+          liveState = {
+            ...raw,
+            observation_unavailable: !available,
+            monitor: available ? raw.collision_monitor : { action: "NO_DATA" },
+            navigation: available ? raw.navigation : { status: "NO_DATA" },
+            command: available && fresh(f.cmd_age_s) ? raw.command : {},
+            pose: available && fresh(f.odom_age_s) ? raw.pose : {},
+            scan: available && fresh(f.scan_age_s) ? raw.scan : null,
+            ages_s: {
+              scans: f.scan_age_s,
+              odom: f.odom_age_s,
+              cmd: f.cmd_age_s,
+              monitor: f.monitor_age_s,
+              navigation: f.goal_age_s,
+            },
+          };
+          if (mode === "live") {
+            const label = observation(liveState)[0];
+            if (label !== lastLiveKey) {
+              transitions.push(detailedEvent({ ...liveState, time_s: liveState.uptime_s || 0 }, label));
+              lastLiveKey = label;
+              transitions = transitions.slice(-100);
+            }
+            update();
+          }
+        } catch (e) {
+          if (mode === "live") {
+            liveState = { observation_unavailable: true };
+            update();
+            $("reason").textContent =
+              "서버 응답이 없습니다. 마지막 관측값을 현재 상태로 판단하지 마세요.";
+          }
+        }
+      }
+      async function start() {
+        try {
+          const config = await (await fetch("/api/config")).json();
+          video.hidden = !config.video_available;
+          $("video-empty").hidden = config.video_available;
+          if (config.video_available) video.src = "/media/replay.mp4";
+          if (config.replay_available) {
+            const response = await fetch("/api/replay");
+            if (!response.ok) throw Error("replay");
+            replay = await response.json();
+          }
+          await poll();
+          switchMode(config.replay_available ? "recorded" : "live");
+          setInterval(poll, 1000);
+        } catch (e) {
+          $("reason").textContent =
+            "관제 서버와 기록 파일 연결을 확인해야 합니다.";
+        }
+      }
+      start();
+      function applyPlaybackRate() {
+        const choice = $("playback-rate").value;
+        // Presentation 1× equals 3× source time; telemetry stays on source time.
+        const rate = choice === "minute" ? video.duration / 60 : Number(choice) * 3;
+        if (finite(rate) && rate > 0) {
+          video.defaultPlaybackRate = rate;
+          video.playbackRate = rate;
+        }
+      }
+      $("playback-rate").addEventListener("change", applyPlaybackRate);
+      applyPlaybackRate();
+      video.addEventListener("loadedmetadata", () => {
+        applyPlaybackRate();
+        const requested = Number(new URLSearchParams(location.search).get("t"));
+        if (Number.isFinite(requested) && requested > 0)
+          video.currentTime = Math.min(requested, video.duration);
+      });
+    </script>
+  </body>
+</html>

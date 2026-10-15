@@ -1,0 +1,1047 @@
+{
+  "content_hashes": {
+    "jdamr_cube_nav_eval.urdf": "0f126a17677ee9f7b1bdeb7b08c2f35115c6fc8768f0a891f2f789bbbdd90acc",
+    "slam_corridor_contact.world": "9a65b877a28c0de5db4a8d5aa2893367f493e5033ab298ce76a885e8e2c2b849",
+    "slam_corridor_eval.pgm": "07d58064a697c2406fa81ee0c97663afd89069f787e8950e95e3014588bd0cda",
+    "slam_corridor_eval.yaml": "b3a706cd490a2709f5d30243aef2fa974d2fce0ce440826b0ed314641e6346be"
+  },
+  "map": {
+    "height_cells": 88,
+    "origin": [
+      -11.0,
+      -2.2,
+      0.0
+    ],
+    "resolution_m": 0.05,
+    "width_cells": 440
+  },
+  "preloaded_obstacles": {
+    "count": 6,
+    "minimum_pairwise_aabb_clearance_m": 3.0,
+    "models": {
+      "contact_control": {
+        "active_pose_m": [
+          -7.8,
+          0.0,
+          0.3
+        ],
+        "contact_collision_ref": "collision",
+        "height_m": 0.4,
+        "length_m": 0.14,
+        "name": "g003_preloaded_contact_control",
+        "park_pose_m": [
+          0.0,
+          45.0,
+          0.2
+        ],
+        "role": "contact_control",
+        "static": true,
+        "visual_visibility_flags": 4,
+        "width_m": 0.12
+      },
+      "front_observation_probe": {
+        "active_pose_m": [
+          -6.5,
+          0.0,
+          0.5
+        ],
+        "contact_collision_ref": "collision",
+        "height_m": 1.0,
+        "length_m": 0.5,
+        "name": "g003_preloaded_front_observation_probe",
+        "park_pose_m": [
+          0.0,
+          40.0,
+          0.5
+        ],
+        "role": "front_observation_probe",
+        "static": true,
+        "visual_visibility_flags": 4,
+        "width_m": 0.4
+      },
+      "full_block": {
+        "active_pose_m": [
+          -1.0,
+          0.0,
+          0.5
+        ],
+        "contact_collision_ref": "collision",
+        "height_m": 1.0,
+        "length_m": 0.5,
+        "name": "g003_preloaded_full_block",
+        "park_pose_m": [
+          0.0,
+          25.0,
+          0.5
+        ],
+        "role": "full_block",
+        "static": true,
+        "visual_visibility_flags": 4,
+        "width_m": 2.3
+      },
+      "goal_occupied": {
+        "active_pose_m": [
+          6.0,
+          0.0,
+          0.5
+        ],
+        "contact_collision_ref": "collision",
+        "height_m": 1.0,
+        "length_m": 1.7,
+        "name": "g003_preloaded_goal_occupied",
+        "park_pose_m": [
+          0.0,
+          30.0,
+          0.5
+        ],
+        "role": "goal_occupied",
+        "static": true,
+        "visual_visibility_flags": 4,
+        "width_m": 1.7
+      },
+      "route": {
+        "active_pose_m": [
+          -1.0,
+          0.0,
+          0.5
+        ],
+        "contact_collision_ref": "collision",
+        "height_m": 1.0,
+        "length_m": 0.5,
+        "name": "g003_preloaded_route_obstacle",
+        "park_pose_m": [
+          0.0,
+          20.0,
+          0.5
+        ],
+        "role": "route",
+        "static": true,
+        "visual_visibility_flags": 4,
+        "width_m": 0.4
+      },
+      "sub_minimum_probe": {
+        "active_pose_m": [
+          -8.0,
+          0.25000000059604643,
+          0.5
+        ],
+        "contact_collision_ref": "collision",
+        "height_m": 1.0,
+        "length_m": 0.02,
+        "name": "g003_preloaded_sub_minimum_probe",
+        "park_pose_m": [
+          0.0,
+          35.0,
+          0.5
+        ],
+        "role": "sub_minimum_probe",
+        "static": true,
+        "visual_visibility_flags": 4,
+        "width_m": 0.02
+      }
+    },
+    "runtime_create_delete_forbidden": true
+  },
+  "schema_version": 1,
+  "simulation_support_plane_correction": {
+    "contact_scope": {
+      "arm_probe": {
+        "classification_source": "evaluation_urdf_arm_link_inventory",
+        "excluded_collision_suffix": "__base_link_collision",
+        "overlap_pose_world_m": [
+          -7.8,
+          0.0,
+          0.3
+        ],
+        "park_pose_source": "preloaded_obstacles.contact_control",
+        "robot_relative_x_extent_m": [
+          0.13,
+          0.27
+        ],
+        "sequence": [
+          "scan_data_ready",
+          "preloaded_entity_ready",
+          "contact_topic_ready",
+          "set_overlap_pose",
+          "nonempty_arm_contact",
+          "deactivate_ack",
+          "strictly_newer_scan",
+          "contact_stream_quiet"
+        ],
+        "size_source": "preloaded_obstacles.contact_control",
+        "unexpected_robot_collision_policy": "fail_closed"
+      },
+      "claim_exclusions": [
+        "moving_people_or_objects",
+        "human_safety",
+        "physical_robot_collision_safety"
+      ],
+      "collision_geometry_preserved": true,
+      "evaluation_geometry_delta": "caster_support_plane_full_azimuth_and_lidar_visibility",
+      "excluded_collision_elements": [],
+      "measured_geometry": "full_evaluation_robot_collision_set_against_preloaded_obstacle",
+      "simulation_only": true
+    },
+    "converted_sdf_validation": {
+      "caster_collision_center_delta_z_m": {
+        "caster_link_front_collision": -0.04799999999999999,
+        "caster_link_rear_collision": -0.04799999999999999
+      },
+      "converter_default_collision_surfaces_normalized": true,
+      "fixed_lump_com_delta_z_m": -0.00018531626021492387,
+      "fixed_lump_expected_com_z_m": 0.07852726285953285,
+      "fixed_lump_parallel_axis_tensor_valid": true,
+      "generated_arm_collision_count": 25,
+      "generated_collision_count": 33,
+      "generated_sdf_sha256": "da097e4965bef2e85f4cd67ad96d0e922c6e915e54b7286d7991e03a4093ca6e",
+      "generated_total_mass_kg": 18.031006001,
+      "lidar_visibility_mask": 4,
+      "non_caster_collision_elements_equal": true,
+      "source_arm_collision_count": 25,
+      "source_collision_count": 33,
+      "source_sdf_sha256": "b8975dbb9feecef3919da476987b11826882101e4498aafa90f2184fccbdb433",
+      "source_total_mass_kg": 18.031006001,
+      "status": "PASS",
+      "visual_count": 27,
+      "visual_semantics_equal_except_visibility_flags": true,
+      "visual_visibility_flags": 11
+    },
+    "scan_preflight_contract": {
+      "expected_wall_beams_m": {
+        "north": 1.15,
+        "south": 1.15,
+        "west": 1.9499999999999993
+      },
+      "front_observation_probe": {
+        "center_x_m": -6.5,
+        "center_y_m": 0.0,
+        "contact_expected": false,
+        "footprint_to_near_surface_m": 1.02,
+        "length_m": 0.5,
+        "start_to_center_m": 1.5,
+        "start_to_near_surface_m": 1.25,
+        "width_m": 0.4
+      },
+      "full_azimuth": {
+        "angle_increment_rad": 0.017453292519943295,
+        "sample_count": 360,
+        "seam_duplicate_allowed": false
+      },
+      "laser_yaw_in_base_rad": 3.141592653589793,
+      "lidar_noise_stddev_m": 0.01,
+      "observed_full_fov_near_return_envelope_m": {
+        "maximum": 0.164383664727211,
+        "minimum": 0.07522211223840714,
+        "sample_count": 25
+      },
+      "real_scan_reference": {
+        "angle_increment_sign": "negative",
+        "claim": "idealized Gazebo lidar reflecting observed G4 full azimuth and reported minimum range",
+        "coverage_rad": {
+          "maximum": 6.276592135429382,
+          "mean": 6.276435539493621,
+          "minimum": 6.276242613792419
+        },
+        "frame_id": "laser_link",
+        "gazebo_gpu_lidar_contract": {
+          "gz_sensors_version": "8.2.2",
+          "range_min_behavior": "GPU ray near clip plane with out-of-range values reported as infinity",
+          "runtime_probe_is_authoritative": true,
+          "source": "https://github.com/gazebosim/gz-sensors/blob/gz-sensors8_8.2.2/src/GpuLidarSensor.cc"
+        },
+        "known_simulation_differences": [
+          "update_rate",
+          "range_limits",
+          "sample_count",
+          "angle_increment_sign"
+        ],
+        "limitations": [
+          "range_min does not establish footprint proximity collision safety",
+          "near-field Collision Monitor behavior is evaluated separately in G004"
+        ],
+        "no_return_observations": {
+          "authoritative_scope": "all /scan messages in the source MCAP",
+          "beam_inclusion": "every value in sensor_msgs/msg/LaserScan.ranges",
+          "calculation": "positive_infinity_count / sample_count",
+          "finite_count": 4248911,
+          "message_count": 7304,
+          "nan_count": 0,
+          "negative_infinity_count": 0,
+          "positive_infinity_count": 2550207,
+          "positive_infinity_fraction": 0.3750790911409392,
+          "sample_count": 6799118,
+          "successful_route_window_comparison": {
+            "difference_reason": "the profile restricts input to the successful-route time window",
+            "message_count": 5394,
+            "positive_infinity_count": 1984246,
+            "positive_infinity_fraction": 0.395006,
+            "profile_path": "media/corridor_localdds_armed_20260904T152036/sensor_profile.json",
+            "profile_sha256": "8e9e259d364b1f39efc5742d4142c6124aed5ebc99b685523a1c8fcc1c780f03",
+            "sample_count": 5023326
+          }
+        },
+        "range_max_m": 16.0,
+        "range_min_m": 0.2800000011920929,
+        "range_min_matching_messages": 7304,
+        "reader": {
+          "rosbag2_py": "0.26.11-1noble.20260616.083139",
+          "rosbag2_storage_mcap": "0.26.11-1noble.20260616.074830"
+        },
+        "robot_forward_nearest_beam": {
+          "selection": "minimum absolute circular angle after applying laser_link to base_link yaw",
+          "total_scan_count": 7304,
+          "valid_fraction": 0.1973,
+          "valid_range_count": 1441,
+          "valid_range_median_m": 3.769,
+          "valid_range_min_m": 0.836
+        },
+        "sample_count": {
+          "maximum": 953,
+          "minimum": 905,
+          "most_common": 931,
+          "most_common_count": 3262
+        },
+        "scan_messages": 7304,
+        "schema_version": 1,
+        "source_bag": {
+          "mcap_sha256": "65105177e43eca6153d2543f3cf8e9cc9f7c62b77f258975fdcdbd10b5e2e16a",
+          "path": "/home/lim/jdamr_artifacts/corridor_localdds_armed_20260904T152036"
+        }
+      },
+      "real_scan_reference_sha256": "8a54f6b94b4bd06c4d3c4c12b69f8e332355703556c2ab663db3367e6a6f6d87",
+      "simulation_update_rate_hz": 2.0,
+      "sub_minimum_range_probe": {
+        "center_x_m": -8.0,
+        "center_y_m": 0.25000000059604643,
+        "contact_expected": false,
+        "footprint_clearance_m": 0.04000000059604644,
+        "length_m": 0.02,
+        "near_surface_m": 0.24000000059604645,
+        "scan_return_expected": false,
+        "width_m": 0.02
+      },
+      "wall_beam_multiple_comparison": {
+        "comparison_count": 3,
+        "correction": "bonferroni",
+        "critical_z": 2.9351994688666982,
+        "direction_count": 3,
+        "familywise_alpha": 0.01,
+        "formula": "NormalDist.inv_cdf(1-alpha/(2*m))*sigma/sqrt(n)",
+        "noise_sigma_m": 0.01,
+        "protocol_version": 2,
+        "replicate_count": 5,
+        "replicate_seeds": [
+          11,
+          23,
+          42,
+          67,
+          89
+        ],
+        "standard_error_m": 0.004472135954999579,
+        "two_sided": true,
+        "unit_of_analysis": "direction_mean_bias",
+        "wall_beam_mean_tolerance_m": 0.013126611079814427
+      }
+    },
+    "sensor_model_claim": "idealized Gazebo lidar reflecting observed G4 full azimuth and reported minimum range",
+    "sensor_model_claim_exclusions": [
+      "objects_inside_0.28m",
+      "emergency_stop_behavior",
+      "moving_people_or_objects",
+      "real_sensor_10hz_rate_equivalence"
+    ],
+    "stale_geometry_assumptions": [
+      {
+        "actual_laser_joint_x_m": 0.0,
+        "assumption": "lidar_x_m_equals_0.3",
+        "used_for_evaluation": false
+      }
+    ],
+    "support_plane_correction": {
+      "changed_joints": [
+        {
+          "after_z_m": -0.05299999999999999,
+          "before_z_m": -0.005,
+          "name": "caster_front_joint"
+        },
+        {
+          "after_z_m": -0.05299999999999999,
+          "before_z_m": -0.005,
+          "name": "caster_rear_joint"
+        }
+      ],
+      "geometry": {
+        "caster_bottom_from_base_m": -0.034999999999999996,
+        "current_support_height_delta_m": 0.047999999999999994,
+        "level_caster_joint_z_m": -0.05299999999999999,
+        "wheel_bottom_from_base_m": -0.08299999999999999
+      },
+      "lidar_horizontal_angle_deltas": {
+        "angle_increment_rad": 0.017453292519943295,
+        "max_angle_after_rad": 3.12413936106985,
+        "max_angle_before_rad": 2.862,
+        "min_angle_after_rad": -3.141592653589793,
+        "min_angle_before_rad": -2.862,
+        "sample_count": 360
+      },
+      "lidar_range_min_delta": {
+        "after_m": 0.2800000011920929,
+        "before_m": 0.05,
+        "source": "real_scan_reference_g4.json"
+      },
+      "lidar_visibility": {
+        "mask": 4,
+        "robot_visual_flags": 11,
+        "selection": "all source URDF links containing visual elements",
+        "visual_link_count": 17,
+        "visual_links": [
+          "base_link",
+          "left_wheel_link",
+          "right_wheel_link",
+          "caster_link_front",
+          "caster_link_rear",
+          "laser_link",
+          "arm_riser_link",
+          "rgbd_mast_link",
+          "rgbd_camera_link",
+          "arm_base_link",
+          "arm_shoulder_link",
+          "arm_upper_arm_link",
+          "arm_lower_arm_link",
+          "arm_wrist_link",
+          "arm_wrist_camera_link",
+          "arm_gripper_link",
+          "arm_moving_jaw_link"
+        ]
+      },
+      "scope": "evaluation_only",
+      "type": "evaluation_support_plane_and_full_azimuth_correction",
+      "wheel_slip_runtime_fault": {
+        "nominal_slip_compliance_lateral": 0.0,
+        "nominal_slip_compliance_longitudinal": 0.0,
+        "plugin": "gz-sim-wheel-slip-system",
+        "wheel_links": [
+          "left_wheel_link",
+          "right_wheel_link"
+        ],
+        "wheel_normal_force_n": 70.0,
+        "wheel_radius_m": 0.075
+      }
+    }
+  },
+  "source_robot": {
+    "allowed_joint_deltas": [
+      {
+        "after_z_m": -0.05299999999999999,
+        "before_z_m": -0.005,
+        "name": "caster_front_joint"
+      },
+      {
+        "after_z_m": -0.05299999999999999,
+        "before_z_m": -0.005,
+        "name": "caster_rear_joint"
+      }
+    ],
+    "allowed_sensor_deltas": {
+      "laser_horizontal_max_angle_rad": 3.12413936106985,
+      "laser_horizontal_min_angle_rad": -3.141592653589793,
+      "laser_range_min_m": 0.2800000011920929,
+      "laser_visibility_mask": 4
+    },
+    "canonical_equivalence": {
+      "all_joints": false,
+      "collision_geometry_and_origin": true,
+      "inertials": true,
+      "unchanged_joints": true,
+      "visuals": true
+    },
+    "collision_elements": [
+      {
+        "index": 0,
+        "link": "base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "510aedb9e507a9e5752a3c5c10cac34403d610119302eaec1a68bab49c3b04eb"
+      },
+      {
+        "index": 0,
+        "link": "left_wheel_link",
+        "name": "<unnamed>",
+        "xml_sha256": "16f66ef3662c2970c7ca6fcc64fdabc6590feb595bbf45ee49a32346811275de"
+      },
+      {
+        "index": 0,
+        "link": "right_wheel_link",
+        "name": "<unnamed>",
+        "xml_sha256": "16f66ef3662c2970c7ca6fcc64fdabc6590feb595bbf45ee49a32346811275de"
+      },
+      {
+        "index": 0,
+        "link": "caster_link_front",
+        "name": "<unnamed>",
+        "xml_sha256": "1dc8d0703fbfe85dd464639834ec0d21ebdb01505b00ff5348d6c08f14bfc8c5"
+      },
+      {
+        "index": 0,
+        "link": "caster_link_rear",
+        "name": "<unnamed>",
+        "xml_sha256": "1dc8d0703fbfe85dd464639834ec0d21ebdb01505b00ff5348d6c08f14bfc8c5"
+      },
+      {
+        "index": 0,
+        "link": "laser_link",
+        "name": "<unnamed>",
+        "xml_sha256": "603aee3da3e0a7f753f8562287b50dc1730d9db795b1a06809af1c23cee828b6"
+      },
+      {
+        "index": 0,
+        "link": "arm_riser_link",
+        "name": "<unnamed>",
+        "xml_sha256": "d825b90197b8b9e9642deadf4243c928035891b1f719741d9f9bb25814767840"
+      },
+      {
+        "index": 0,
+        "link": "rgbd_mast_link",
+        "name": "<unnamed>",
+        "xml_sha256": "52e70e5e6569a32a4d9de37aea612c379c14af9b11de4cbca27627c4fbe66d6a"
+      },
+      {
+        "index": 0,
+        "link": "rgbd_camera_link",
+        "name": "<unnamed>",
+        "xml_sha256": "0e6521517733619f59b24e4b7c4c8e815d093b27574b5ee25c9ccc0ea3afa4a9"
+      },
+      {
+        "index": 0,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "d998ec29bc74d496c449b634a25b94b55d07ae50e5c0689bb6071f53d56e38ea"
+      },
+      {
+        "index": 1,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "3d66dce92f58f2ed8eae9c2655c465f4e1f2dcaa2fb04b1511ee24809677df27"
+      },
+      {
+        "index": 2,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "195124a327e3d511b3557b528bfa0708401d00fed1e04325c3e75d322ec29b4e"
+      },
+      {
+        "index": 3,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "a88dca80c64b73948dae659b45ae630df76c8e6b7e2786eae6529781cea1ba23"
+      },
+      {
+        "index": 0,
+        "link": "arm_shoulder_link",
+        "name": "<unnamed>",
+        "xml_sha256": "e8e7ccde0ea5c378481680a770e24243b022d38dc28f5c823ae8c057b5668313"
+      },
+      {
+        "index": 1,
+        "link": "arm_shoulder_link",
+        "name": "<unnamed>",
+        "xml_sha256": "fbd1d895bf26fa96808530d2a388e9dac36b62e1dbcb6b9a26aefe8dcef8876e"
+      },
+      {
+        "index": 2,
+        "link": "arm_shoulder_link",
+        "name": "<unnamed>",
+        "xml_sha256": "f6506f03ac70e910a0549100e9c5a7bd16a4402b870d5d0e8a5fa607008096c0"
+      },
+      {
+        "index": 0,
+        "link": "arm_upper_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "4bb7da8ba4893e0a41f925253849c141646c600a3285936aa8bfa257d8870729"
+      },
+      {
+        "index": 1,
+        "link": "arm_upper_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "678454cd7b80950870a51c8487932611138c5740018f3440871af3febe1d5fb7"
+      },
+      {
+        "index": 0,
+        "link": "arm_lower_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "9e7dd13f79519e033511a65017bf77363facc782ba240a2cf74b551bd8a390a9"
+      },
+      {
+        "index": 1,
+        "link": "arm_lower_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "82ebeac8c4802ad151c4c50d6b410fae4b0dbe82e32798612e92f27f07543e4c"
+      },
+      {
+        "index": 2,
+        "link": "arm_lower_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "9c2a7875fb8235eb1f26fcb0c0ab8806373c940abfb94b997f77fb7d49c0698e"
+      },
+      {
+        "index": 0,
+        "link": "arm_wrist_link",
+        "name": "<unnamed>",
+        "xml_sha256": "2462e7662b4cd8def4f19faa39979a00ee530bf92f8af12dcba1f1e4b92b6de8"
+      },
+      {
+        "index": 1,
+        "link": "arm_wrist_link",
+        "name": "<unnamed>",
+        "xml_sha256": "f4f8ecbfe7ae3e5add443bf9a04fe41c750657ce06adddcfe0dfcdd5343f7a46"
+      },
+      {
+        "index": 0,
+        "link": "arm_wrist_camera_link",
+        "name": "<unnamed>",
+        "xml_sha256": "7b2bb50186b230ac716c67f17addd2ab5d046c32398f64adeb94bb60661cd2fb"
+      },
+      {
+        "index": 0,
+        "link": "arm_gripper_link",
+        "name": "<unnamed>",
+        "xml_sha256": "5dbc5916d36e7df452477eabb25daca1d63f4d76c62679ea7f22c1cf2eefc4b7"
+      },
+      {
+        "index": 1,
+        "link": "arm_gripper_link",
+        "name": "<unnamed>",
+        "xml_sha256": "08c64a4ae2e784375fa498f70a41dc714a3281368e2bece445065b006bfcdf21"
+      },
+      {
+        "index": 2,
+        "link": "arm_gripper_link",
+        "name": "fixed_finger_tip",
+        "xml_sha256": "2f92ea96702fee7d114deada9d5b3f6a7c28f066b7b56c59fa75a5a9e8e0eb2c"
+      },
+      {
+        "index": 3,
+        "link": "arm_gripper_link",
+        "name": "fixed_finger_mid",
+        "xml_sha256": "81bcbe034b76c5c4a9f1196a2015781a8e9343f6612d5505bd043b3b8e760e33"
+      },
+      {
+        "index": 4,
+        "link": "arm_gripper_link",
+        "name": "fixed_finger_base",
+        "xml_sha256": "7516b2205d05736075dd86c8c5391031ff5f05a74ecdec46a0a6ad172ad8f442"
+      },
+      {
+        "index": 0,
+        "link": "arm_moving_jaw_link",
+        "name": "<unnamed>",
+        "xml_sha256": "26e1a3d94cddb1614c2c40532ccc9c2388e942d735bf5f63646e9f569aac9dd0"
+      },
+      {
+        "index": 1,
+        "link": "arm_moving_jaw_link",
+        "name": "moving_finger_tip",
+        "xml_sha256": "50bf5ac4624cc3cfbc0090a2c86e1980d0f37a6b890f1d13529f1c4bfd65bf52"
+      },
+      {
+        "index": 2,
+        "link": "arm_moving_jaw_link",
+        "name": "moving_finger_mid",
+        "xml_sha256": "c6434313321440249170eea6a0ec25849b95e9eb90f66425393c768b37a9abe0"
+      },
+      {
+        "index": 3,
+        "link": "arm_moving_jaw_link",
+        "name": "moving_finger_base",
+        "xml_sha256": "1d0dbfcc837fa9d639ac0d23ccc6df74505939e439c2cc0aeb5d17a94bfe4d62"
+      }
+    ],
+    "generated_lidar_sensor": {
+      "frame_id": "laser_link",
+      "horizontal_resolution": 1.0,
+      "max_angle_rad": 3.12413936106985,
+      "min_angle_rad": -3.141592653589793,
+      "noise_mean_m": 0.0,
+      "noise_stddev_m": 0.01,
+      "noise_type": "gaussian",
+      "range_max_m": 8.0,
+      "range_min_m": 0.2800000011920929,
+      "range_resolution_m": 0.01,
+      "sample_count": 360,
+      "sensor_pose": "0 0 0 0 0 0",
+      "topic": "scan",
+      "update_rate_hz": 2.0,
+      "visibility_mask": 4
+    },
+    "inertial_elements": [
+      {
+        "link": "base_link",
+        "xml_sha256": "5974a6ec7254b055bccdbc8ab095c5fb6f81ed87683378b59d8bab9c759a9c29"
+      },
+      {
+        "link": "left_wheel_link",
+        "xml_sha256": "8b7e95acc6471dfd7166f37bd8fd7d0c9de2b3e9bbd35a1f5bc71278383557e6"
+      },
+      {
+        "link": "right_wheel_link",
+        "xml_sha256": "8b7e95acc6471dfd7166f37bd8fd7d0c9de2b3e9bbd35a1f5bc71278383557e6"
+      },
+      {
+        "link": "caster_link_front",
+        "xml_sha256": "083191a28025c218b8032d075fea2b0893ca5789038a3cad3da578e5170081c1"
+      },
+      {
+        "link": "caster_link_rear",
+        "xml_sha256": "083191a28025c218b8032d075fea2b0893ca5789038a3cad3da578e5170081c1"
+      },
+      {
+        "link": "laser_link",
+        "xml_sha256": "3a912c66adac6bc350e70b1150c6f5268fdf0a0baf0bd02ef2b9d07ef9011fa1"
+      },
+      {
+        "link": "arm_riser_link",
+        "xml_sha256": "6dd0816c45e3c60128d82aa3badb988ad0ca16390b04102a3ae9f6e54d9ae37c"
+      },
+      {
+        "link": "rgbd_mast_link",
+        "xml_sha256": "38a9decab5855ea704f4d4b6fecb4439f1302b8841a60cae7e6ffeedabaa662b"
+      },
+      {
+        "link": "rgbd_camera_link",
+        "xml_sha256": "b11990acb665cc267ede1bd1666c03f9da232d12226b5eb50aca6cdf47e88116"
+      },
+      {
+        "link": "arm_base_link",
+        "xml_sha256": "00d4c4d6d4718d14ae67d65f5829e1f9c137d1bfebb16824786e42e62446955d"
+      },
+      {
+        "link": "arm_shoulder_link",
+        "xml_sha256": "f6d9a692efc8389ff0a58791e9b61bca54b2655620d89567ee7e8867aac587dd"
+      },
+      {
+        "link": "arm_upper_arm_link",
+        "xml_sha256": "86193797ff508fdb8e5d2a8b2b6bb5eecb1e7f3c1feb2455be612db163be7866"
+      },
+      {
+        "link": "arm_lower_arm_link",
+        "xml_sha256": "6e1a48ea5b7de989f5ee1eb8c680fbc45a72ef90939c8bdb66db2a2e20cc84ce"
+      },
+      {
+        "link": "arm_wrist_link",
+        "xml_sha256": "a4583bbda5c3590f63c4047e590f15c9f3b6eae8afd904403de2bef424f0b56b"
+      },
+      {
+        "link": "arm_wrist_camera_link",
+        "xml_sha256": "5975f2368ba866545484e3990bcd5c96a46ba50e916052d9cc1f884213437f16"
+      },
+      {
+        "link": "arm_gripper_link",
+        "xml_sha256": "8d0a2e82d23569e6def67cab6d0ec310ee59ef656484bf4a1c400c5d79d50aa6"
+      },
+      {
+        "link": "arm_gripper_frame_link",
+        "xml_sha256": "8372f2d88be2dd9ad0f251720264909a635287e4b50b4a35592a2cc45fb6e1ae"
+      },
+      {
+        "link": "arm_moving_jaw_link",
+        "xml_sha256": "ddcabc1c526a426561e54ebe48561a02179f4bdc9d69f4ef205f6d643a51e503"
+      }
+    ],
+    "joint_elements": [
+      {
+        "name": "base_joint",
+        "type": "fixed",
+        "xml_sha256": "e1a6f902f49b8e6ad2f11c18a856332c0af0a5a7eb4b12462782ddb499e382be"
+      },
+      {
+        "name": "left_wheel_joint",
+        "type": "continuous",
+        "xml_sha256": "10cd867fa869498600826703759d76fc4e7fe7c5f591539fc40a76cdb30b5f88"
+      },
+      {
+        "name": "right_wheel_joint",
+        "type": "continuous",
+        "xml_sha256": "1296e6ef33f53fe292fadef6dbc822d75d52f3b6cd05ac26bbdd591b029c4f5b"
+      },
+      {
+        "name": "caster_front_joint",
+        "type": "fixed",
+        "xml_sha256": "0c7078c6a633e285aff8db094c6ae363c4fe413035bbf37c5e6e43201bdd2903"
+      },
+      {
+        "name": "caster_rear_joint",
+        "type": "fixed",
+        "xml_sha256": "271678c3cdfb7e79687837af0e76283ad997a3793e19daa96d21c5d6fbdc8209"
+      },
+      {
+        "name": "laser_joint",
+        "type": "fixed",
+        "xml_sha256": "661bddc84a1ec5128c7b27f726910308e0c81b71d1afe7e9f55b781972e5a937"
+      },
+      {
+        "name": "arm_riser_joint",
+        "type": "fixed",
+        "xml_sha256": "d7f99f398e495874cee10da9f1dca71e341279721a3481dd0eb0098768bd4f93"
+      },
+      {
+        "name": "arm_mount_joint",
+        "type": "fixed",
+        "xml_sha256": "c19739fa24a4c56480276e1f9a8156bbe378975fa843e0c241ed857d64eefa71"
+      },
+      {
+        "name": "rgbd_mast_joint",
+        "type": "fixed",
+        "xml_sha256": "cac2c1f6d985c0dd6ff5303d55d60c79468d25d364e422361126f556b32b3a18"
+      },
+      {
+        "name": "rgbd_camera_joint",
+        "type": "fixed",
+        "xml_sha256": "07812c3bf51f305805292a1272190c35296b1d2603b0a86479fab2d3fca9f192"
+      },
+      {
+        "name": "arm_shoulder_pan",
+        "type": "revolute",
+        "xml_sha256": "da7921ca5e4ebc61f79871222675ada137cf6a88015f08ecca670844c7ee1988"
+      },
+      {
+        "name": "arm_shoulder_lift",
+        "type": "revolute",
+        "xml_sha256": "9d3a62d728fecd1540755339e7727bfc84f7f258b7fd0e2148ebcd34575122c5"
+      },
+      {
+        "name": "arm_elbow_flex",
+        "type": "revolute",
+        "xml_sha256": "71a5f9ab7c3ef362874750250c40d1926e6dae3d8720a39c309e3c815b3a205a"
+      },
+      {
+        "name": "arm_wrist_camera_joint",
+        "type": "fixed",
+        "xml_sha256": "d4f54bd949abeebcfb1cd82c5757a2d96900fef6d4defc709b74eae63d727563"
+      },
+      {
+        "name": "arm_wrist_flex",
+        "type": "revolute",
+        "xml_sha256": "eb367251163de91cf989ecbcc421e0e453c325d050aa0e070e0d2cf924bb8bed"
+      },
+      {
+        "name": "arm_wrist_roll",
+        "type": "revolute",
+        "xml_sha256": "11af4e9cda7a00220acd2eb8ae958c475c9aaf280db0f698a27b2be55f63d30e"
+      },
+      {
+        "name": "arm_gripper_frame_joint",
+        "type": "fixed",
+        "xml_sha256": "f543db3f6f00e47af4cf0b11996911eb53c545a6fbaadbce30496bda4a9e629f"
+      },
+      {
+        "name": "arm_gripper",
+        "type": "revolute",
+        "xml_sha256": "696e43493400da98a9a70edd752905fd7b011a0f43091fd5185a2390897edc75"
+      }
+    ],
+    "path": "/home/lim/bimanual-robot/src/jdamr/jdamr_cube_description/urdf/jdamr_cube.urdf",
+    "removed_collision_elements": [],
+    "required_collision_counts": {
+      "arm": 25,
+      "base_wheel_caster": 5
+    },
+    "sha256": "71ebc4dfd3c0a5e69511eb99858aac5133ea8f9ef6ab653e713cd31ce66eb443",
+    "source_lidar_sensor": {
+      "frame_id": "laser_link",
+      "horizontal_resolution": 1.0,
+      "max_angle_rad": 2.862,
+      "min_angle_rad": -2.862,
+      "noise_mean_m": 0.0,
+      "noise_stddev_m": 0.01,
+      "noise_type": "gaussian",
+      "range_max_m": 8.0,
+      "range_min_m": 0.05,
+      "range_resolution_m": 0.01,
+      "sample_count": 360,
+      "sensor_pose": "0 0 0 0 0 0",
+      "topic": "scan",
+      "update_rate_hz": 2.0,
+      "visibility_mask": null
+    },
+    "unchanged_lidar_sensor_fields": [
+      "frame_id",
+      "horizontal_resolution",
+      "noise_mean_m",
+      "noise_stddev_m",
+      "noise_type",
+      "range_max_m",
+      "range_resolution_m",
+      "sample_count",
+      "sensor_pose",
+      "topic",
+      "update_rate_hz"
+    ],
+    "visual_elements": [
+      {
+        "index": 0,
+        "link": "base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "88707a92b80661fbe5e1d24f471668a0db4ccec260f460a559abeee4ecc6dff7"
+      },
+      {
+        "index": 0,
+        "link": "left_wheel_link",
+        "name": "<unnamed>",
+        "xml_sha256": "95dddba0c89bdbbd7b4e5da93a02a4090d16159fd769915a5bfe115e26081776"
+      },
+      {
+        "index": 0,
+        "link": "right_wheel_link",
+        "name": "<unnamed>",
+        "xml_sha256": "95dddba0c89bdbbd7b4e5da93a02a4090d16159fd769915a5bfe115e26081776"
+      },
+      {
+        "index": 0,
+        "link": "caster_link_front",
+        "name": "<unnamed>",
+        "xml_sha256": "7806c8f6170c9f49953555c370abf429eaa78fbe144396bddff9725d06a4efdc"
+      },
+      {
+        "index": 0,
+        "link": "caster_link_rear",
+        "name": "<unnamed>",
+        "xml_sha256": "7806c8f6170c9f49953555c370abf429eaa78fbe144396bddff9725d06a4efdc"
+      },
+      {
+        "index": 0,
+        "link": "laser_link",
+        "name": "<unnamed>",
+        "xml_sha256": "c16f0d6cdaa890b4210a35cf2652bda312e791b65e58c765bda78ce2430235e9"
+      },
+      {
+        "index": 0,
+        "link": "arm_riser_link",
+        "name": "<unnamed>",
+        "xml_sha256": "2a313acd676f28f0d9742312a84ac30c7ed27a17dc3aa92931448b64a3be75e0"
+      },
+      {
+        "index": 0,
+        "link": "rgbd_mast_link",
+        "name": "<unnamed>",
+        "xml_sha256": "a390b6e020d87a9337ffc861e201ee168908212f49059c601a079fe417feb725"
+      },
+      {
+        "index": 0,
+        "link": "rgbd_camera_link",
+        "name": "<unnamed>",
+        "xml_sha256": "37b92dc70a5c915420f4420df57f36fa189387a5a4c4538c65c839895c749c24"
+      },
+      {
+        "index": 0,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "668c126e3e45f17fa4900740fc3a634fb2faffb4668d5cdfdf3715b29038394b"
+      },
+      {
+        "index": 1,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "dd97858e6ce2ab4b3b74b02a24613d00884e113bf486e3b6b694d294fc9bd32e"
+      },
+      {
+        "index": 2,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "cc7820b89a1e118fc6aa98a2acc05f98e2238cd2eba4abaf465a565bafc7bf34"
+      },
+      {
+        "index": 3,
+        "link": "arm_base_link",
+        "name": "<unnamed>",
+        "xml_sha256": "e4f6dbd8f414992cea9656f2880d7345839947e199b21356ac958c97bd584697"
+      },
+      {
+        "index": 0,
+        "link": "arm_shoulder_link",
+        "name": "<unnamed>",
+        "xml_sha256": "e01891d19f171283fcd7ad8007745b78dbd09ab427aa28ba47c11628307382b4"
+      },
+      {
+        "index": 1,
+        "link": "arm_shoulder_link",
+        "name": "<unnamed>",
+        "xml_sha256": "1d123671fe115fcec5623e2ff603c191d12ef440ca33a77b3d3a1e1afeb1fd5f"
+      },
+      {
+        "index": 2,
+        "link": "arm_shoulder_link",
+        "name": "<unnamed>",
+        "xml_sha256": "5bf85fb410c980275af1c4f0acb0c1611c21e7956c567b19b5a39c5c0069dc28"
+      },
+      {
+        "index": 0,
+        "link": "arm_upper_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "a05d88aa1631ecabd0eba0bb2f993637059620baed16d8cbbaba704cea33438f"
+      },
+      {
+        "index": 1,
+        "link": "arm_upper_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "643cd9ff0f00f0c633daac1c8f01a15774cdf22d5fb654d975da732d23b93481"
+      },
+      {
+        "index": 0,
+        "link": "arm_lower_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "65439f4c8f5c666a8798ab6cd139c35186312792c0877864f92cd3c856830e93"
+      },
+      {
+        "index": 1,
+        "link": "arm_lower_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "ffd5c0bd0b039dae2d6fd91a7daf39a313c39ea3581f26cbac9d85b753614710"
+      },
+      {
+        "index": 2,
+        "link": "arm_lower_arm_link",
+        "name": "<unnamed>",
+        "xml_sha256": "a743fedd14ccf4fe887e3ec20b448922b25b6e7c08269854a66b151dd8d5bf37"
+      },
+      {
+        "index": 0,
+        "link": "arm_wrist_link",
+        "name": "<unnamed>",
+        "xml_sha256": "5798210132372e852c30bc4f07cc1b866ada01aeb4c106ac2f785ca2068103d6"
+      },
+      {
+        "index": 1,
+        "link": "arm_wrist_link",
+        "name": "<unnamed>",
+        "xml_sha256": "f5b5d7fdbb649b50e2b839a6dc346b2e8775f31bdaf780cfc51672ecbb874c4f"
+      },
+      {
+        "index": 0,
+        "link": "arm_wrist_camera_link",
+        "name": "<unnamed>",
+        "xml_sha256": "df1753b8aaa0d935e400236776d5d711fa0b5f243b1936451a85a3385af6bfd4"
+      },
+      {
+        "index": 0,
+        "link": "arm_gripper_link",
+        "name": "<unnamed>",
+        "xml_sha256": "500f152107e553724f20c2b9045fdbcc9403ec112273e765ac6d3a0482d04de2"
+      },
+      {
+        "index": 1,
+        "link": "arm_gripper_link",
+        "name": "<unnamed>",
+        "xml_sha256": "357672ef16a336c0d3be7b61d2cae7af02cc124aad71a70d1df5841ec0ec0870"
+      },
+      {
+        "index": 0,
+        "link": "arm_moving_jaw_link",
+        "name": "<unnamed>",
+        "xml_sha256": "16f850f69fff5f6e061d3497f39b793660ed2102cea24b0eacdf2d0f556476f8"
+      }
+    ]
+  },
+  "source_world": {
+    "path": "/home/lim/bimanual-robot/src/jdamr/jdamr_cube_gazebo/worlds/slam_corridor.world",
+    "sha256": "7b91c38d999473b368a8ab1339b96649674c4154566297fbb0cc261a4f727fad"
+  }
+}
