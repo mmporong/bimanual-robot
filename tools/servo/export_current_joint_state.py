@@ -17,13 +17,13 @@ import sys
 
 SERVO_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SERVO_DIR.parents[1]
-IK_DIR = REPO_ROOT / "src/hold_flow_description/scripts"
+IK_DIR = REPO_ROOT / "src/description/hold_flow_description/scripts"
 for directory in (SERVO_DIR, IK_DIR):
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))
 
 from solve_task_poses import ARM_JOINTS, Chain, URDF_PATH  # noqa: E402
-from sts_bus import A_POS, A_TEMP, A_TORQUE, A_VOLT, Bus, find_port  # noqa: E402
+from tools.servo.sts_bus import A_POS, A_TEMP, A_TORQUE, A_VOLT, Bus, find_port  # noqa: E402
 
 
 DEFAULT_CALIBRATION = REPO_ROOT / "calibration/bi_follower/arms_left.json"

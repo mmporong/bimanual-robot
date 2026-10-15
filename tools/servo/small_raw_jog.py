@@ -10,12 +10,10 @@ import threading
 import time
 from urllib.request import urlopen
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dashboard_stop import open_stop_bus
-from servo.sts_bus import (A_ACCEL, A_GOAL, A_MAX_ANGLE, A_MIN_ANGLE, A_OFFSET,
-                          A_PHASE, A_POS, A_SPEED, A_TORQUE, decode_offset)
-from servo.execute_safe_recovery import read_required, require_write
-from servo.servo_record_ranges import validate_capture
+from apps.camera_dashboard.dashboard_stop import open_stop_bus
+from tools.servo.sts_bus import A_ACCEL, A_GOAL, A_MAX_ANGLE, A_MIN_ANGLE, A_OFFSET, A_PHASE, A_POS, A_SPEED, A_TORQUE, decode_offset
+from tools.servo.execute_safe_recovery import read_required, require_write
+from tools.servo.servo_record_ranges import validate_capture
 
 # STS3215 Operating_Mode: LeRobot feetech/tables.py, position mode = 0.
 OPERATING_MODE = 33

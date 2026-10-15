@@ -1,7 +1,7 @@
 status: preliminary_trade_study_not_build_release
 units: SI
 provenance:
-  base: docs/20260909_하단프레임_실물치수_모델링기록.md
+  base: docs/architecture/20260909_하단프레임_실물치수_모델링기록.md
   target_height: 0.720 m, previous design datum; actual table measurement pending
   profile_2020: https://cdn.item24.com/product-assets/DOK_PROD_37015_%23SEN_%23AIN_%23V1.pdf
   profile_2040: https://th.misumi-ec.com/en/vona2/detail/110302684350/

@@ -4,17 +4,16 @@
 한계는 하드 스톱에 밀어붙이는 것을 막는 마지막 방어선이다. 실측한 양 끝에서
 안쪽으로 조금 물려서 잡는다.
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_limits.py --min 760 --max 3600
-    python3 servo_limits.py --min 760 --max 3600 --execute
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_limits --min 760 --max 3600
+    python3 -m tools.servo.servo_limits --min 760 --max 3600 --execute
 """
 import argparse
 import json
 import time
 from pathlib import Path
 
-from sts_bus import (Bus, FakeBus, A_MIN_ANGLE, A_MAX_ANGLE, A_TORQUE, A_POS,
-                     RESOLUTION, find_port)
+from tools.servo.sts_bus import Bus, FakeBus, A_MIN_ANGLE, A_MAX_ANGLE, A_TORQUE, A_POS, RESOLUTION, find_port
 
 BACKUP = Path.home() / ".cache" / "bimanual-robot" / "servo_backup.jsonl"
 

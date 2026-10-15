@@ -9,8 +9,7 @@ import unittest
 
 
 spec = importlib.util.spec_from_file_location(
-    'migration', Path(__file__).resolve().parents[1]
-    / 'tools/prepare_jdamr_migration.py')
+    'migration', Path(__file__).resolve().parents[1] / 'tools/jdamr/prepare_jdamr_migration.py')
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
 

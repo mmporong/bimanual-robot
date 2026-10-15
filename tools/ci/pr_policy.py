@@ -44,7 +44,7 @@ def summary(risk, paths, number, draft):
              '```bash', 'python3 -m pytest -q',
              'python3 tools/ci/check_local_markdown_links.py',
              'python3 tools/ci/sync_readme_status.py',
-             'python3 src/hold_flow_description/scripts/validate_description.py', '```', '']
+             'python3 src/description/hold_flow_description/scripts/validate_description.py', '```', '']
     lines += ['4. 충돌이 있으면 main 변경을 작업 브랜치에 반영하고 같은 검사를 다시 실행한다. '
               '검사 통과 뒤 GitHub가 자동 병합한다. 보호 규칙은 유지한다.', '']
     return '\n'.join(lines)

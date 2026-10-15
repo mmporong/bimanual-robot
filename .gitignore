@@ -52,6 +52,7 @@ credentials/
 docs/renders/
 .omx/
 .runtime/
+output/
 
 # 캘리브레이션 도구가 실행 직전 자동 생성하는 로컬 백업
 calibration/**/*.json.bak-*

@@ -19,15 +19,26 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SPEC_PATH = REPO_ROOT / "design/mechanical/hold_flow_mechanical_v0_3.yaml"
 CAD_MANIFEST = REPO_ROOT / "design/cad/exports/manifest.json"
 CUP_MANIFEST = REPO_ROOT / "design/gripper/exports/cup_overcaps/manifest.json"
-IMPORT_SCRIPT = REPO_ROOT / "src/hold_flow_description/scripts/import_isaac_sim.py"
-URDF_PATH = REPO_ROOT / "src/hold_flow_description/urdf/hold_flow.urdf"
-DESCRIPTION_VALIDATOR = REPO_ROOT / "src/hold_flow_description/scripts/validate_description.py"
-QUALITY_AUDITOR = REPO_ROOT / "src/hold_flow_description/scripts/audit_urdf_quality.py"
-CALIBRATION_PATH = REPO_ROOT / "src/hold_flow_description/config/mechanical_calibration.yaml"
-SO101_LICENSE = REPO_ROOT / "src/hold_flow_description/third_party/so_arm_101/LICENSE"
+IMPORT_SCRIPT = REPO_ROOT / "src/description/hold_flow_description/scripts/import_isaac_sim.py"
+URDF_PATH = REPO_ROOT / "src/description/hold_flow_description/urdf/hold_flow.urdf"
+DESCRIPTION_VALIDATOR = REPO_ROOT / "src/description/hold_flow_description/scripts/validate_description.py"
+QUALITY_AUDITOR = REPO_ROOT / "src/description/hold_flow_description/scripts/audit_urdf_quality.py"
+CALIBRATION_PATH = REPO_ROOT / "src/description/hold_flow_description/config/mechanical_calibration.yaml"
+SO101_LICENSE = REPO_ROOT / "src/description/hold_flow_description/third_party/so_arm_101/LICENSE"
 
 
 class MechanicalV03Test(unittest.TestCase):
+    def test_so101_generator_uses_embedded_source_and_external_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "so101.urdf.xacro"
+            subprocess.run(
+                [sys.executable, str(DESCRIPTION_VALIDATOR.with_name("generate_so101_arm_xacro.py")),
+                 "--output", str(output)],
+                cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+            )
+            expected = URDF_PATH.parents[1] / "third_party/so_arm_101/so101_arm.urdf.xacro"
+            self.assertEqual(output.read_bytes(), expected.read_bytes())
+
     def test_xacro_expands_without_ros_package_index(self) -> None:
         script = """
 import sys
@@ -136,8 +147,8 @@ print(xacro.process_file(sys.argv[1]).toxml())
             ["python3", "design/mechanical/calculate_full_size_tabletop_design.py"],
             ["python3", str(DESCRIPTION_VALIDATOR.relative_to(REPO_ROOT))],
             ["python3", str(QUALITY_AUDITOR.relative_to(REPO_ROOT)), "--strict"],
-            ["python3", "src/hold_flow_description/scripts/validate_isaac_contract.py"],
-            ["python3", "src/hold_flow_description/scripts/import_isaac_sim.py", "--check-only"],
+            ["python3", "src/description/hold_flow_description/scripts/validate_isaac_contract.py"],
+            ["python3", "src/description/hold_flow_description/scripts/import_isaac_sim.py", "--check-only"],
         )
         for command in commands:
             with self.subTest(command=command):
@@ -195,7 +206,7 @@ print(xacro.process_file(sys.argv[1]).toxml())
 
     def test_isaac_contract_uses_four_velocity_joints_without_contact_proxies(self) -> None:
         config = yaml.safe_load(
-            (REPO_ROOT / "src/hold_flow_description/config/isaac_sim_6.yaml").read_text(
+            (REPO_ROOT / "src/description/hold_flow_description/config/isaac_sim_6.yaml").read_text(
                 encoding="utf-8"
             )
         )
@@ -250,7 +261,7 @@ print(xacro.process_file(sys.argv[1]).toxml())
         assert spec.loader is not None
         spec.loader.exec_module(module)
         settings, robot_type, source_urdf, output_usd = module.load_import_settings(
-            REPO_ROOT / "src/hold_flow_description/config/isaac_sim_6.yaml"
+            REPO_ROOT / "src/description/hold_flow_description/config/isaac_sim_6.yaml"
         )
         self.assertEqual(robot_type, "Mobile Manipulators")
         self.assertEqual(source_urdf, URDF_PATH)
@@ -296,7 +307,7 @@ print(xacro.process_file(sys.argv[1]).toxml())
             output = module.materialize_isaac_urdf(URDF_PATH, Path(directory))
             text = output.read_text(encoding="utf-8")
         self.assertNotIn("package://hold_flow_description/", text)
-        self.assertIn(str(REPO_ROOT / "src/hold_flow_description/meshes"), text)
+        self.assertIn(str(REPO_ROOT / "src/description/hold_flow_description/meshes"), text)
 
     def test_so101_upstream_license_copy_is_pinned(self) -> None:
         self.assertEqual(

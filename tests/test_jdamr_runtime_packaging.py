@@ -11,7 +11,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-JDAMR = ROOT / "src/jdamr"
+JDAMR = ROOT / "src/navigation"
 DEPLOY = JDAMR / "deployment"
 DASHBOARD = JDAMR / "dashboard"
 
@@ -114,7 +114,7 @@ esac
         )
         commands = log.read_text().splitlines()
         install = next(line for line in commands if line.startswith("install "))
-        assert f"--from-paths {ROOT / 'src/jdamr'} {astra}" in install
+        assert f"--from-paths {ROOT / 'src/navigation'} {astra}" in install
         assert "--ignore-src -y --rosdistro jazzy" in install
 
 

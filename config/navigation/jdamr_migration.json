@@ -76,7 +76,7 @@
       "wheel_outer_width_m": 0.540,
       "measurement_date": "2026-09-15",
       "valid_for": "unchanged_lower_frame_front_wheels_4wd_rear_geometry_pending",
-      "width_source": "docs/20260909_하단프레임_실물치수_모델링기록.md",
+      "width_source": "docs/architecture/20260909_하단프레임_실물치수_모델링기록.md",
       "axle_offset_source": "2026-09-15 사용자 실측: 앞 끝에서 65 mm",
       "supersedes_prior_axle_offset_m": 0.060
     },
@@ -192,7 +192,7 @@
   "integration": {
     "status": "SOURCE_INTEGRATED_PC_RUNTIME_BUILD_VALIDATED",
     "authority_repository": "https://github.com/mmporong/bimanual-robot",
-    "source_tree": "src/jdamr",
+    "source_tree": "src/navigation",
     "imported_from_commit": "2e25c423926d02badd8e3461a32c587912f5dd0a",
     "provenance_manifest": "config/navigation/jdamr_import_manifest.json",
     "operator_entrypoint": "tools/jdamr/jdamr_depart.py",

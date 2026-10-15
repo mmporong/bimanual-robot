@@ -238,9 +238,9 @@ workspace:
   dining_table_required: false
   task_pose_validation:
     status: partially_cleared_ik_recompute_pending
-    structural_quality_audited_with: src/hold_flow_description/scripts/audit_urdf_quality.py
+    structural_quality_audited_with: src/description/hold_flow_description/scripts/audit_urdf_quality.py
     structural_quality_status: pass_for_p0_numeric_consistency_only
-    audited_with: src/hold_flow_description/scripts/audit_task_pose.py
+    audited_with: src/description/hold_flow_description/scripts/audit_task_pose.py
     collision_audited_with: design/cad/audit_urdf_clearance.py
     transport_joint_limits: pass
     transport_tcp_target_match: fail_targets_stored_as_constants_not_fk
@@ -301,7 +301,7 @@ workspace:
       붙일 수 있고, 그 폭이 홈 폭을 제한한다.
   transport_joint_degrees:
     status: fk_solved_2026_09_03_clearance_pass
-    solver: src/hold_flow_description/scripts/solve_task_poses.py
+    solver: src/description/hold_flow_description/scripts/solve_task_poses.py
     tool0_target_m: [0.06, 0.10, 0.26]
     left: [-19.0, -95.1, 60.1, 78.4, -1.0]
     right: [19.0, -95.1, 60.1, 78.4, 1.2]

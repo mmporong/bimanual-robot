@@ -17,7 +17,7 @@ from _common import (
 )
 
 
-HELPER_DIR = REPO_ROOT / "src/jdamr/scripts/map_20260930_manual"
+HELPER_DIR = REPO_ROOT / "src/navigation/scripts/map_20260930_manual"
 
 
 def _load_helper():

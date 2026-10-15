@@ -1,7 +1,7 @@
 # STS3215 서보 도구
 
 그리퍼 캘리브레이션과 서보 상태 점검에 쓰는 최소 도구다. 절차와 실측값은
-[`docs/20260909_그리퍼_캘리브레이션_인계.md`](../../docs/20260909_그리퍼_캘리브레이션_인계.md)에 있다.
+[`docs/experiments/20260909_그리퍼_캘리브레이션_인계.md`](../../docs/experiments/20260909_그리퍼_캘리브레이션_인계.md)에 있다.
 
 ## 처음 받는 사람 — 환경 준비
 
@@ -47,17 +47,17 @@ ls -l /dev/serial/by-id/
 **5) 읽어본다.** 여기까지 오면 설치가 맞은 것이다.
 
 ```bash
-cd ~/bimanual-robot/tools/servo
-python3 servo_read.py
+cd ~/bimanual-robot
+python3 -m tools.servo.servo_read
 ```
 
 ## 실행
 
-도구가 같은 디렉터리의 `sts_bus.py`를 읽도록 서보 도구 디렉터리에서 실행한다.
+저장소 루트에서 모듈로 실행한다. 버스 구현은 `tools.servo.sts_bus`를 사용한다.
 
 ```bash
-cd ~/bimanual-robot/tools/servo
-python3 servo_read.py
+cd ~/bimanual-robot
+python3 -m tools.servo.servo_read
 ```
 
 포트는 `--port` 를 생략하면 `/dev/serial/by-id` 에서 자동으로 찾는다. 보드가 두 개
@@ -84,7 +84,7 @@ python3 servo_read.py
 | `lerobot_gripper_protection.patch` | lerobot 로컬 패치 — 연결 때 그리퍼 토크를 낮추는 코드를 끈다 | — | `git apply` |
 
 전체 흐름(전원 → 텔레옵 → 녹화 → 학습)은
-[`docs/20260910_텔레옵_IL_사용법.md`](../../docs/20260910_텔레옵_IL_사용법.md) 에 있다.
+[`docs/guides/20260910_텔레옵_IL_사용법.md`](../../docs/guides/20260910_텔레옵_IL_사용법.md) 에 있다.
 
 `--execute` 가 없으면 전부 dry-run 으로 끝난다. 무엇을 바꿀지 먼저 출력해서 보여준다.
 
@@ -141,34 +141,34 @@ ID 6만 시험한다. 기본은 읽기 대조이며 `--output <새 로컬 JSON>`
 실물에 붙이기 전에 모의 버스로 끝까지 돌려 본다. `py_compile` 은 리허설이 아니다.
 
 ```bash
-cd ~/bimanual-robot/tools/servo
-python3 servo_goto.py --mock --goal 3000 --execute
-python3 servo_goto.py --mock --mock-wall 3300 --goal 3000 --execute   # 걸림 경로
-python3 servo_offset.py --mock --mock-sign -1 --target 3600 --execute # 부호 반대인 서보
-python3 servo_limits.py --mock --min 760 --max 3600 --execute
-python3 execute_safe_recovery.py --plan /tmp/holdflow_left_recovery_plan.json --mock --execute
+cd ~/bimanual-robot
+python3 -m tools.servo.servo_goto --mock --goal 3000 --execute
+python3 -m tools.servo.servo_goto --mock --mock-wall 3300 --goal 3000 --execute   # 걸림 경로
+python3 -m tools.servo.servo_offset --mock --mock-sign -1 --target 3600 --execute # 부호 반대인 서보
+python3 -m tools.servo.servo_limits --mock --min 760 --max 3600 --execute
+python3 -m tools.servo.execute_safe_recovery --plan /tmp/holdflow_left_recovery_plan.json --mock --execute
 ```
 
 ## 그리퍼 캘리브레이션 한 판 (실제 순서)
 
 죠를 다시 물린 뒤 이 다섯 줄이면 끝난다. 절차의 근거는
-[인계 문서 3절](../../docs/20260909_그리퍼_캘리브레이션_인계.md)에 있다.
+[인계 문서 3절](../../docs/experiments/20260909_그리퍼_캘리브레이션_인계.md)에 있다.
 
 ```bash
-cd ~/bimanual-robot/tools/servo
+cd ~/bimanual-robot
 
 # 1. 죠를 손으로 완전히 맞닿게 한 뒤
-python3 servo_read.py --id 6                          # 구동이 0 인지 확인
-python3 servo_offset.py --target 3600 --execute       # 그 자세를 3600 으로
+python3 -m tools.servo.servo_read --id 6                          # 구동이 0 인지 확인
+python3 -m tools.servo.servo_offset --target 3600 --execute       # 그 자세를 3600 으로
 
 # 2. 죠를 손으로 완전히 벌린 뒤
-python3 servo_read.py --id 6                          # 열림 끝 값을 읽는다 (예: 506)
-python3 servo_limits.py --min 546 --max 3480 --execute
+python3 -m tools.servo.servo_read --id 6                          # 열림 끝 값을 읽는다 (예: 506)
+python3 -m tools.servo.servo_limits --min 546 --max 3480 --execute
 
 # 3. 12 V 를 껐다 켠다 — EEPROM 을 쓴 뒤 재부팅 없이 움직이면 제어가 꼬인다
 
 # 4. 검증 — 20 mm 를 명령하고 자로 잰다 (3500 − 20 × 30.5 ≈ 2890)
-python3 servo_goto.py --goal 2890 --execute
+python3 -m tools.servo.servo_goto --goal 2890 --execute
 ```
 
 `--execute` 를 빼고 먼저 돌리면 무엇을 바꿀지 보여주고 끝난다.

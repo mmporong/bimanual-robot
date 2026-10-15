@@ -56,7 +56,7 @@ class StandaloneRuntimeTest(unittest.TestCase):
         self.assertFalse((assets / "state.json").exists())
         self.assertFalse((assets / "rviz_initialpose.json").exists())
         mount = yaml.safe_load(
-            (ROOT / "src/jdamr/jdamr_cube_navigation/config/camera_mount_current.yaml").read_text()
+            (ROOT / "src/navigation/jdamr_cube_navigation/config/camera_mount_current.yaml").read_text()
         )
         self.assertEqual(mount["camera_mount"]["transform"]["z_m"], 1.26)
 
@@ -65,7 +65,7 @@ class StandaloneRuntimeTest(unittest.TestCase):
         self.assertEqual(len(provenance["departure_helper_original_sha256"]), 64)
         for name, expected in provenance["copied_dependencies"].items():
             actual = hashlib.sha256(
-                (ROOT / "src/jdamr/scripts/map_20260930_manual" / name).read_bytes()
+                (ROOT / "src/navigation/scripts/map_20260930_manual" / name).read_bytes()
             ).hexdigest()
             self.assertEqual(actual, expected, name)
 
@@ -128,7 +128,7 @@ class StandaloneRuntimeTest(unittest.TestCase):
             "promote": True,
         })()
         rendered = "\n".join(runtime.shell_join(c) for c in runtime.deploy_commands(args))
-        self.assertIn(str(ROOT / "src/jdamr") + "/", rendered)
+        self.assertIn(str(ROOT / "src/navigation") + "/", rendered)
         self.assertIn("--workspace /srv/ws", rendered)
         self.assertIn("colcon", rendered)
         self.assertIn(" build ", rendered)

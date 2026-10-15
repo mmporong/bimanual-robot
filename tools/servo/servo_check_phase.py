@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 
-from sts_bus import A_PHASE, Bus, find_port
+from tools.servo.sts_bus import A_PHASE, Bus, find_port
 
 
 def check_phase(bus, servo_id: int, expected: int) -> bool:

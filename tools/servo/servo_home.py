@@ -8,17 +8,16 @@ lerobot 의 "middle of range" 단계와 같은 일이다. 이걸 하는 이유�
 
 한 팔씩, 손으로 들고 실행하면 1초 안에 끝난다. 구동이 켜져 있으면 중단한다.
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_home.py --port <by-id>                      # 6개 모두
-    python3 servo_home.py --port <by-id> --only wrist_flex    # 한 관절만
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_home --port <by-id>                      # 6개 모두
+    python3 -m tools.servo.servo_home --port <by-id> --only wrist_flex    # 한 관절만
 """
 import argparse
 import json
 import time
 from pathlib import Path
 
-from sts_bus import (Bus, A_OFFSET, A_POS, A_TORQUE, RESOLUTION,
-                     decode_offset, encode_offset, find_port)
+from tools.servo.sts_bus import Bus, A_OFFSET, A_POS, A_TORQUE, RESOLUTION, decode_offset, encode_offset, find_port
 
 SO101 = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 CENTER = 2047

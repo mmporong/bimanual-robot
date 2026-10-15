@@ -1,7 +1,7 @@
 {
   "source_repository": "https://github.com/mmporong/jdamr_cube_ros",
   "source_commit": "2e25c423926d02badd8e3461a32c587912f5dd0a",
-  "destination": "src/jdamr",
+  "destination": "src/navigation",
   "authority": "bimanual-robot is the maintained source after import",
   "scope": "all ROS packages, drivers, firmware, launch/config, evaluation code and operator scripts",
   "excluded": "agent/editor runtime state, unrelated portfolio/reference records, sensor recordings and videos/weights",
@@ -3799,10 +3799,10 @@
   "additional_inputs": {
     "operational_tools": "tools/jdamr/provenance.json",
     "runtime_assets": "config/navigation/jdamr_runtime",
-    "pi_astra_systemd_dashboard": "src/jdamr/deployment/provenance.json",
+    "pi_astra_systemd_dashboard": "src/navigation/deployment/provenance.json",
     "generated_regression_fixtures": {
-      "generator": "src/jdamr/jdamr_cube_navigation/evaluation/generate_sim_nav_obstacle_assets.py",
-      "output": "src/jdamr/jdamr_cube_navigation/evaluation/assets/nav_obstacle",
+      "generator": "src/navigation/jdamr_cube_navigation/evaluation/generate_sim_nav_obstacle_assets.py",
+      "output": "src/navigation/jdamr_cube_navigation/evaluation/assets/nav_obstacle",
       "purpose": "small deterministic world/map/URDF fixtures required by existing regression tests",
       "files": {
         "asset_manifest.json": "1b9a3ee43072c58efe60d5ed00ecdb055ea8f5dd9848838e369512fec77c7baa",
@@ -3817,5 +3817,43 @@
     "Core runtime algorithms, real URDF, four-wheel firmware and calibration bytes preserved; path/entrypoint and test-fixture adjustments are listed separately.",
     "Legacy whitespace attributes preserve upstream source bytes, sealed fixture hashes and unified patch context. New runtime tools keep the default whitespace checks.",
     "AMCL Axis B five known failing tests are retained without changing their decision-pending behavior."
-  ]
+  ],
+  "layout_reorganization": {
+    "previous_destination": "src/jdamr",
+    "destination": "src/navigation",
+    "behavior_change": false,
+    "changes": [
+      {
+        "path": "README.md",
+        "before_sha256": "46a8cb5f0acd2aeaa43e8396c36ca169c447932bee885fec5d25de97eb8de6e7",
+        "after_sha256": "0e4ce9bb3dddc08637b90494c52e3f52431ed2eeec94152c8191891ab3dc388e"
+      },
+      {
+        "path": "deployment/README.md",
+        "before_sha256": "f173f6062eae994b6de3b5d3cb41468451274f7786bd9515f9c2cf659be3828f",
+        "after_sha256": "6fa08e616f320b9d496db3faa506e61efa16fe721597a6dcb2b049eb0a344158"
+      },
+      {
+        "path": "deployment/install_dependencies.sh",
+        "before_sha256": "6d782f09733e9dfec7861b376c62eb1d3472a145b7d84da8e0b0a040302ce15a",
+        "after_sha256": "2e661e5af295adf7c59fd48487d2c6f7203d60c716371d490e7123eb0a2235aa"
+      },
+      {
+        "path": "jdamr_cube_bringup/config/self_filter_hold_flow_model.yaml",
+        "before_sha256": "eb319a10777fd54294f4ea50c5cea04dd94ad7a3b0d812189d0e4989fd25a36d",
+        "after_sha256": "3345d0734274f740c19a5d2219af9725e276f64ea4b72cef2ca227fd6fd2bac8"
+      },
+      {
+        "path": "jdamr_cube_description/config/new_base_geometry.yaml",
+        "before_sha256": "0d1866e9ac020bd7cf05506f833ad5aea571ed94c6a8b3b6b7672098cae1e746",
+        "after_sha256": "24dcb9422446ca4ed26defcad173bf069bfedc6613dc4bf83d37e220e2c3b139"
+      },
+      {
+        "path": "scripts/map_20260930_manual/README.md",
+        "before_sha256": "5952a7cee74e145ac896309530ee0ccfe6c914c5cfdc0dfd6d055f62c3e32c0d",
+        "after_sha256": "9563a9a333d2a9e7c60a6014be58e39242deef6d04eeb5d5e46aeb32a02dd47c"
+      }
+    ],
+    "note": "기존 원본/초기 통합 해시는 당시의 근거로 보존하며 아래 변경은 저장소 경로 참조만 갱신한다"
+  }
 }

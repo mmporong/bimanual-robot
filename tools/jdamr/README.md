@@ -1,6 +1,6 @@
 # JD-AMR 저장소 내부 실행 도구
 
-JD-AMR SLAM·주행 코드의 관리 기준은 이 저장소의 `src/jdamr/`이다. 이후 수정은
+JD-AMR SLAM·주행 코드의 관리 기준은 이 저장소의 `src/navigation/`이다. 이후 수정은
 `bimanual-robot`의 `main`에서 작업 브랜치를 만든 뒤 진행하며, 별도 JD-AMR 저장소나
 `$HOME/jdamr_data/.../tools`의 실행 사본을 원본으로 수정하지 않는다.
 
@@ -48,7 +48,7 @@ tools/jdamr/jdamr_depart.py go table_01
 ```
 
 실행기는 누락된 정적 자산을 준비한 뒤
-`src/jdamr/scripts/map_20260930_manual/jdamr_depart.py`를 불러온다. 주행·위치초기화
+`src/navigation/scripts/map_20260930_manual/jdamr_depart.py`를 불러온다. 주행·위치초기화
 알고리즘의 관리 대상은 이 파일 하나다. `status`는 상태 조회, `init`은 위치초기화,
 `go`는 실물 이동 명령이므로 운영 상황에 맞게 사용한다.
 

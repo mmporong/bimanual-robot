@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools import validate_episode_meta, validate_failure_record
+from tools.data import validate_episode_meta, validate_failure_record
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -544,7 +544,7 @@ class ValidatorCliTest(unittest.TestCase):
             document = copy.deepcopy(EPISODE_EXAMPLE)
             document["outcome"] = None
             episode.write_text(json.dumps(document), encoding="utf-8")
-            command = [str(REPO_ROOT / "tools/validate_episode_meta.py"), str(episode),
+            command = ["-m", "tools.data.validate_episode_meta", str(episode),
                        "--failure-record-dir", str(failures)]
             result = subprocess.run([sys.executable, *command], capture_output=True, text=True)
             self.assertEqual(1, result.returncode, result.stdout + result.stderr)
@@ -560,7 +560,7 @@ class ValidatorCliTest(unittest.TestCase):
             path = Path(directory) / "bad.json"
             path.write_text('{"diagnosis":null,"validation":null,"data_use":null}', encoding="utf-8")
             result = subprocess.run(
-                [sys.executable, "-S", str(REPO_ROOT / "tools/validate_failure_record.py"), str(path)],
+                [sys.executable, "-S", str(REPO_ROOT / "tools/data/validate_failure_record.py"), str(path)],
                 capture_output=True, text=True,
             )
             self.assertNotEqual(result.returncode, 0)
@@ -568,7 +568,7 @@ class ValidatorCliTest(unittest.TestCase):
 
     def run_validator(self, script: str, target: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(REPO_ROOT / "tools" / script), str(target)],
+            [sys.executable, str(REPO_ROOT / "tools/data" / script), str(target)],
             cwd=REPO_ROOT,
             text=True,
             capture_output=True,

@@ -4,13 +4,13 @@
 푸는 순간 자세가 밀렸는지 보이도록 전후 위치를 함께 찍는다.
 중력을 받는 자세에서 풀면 팔이 떨어진다. 그리퍼 단독 작업에서만 무심히 쓸 것.
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_release.py --id 6
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_release --id 6
 """
 import argparse
 import time
 
-from sts_bus import Bus, A_TORQUE, A_POS, find_port
+from tools.servo.sts_bus import Bus, A_TORQUE, A_POS, find_port
 
 
 def main():

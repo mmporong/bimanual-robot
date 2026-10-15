@@ -1,125 +1,54 @@
-# src 구현 계약
+# 실행 소스 지도
 
-이 디렉터리는 물 서빙 로봇의 실행 코드를 담는다. 현행 태스크·정책·구현 순서는
-[2026-09-07 물 서빙 로봇 회의 결정](../docs/20260907_물서빙로봇_회의결정과_실행범위.md)을
-따른다. 과거 붓기안의 MoveIt·로드셀 중심 구조는 현행 구현 기준이 아니다.
+팀 공용 소스는 이 저장소에서 수정한다. 기능별 폴더 안의 ROS 패키지명과 설치된 실행 파일 이름은 유지한다.
 
-현재 실제 ROS 2 패키지는 `hold_flow_description`, `hold_flow_interfaces`, `hold_flow_mission`과
-`jdamr/` 아래의 실차 SLAM·주행 패키지다. JD-AMR 패키지는 기존 이름과 실행 계약을 유지하며,
-[통합 사용법](../docs/JDAMR_RUNTIME.md)에서 빌드·운영한다.
-`hold_flow_mission`은 조작 Action 계약·관제 명령 adapter·시뮬레이션 mock까지 구현됐고,
-`tools/service_order_server.py`의 선택형 backend에서 Action 결과를 소비한다. 아래
-나머지 패키지는 책임과 인터페이스를 먼저 고정한 **구현 예정 경계**이며, 빈 패키지를 완료물처럼
-만들지 않는다.
+| 경로 | 구현 | 시작할 파일 |
+|---|---|---|
+| navigation/ | Cartographer·AMCL·Nav2·면 정렬·정밀 주차·4WD·LiDAR | [주행 소스](navigation/README.md), [사용법](../docs/guides/JDAMR_RUNTIME.md) |
+| manipulation/ | DLS IK·파지·붓기·복귀·엔코더 실행 계획 | [픽앤플레이스](manipulation/ik_pick_place.py), [상대 IK](manipulation/bench_relative_ik.py) |
+| perception/ | 카메라/작업면 보정·컵 추적·액체 충전율 | [컵·액체 인식](perception/water_detection/README.md) |
+| mission/ | 주문 상태기계·SQLite·실행 backend·ROS Action | [상태기계](mission/service_mission_control.py), [Action 패키지](mission/hold_flow_mission/) |
+| description/ | 양팔 URDF/Xacro·기계 설정·검증 | [모델 패키지](description/hold_flow_description/README.md) |
 
-## 패키지별 언어와 책임
+실차 SLAM은 `src/navigation/jdamr_cube_cartographer/`, 저장 지도 주행·주차는
+`src/navigation/jdamr_cube_navigation/`에 있다. 운영 명령은 루트의 `tools/jdamr/`를 사용한다.
+원본 JD-AMR 저장소는 과거 이력이며 이후 수정 기준은 양팔 저장소다.
 
-| 패키지 | 상태 | 주 언어·기술 | 현행 책임 | 착수 조건 |
-|---|---|---|---|---|
-| `hold_flow_interfaces` | 조작 Action v0.1 | ROS IDL | `ExecuteManipulationSkill` 계약. 나머지 인터페이스 예정 | 전체 Mission·정렬·물 양 계약 확정 |
-| `hold_flow_description` | v0.3 정적 검증 완료 | xacro·YAML·URDF | 300 mm·720 mm 모바일 베이스, 혼합 그리퍼 SO-101×2, Astra S·LDS-03 TF | 실측값 반영과 Isaac 동역학 검증 |
-| `hold_flow_bringup` | 예정 | Python·YAML | 실물/sim launch profile, lifecycle 실행 순서 | 첫 실행 패키지와 함께 |
-| `hold_flow_web` | 예정 | FastAPI·HTML·JavaScript·rclpy | 웹 요청 검증, `ServeDrink` Action client | 요청 JSON 계약 |
-| `jdamr/jdamr_cube_navigation`·`jdamr_cube_cartographer` | 소스 통합 | Cartographer·AMCL·Nav2·NavFn·RPP·RGB-D | 저장 지도 이동, station·면 정렬, 근접 주차·도킹 | 실차 출발은 기존 준비된 실행 경로 사용 |
-| `hold_flow_navigation` | 미션 adapter 예정 | 기존 JD-AMR Nav2 Action 소비 | 양팔 작업 완료 신호와 실차 이동 연결 | 실제 조작 Action 연동 |
-| `hold_flow_perception` | 예정 | Python·RGB-D·YOLO·OpenCV·tf2 | station 정렬, 컵·물통·선반·테이블·액면 인지 | 컵·카메라 POC |
-| `hold_flow_motion` | 예정 | C++·Eigen·FollowJointTrajectory | PLANNED phase의 그립·IK·시작·복귀·검증 궤적·붓기 폐루프 | 새 팔 역할·선반 좌표 |
-| `hold_flow_safety` | 예정 | C++·rclcpp·tf2 | command lease, 관절 delta, timeout, 정지 | 첫 실물 명령 전에 |
-| `hold_flow_hardware` | 예정 | Python→C++ 선택·LeRobot·serial | 좌우 SO-101 포트 단독 소유, 상태·명령 변환 | 포트·서보 변종 감사 |
-| `hold_flow_learning` | 예정 | Python·LeRobot 0.6.1·PyTorch·ACT | phase 표시 수집, ACT_ALL·로컬 ACT, rollout, 실패/HIL 데이터 | phase·backend 계약·데이터 게이트 |
-| `hold_flow_mission` | 조작 실행 v0.4 | Python·rclpy | mock·산출물 재생·단일 Isaac 월드 phase 실행을 잇는 Unix socket Action bridge | 반복 주문 물리 reset·Nav2·ACT 연결 |
-| `hold_flow_logging` | 예정 | Python·rosbag2·JSON·Parquet | request ID로 미션·episode·실패 연결 | 인터페이스와 함께 |
-| `hold_flow_isaac` | importer·정적 계약 존재 | Python·USD·Isaac Sim 6.0·ROS 2 Bridge | v0.3 URDF→USD, Nav2·양팔·센서 SIL, sim/real gap | Isaac 장비에서 USD·접촉·gain 검증 |
+## ROS 패키지
 
-## 명령과 데이터 경로
+`description/hold_flow_description`, `mission/hold_flow_interfaces`,
+`mission/hold_flow_mission`과 `navigation/`의 기존 JD-AMR 패키지를 colcon이 찾는다.
+폴더 이름을 ROS 패키지 이름으로 바꿔 호출하지 않는다.
 
-```text
-웹 브라우저
-  → hold_flow_web
-  → ServeDrink Action
-  → hold_flow_mission
-      ├─ NavigateToPose / DockRobot → Nav2 → base controller
-      ├─ AlignToStation → perception
-      └─ ExecuteManipulationSkill → phase router
-            ├─ backend=PLANNED → motion ┐
-            └─ backend=ACT → learning   ├→ command_mux → safety_guard → 양팔 bridge
-                                        ┘
-
-Astra S RGB-D → perception → station pose / fill estimate → mission·phase router·logging
-joint state·action·strategy·backend·safety event → logging → episode sidecar / failure bank
+```bash
+cd "$HOME/bimanual-robot"
+source /opt/ros/jazzy/setup.bash
+python3 tools/jdamr/runtime.py build-pc
+source .runtime/jdamr/pc_ws/install/setup.bash
 ```
 
-### 소유권 규칙
+실차 전륜축 원점과 양팔 모델 차체 중심 원점은105 mm 차이가 있다.
+같은 TF에 두 모델을 동시에 발행하거나 좌표·카메라 자세를 혼용하지 않는다.
+카메라 높이는 바닥 기준1260 mm이며 실차와 설계의 x·y·장착각까지 같은 뜻은 아니다.
 
-- 베이스 이동 중에는 Nav2만 베이스 명령 lease를 가진다.
-- 팔 조작 중에는 베이스 lease를 해제하고 정지 상태를 확인한다.
-- PLANNED·ACT·teleop 중 하나만 팔 명령 lease를 가진다.
-- backend 전환은 관절 속도 0, 허용 자세, 남은 ACT chunk 폐기와 기존 lease 해제 뒤에만 한다.
-- 좌우 SO-101 시리얼 포트는 `hold_flow_hardware` 한 프로세스만 연다.
-- perception은 actuator 명령을 직접 내리지 않고 판정 결과만 반환한다.
-- Action 취소는 mission→policy executor→hardware까지 전파한다.
+## Python 실행
 
-## 먼저 만들 인터페이스
+공용 Python 코드는 저장소 루트에서 모듈로 실행한다. 옮긴 파일을 옛 tools에 복제하거나
+여러 경로를 순회하는 import 우회 사본을 만들지 않는다.
 
-| 인터페이스 | 목적 | 성공 결과에 포함할 것 |
-|---|---|---|
-| `ServeDrink.action` | 전체 미션 실행 | request ID, final state, error code |
-| `AlignToStation.action` | 주방·테이블 정밀 정렬 | pose, quality, timestamp |
-| `ExecuteManipulationSkill.action` | PLANNED·ACT·HYBRID 조작 | skill/strategy, phase별 backend·checkpoint, failure stage/code, intervention count |
-| `EstimateFillLevel.srv` 또는 Action | 물 양 판정 | estimated mL, class, confidence, cup calibration ID |
-| `MissionEvent.msg` | 계층 간 공통 로그 | request ID, stage, event, timestamp |
-| `SafetyState.msg` | 실행 허용·정지 상태 | active lease, stop reason, timestamp |
+```bash
+cd "$HOME/bimanual-robot"
+python3 -m src.manipulation.ik_pick_place --help
+python3 -m src.perception.workspace_plane_calibration --help
+python3 -m apps.service_order.service_order_server --help
+```
 
-긴 작업에는 Action을 사용한다. 물 양을 한 프레임에서 즉시 읽으면 Service로 시작할 수
-있지만, 연속 프레임을 모아 판정하고 취소·feedback이 필요하면 Action으로 올린다.
+웹 화면은 [apps](../apps/README.md), Isaac 실행은 [simulation](../simulation/README.md),
+하드웨어·운영 도구는 [tools](../tools/README.md)에 있다.
+검사는 루트 pytest.ini의 범위와 ROS 패키지의 test/를 구분해 실행한다.
 
-## 병렬 구현 순서
+## 통합 상태
 
-### policy lane — 팀 1순위
-
-1. policy 1·2 내부 phase와 회의의 `3번 policy` 의미를 확정한다.
-2. `PLANNED_ALL / ACT_ALL / HYBRID` preset과 phase별 시작·종료·backend 계약을 IDL로 고정한다.
-3. PLANNED_ALL mock·dry-run으로 phase·성공 판정·안전 정지를 연결한다.
-4. 주방·테이블 장면을 수동 배치해 phase 표시 LeRobot smoke episode를 수집한다.
-5. ACT_ALL과 phase별 ACT 과적합 기준선을 만든다.
-6. 같은 scenario matrix에서 세 전략을 비교한다.
-7. rollout 실패를 strategy·backend·phase별로 수집하고 확인된 원인만 수정·보강한다.
-
-### 이동·IK lane — 사용자 담당
-
-1. `stations.yaml`에 충전소·주방·테이블 계약을 만든다.
-2. SLAM 지도 작성과 AMCL/Nav2 반복 이동을 분리한다.
-3. `jdamr/`의 현행 NavFn·RPP와 실측 footprint·속도·가감속 설정을 사용한다.
-4. 현재 실장 G4의 obstacle layer와 Collision Monitor 설정을 유지한다.
-5. 장애물 회피·재계획 실패 코드와 Nav2 feedback을 기록한다.
-6. 새 팔 역할과 선반 frame을 기준으로 IK 시작·복귀 자세를 검증한다.
-7. 현행 v0.3 URDF를 Isaac Sim에서 USD로 만들고 같은 인터페이스·접촉·gain을 검증한다.
-
-### 인지 lane
-
-1. Astra S에서 컵·액면 가시성 POC를 한다.
-2. YOLO segmentation 라벨과 컵별 보정표를 만든다.
-3. `UNDER/TARGET/OVER/SPILL/UNKNOWN` 판정과 confidence를 반환한다.
-4. 가림이 실제 주요 실패 원인일 때만 손목 카메라를 검토한다.
-
-### 통합 lane
-
-1. 실제 Nav2·policy 대신 mock Action server로 상태기계를 먼저 통과시킨다.
-2. phase router와 세 preset을 mock PLANNED·ACT backend로 검증한다.
-3. 각 실제 패키지를 하나씩 mock과 교체한다.
-4. backend 전환, Action 결과·취소·timeout·재시도를 검증한다.
-5. 마지막에 웹 요청부터 충전 시작까지 request ID 하나로 연결한다.
-
-## 코드 리뷰에서 반드시 확인할 것
-
-- 현재 태스크가 물 서빙 하나인지, 과거 커넥터·음성·범용 태스크가 재진입하지 않았는가
-- 단위가 degree/radian, mm/m 중 무엇인지 필드와 코드에서 명시됐는가
-- `frame_id`와 timestamp가 있으며 오래된 TF·영상이 거부되는가
-- timeout·취소·실제 hold/stop 경로가 있는가
-- 베이스와 팔, PLANNED와 ACT의 명령 소유자가 동시에 활성화되지 않는가
-- strategy·phase·backend·checkpoint 또는 planner/trajectory/controller 버전이 기록되는가
-- 카메라·joint state·action의 실제 fps와 주기 지터를 기록하는가
-- policy ID, checkpoint, dataset, calibration, code commit을 연결했는가
-- 성공률뿐 아니라 단계별 실패 코드와 사람 개입을 남기는가
-- 실물·Isaac Sim·혼합 데이터의 dataset ID와 split이 분리됐는가
-- TODO·stub·빈 패키지를 구현 완료로 보고하지 않았는가
+미션은 ExecuteManipulationSkill Action과 Unix socket으로 시뮬 실행 결과·feedback·취소·timeout을 연결한다.
+실차 도착과 실물 양팔 완료 신호의 주문 미션 연결, 물 양 정지·충전 시작·반복 주문 실물 검증은 남아 있다.
+구현된 모듈과 예정 통합을 구분하며 시뮬·모의 실행을 실물 전체 미션 성공으로 기록하지 않는다.

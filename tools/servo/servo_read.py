@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """버스에 붙은 서보 상태를 읽는다. 읽기 전용이라 언제 실행해도 안전하다.
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_read.py
-    python3 servo_read.py --id 6
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_read
+    python3 -m tools.servo.servo_read --id 6
 """
 import argparse
 
-from sts_bus import (Bus, A_MIN_ANGLE, A_MAX_ANGLE, A_MAX_TEMP, A_P, A_D, A_I,
-                     A_OFFSET, A_TORQUE, A_POS, A_PRESENT_SPEED, A_LOAD,
-                     A_VOLT, A_TEMP, decode_offset, find_port, signed)
+from tools.servo.sts_bus import Bus, A_MIN_ANGLE, A_MAX_ANGLE, A_MAX_TEMP, A_P, A_D, A_I, A_OFFSET, A_TORQUE, A_POS, A_PRESENT_SPEED, A_LOAD, A_VOLT, A_TEMP, decode_offset, find_port, signed
 
 
 def main():

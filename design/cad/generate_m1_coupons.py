@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """인계 문서 6절 M1 공차 쿠폰의 출력용 STEP/STL을 생성한다.
 
-`docs/20260901_설계팀_제작인계패키지_P0.md`의 M1 표가 후보 치수만 정의하고
+`docs/architecture/20260901_설계팀_제작인계패키지_P0.md`의 M1 표가 후보 치수만 정의하고
 모델을 남기지 않아, 출력 순서 1번을 실행할 수 없었다. 이 스크립트가 그 표를
 그대로 형상으로 옮긴다. 치수 단위는 mm다.
 
@@ -31,7 +31,7 @@ from generate_hold_flow_cad import (
 )
 
 DEFAULT_OUTPUT = REPO_ROOT / "design/cad/exports"
-DOC_PATH = REPO_ROOT / "docs/20260901_설계팀_제작인계패키지_P0.md"
+DOC_PATH = REPO_ROOT / "docs/architecture/20260901_설계팀_제작인계패키지_P0.md"
 
 # 인계 문서 6절 M1 표
 M3_CLEARANCE = (3.2, 3.4, 3.6)

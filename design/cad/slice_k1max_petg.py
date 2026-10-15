@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """HOLD THE FLOW 차체 부품을 K1 Max + PETG 인계 문서 스펙으로 슬라이싱한다.
 
-인계 문서 `docs/20260901_설계팀_제작인계패키지_P0.md` 5.2절의 시작 프로파일을
+인계 문서 `docs/architecture/20260901_설계팀_제작인계패키지_P0.md` 5.2절의 시작 프로파일을
 OrcaSlicer 시스템 프리셋 위에 그대로 얹는다. 시스템 프리셋을 평탄화하지 않고
 `inherits`를 남긴 사본에 키만 덮어써서 CLI 호환 실패(-17)를 피한다.
 

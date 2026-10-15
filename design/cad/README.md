@@ -19,7 +19,7 @@
 앞뒤 끝에서 같은 거리로 장착했다는 사용자 확인과 기존 전륜 실측의 환산값이다.
 체결공·휠 높이를 확정한 제조 치수와 구분한다.
 
-SO-101 팔과 그리퍼 원본은 이 생성기가 다시 그리지 않는다. ROS 모델은 `../../src/hold_flow_description`의 SO-101 메시, 왼쪽 기본 moving jaw, 오른쪽 ggao50 치수 프록시를 쓴다.
+SO-101 팔과 그리퍼 원본은 이 생성기가 다시 그리지 않는다. ROS 모델은 `../../src/description/hold_flow_description`의 SO-101 메시, 왼쪽 기본 moving jaw, 오른쪽 ggao50 치수 프록시를 쓴다.
 
 ## 재생성
 
@@ -31,7 +31,7 @@ cd "$HOME/bimanual-robot"
 "$HOME/.cache/bimanual-cad-venv/bin/python" design/cad/generate_hold_flow_cad.py
 ```
 
-결과는 `exports/step`, `exports/stl`, `exports/manifest.json`에 생긴다. 프레임·상판·장착판 조립 STEP은 `exports/step/hold_flow_frame_structure.step`이다. URDF가 참조하는 CAD STL은 `../../src/hold_flow_description/meshes/cad`에도 같은 바이트로 복사된다. STEP 헤더 생성 시각을 정규화하므로 같은 입력의 재생성 diff가 흔들리지 않는다.
+결과는 `exports/step`, `exports/stl`, `exports/manifest.json`에 생긴다. 프레임·상판·장착판 조립 STEP은 `exports/step/hold_flow_frame_structure.step`이다. URDF가 참조하는 CAD STL은 `../../src/description/hold_flow_description/meshes/cad`에도 같은 바이트로 복사된다. STEP 헤더 생성 시각을 정규화하므로 같은 입력의 재생성 diff가 흔들리지 않는다.
 
 ## 2026-09-10 생성 결과
 

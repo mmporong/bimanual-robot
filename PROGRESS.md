@@ -4,11 +4,20 @@
 
 ---
 
+## 2026-10-15 | 기능별 소스·화면·문서 구조 정리
+
+- Git 기준1,478개 파일의 이동 명세를 대조해 누락·목적지 중복 없이1,226개 경로를 옮겼다. 실차 소스는 `src/navigation/`, 양팔 모델은 `src/description/`, 조작·인식·미션은 각 `src/` 분야로 구분했다. 화면은 `apps/`, Isaac 실행·영상은 `simulation/`, 공용 회귀는 `tests/`로 모으고 공용 설치·운영·서보·학습 연동 도구는 `tools/`에 유지한다. 기존 ROS 패키지명과 내부 launch/config/test, 실행 코드를 포함한 evaluation은 보존했다.
+- 문서는 guides/architecture/experiments/meetings/presentations로 나누고 대표 README와 소스·문서 지도를 갱신했다. 소개 사이트는 구형 계획을 현행 Cartographer·RGB-D 면 정렬·4WD·IK·Isaac5.1·SmolVLA 검증 범위로 고쳤다. 미사용 여부가 입증되지 않은 코드는 삭제하거나 archive로 분리하지 않았다.
+- Python은 저장소 루트의 명시적 모듈 import와 실행 명령으로 연결한다. 분야가 갈라진 시뮬 산출물에는 파일별 저장소 상대 경로를 함께 기록하고 Action 산출물 판독기는 해당 경로·해시를 검증한다. 기존 tools/ 기반 산출물 형식도 유지한다. 인식기의 기본 모델 위치와 팔 Xacro 생성기의 입력을 내부 원본으로 연결했다. 생성기의 외부 출력 경로에서도 파일 작성 후 정상 종료하며 생성 Xacro는 기존 결과와 바이트가 같다.
+- 검증: 공용 전체 회귀974건 통과·3건 skip, 후속 생성기·모델·산출물 표적13건 통과. 실차 ROS 회귀2833건 통과·기존 AMCL Axis B 실패5건은 유지했다. C++ colcon 검사29건, AMR9개와 양팔3개 패키지 빌드, 별도 새 clone의 AMR9개 빌드·운영 CLI·표적 검사, 웹 린트·빌드, YAML65개·Markdown191파일·URDF·Python 구문·README 요약·diff 검사가 통과했다. 봉인 평가 자산26개와 패치6개는 바이트를 보존했다.
+- AMR 운영 진입점 `tools/jdamr/jdamr_depart.py`와 Pi의 원격 배포 경로 `src/jdamr_cube_ros`는 유지한다. 새 출발 제약을 추가하지 않았으며 주행 알고리즘·실측 수치·Pi 서비스·펌웨어·지도·도크를 바꾸거나 실물을 움직이지 않았다. 옛 로컬 빌드 캐시는 `.runtime/jdamr/pc_ws_before_navigation_layout_20261015_144001/`, 폴더에 남은 비추적 산출물은 `.runtime/previous_layout_20261015/`에 보존했다.
+
+
 ## 2026-10-15 | SLAM·실차 주행 소스를 양팔 저장소로 통합
 
-- JD-AMR 원본 커밋 `2e25c423926d02badd8e3461a32c587912f5dd0a`의 ROS 패키지·드라이버·SLAM·Nav2·주차·펌웨어·운영 도구를 `src/jdamr/`에 통합했다. 이후 소스 기준과 작업 브랜치는 양팔 저장소로 통일한다. ROS 패키지명·전륜축 기준 실차 TF·4륜 펌웨어·렌즈 높이1260 mm를 유지하고, 양팔 시뮬 모델의 차체 중심 원점과105 mm 차이를 명시했다. 원본 리포의 사용자 미커밋 RViz 변경과 에이전트 상태·영상·주행 로그는 포함하지 않았다.
+- JD-AMR 원본 커밋 `2e25c423926d02badd8e3461a32c587912f5dd0a`의 ROS 패키지·드라이버·SLAM·Nav2·주차·펌웨어·운영 도구를 `src/navigation/`에 통합했다. 이후 소스 기준과 작업 브랜치는 양팔 저장소로 통일한다. ROS 패키지명·전륜축 기준 실차 TF·4륜 펌웨어·렌즈 높이1260 mm를 유지하고, 양팔 시뮬 모델의 차체 중심 원점과105 mm 차이를 명시했다. 원본 리포의 사용자 미커밋 RViz 변경과 에이전트 상태·영상·주행 로그는 포함하지 않았다.
 - `tools/jdamr/`에서 PC 빌드·Pi stage 배포·기존 `status/init/go`를 제공한다. 외부에만 있던 보조 도구6개와 작은 지도·keepout·등록부·route 자산을 포함했으며 기존 도크·초기화 상태·기록은 보존한다. 승격은 검증된 stage를 유지한 채 source/install/tools 경로를 연결하고 중간 실패 시 슬롯과 자산을 복구한다. 원격 인자 검증과 배포 잠금을 적용했으며 서비스 재시작·실물 이동을 자동 실행하지 않는다.
-- Pi의 Astra 소스 pin과 Jazzy 호환 수정10파일, 현행 대시보드 소스4개·systemd·udev를 보존했다. 원본·수정·자산의 해시는 가져오기 명세와 각 provenance에 기록했다. 새 사용법은 `docs/JDAMR_RUNTIME.md`에 두고 대표 README와 기존 이식 문서의 현행 진입점을 갱신했다.
+- Pi의 Astra 소스 pin과 Jazzy 호환 수정10파일, 현행 대시보드 소스4개·systemd·udev를 보존했다. 원본·수정·자산의 해시는 가져오기 명세와 각 provenance에 기록했다. 새 사용법은 `docs/guides/JDAMR_RUNTIME.md`에 두고 대표 README와 기존 이식 문서의 현행 진입점을 갱신했다.
 - 검증: 기존 양팔 공용 회귀870건 통과·2건 skip, ROS 회귀2833건 통과·기존 AMCL Axis B 실패5건 보존, 별도 출발 모의71건 통과. 실차 런타임9개 패키지는 기존 overlay 없이 새 빌드와 별도 Git index 스냅샷 빌드가 모두 통과했고 설치 경로9개·실행기 도움말을 확인했다. 출발 모의 검사는 번들 자산을 임시 폴더에 만들어 외부 운영 데이터 없이 실행한다. 실패5건은 사용자 결정 대기 범위이므로 알고리즘이나 판정을 바꾸지 않았다.
 - 양팔 운영 진입점의 Pi 상태 조회는 성공했다. CLI 세션에 사용자 bus 환경변수가 없을 때 현재 UID 소유의 기존 socket만 사용하도록 보완했다. 통합 중 Pi 서비스·펌웨어·도크는 변경하지 않았고 비상정지를 해제하거나 이동 명령을 보내지 않았다. 코드 통합·빌드 결과를 새 높이에서의1 cm 실측 성공으로 취급하지 않는다.
 
@@ -29,7 +38,7 @@
 - 원격 서버 학습(`water_pour_jitter_60_smolvla_v1`) 완료를 확인했다. eval_loss는
   9000스텝(0.1632)이 최종 10000스텝(0.1668)보다 낮아 9000스텝 체크포인트를
   채택했다. `train_config.json`의 `episodes` 목록으로 held-out 12개(14,15,19,20,
-  24,27,32,37,42,47,52,57) 제외가 실제 반영됐음을 재확인했다. 상세: `docs/20261014_원격GPU서버_학습셋업_기록.md`.
+  24,27,32,37,42,47,52,57) 제외가 실제 반영됐음을 재확인했다. 상세: `docs/experiments/20261014_원격GPU서버_학습셋업_기록.md`.
 - `pretrained_model/`만(1.2GB) 로컬로 내려받았다. 배포 전 게이트 1·2단계(오프라인
   shape 확인, 관절 한계 검사)를 하드웨어 없이 통과시켰다. 토크나이저 상대경로 버그를
   절대경로로 고쳤고, calibration range_min/max가 안전 기준으로 부적절함을(시연
@@ -42,7 +51,7 @@
   기본 실행 인자에 더했다.
 - 건식(물 없음) 실물 롤아웃 8회: 중심부/비극단 위치에서는 붓기·컵 적재·초기 자세
   복귀까지 여러 차례 완주, 지터(±3cm) 범위 가장자리에서는 그립 실패·충돌이
-  반복됐다. 물 포함 시험은 아직 진행하지 않았다. 상세: `docs/20261014_로컬_SmolVLA_배포전_검증과_건식롤아웃.md`.
+  반복됐다. 물 포함 시험은 아직 진행하지 않았다. 상세: `docs/experiments/20261014_로컬_SmolVLA_배포전_검증과_건식롤아웃.md`.
 
 ## 2026-10-14 | 4륜 최종안의 기계·URDF·시뮬 소비 경로 통합
 
@@ -63,11 +72,11 @@
 - 사용자 요청으로 출발 뒤 검토·검수·리뷰·전체 검사·문서 작업을 끼우지 않는 실행 규칙을 CLAUDE.md와 README에 반영했다. 최종 간격을 임의 여유로 늘리지 않으며, JD-AMR 기본 `go`에서 매번 기동하던 기록기·부하 진단은 `--record-diagnostics` 선택 기능으로 바꿨다(관련 흐름71건 통과). 센서·통신 장애와 충돌 정지는 유지하고 별도 실차 주행 코드를 이 저장소에 복제하지 않는다.
 - 근거와 상세 한계: [책상 1 cm 주차 결과와 4륜 전환 분석](https://github.com/mmporong/jdamr_cube_ros/blob/main/jdamr_cube_navigation/evaluation/20261013_TABLE_PARKING_AND_4WD_TRANSITION.md). 이 항목은 오늘 확인된 실기 상태를 덧붙인 기록이며, 문서에 남은 전환 전 계획과 당시 2륜 결과를 4WD 성능으로 사용하지 않는다.
 
-## 2026-10-12 | 탑뷰 카메라 컵 충전율 감지 모듈 추가 (`water_detection/`)
+## 2026-10-12 | 탑뷰 카메라 컵 충전율 감지 모듈 추가 (`src/perception/water_detection/`)
 
-- 비스듬한 탑뷰 카메라 한 대로 투명 컵의 액체 충전율(높이·부피)을 실시간으로 재는 독립 모듈을 `water_detection/`에 추가했다. YOLOE로 컵을, 탑뷰 사진 56장으로 파인튜닝한 YOLOE 세그멘테이션으로 액체를 찾고, 컵 입구·수위선·바닥을 타원으로 보아 가운데 선끼리 비교한다. 부피는 컵 윤곽의 줄별 너비²를 쌓아 컵 모양 가정 없이 계산한다. 웹 GUI(`python -m water_detection.detect_gui`)와 `/status` JSON API를 제공한다.
+- 비스듬한 탑뷰 카메라 한 대로 투명 컵의 액체 충전율(높이·부피)을 실시간으로 재는 독립 모듈을 `src/perception/water_detection/`에 추가했다. YOLOE로 컵을, 탑뷰 사진 56장으로 파인튜닝한 YOLOE 세그멘테이션으로 액체를 찾고, 컵 입구·수위선·바닥을 타원으로 보아 가운데 선끼리 비교한다. 부피는 컵 윤곽의 줄별 너비²를 쌓아 컵 모양 가정 없이 계산한다. 웹 GUI(`python -m water_detection.detect_gui`)와 `/status` JSON API를 제공한다.
 - 붓기 중 가림 대응으로 컵 모양을 약 1초 안정 후 저장하고, 수위선 위쪽이 가려지면 숫자 대신 `occluded`를 낸다. 목표 판정은 5프레임 연속 일치 시 확정한다.
-- 모델 가중치(`water_yoloe.pt` 23MB)는 처음엔 데이터 규칙에 따라 제외했으나, 팀원이 바로 실행할 수 있도록 사용자 요청으로 `water_detection/models/`에 포함했다(규칙 예외, sha256 `1610267f026d…`). Orbbec Astra용 OpenNI2 헬퍼는 저장소 밖에 있어 `ASTRA_HELPER` 환경변수로 지정하고, 일반 웹캠은 `--camera`로 쓴다.
+- 모델 가중치(`water_yoloe.pt` 23MB)는 처음엔 데이터 규칙에 따라 제외했으나, 팀원이 바로 실행할 수 있도록 사용자 요청으로 `src/perception/water_detection/models/`에 포함했다(규칙 예외, sha256 `1610267f026d…`). Orbbec Astra용 OpenNI2 헬퍼는 저장소 밖에 있어 `ASTRA_HELPER` 환경변수로 지정하고, 일반 웹캠은 `--camera`로 쓴다.
 - 검증: 합성 컵 단위 테스트 29개와 저장소 링크·README 검사 PASS(34 passed), 저장소 전체 수집 829개 중 기존 `vtk` 미설치 3건 외 오류 없음, 마크다운 링크 101파일 PASS. 이번 작업에서 실물 로봇·카메라 측정은 하지 않았다. 실제 수위·부피와 비교한 정량 정확도는 아직 없다(README 한계 참고).
 
 ## 2026-10-02 | PR #54 새 양팔 캘리브레이션 통합과 충돌 해결
@@ -95,7 +104,7 @@
 ## 2026-09-30 | 왼팔 상대 IK와 엔코더 보정, 영상상 컵 동반 상승
 
 - 사용자 요청에 따라 실물 왼팔 컵 접근을 이어갔다. 추가 캘리브레이션·실측·A/B 판독을 요구하지 않았다. 오른팔·리더·베이스는 움직이지 않았고 게인·EEPROM·보호·캘리브레이션·URDF는 변경하지 않았다. 온도·부하를 읽지 않았다.
-- 공식 보정의 범위 중점은 LeRobot 각도 영점이며 URDF 영점 대응 인증은 아니다. 관측한 수평 죠에 맞는 손목 roll +90° 후보를 `tools/bench_relative_ik.py`에 분리했다. 첫 4축 오프셋은 0, 손목 후보는 0/90°만 허용하며 calibration/URDF 해시·관측 근거를 결합한다. 시작 FK·IK·raw 역변환·실물 범위 교집합·양자화 후 FK·충돌 표본은 같은 변환을 쓴다. 잠정 매핑·실물 정밀도·파지 인증 플래그는 false로 유지한다. 도구 CLI는 오프라인 계획만 작성한다.
+- 공식 보정의 범위 중점은 LeRobot 각도 영점이며 URDF 영점 대응 인증은 아니다. 관측한 수평 죠에 맞는 손목 roll +90° 후보를 `src/manipulation/bench_relative_ik.py`에 분리했다. 첫 4축 오프셋은 0, 손목 후보는 0/90°만 허용하며 calibration/URDF 해시·관측 근거를 결합한다. 시작 FK·IK·raw 역변환·실물 범위 교집합·양자화 후 FK·충돌 표본은 같은 변환을 쓴다. 잠정 매핑·실물 정밀도·파지 인증 플래그는 false로 유지한다. 도구 CLI는 오프라인 계획만 작성한다.
 - 작은 waypoint마다 P16의 목표 미도달로 멈추던 실행기를 보강했다. 기본 복귀 성공은 토크 유지, 실패/중단은 현재 위치로 진행 목표를 취소하며 토크 OFF를 보내지 않는다. 새 `execute_encoder_feedback()`는 이미 켜진 팔의 엔코더를 따라 명목 목표와 보정 명령을 구분한다. 전달당 최대 5 tick, 실제 위치 구간 ±10 tick, 10초 제한과 정체 중단을 유지한다. 실패 진단에 actual/target/command/bias와 표본을 남기고 속도·가속도를 복원한다. 기존 보정 goal의 연속 호출 보존과 최종 재판독으로 stale 성공을 막는다.
 - 25 mm 명목 수평 추가 접근 `advance25b`는 실제 목표 ±3 tick 이내에 도달했다. 닫기는 그리퍼 2969→2484에서 추종 차이로 멈췄으며 접촉과 deadband를 구분하지 못했다. 이후 목표 2465/실제 2482의 제한된 추가 닫기를 유지했다. 모터 닫힘값을 파지 성공으로 사용하지 않는다.
 - 기본 보정/추종 40/45 tick에서 10 mm·8 mm 명목 상승은 shoulder_lift에 각각 +22/+19 tick 오차가 남아 중단됐다. 나머지 축은 ±3 tick 이내였으나 잠정 FK의 실제 TCP 높이도 시작보다 내려갔다. 성공한 3 mm 후보는 어깨가 반대 방향으로 움직인 다른 자세 해이므로 단순히 높이만 줄여 해결한 것으로 해석하지 않는다. P16·중력·마찰의 정확한 물리 원인은 확정하지 않았다.
@@ -238,7 +247,7 @@
 
 ## 2026-09-29 | 실물 RGB 3대 카메라 관제와 양팔 정지 버튼
 
-- `tools/camera_dashboard.py`를 상단·손목 A/B 3개 영상과 사용자 클릭 토크 OFF 관제로 갱신했다. 현 연결의 USB by-path를 기본값으로 사용하고 `127.0.0.1:8770`에만 제공한다. 카메라 좌우 역할은 미확정이므로 A/B로 표시한다.
+- `apps/camera_dashboard/camera_dashboard.py`를 상단·손목 A/B 3개 영상과 사용자 클릭 토크 OFF 관제로 갱신했다. 현 연결의 USB by-path를 기본값으로 사용하고 `127.0.0.1:8770`에만 제공한다. 카메라 좌우 역할은 미확정이므로 A/B로 표시한다.
 - 정지는 서로 다른 팔 포트 2개를 명시한 경우만 활성화한다. ID 1–6 전체에 torque OFF를 전송한 뒤 읽어 확인하며 일부 ID/포트 실패 시 나머지 정지도 시도한다. 이동·토크 ON·EEPROM·온도·부하 접근은 없다. GET과 미인증 POST는 팔 포트를 열지 않는다.
 - 정지 결과는 `~/.local/state/bimanual-robot/dashboard-stop.jsonl`에 저장한다. 토크 OFF로 팔과 물체가 내려올 수 있고, 포트를 다른 제어기가 사용하거나 통신이 끊기면 정지를 보장하지 못한다. 하드웨어 전원 차단 및 실행기 연동 인터록을 대체하지 않는다. 이전 OFF 확인도 현재 상태를 보장하지 않는다.
 - 검증: 정지·통신 실패·다른 팔 처리·로그 실패·HTTP 보호·잘못된 포트 개수 포함 mock 10개 통과, 구문·diff 검사 통과. 연구자 보조 검토의 포트 개수 결함을 수정했다. 공식 독립 승인으로 취급하지 않는다. 실제 브라우저에서 3개 영상 640×480 로드, 정지 버튼 활성화, 가로 overflow 없음 확인. 검증 중 실물 정지 버튼이나 이동 명령을 실행하지 않았다.
@@ -253,7 +262,7 @@
 - `validated_mock.json`은 11개 phase와 정지·복원까지 통과했다. `isaac_touchdown`·최종 코드 `isaac_final`은 10 g 강체 컵 집기·상승·10 mm 이송·내려놓기·분리를 통과했다. 유지 최소 상승 59.596 mm, 최종 책상 지지 0.0981 N·손가락 접촉 0 N이며 최종 tool 해시도 일치한다. 실물·RGB 인식·유동·컵 변형·완전 연속 충돌 검증은 아니다.
 - 실행 전/후 성공을 분리한다. mock·모터 도달로 physical_grasp_verified/physical_task_verified를 참으로 만들지 않는다. 현행 실측 작업셀·TCP·개구 대응값은 아직 없어 템플릿을 비워 두었다. 연결만 하면 무조건 실행된다고 표시하지 않는다. 실물은 감독형 확인, Isaac의 자동 접촉 하강 정지는 시뮬레이션 전용이다.
 - 검증: tools pytest 525개 통과·2개 skip, 이후 추가한 실측 미확인 packet 실행 거부 검사 포함 신규 파일 45개 통과. 구문·pyflakes·diff·README 자동 요약·수정 문서 47개 로컬 링크 검사 통과. code-reviewer 생성은 native thread limit으로 불가했다. 별도 검증 패스와 연구자 보조 검토를 수행했으며 공식 독립 승인으로 과장하지 않는다.
-- 실행 절차: [IK 픽앤플레이스 실행 전 준비](docs/20260929_IK_픽앤플레이스_실행전_준비.md). 로컬 증거는 `/data/$USER/robot-artifacts/restaurant/ik_pre_execution_20260929/`에 보존한다. 새 영상 프레임·데이터셋·가중치는 만들지 않았다.
+- 실행 절차: [IK 픽앤플레이스 실행 전 준비](docs/guides/20260929_IK_픽앤플레이스_실행전_준비.md). 로컬 증거는 `/data/$USER/robot-artifacts/restaurant/ik_pre_execution_20260929/`에 보존한다. 새 영상 프레임·데이터셋·가중치는 만들지 않았다.
 
 ## 2026-09-29 | 최신 보정 재사용과 고정 좌표 IK 준비
 
@@ -338,7 +347,7 @@
 - `hold_flow_mission`에 ROS import가 없는 계약 검증 계층, 관제 `manipulate` 명령 adapter, simulation mock Action server와 CLI client를 추가했다. mock은 `dry_run=true`만 받고 모터·카메라·Isaac Sim에 접근하지 않는다.
 - ROS 2 Jazzy에서 IDL 생성과 두 패키지 빌드를 통과했다. Action 왕복 결과는 정상 `SUCCEEDED`, 0.03초 제한 `TIMEOUT/ABORTED`, 실행 중 취소 `CANCELED`로 분리됐고 세 경우 모두 요청·미션·주문 ID와 phase/backend를 보존했다.
 - 계약 단위 테스트 7개와 `colcon test`를 통과했다. 현재는 웹 관제 명령을 수동 client로 보내는 경계까지이며 웹 runtime 대기·실제 PLANNED/ACT 실행기·취소의 hardware bridge 전파는 남아 있다.
-- 계약과 재현 명령: [ExecuteManipulationSkill ROS 2 Action 계약과 mock 검증](docs/20260922_ExecuteManipulationSkill_ROS2_Action.md)
+- 계약과 재현 명령: [ExecuteManipulationSkill ROS 2 Action 계약과 mock 검증](docs/experiments/20260922_ExecuteManipulationSkill_ROS2_Action.md)
 
 ## 2026-09-22 | 웹 주문·Mission Queue·배터리 관제 dry-run
 
@@ -348,7 +357,7 @@
 - 로컬 HTTP API와 운영형 주문 화면을 추가했다. 4테이블 식당 지도, 현재 이동 경로, 11개 phase, 냉수·온수 주문, 큐, 누적 이력과 이벤트를 한 화면에서 확인한다.
 - 주문·이벤트·실행 명령·최신 snapshot을 SQLite에 저장한다. 기본 경로는 `$HOME/.local/state/bimanual-robot/service-order-server/`이며 서버 재시작 뒤 활성 주문, phase, 배터리와 큐를 복구한다. JSON과 JSONL은 확인용으로 함께 남긴다.
 - 이 구현은 실물·ROS 2·카메라·Isaac Sim에 접속하지 않는다. 인증·TLS·다중 로봇 배차·무선 복구·실제 충전 확인도 남아 있다.
-- 실행법과 다음 adapter 경계: [웹 주문·Mission Queue·배터리 관제 dry-run](docs/20260922_웹주문_미션관제_dry-run.md)
+- 실행법과 다음 adapter 경계: [웹 주문·Mission Queue·배터리 관제 dry-run](docs/experiments/20260922_웹주문_미션관제_dry-run.md)
 
 ## 2026-09-22 | 차체 완성 전 지도·박스 station·충전소 왕복 기준선
 
@@ -356,7 +365,7 @@
 - JD-AMR `feat/restaurant-service-destinations`의 `8e11564`에 `home_dock` 교시와 `지정 station별 도착 → 전면 박스 안정 관측 20초 → 다음 station → home_dock 위치·방향 복귀` 상태기계를 추가했다. 박스 관측기는 속도를 발행하지 않으며 서비스 launch에서 명시적으로 함께 기동할 수 있다.
 - 목적지와 home은 같은 지도·Keepout 해시와 실시간 격자 신원에 묶인다. 내부 판정 목표는 위치 0.05m·방향 3°·정지 1초이며 외부 계측 정확도로 표시하지 않는다. 과거 `후진 → 회전 → 후진`은 충전소 복귀가 아니라 목적지 이탈 동작으로 재분류한다.
 - JD-AMR 패키지 빌드, 관련 기능 테스트 102개, 변경 파일 flake8, 설치된 CLI·launch 인자 확인을 통과했다. 새 지도 생성, 실제 station 교시와 한 번의 전체 왕복은 남아 있다.
-- 이 선행 시험은 실제 센서를 쓰지만 완성 기체의 전체 검증은 아니다. 실제 충전 접점·전류, 박스 종류 분류, 양팔 조작, 완성 차체 하중·정지 성능은 별도 게이트로 유지한다. 실행 순서와 이관 경계는 [차체 완성 전 지도 기반 서빙 왕복 검증](docs/20260922_차체완성전_지도기반_왕복검증.md)에 정리했다.
+- 이 선행 시험은 실제 센서를 쓰지만 완성 기체의 전체 검증은 아니다. 실제 충전 접점·전류, 박스 종류 분류, 양팔 조작, 완성 차체 하중·정지 성능은 별도 게이트로 유지한다. 실행 순서와 이관 경계는 [차체 완성 전 지도 기반 서빙 왕복 검증](docs/experiments/20260922_차체완성전_지도기반_왕복검증.md)에 정리했다.
 
 ## 2026-09-22 | 기각 영상·임시 검수 데이터 정리
 
@@ -442,7 +451,7 @@
 - 실패 원본은 `/data/lim/robot-artifacts/restaurant/`에 보존했다. 초기 주행 정차 오차, 접촉 API 인자 오류, PLACE 전환 시 이전 명령 재사용, 고정 구조물 내부 접촉, 예외의 성공 플래그 잔류를 수정했다. 단위 테스트로 고정 연결성·바닥 접촉·오류 플래그를 검사한다.
 - `probe02`는 주입 장애물 접촉을 식별해 미션 실패/검출 시험 통과로 종료했다. 물리 제동 거리나 동적 장애물 회피를 검증한 것은 아니다. Kit의 graceful 종료 스레드가 남는 현상은 결과 저장 후 반환 코드와 함께 종료를 요청하도록 수정했다. 시간 초과 `exit_failure01`은 종료 코드 1, `probe02`는 종료 코드 0을 확인했다. 이미 끝난 옛 실행의 종료 잔여 프로세스만 정리했으며 산출물은 보존했다.
 - CPU 전체 354 passed·2 skipped, 구문·pyflakes·diff 검사 통과. 별도 코드 리뷰의 미해결 차단 사항은 없으며, LSP 진단은 환경에 없어 실행하지 못했다. 기록된 실행 코드 사본·12개 도구·5개 입력 해시로 버전을 구분한다.
-- 현재 물리 서빙 검증은 `table_1`의 빈 컵이다. 나머지 테이블은 정적 경로 검사만 수행했다. Nav2·ROS BT·SLAM, 물붓기와 액체 운반 통합, 충전소 복귀·실물 전이는 미검증이다. [실행법과 증거](docs/20260921_식당_시뮬레이션_환경.md)를 참고한다.
+- 현재 물리 서빙 검증은 `table_1`의 빈 컵이다. 나머지 테이블은 정적 경로 검사만 수행했다. Nav2·ROS BT·SLAM, 물붓기와 액체 운반 통합, 충전소 복귀·실물 전이는 미검증이다. [실행법과 증거](docs/experiments/20260921_식당_시뮬레이션_환경.md)를 참고한다.
 
 ## 2026-09-21 | 입구 확장 컵과 발표용 식당 환경
 
@@ -453,7 +462,7 @@
 - `flared03` 105°·20초 조건 1회는 종료 코드 0, task_pass/preclose_clear true로 파지·붓기·복귀·손 분리까지 통과했다. 최종 컵 631/918개·밖 3개이며 이전 원통 컵의 밖 8개보다 적다. 컵과 접근 경로를 함께 바꾼 단일 실행 비교다. 조기 접촉/이동 위반 0건, 비파지·팔끼리·용기끼리 접촉 신호 최대 0 N, 복귀 XY 오차 컵 2.559 mm·병 2.285 mm다. 도구 9개·설정 해시를 대조했고 1,308프레임을 기록했다.
 - CPU 337 passed·2 skipped, 구문·pyflakes·diff 검사 통과. 코드 리뷰에서 발견한 조기 접촉 판정 누락과 장면/지도 원본 분리를 수정했다. 원본 URDF·실물 그리퍼 모델은 변경하지 않았으며 미보정 강체 프록시·8 mm 장착 가정은 유지한다.
 - 식당 최종 `presentation02`의 전체·손님·작업대·컵 근접·상부 시점 렌더와 USD 재개방을 확인했다. 근접 카메라 near clip을 보정하고 상부 시점 잘림을 수정했다. `flared03/bimanual_pour_full.mp4`는 130.8초·1,308프레임·10 fps이며 전체 디코딩을 통과했다. 대용량 자산은 `/data/lim/robot-artifacts/`에만 보존한다. 원본 import의 빈 base visual 참조 경고는 문서에 남겼다.
-- 실행법과 범위: [식당 환경](docs/20260921_식당_시뮬레이션_환경.md), [넓은 입구 컵](docs/20260921_양팔_PBD_물붓기_시뮬레이션.md#입구가-넓은-컵).
+- 실행법과 범위: [식당 환경](docs/experiments/20260921_식당_시뮬레이션_환경.md), [넓은 입구 컵](docs/experiments/20260921_양팔_PBD_물붓기_시뮬레이션.md#입구가-넓은-컵).
 
 ## 2026-09-21 | 오른쪽 병 몸통 유지·왼쪽 컵 방향으로 물붓기 경로 수정
 
@@ -473,7 +482,7 @@
 - 왼손은 강체 패드, 오른손은 순정 평면 죠 프록시다. 랙 한 쌍만 내부 충돌에서 제외하고 블레이드 간격·실제 관절 범위를 확인한다. 손목–연결판 간격을 위한 추가 8 mm 장착은 별도 미보정 가설이며 원본 URDF·기본 설정은 보존했다. 접촉력은 정량 무게 검증이 아닌 접촉 신호로 사용한다.
 - 실패 기록 `FAIL-20260921-0002/0003`과 근거 6개를 `~/robot-artifacts/pour_20260921/failures/`에 보존하고 SHA-256을 확인했다. 성공 IL 데이터로 편입하지 않는다.
 - 검증: CPU 318 passed·2 skipped(기존 OpenCV ChArUco 제약), 구문·pyflakes·diff 검사 통과. 코드 리뷰에서 조기 물 이동, 중간 파지 유실, 잘못된 배치 위치, 후처리 예외의 거짓 성공 판정을 보강했다.
-- 상세: [양팔 PBD 물붓기 시뮬레이션](docs/20260921_양팔_PBD_물붓기_시뮬레이션.md). 실물 물붓기·RGB 인식·TPU 변형·이동 베이스 검증은 포함하지 않는다.
+- 상세: [양팔 PBD 물붓기 시뮬레이션](docs/experiments/20260921_양팔_PBD_물붓기_시뮬레이션.md). 실물 물붓기·RGB 인식·TPU 변형·이동 베이스 검증은 포함하지 않는다.
 
 ## 2026-09-21 | 오른손 경로·충돌 형상 대조와 교체 조립 가설 시험
 
@@ -532,7 +541,7 @@
 - 물체 원기둥·책상 판·반대 팔에 대해 URDF collision 외곽 검사와 팔 관절 한계 검사를 추가했다. 보수적 검사로 오탐이 가능하며 자가충돌·로봇 구조물·TPU 접촉/변형·연속 경로 검증은 아니다. 실패 후보는 화면에서 마지막 통과 자세를 유지한다.
 - 실제 Isaac GUI에서 6개 후보를 검토해 오른손 reorient 1개만 적용하고 나머지 5개가 HOLD되는 것을 manifest로 확인했다. 적용 자세의 시뮬레이터 값 차이는 좌 4.64e-8 rad·우 5.00e-8 rad였으며 양팔 구동 추종 성능을 뜻하지 않는다. 장면 재개방도 통과했다. 로컬 증거: `logs/isaac_workcell_20260918/body_side_v2/`.
 - 검증: 전체 pytest 191 passed·2 skipped(기존 OpenCV ChArUco 제약), 구문·diff 검사 통과. 원본 URDF·캘리브레이션·서보 실행기는 유지했고 실물 접속은 없었다. 닫기·들어올림은 미구현/미검증 상태로 남긴다.
-- 상세와 재실행: [컵 중간·양팔 측면 파지 재설계](docs/20260918_컵중간_양팔_측면파지_재설계.md). README와 프리뷰 안내도 초기 갤러리와 현행 후보 검토를 구분했다.
+- 상세와 재실행: [컵 중간·양팔 측면 파지 재설계](docs/architecture/20260918_컵중간_양팔_측면파지_재설계.md). README와 프리뷰 안내도 초기 갤러리와 현행 후보 검토를 구분했다.
 
 ## 2026-09-18 | Isaac Sim 5.1 전체 모델·작업 환경 프리뷰
 
@@ -540,7 +549,7 @@
 - 원본 URDF의 구형 바퀴 간격 320 mm와 앞뒤 중앙 캐스터 배치를 발견했다. 팔 FK와 원본 파일은 보존하고 프리뷰 사본에만 migration 기록의 간격 510 mm·바퀴 반경 32.9 mm·후방 캐스터 2개 프록시를 적용했다. 캐스터 장착 중심은 추정이며 주행 좌표계 통합·관성 재계산은 하지 않았다.
 - 베이스 고정·중력/접촉 제외 상태의 자세 갤러리다. 보간은 실제 기록 궤적이 아니며 관절 한계·충돌 안전·동역학·파지 성공은 미검증이다. 왼손 FinRay와 RGB 3대는 아직 모델에 반영되지 않아 GUI·manifest·문서에 차이를 표시했다.
 - 검증: 전체 pytest 170 passed·2 skipped(기존 OpenCV ChArUco API 제약), 신규 시험 17개 전부 통과. 별도 코드 리뷰 차단 결함 없음, Python 구문·diff 검사 통과. 실행 증거는 Git 제외 `logs/isaac_workcell_20260918/gui_final/`에 있다.
-- 실행법·검증 범위: [URDF 작업 환경 프리뷰](docs/20260918_URDF_Isaac51_작업환경_프리뷰.md). README도 갱신했고 활성 URDF·캘리브레이션·서보 실행기는 변경하지 않았다.
+- 실행법·검증 범위: [URDF 작업 환경 프리뷰](docs/architecture/20260918_URDF_Isaac51_작업환경_프리뷰.md). README도 갱신했고 활성 URDF·캘리브레이션·서보 실행기는 변경하지 않았다.
 
 ## 2026-09-18 | 컵 파지 오프라인 재생·TCP 가정 비교·시간 동기 경로
 
@@ -548,7 +557,7 @@
 - `replay_cup_pick.py`로 원본 JSON·사진·FK용 URDF를 Git 제외 로그 폴더에 보존하고 해시 manifest·HTML을 생성했다. pregrasp 저장 자세는 계획 대비 최대 2.7257°/명목 TCP 16.02 mm 차이였고, 이후 재배치 시점 자세는 37.9785°/150.14 mm 차이였다. 후자는 도달 오차가 아니며 두 수치 모두 실물 컵 위치 오차가 아니다.
 - FinRay 선정 STL 해시와 외곽 `80.0×24.74545×24.087 mm`를 확인했다. 새 `preview_finray_tcp.py`는 별도 URDF에 물리 형상이 없는 가정 프레임만 추가한다. 실측 장착 변환·접촉 중심·질량과 라이선스 확인 전이므로 활성 URDF·collision·inertial은 유지했다.
 - `prepare_pick_execution.py`의 5축 길이·유한 숫자·계획/감사 대응 검증을 보강했다. `build_pick_schedule.py`는 공통 시간 진행률로 감사 시작→pregrasp→grasp를 보존한다. 저장 자료 예시는 52개 샘플·5.068205초이며 `start_recovery_only`, `collision_free=false`다. 실물 실행기에 연결하거나 시간 추종을 검증한 것은 아니다.
-- 절차·명령·남은 실측은 [오프라인 검증과 재개 조건](docs/20260918_컵파지_오프라인검증과_재개조건.md)에 있다. 활성 캘리브레이션·서보 실행기 변경과 원격 push는 수행하지 않았다.
+- 절차·명령·남은 실측은 [오프라인 검증과 재개 조건](docs/experiments/20260918_컵파지_오프라인검증과_재개조건.md)에 있다. 활성 캘리브레이션·서보 실행기 변경과 원격 push는 수행하지 않았다.
 - 검증: `python3 -m pytest -q tools tests -rs`에서 153 passed·2 skipped. 두 skip은 현 시스템 OpenCV의 ChArUco 보드 생성 API 미지원 때문이며 신규 시험은 생략하지 않았다. 저장 자료 기반 세 도구 CLI, Python 컴파일, diff 공백 검사도 통과했다.
 ## 2026-09-21 | PR #42 CI Xacro 의존성 오류 수정
 
@@ -563,7 +572,7 @@
 > 2026-09-18 정정: 아래 당시 기록의 TCP 원인 확정·단일 좌표 실측 기준·모든 실행의 position-only
 > 표현은 검증 범위를 넘었다. 상단 카메라 경로 `2.1`은 허브 하위이고 왼손목 `4`가 노트북 포트다.
 > 부하·온도 제외는 사용자 지시 이후 해당 옵션을 붙인 실행에만 적용된다. 초기 팔 실행은
-> 부하·온도를 판독했다. 현행 판단은 [오프라인 재검토](docs/20260918_컵파지_오프라인검증과_재개조건.md)를 따른다.
+> 부하·온도를 판독했다. 현행 판단은 [오프라인 재검토](docs/experiments/20260918_컵파지_오프라인검증과_재개조건.md)를 따른다.
 
 - 상단 RGB는 노트북 직결 경로 `pci-0000:65:00.3-usb-0:2.1`, 왼손목 RGB는 직결 경로 `pci-0000:65:00.3-usb-0:4`에서 각각 640×480 스트림을 확인했다. 대시보드 기본 손목카메라 경로도 직결 포트로 바꿨다.
 - 투명컵을 왼팔 작업영역에 다시 놓은 뒤 `base_footprint=(0.320, 0.170) m`, 아래로 55도 접근 계획으로 pre-grasp와 grasp 관절 목표까지 실물을 이동했다. 작은 2도 실물 waypoint는 P게인 16의 정지 오차보다 작아 반복 정지했으므로, 충돌 감사 간격은 2도로 유지하고 실물 waypoint는 최대 180 tick, 도달 허용치는 40 tick으로 사용했다.
@@ -631,7 +640,7 @@
 - 실차 기준은 바퀴 반경 0.0329 m, 기하 중심거리 0.510 m, 프레임 340×450 mm, 바퀴 포함 폭 540 mm다. 과거 0.320 m 명목 설계값은 현재 조립 실차 주행 시작값으로 사용하지 않는다.
 - Orbbec Astra S 단독 POC는 개발 노트북 USB에 직접 연결한다. 차체 이동 시험에서는 Pi 4B USB-A에 연결해 Pi가 드라이버·시각·ROS 토픽을 맡고, 노트북이 기록·RTAB-Map·3D 지도 생성·분석을 맡는다. 모터 제어보드나 LiDAR UART에는 연결하지 않는다.
 - 파이 실측 토폴로지는 베이스 제어보드 `/dev/ttyS0` 헤더 UART, G4 LiDAR `/dev/ttyUSB0` CP210x 12 Mbps다. 외부 USB 장치는 G4 한 개만 열거돼 USB-A 4개 중 1개를 사용하고 3개가 남아 있다.
-- 기계 판독값과 주장 한계는 `config/navigation/jdamr_migration.json`, 상세 절차는 [SLAM 실기체 이식](docs/20260912_JDAMR_SLAM_실기체이식.md)에 반영했다.
+- 기계 판독값과 주장 한계는 `config/navigation/jdamr_migration.json`, 상세 절차는 [SLAM 실기체 이식](docs/experiments/20260912_JDAMR_SLAM_실기체이식.md)에 반영했다.
 
 ## 2026-09-14 | 바퀴 모터 이식·기본 주행을 SLAM 선행 게이트로 확정
 
@@ -647,7 +656,7 @@
 - 실패 525회는 유효하게 든 뒤 목표 배치 미달이며 XY 접근/Z 하강/접촉 상실을 구분할 계측이 다음 작업이다. 이 호스트의 Mimic 이미지 생성(1환경, 성공 500개 목표)과 별도 PPO를 동일시하지 않는다. PPO의 39차원 입력 계약을 로컬 미커밋 45차원 계약과도 구분했다.
 - 고도화 제안은 생성 데이터 QC·독립 정책 평가·센서/행동 계약 확인·정차 오차를 반영한 파지·실물 제한 검증이다. AMMR은 별도 새 프로젝트보다 현행 물 서빙의 이동→정지→조작→수납→이동 통합으로 다룬다.
 - 당시 RGB-D P0/P1 우선순위는 유지한다고 기록했으나, 2026-09-14 결정으로 번호와 순서를 대체했다. 현재 P0/P1은 모터 이식·기본 주행이고 RGB-D/LiDAR 검증은 P2/P3이다. 이 항목에서 실행 중인 생성·학습은 중단하거나 변경하지 않았다.
-- 상세 근거·평가 분기·다음 세션 인계: [매니퓰레이션과 AMMR 고도화](docs/20260913_시뮬레이션_매니퓰레이션_AMMR_고도화.md).
+- 상세 근거·평가 분기·다음 세션 인계: [매니퓰레이션과 AMMR 고도화](docs/experiments/20260913_시뮬레이션_매니퓰레이션_AMMR_고도화.md).
 
 ## 2026-09-13 | 당시 결정: 임시 장착 RGB-D 단독 검증 → LiDAR 통합
 
@@ -655,7 +664,7 @@
 
 - 당시 사용자 우선순위는 새 양팔 차체 완성 전 RGB-D 단독 Visual SLAM을 먼저 검증하는 것이었다. 2026-09-14 결정으로 모터 이식·기본 주행 뒤로 이동했다.
 - 당시 첫 작업으로 정한 카메라 모델·드라이버·RGB/Depth/CameraInfo·정렬·시간축·장착 좌표 확인과 기록 재생은 현행 P2에서 수행한다. LiDAR 주행 코드를 교체하거나 두 SLAM이 같은 TF를 발행하도록 하지 않는 경계는 유지한다.
-- 다음 세션의 입력·기록 항목·완료 기준·실패 평가·실물 실행 경계는 [전용 인계 문서](docs/20260913_RGBD_SLAM_우선순위와_다음세션.md)에 고정했다.
+- 다음 세션의 입력·기록 항목·완료 기준·실패 평가·실물 실행 경계는 [전용 인계 문서](docs/experiments/20260913_RGBD_SLAM_우선순위와_다음세션.md)에 고정했다.
 - 당시 P0/P1이라고 부른 RGB-D/LiDAR 검증은 현행 P2/P3이다. 이후 RGB-D·IK 조작 반복성과 동일 과제 ACT 평가를 우선하고 SLAM 백엔드 추가·새 RL 확장을 후순위로 두는 판단은 유지한다.
 - 사용자 추가 확인: 모터는 같은 모델인 다른 차체의 개체이며 ID는 미확정. 기존 제어보드·Pi·G4 LiDAR를 유지하고 LiDAR 높이·위치는 바뀔 수 있다. 장착 완료·실측·실행 승인을 뜻하지 않는다.
 - 독립 리뷰 지적에 따라 이식 계약 schema v2에서 모터·보드 재사용 결합 필드를 분리했다. 확인된 부품 계획과 미확정 ID·실장·실측을 구분하고 실물 구동 비활성을 고정하는 회귀 테스트를 추가했다.
@@ -668,7 +677,7 @@
 - 원본 742개 파일을 별도 로컬 작업공간에 내보내고 해시를 대조했다. dirty/untracked 제외와 덮어쓰기 거부 테스트 PASS.
 - 현행 320 mm 기하 트레드와 기존 183.6 mm 유효값, G4 실행 코드와 LDS-03 설계 차이를 이식 계약에 기록했다.
 - 당시에는 모터·제어보드 재사용안이었으나, 2026-09-13 사용자 확인으로 모터는 같은 모델의 다른 차체 개체, 제어보드·Pi만 기존 장치를 유지하는 것으로 정정됐다. 실장·측정·주행 검증 전이라는 경계는 유지한다.
-- 절차: [SLAM 실기체 이식](docs/20260912_JDAMR_SLAM_실기체이식.md)
+- 절차: [SLAM 실기체 이식](docs/experiments/20260912_JDAMR_SLAM_실기체이식.md)
 
 ## 2026-09-10 | 450×340 mm 상부 프레임·4분할 상판·JDAMR 구동계 재사용
 
@@ -698,13 +707,13 @@
 것을 읽기 전용으로 확인하고 lerobot JSON 으로 내보내, 오른팔(이 문서 상단 세션에서 완료)과
 합쳐 `bi_so_follower`/`bi_so_leader` 로 한 프로세스에서 양팔 동시 텔레옵을 확인했다.
 `bi_so_follower.py` 가 좌우 `gripper_protection` 을 안 읽는 문제를 patch 로 추가 보강했다.
-`docs/20260910_텔레옵_IL_사용법.md` 에 양팔 텔레옵·녹화·학습·자율실행 절차를 반영했다.
+`docs/guides/20260910_텔레옵_IL_사용법.md` 에 양팔 텔레옵·녹화·학습·자율실행 절차를 반영했다.
 
 **구현**
 - `calibration/so_follower_left/follower_left.json`, `calibration/so_leader_left/leader_left.json` — 왼팔 EEPROM 을 `export_lerobot_calibration.py` 로 그대로 내보냄 (서보 미동작)
 - `calibration/bi_follower/{arms_left,arms_right}.json`, `calibration/bi_leader/{arms_left,arms_right}.json` — `bi_so_follower`/`bi_so_leader` 가 기대하는 `<id>_left.json`/`<id>_right.json` 이름 규칙으로 좌우 개별 파일 조립
 - `tools/servo/bi_so_follower_gripper_protection.patch` — `bi_so_follower.py` 가 `left_arm_config`/`right_arm_config` 의 `gripper_protection` 을 안 읽고 항상 `false` 로 무시하던 문제 패치
-- `docs/20260910_텔레옵_IL_사용법.md` — 3-1절(양팔 동시 텔레옵), 5절 양팔 녹화, 6·7절 양팔 비고, 10절 관련 파일 추가
+- `docs/guides/20260910_텔레옵_IL_사용법.md` — 3-1절(양팔 동시 텔레옵), 5절 양팔 녹화, 6·7절 양팔 비고, 10절 관련 파일 추가
 
 **검증**
 - 왼팔 `servo_check_calibration.py`: JSON=EEPROM 일치, `0~4095 오염`·`폭 작음` 없음 (elbow_flex 가 현재 자세에서 기록 범위를 5~7틱 벗어남 — 오차 수준, ok 판정에 영향 없음)
@@ -734,8 +743,8 @@
 - `tools/servo/`: STS3215 도구 8개 — 읽기·이동(델타·부하·정지·발산 감시)·0점·범위 기록(체크섬·글리치 필터)·한계·오프셋·대조·lerobot JSON 내보내기
 - `calibration/so_follower/follower.json`, `calibration/so_leader/leader.json` — lerobot 이 `--robot.calibration_dir` 로 직접 읽는 캘리브레이션. 팔로워 `gripper drive_mode 1`
 - `tools/servo/lerobot_gripper_protection.patch` — lerobot 이 연결 때 그리퍼 토크를 50 % 로 낮추는 코드를 플래그로 분리(로컬 기본 꺼짐). ggao50 은 닫힘 부하 35 % 라 필요
-- `docs/20260910_텔레옵_IL_사용법.md` — 전원 → 텔레옵 → `lerobot-record` → `lerobot-train` → 자율 실행, 금지 사항, 문제 해결
-- `docs/20260909_그리퍼_서보_Phase반전_사고분석.md` + `docs/assets/gripper_phase_20260909/` — 가설 8개 기각 과정, 테스트 로그 원문, 서보 12개 EEPROM 덤프
+- `docs/guides/20260910_텔레옵_IL_사용법.md` — 전원 → 텔레옵 → `lerobot-record` → `lerobot-train` → 자율 실행, 금지 사항, 문제 해결
+- `docs/experiments/20260909_그리퍼_서보_Phase반전_사고분석.md` + `docs/assets/gripper_phase_20260909/` — 가설 8개 기각 과정, 테스트 로그 원문, 서보 12개 EEPROM 덤프
 
 **검증**
 - 그리퍼: 2890 명령 → 자로 2 cm, 1670 → 6 cm, 546 → 95 mm. 발산 감지 도입 후 시험 8회 이탈 0건
@@ -819,7 +828,7 @@ RGB-D 광학 중심을 `(-110, 0, 970) mm`에 배치한 v0.3 모델을 만들었
 
 ## 2026-09-08 | 무선 운용·SLAM·ACT 팀 보고서 작성
 
-**산출물**: `docs/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md` (13개 절).
+**산출물**: `docs/experiments/20260908_물서빙로봇_무선운용과_SLAM_ACT_팀보고.md` (13개 절).
 물 서빙 전체 흐름, Pi·노트북 처리 분담, 무선 관측·행동 계약, 사전 지도와 온라인 SLAM,
 안전·검증 순서·실패 데이터 활용·담당과 미결 사항을 한 문서로 정리했다.
 
@@ -841,7 +850,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 현행 구현 범위에서 걷어내고, 실제 데이터와 미확정 사항을 가상 예시·권장 기준선과 구분했다.
 
 **구현**
-- `tools/failure_bank.py capture`: 관측 입력과 실제 근거 파일을 저장소 밖에 복사하고 SHA-256
+- `tools/data/failure_bank.py capture`: 관측 입력과 실제 근거 파일을 저장소 밖에 복사하고 SHA-256
   기록. 동일 ID 덮어쓰기 거부, 미분석·학습 제외 상태로 시작
 - `verify-evidence`: 로컬 번들의 누락·경로 이탈·해시 불일치 검사
 - `summary`: EXAMPLE 기본 제외, 환경·단계·증상·확정 원인·재시험·재학습 결정 집계.
@@ -853,8 +862,8 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 
 **검증**
 - `python3 -m unittest discover -s tests -v`: 46개 PASS (가상 입력·임시 파일·CLI 왕복)
-- `python3 tools/validate_episode_meta.py`: 예시 1개 full PASS
-- `python3 tools/validate_failure_record.py`: 예시 1개 full PASS
+- `python3 -m tools.data.validate_episode_meta`: 예시 1개 full PASS
+- `python3 -m tools.data.validate_failure_record`: 예시 1개 full PASS
 - 변경 문서 로컬 링크 79개 존재 확인, 공식 기술 링크 9개 본문 확인
 - `git diff --check`: PASS
 
@@ -884,7 +893,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - `data/failures/README.md`
 - `data/schema/failure_record.schema.json`
 - `data/schema/example_failure_record.json`
-- `tools/validate_failure_record.py`
+- `tools/data/validate_failure_record.py`
 - 에피소드 스키마·dataset card·포함제외 기준·현행 회의 문서·README·인계 문서·프로젝트 규칙 연결 갱신
 
 ---
@@ -907,8 +916,8 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - ACT와 Nav2는 합치지 않고 정지 상태와 요청·완료 인터페이스로 연결한다
 
 **반영 파일**
-- `docs/20260907_물서빙로봇_회의결정과_실행범위.md`
-- `docs/20260904_양팔로봇_프로젝트_인계.md`
+- `docs/meetings/20260907_물서빙로봇_회의결정과_실행범위.md`
+- `docs/meetings/20260904_양팔로봇_프로젝트_인계.md`
 - `README.md`
 - 구형 태스크·정책 문서 6개에 현행 범위가 아니라는 안내 추가
 
@@ -999,8 +1008,8 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - `design/gripper/` (신설)
 - `design/cad/slice_k1max_petg.py`, `design/cad/generate_m1_coupons.py`
 - `design/mechanical/hold_flow_mechanical_v0_2.yaml`, `calculate_250mm_design.py`
-- `src/hold_flow_description/` (팔 체인 교체, `ggao50_gripper.xacro`, `solve_task_poses.py`)
-- `docs/20260903_온보드컴퓨트_USB대역폭_전원_검토.md`, `docs/20260903_IK_IL_경계와_결합.md`
+- `src/description/hold_flow_description/` (팔 체인 교체, `ggao50_gripper.xacro`, `solve_task_poses.py`)
+- `docs/architecture/20260903_온보드컴퓨트_USB대역폭_전원_검토.md`, `docs/architecture/20260903_IK_IL_경계와_결합.md`
 - `research/R32_IL과_IK_결합구조_정책선택_실행모드.md`
 
 ---
@@ -1029,8 +1038,8 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 **반영 파일**
 - `design/cad/`
 - `design/mechanical/hold_flow_mechanical_v0_2.yaml`
-- `src/hold_flow_description/`
-- `docs/20260901_기구설계_제작명세_v0.2.md`
+- `src/description/hold_flow_description/`
+- `docs/architecture/20260901_기구설계_제작명세_v0.2.md`
 - `README.md`
 
 ---
@@ -1051,10 +1060,10 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 **출력 상태**: STL 회전은 적용하지 않았고 G-code도 생성하지 않았다. 방향 확정 뒤 K1 Max 실제 OrcaSlicer 프로파일로 슬라이싱한다.
 
 **반영 파일**
-- `docs/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md`
-- `docs/20260901_250mm_차체_계산검증_v0.2.md`
-- `docs/20260901_기구설계_제작명세_v0.2.md`
-- `docs/20260901_기구설계_검증체크리스트_v0.2.md`
+- `docs/architecture/20260901_JDAMR_K1Max_평행그리퍼_설계반영.md`
+- `docs/architecture/20260901_250mm_차체_계산검증_v0.2.md`
+- `docs/architecture/20260901_기구설계_제작명세_v0.2.md`
+- `docs/architecture/20260901_기구설계_검증체크리스트_v0.2.md`
 - `design/mechanical/hold_flow_mechanical_v0_2.yaml`
 - `design/mechanical/calculate_250mm_design.py`
 - `README.md`
@@ -1077,9 +1086,9 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 **주행 조건**: C018 속도 폐루프 모터 모드, 팔과 분리된 TTL 버스, 외부 베어링 2점 지지 휠 허브, 매끄러운 실내 바닥, 20분 온도·전류 검증이 필수다.
 
 **반영 파일**
-- `docs/20260901_250mm_차체_계산검증_v0.2.md`
-- `docs/20260901_기구설계_제작명세_v0.2.md`
-- `docs/20260901_기구설계_검증체크리스트_v0.2.md`
+- `docs/architecture/20260901_250mm_차체_계산검증_v0.2.md`
+- `docs/architecture/20260901_기구설계_제작명세_v0.2.md`
+- `docs/architecture/20260901_기구설계_검증체크리스트_v0.2.md`
 - `design/mechanical/hold_flow_mechanical_v0_2.yaml`
 - `design/mechanical/calculate_250mm_design.py`
 - `README.md`
@@ -1104,8 +1113,8 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - `docs/20260901_기구설계_검증체크리스트_v0.1.md`
 - `design/mechanical/hold_flow_mechanical_v0_1.yaml`
 - `README.md`
-- `docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md`
-- `docs/20260828_1안_확정_이동형_양팔_붓기.md`
+- `docs/architecture/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md`
+- `docs/meetings/20260828_1안_확정_이동형_양팔_붓기.md`
 
 **미검증**: 실제 베이스 체결홀, 그리퍼 완성 질량·무게중심, 모터·배터리 모델, LiDAR 가림각, 출력 공차, 전체 무게중심은 M0~M4에서 실측한다. 이 단계 전에는 STL·URDF 완성이나 실기체 동작 가능을 주장하지 않는다.
 
@@ -1119,7 +1128,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 
 **리뷰를 권장하는 범위**: 공용 ROS 2 인터페이스, 실기체 안전 경로, 데이터 규격처럼 다른 파트에 영향을 주는 변경은 필요할 때 팀원에게 교차 확인을 요청한다.
 
-**반영 파일**: `README.md`, `CLAUDE.md`, `docs/TEAM_WORKFLOW.md`
+**반영 파일**: `README.md`, `CLAUDE.md`, `docs/guides/TEAM_WORKFLOW.md`
 
 ---
 
@@ -1137,7 +1146,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 
 **검증**: Sites 빌드·ESLint·런타임 의존성 감사 통과, 로컬 HTTP 200, 배포 상태 `succeeded`, 인증된 배포 주소 HTTP 200을 확인했다.
 
-**반영 파일**: `README.md`, `CLAUDE.md`, `docs/TEAM_WORKFLOW.md`, `site/`
+**반영 파일**: `README.md`, `CLAUDE.md`, `docs/guides/TEAM_WORKFLOW.md`, `apps/project_site/`
 
 ---
 
@@ -1159,12 +1168,12 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - Isaac Sim 합성 데이터는 실물 데이터와 분리하고 real-only 기준선을 이길 때만 혼합한다.
 
 **반영 파일**
-- `docs/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md`
-- `docs/20260901_HOLD_THE_FLOW_구현아키텍처.svg`
+- `docs/architecture/20260901_구현아키텍처_ROS2_CPP_Python_ACT_IsaacSim.md`
+- `docs/architecture/20260901_HOLD_THE_FLOW_구현아키텍처.svg`
 - `src/README.md`
 - `README.md`
-- `docs/TEAM_WORKFLOW.md`
-- `docs/20260828_1안_확정_이동형_양팔_붓기.md`
+- `docs/guides/TEAM_WORKFLOW.md`
+- `docs/meetings/20260828_1안_확정_이동형_양팔_붓기.md`
 
 **협업 상태**: `@Minsuk-ji`는 write 초대를 수락했다. `@jangjunseo05`는 수락 대기다. 세부 역할은 GitHub 접근 권한과 분리해 다음 회의에서 확정한다.
 
@@ -1190,7 +1199,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 
 **반영 파일**
 - `research/R31_1안_이동형_양팔_붓기_논문적용.md`
-- `docs/20260828_1안_확정_이동형_양팔_붓기.md`
+- `docs/meetings/20260828_1안_확정_이동형_양팔_붓기.md`
 - `README.md`
 - `research/README.md`
 
@@ -1217,10 +1226,10 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 5. 미끄럼과 넘침을 넣은 복구 시험
 
 **반영 파일**
-- `docs/20260828_1안_확정_이동형_양팔_붓기.md`
-- `docs/TEAM_WORKFLOW.md`
+- `docs/meetings/20260828_1안_확정_이동형_양팔_붓기.md`
+- `docs/guides/TEAM_WORKFLOW.md`
 - `README.md`
-- `docs/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx`
+- `docs/presentations/20260828_HANDOVER_양팔로봇_5페이지_발표자료.pptx`
 
 **협업 설정**: GitHub 사용자 `@jangjunseo05`에게 `mmporong/bimanual-robot` 저장소의 write 초대를 발송했다. 현재는 수락 대기 상태다.
 
@@ -1231,10 +1240,10 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 **결론**: 이전의 `지속 유지형 가림 해소` 단일안은 회의 결과로 보류했다. 강사/멘토 1명과 학습자 2명이 `비정형 물병 붓기·테이블 세팅`과 `봉지 열어 물체 담기`를 함께 기초검증하고, 9월 중순 전후 실물 게이트에서 메인 시나리오를 고른다.
 
 **한 일**
-- `docs/20260828_회의결과_주제후보_역할분담.md` — 잡담과 요구사항 분리, 전제·두 안·역할·일정·미확정 사항 정리
+- `docs/meetings/20260828_회의결과_주제후보_역할분담.md` — 잡담과 요구사항 분리, 전제·두 안·역할·일정·미확정 사항 정리
 - `research/R30_봉지_물병_에이전틱_SLAM_재평가.md` — ACT, ShakingBot, Pouring by Feel, Inner Monologue, BiGym, Nav2를 현재 구조에 연결
-- `docs/20260828_4페이지_발표원고.md` — 강사 검토용 4쪽 발표 흐름 작성
-- `docs/20260828_양팔로봇_프로젝트_회의결과_4페이지.pptx` — 화이트 포트폴리오 톤의 4쪽 발표자료 제작
+- `docs/presentations/20260828_4페이지_발표원고.md` — 강사 검토용 4쪽 발표 흐름 작성
+- `docs/presentations/20260828_양팔로봇_프로젝트_회의결과_4페이지.pptx` — 화이트 포트폴리오 톤의 4쪽 발표자료 제작
 - `docs/site-preview/` — 데스크톱 전체·봉지 전환·모바일 화면 검수 이미지
 - 발표용 사이트를 회의 결과 기준으로 전면 개편하고 버전 3 배포: `https://bimanual-hold-to-access.mmporong.chatgpt.site`
 
@@ -1284,7 +1293,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - `research/R25` Pointmap(arXiv:2607.11498) 이식 경로
 - `research/R26` 명령 문장 규격 초안 (3축 · 메타데이터 확장안)
 - `research/R27` 붓기 실현 가능성과 양팔 근거 검증
-- `docs/20260824_회의_결정과_쟁점.md`
+- `docs/meetings/20260824_회의_결정과_쟁점.md`
 
 **핵심 발견 넷**
 1. **음성은 모델 구조 변경 0.** task 문자열로 들어간다. `rollout/context.py:491` → `inference/sync.py:73`의 `self._task`가 매 추론에서 다시 읽히므로(sync.py:112, rtc.py:299-301) STT 스레드가 이 값만 갱신하면 된다. ACT에 오디오 MLP를 붙이는 개조는 불필요
@@ -1296,7 +1305,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 
 **설계**: 음성 지시 3종 — 옮기기(B0 기준선) / 건네주기(B1) / 들고 있는 컵에 붓기(B2). 양팔 등급이 갈려 **단팔 대조 실험이 태스크셋 안에 내장된다**
 
-**다음**: 8/25 회의 논점 4개 지참. `tools/validate_episode_meta.py`를 R26 필드로 확장(미착수), 저울·마이크·용기 조달 결정
+**다음**: 8/25 회의 논점 4개 지참. `tools/data/validate_episode_meta.py`를 R26 필드로 확장(미착수), 저울·마이크·용기 조달 결정
 
 ---
 
@@ -1308,8 +1317,8 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - `research/R7` 해외 양팔 회사 실배치 조사 — Dexterity Mech(FedEx 실배치, 두 팔 59kg), ABB YuMi(10년 상용, 실험실 응용), 휴머노이드 3사(Figure/BMW·Agility/Amazon·Apptronik/Mercedes), Mobile ALOHA 태스크 카탈로그
 - `research/R8` 하드웨어 실측 역산 — 리치 346mm, 5축+그리퍼, `wrist_roll`이 전회전 축
 - `research/R9` 석션 엔드이펙터 검토 — 구성 3종 비교
-- `docs/20260820_프로젝트_정의.md` — 데스크톱 시료 취급 셀
-- `docs/20260820_현황요약.md` — 전체 스냅샷 한 장
+- `docs/meetings/20260820_프로젝트_정의.md` — 데스크톱 시료 취급 셀
+- `docs/meetings/20260820_현황요약.md` — 전체 스냅샷 한 장
 
 **핵심 판단 셋**
 1. **양팔 필요 근거가 산업에서 세 갈래**다 — (a)무게·부피 (b)고정+작업 (c)사람 작업장. **우리가 재현 가능한 건 (b)뿐.** (a)는 페이로드 불가, (c)는 하드웨어가 다르다
@@ -1372,7 +1381,7 @@ LeRobot 0.6.1·Nav2 Jazzy 공식 문서 4개 본문 확인, `git diff --check` P
 - 킥오프 결정사항 정리: 픽앤플레이스 1단계 / 텔레옵 실물 수집(시뮬 배제) / LeRobot 먼저 후 커스텀 / 금요일 16:00 재논의
 - 담당 파트 확정 — **로봇 제어(IK + Depth) + 이미테이션 러닝/학습** 두 축. 팀 제출용 문서 초안 작성(액션 A1)
 - 데이터 저장 규격 초안: LeRobot v3.0 포맷 고정, 수집 조건 메타데이터 JSON Schema, 에피소드 포함/제외 기준 8종, dataset card 템플릿
-- 검증 도구 `tools/validate_episode_meta.py` 작성. 정상 1건 통과 + 고의 오류 3건에서 5개 위반 검출(필수누락·enum위반·오탈자필드·타입위반) 확인
+- 검증 도구 `tools/data/validate_episode_meta.py` 작성. 정상 1건 통과 + 고의 오류 3건에서 5개 위반 검출(필수누락·enum위반·오탈자필드·타입위반) 확인
 - 리서치 계획 수립: R1 양팔 동시 텔레옵(최우선) / R2 픽앤플레이스 기준선 / R3 클라우드 GPU 비용 / R4 적용 사례
 
 **핵심 — 이 프로젝트의 첫 미검증 지점 두 개**

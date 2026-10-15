@@ -7,17 +7,16 @@
 오프셋의 부호 규약은 자료마다 다르다. 그래서 추정하지 않고 시험값을 한 번 써서
 위치가 어느 쪽으로 움직이는지 보고 판정한다. 예상과 다르면 원래대로 돌리고 멈춘다.
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_offset.py --target 3600
-    python3 servo_offset.py --target 3600 --execute
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_offset --target 3600
+    python3 -m tools.servo.servo_offset --target 3600 --execute
 """
 import argparse
 import json
 import time
 from pathlib import Path
 
-from sts_bus import (Bus, FakeBus, A_OFFSET, A_TORQUE, A_POS, RESOLUTION,
-                     decode_offset, encode_offset, find_port)
+from tools.servo.sts_bus import Bus, FakeBus, A_OFFSET, A_TORQUE, A_POS, RESOLUTION, decode_offset, encode_offset, find_port
 
 PROBE = 100                    # 부호 판정용 시험값
 BACKUP = Path.home() / ".cache" / "bimanual-robot" / "servo_backup.jsonl"

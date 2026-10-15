@@ -19,11 +19,8 @@ import signal
 import sys
 import time
 
-SERVO_DIR = Path(__file__).resolve().parent
-if str(SERVO_DIR) not in sys.path:
-    sys.path.insert(0, str(SERVO_DIR))
 
-from sts_bus import A_ACCEL, A_GOAL, A_LOAD, A_POS, A_SPEED, A_TEMP, A_TORQUE, Bus, find_port
+from tools.servo.sts_bus import A_ACCEL, A_GOAL, A_LOAD, A_POS, A_SPEED, A_TEMP, A_TORQUE, Bus, find_port
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
