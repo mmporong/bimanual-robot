@@ -4,7 +4,9 @@
 [2026-09-07 물 서빙 로봇 회의 결정](../docs/20260907_물서빙로봇_회의결정과_실행범위.md)을
 따른다. 과거 붓기안의 MoveIt·로드셀 중심 구조는 현행 구현 기준이 아니다.
 
-현재 실제 ROS 2 패키지는 `hold_flow_description`, `hold_flow_interfaces`, `hold_flow_mission`이다.
+현재 실제 ROS 2 패키지는 `hold_flow_description`, `hold_flow_interfaces`, `hold_flow_mission`과
+`jdamr/` 아래의 실차 SLAM·주행 패키지다. JD-AMR 패키지는 기존 이름과 실행 계약을 유지하며,
+[통합 사용법](../docs/JDAMR_RUNTIME.md)에서 빌드·운영한다.
 `hold_flow_mission`은 조작 Action 계약·관제 명령 adapter·시뮬레이션 mock까지 구현됐고,
 `tools/service_order_server.py`의 선택형 backend에서 Action 결과를 소비한다. 아래
 나머지 패키지는 책임과 인터페이스를 먼저 고정한 **구현 예정 경계**이며, 빈 패키지를 완료물처럼
@@ -18,7 +20,8 @@
 | `hold_flow_description` | v0.3 정적 검증 완료 | xacro·YAML·URDF | 300 mm·720 mm 모바일 베이스, 혼합 그리퍼 SO-101×2, Astra S·LDS-03 TF | 실측값 반영과 Isaac 동역학 검증 |
 | `hold_flow_bringup` | 예정 | Python·YAML | 실물/sim launch profile, lifecycle 실행 순서 | 첫 실행 패키지와 함께 |
 | `hold_flow_web` | 예정 | FastAPI·HTML·JavaScript·rclpy | 웹 요청 검증, `ServeDrink` Action client | 요청 JSON 계약 |
-| `hold_flow_navigation` | 예정 | Nav2·SLAM Toolbox·AMCL·DWB·Collision Monitor | 지도, station registry, 장애물 회피, 도킹 staging | 실험 공간·station 실측 |
+| `jdamr/jdamr_cube_navigation`·`jdamr_cube_cartographer` | 소스 통합 | Cartographer·AMCL·Nav2·NavFn·RPP·RGB-D | 저장 지도 이동, station·면 정렬, 근접 주차·도킹 | 실차 출발은 기존 준비된 실행 경로 사용 |
+| `hold_flow_navigation` | 미션 adapter 예정 | 기존 JD-AMR Nav2 Action 소비 | 양팔 작업 완료 신호와 실차 이동 연결 | 실제 조작 Action 연동 |
 | `hold_flow_perception` | 예정 | Python·RGB-D·YOLO·OpenCV·tf2 | station 정렬, 컵·물통·선반·테이블·액면 인지 | 컵·카메라 POC |
 | `hold_flow_motion` | 예정 | C++·Eigen·FollowJointTrajectory | PLANNED phase의 그립·IK·시작·복귀·검증 궤적·붓기 폐루프 | 새 팔 역할·선반 좌표 |
 | `hold_flow_safety` | 예정 | C++·rclcpp·tf2 | command lease, 관절 delta, timeout, 정지 | 첫 실물 명령 전에 |
@@ -86,8 +89,8 @@ joint state·action·strategy·backend·safety event → logging → episode sid
 
 1. `stations.yaml`에 충전소·주방·테이블 계약을 만든다.
 2. SLAM 지도 작성과 AMCL/Nav2 반복 이동을 분리한다.
-3. DWB를 첫 controller로 두고 실측 footprint·속도·가감속 한계를 적용한다.
-4. LDS-03 obstacle layer와 Collision Monitor 감속·정지 영역을 검증한다.
+3. `jdamr/`의 현행 NavFn·RPP와 실측 footprint·속도·가감속 설정을 사용한다.
+4. 현재 실장 G4의 obstacle layer와 Collision Monitor 설정을 유지한다.
 5. 장애물 회피·재계획 실패 코드와 Nav2 feedback을 기록한다.
 6. 새 팔 역할과 선반 frame을 기준으로 IK 시작·복귀 자세를 검증한다.
 7. 현행 v0.3 URDF를 Isaac Sim에서 USD로 만들고 같은 인터페이스·접촉·gain을 검증한다.

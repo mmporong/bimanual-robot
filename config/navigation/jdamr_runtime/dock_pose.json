@@ -1,0 +1,29 @@
+{
+ "map_yaml": "/home/lim/jdamr_data/map_20260930_manual/aligned/map.yaml",
+ "scan": "../scan_dock_end.json",
+ "dock_pose_scan_match": [
+  -0.18490568701115598,
+  0.19137407553043168,
+  0.11695281651913851
+ ],
+ "inlier_5cm": 0.7189542483660131,
+ "mean_dist_m": 0.024509794260162154,
+ "global_best": [
+  -0.18999999999999986,
+  0.19500000000000073,
+  0.12217304763960307
+ ],
+ "global_agrees": true,
+ "rotated_from_cartographer_frame": [
+  -0.17990568701115597,
+  0.20637407553043163,
+  0.11695281651913851
+ ],
+ "basis": "user: \"지금 마지막 차량의 자리 부근을 충전소로 지정\" (14:23); dock scan matched on the wall-aligned map",
+ "dock_target": [
+  -0.18490568701115598,
+  0.19137407553043168,
+  0.0
+ ],
+ "dock_target_basis": "user: \"dock의 각도도 바꿔야하고\" (2026-09-30): heading snapped to the wall axis 0 deg; position from the scan match (robot stood at 6.7 deg)"
+}

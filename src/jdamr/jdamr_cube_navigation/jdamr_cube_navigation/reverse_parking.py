@@ -1,0 +1,650 @@
+"""
+Pure helpers for a short Nav2 reverse-parking path.
+
+Path generation validates geometry, and the static corridor check rejects
+occupied, unknown and keepout cells. Live obstacle detection remains with
+Nav2 costmaps and the collision monitor.
+"""
+
+from __future__ import annotations
+
+import math
+from copy import deepcopy  # noqa: I100
+from pathlib import Path
+from typing import Any, Sequence
+
+from jdamr_cube_navigation.keepout_mask import _map_metadata, _point_in_polygon
+
+
+ALREADY_AT_GOAL_DISTANCE_M = 0.05
+MAX_XY_TOLERANCE_M = 0.05
+MAX_YAW_TOLERANCE_RAD = math.radians(3.0)
+MAX_REVERSE_DISTANCE_M = 2.0
+MAX_WAYPOINT_SPACING_M = 0.025
+MAX_REVERSE_LINEAR_VELOCITY_MPS = 0.08
+# Tightest turn the curved dock reverse may ask for: the transit curve slowdown
+# radius (FollowPath regulated_linear_scaling_min_radius).
+REVERSE_CURVE_MIN_RADIUS_M = 0.3
+# Service-session transit speed: the configured 0.12 m/s transit (operator,
+# 2026-10-01: 0.06 m/s was too slow). Parking controllers keep their own
+# contract speeds.
+SERVICE_TRANSIT_MAX_MPS = 0.12
+RPP_PLUGIN = (
+    'nav2_regulated_pure_pursuit_controller::'
+    'RegulatedPurePursuitController')
+
+
+def _finite_number(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'{name} must be a finite number')
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f'{name} must be a finite number')
+    return number
+
+
+def _pose(value: Sequence[float], name: str) -> tuple[float, float, float]:
+    try:
+        if len(value) != 3:
+            raise ValueError(f'{name} must contain x, y, and yaw')
+    except TypeError as error:
+        raise ValueError(f'{name} must contain x, y, and yaw') from error
+    return tuple(_finite_number(item, name) for item in value)
+
+
+def _shortest_angle(angle: float) -> float:
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def reverse_waypoints(
+        start_pose: Sequence[float], target_pose: Sequence[float],
+        xy_tolerance_m: float = 0.05,
+        yaw_tolerance_rad: float = math.radians(3.0),
+        max_distance_m: float = 2.0,
+        spacing_m: float = 0.025,
+) -> list[tuple[float, float, float]]:
+    """
+    Interpolate an obstacle-unchecked, straight reverse-only path.
+
+    The start must be in front of the target along the target heading, with
+    lateral and yaw errors inside the supplied tolerances.  Both the measured
+    start pose and the exact target pose are included in the returned path.
+    """
+    start = _pose(start_pose, 'start_pose')
+    target = _pose(target_pose, 'target_pose')
+    xy_tolerance = _finite_number(xy_tolerance_m, 'xy_tolerance_m')
+    yaw_tolerance = _finite_number(
+        yaw_tolerance_rad, 'yaw_tolerance_rad')
+    max_distance = _finite_number(max_distance_m, 'max_distance_m')
+    spacing = _finite_number(spacing_m, 'spacing_m')
+    if not 0.0 <= xy_tolerance <= MAX_XY_TOLERANCE_M:
+        raise ValueError('xy_tolerance_m exceeds the accepted bound')
+    if not 0.0 <= yaw_tolerance <= MAX_YAW_TOLERANCE_RAD:
+        raise ValueError('yaw_tolerance_rad exceeds the accepted bound')
+    if not 0.0 < max_distance <= MAX_REVERSE_DISTANCE_M:
+        raise ValueError('max_distance_m exceeds the accepted bound')
+    if not 0.0 < spacing <= MAX_WAYPOINT_SPACING_M:
+        raise ValueError('spacing_m exceeds the accepted bound')
+
+    target_heading = (math.cos(target[2]), math.sin(target[2]))
+    target_left = (-target_heading[1], target_heading[0])
+    target_to_start = (start[0] - target[0], start[1] - target[1])
+    forward_distance = sum(
+        component * heading
+        for component, heading in zip(target_to_start, target_heading))
+    lateral_error = abs(sum(
+        component * left
+        for component, left in zip(target_to_start, target_left)))
+    distance = math.hypot(*target_to_start)
+    yaw_delta = _shortest_angle(target[2] - start[2])
+
+    if distance <= ALREADY_AT_GOAL_DISTANCE_M:
+        raise ValueError('already at goal')
+    if distance > max_distance:
+        raise ValueError('reverse path exceeds max_distance_m')
+    if forward_distance <= 0.0:
+        raise ValueError('start_pose must be in front of target_pose')
+    if lateral_error > xy_tolerance:
+        raise ValueError('start_pose lateral error exceeds xy_tolerance_m')
+    if abs(yaw_delta) > yaw_tolerance:
+        raise ValueError('start_pose yaw error exceeds yaw_tolerance_rad')
+
+    segment_count = math.ceil(distance / spacing)
+    waypoints = []
+    for index in range(segment_count + 1):
+        fraction = index / segment_count
+        if index == segment_count:
+            waypoints.append(target)
+            continue
+        x = start[0] + (target[0] - start[0]) * fraction
+        y = start[1] + (target[1] - start[1]) * fraction
+        yaw = start[2] if index == 0 else _shortest_angle(
+            start[2] + yaw_delta * fraction)
+        waypoints.append((x, y, yaw))
+
+    for current, following in zip(waypoints, waypoints[1:]):
+        displacement = (
+            following[0] - current[0], following[1] - current[1])
+        for yaw in (current[2], following[2]):
+            rearward_dot = (
+                displacement[0] * math.cos(yaw)
+                + displacement[1] * math.sin(yaw))
+            if rearward_dot >= 0.0:
+                raise ValueError('path segment is not behind robot heading')
+    return waypoints
+
+
+def _base_points(scan, laser_pose):
+    """Yield the valid scan returns as (x, y) in the base frame."""
+    lx, ly, lyaw = laser_pose
+    for index, distance in enumerate(scan.ranges):
+        if not (math.isfinite(distance) and scan.range_min <= distance <= scan.range_max):
+            continue
+        angle = lyaw + scan.angle_min + index * scan.angle_increment
+        yield lx + distance * math.cos(angle), ly + distance * math.sin(angle)
+
+
+def scan_points(scan, laser_pose):
+    """Return the valid scan returns as a list of (x, y) in the base frame."""
+    return list(_base_points(scan, laser_pose))
+
+
+def points_sweep_hit(points, outline, distance_m, step_m=0.01):
+    """
+    Whether a straight move of distance_m (negative: reverse) would meet a point.
+
+    points are (x, y) in the base frame. A point is met when the outline shifted
+    along the heading covers it. One already inside the outline counts only on the
+    half facing the move: a straight move cannot close on a point beside the
+    trailing half (2026-10-02 13:48: a bounding rectangle held a return 5 mm beside
+    the rear corner as "behind" and refused the back-off).
+    """
+    count = max(1, math.ceil(abs(distance_m) / step_m))
+    shifts = [math.copysign(abs(distance_m) * index / count, distance_m)
+              for index in range(1, count + 1)]
+    for x_m, y_m in points:
+        if _point_in_polygon(x_m, y_m, outline):
+            if (x_m >= 0.0) == (distance_m > 0.0):
+                return True
+            continue
+        if any(_point_in_polygon(x_m - shift, y_m, outline) for shift in shifts):
+            return True
+    return False
+
+
+def straight_sweep_hit(scan, laser_pose, outline, distance_m, step_m=0.01, extra_points=()):
+    """
+    Whether a straight move of distance_m (negative: reverse) would meet a scan return.
+
+    laser_pose is the scan frame in the base frame as (x, y, yaw); extra_points are
+    further (x, y) in the base frame, such as remembered returns the LiDAR can no
+    longer see. See points_sweep_hit.
+    """
+    return points_sweep_hit(
+        [*_base_points(scan, laser_pose), *extra_points], outline, distance_m, step_m)
+
+
+def _edge_distance(x_m, y_m, outline):
+    """Distance from (x, y) to the nearest outline edge."""
+    best = math.inf
+    for (ax, ay), (bx, by) in zip(outline, list(outline[1:]) + list(outline[:1])):
+        dx, dy = bx - ax, by - ay
+        length2 = dx * dx + dy * dy
+        fraction = 0.0 if length2 == 0.0 else max(
+            0.0, min(1.0, ((x_m - ax) * dx + (y_m - ay) * dy) / length2))
+        best = min(best, math.hypot(x_m - ax - fraction * dx, y_m - ay - fraction * dy))
+    return best
+
+
+def path_sweep_hit(points, outline, poses, step_m=0.01, step_rad=math.radians(1.0),
+                   push_tolerance_m=0.005):
+    """
+    Whether moving along poses would bring the outline over a point, or push into one.
+
+    poses are (x, y, yaw) in the current base frame, starting at the base, and are
+    densified to step_m and step_rad. A point outside the outline is met when the
+    outline covers it at any pose. A point already inside (it touches the body) is
+    met when it gets more than push_tolerance_m deeper than it started: backing off
+    it or sliding along it is the escape, driving into it is not (review 2026-10-06:
+    a return inside the rear half was left out, and the way back pushed it).
+    """
+    dense = [tuple(poses[0])]
+    for start, end in zip(poses, poses[1:]):
+        turn = _shortest_angle(end[2] - start[2])
+        count = max(1, math.ceil(max(math.dist(start[:2], end[:2]) / step_m,
+                                     abs(turn) / step_rad)))
+        for index in range(1, count + 1):
+            fraction = index / count
+            dense.append((start[0] + (end[0] - start[0]) * fraction,
+                          start[1] + (end[1] - start[1]) * fraction,
+                          start[2] + turn * fraction))
+    reach_m = max(math.hypot(x_m, y_m) for x_m, y_m in outline)
+    for x_m, y_m in points:
+        touching = _point_in_polygon(x_m, y_m, outline)
+        allowed_m = _edge_distance(x_m, y_m, outline) + push_tolerance_m if touching else None
+        for x, y, yaw in dense[1:]:
+            dx, dy = x_m - x, y_m - y
+            if math.hypot(dx, dy) > reach_m:
+                continue
+            cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
+            local = (cos_yaw * dx + sin_yaw * dy, -sin_yaw * dx + cos_yaw * dy)
+            if not _point_in_polygon(*local, outline):
+                continue
+            if allowed_m is None or _edge_distance(*local, outline) > allowed_m:
+                return True
+    return False
+
+
+def to_base_frame(base_pose, pose):
+    """Express pose (x, y, yaw), given in the frame of base_pose, in the base frame."""
+    dx, dy = pose[0] - base_pose[0], pose[1] - base_pose[1]
+    cos_yaw, sin_yaw = math.cos(base_pose[2]), math.sin(base_pose[2])
+    return (cos_yaw * dx + sin_yaw * dy, -sin_yaw * dx + cos_yaw * dy,
+            _shortest_angle(pose[2] - base_pose[2]))
+
+
+def trail_retrace_points(current, trail, distance_m, max_gap_m, max_turn_rad,
+                         settle_m=0.01):
+    """
+    Walk the trail back from current: the way the base came, as (x, y, yaw).
+
+    trail holds the poses the base drove forward through, oldest first, in the frame
+    of current. Every step back must lead backwards from the previous pose (within
+    60 deg of its rear direction), be at most max_gap_m long and turn at most
+    max_turn_rad; the walk ends at the first step that is not (an odom jump, a stretch
+    driven in reverse, a turn on the spot) or once distance_m is covered. Trail
+    poses within settle_m of the walk are skipped. Returns (points, length_m).
+    """
+    points, length_m = [tuple(current)], 0.0
+    for pose in reversed(list(trail)):
+        previous = points[-1]
+        gap_m = math.dist(previous[:2], pose[:2])
+        if gap_m < settle_m:
+            continue
+        along_m = ((pose[0] - previous[0]) * math.cos(previous[2])
+                   + (pose[1] - previous[1]) * math.sin(previous[2]))
+        if (gap_m > max_gap_m or along_m > -0.5 * gap_m
+                or abs(_shortest_angle(pose[2] - previous[2])) > max_turn_rad):
+            break
+        points.append(tuple(pose))
+        length_m += gap_m
+        if length_m >= distance_m:
+            break
+    return points, length_m
+
+
+def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m):
+    """
+    Return remembered returns that now lie inside the LiDAR blind range, base frame.
+
+    keyframes are (base pose in odom, scan) pairs, current_pose the base pose in odom
+    and laser_pose the scan frame in the base frame. Inside blind_radius_m of the
+    laser the G4 reports nothing (range_min), so an object the base drove up to
+    vanishes from the live scan; outside it the live scan decides.
+    """
+    lx, ly, _lyaw = laser_pose
+    found = []
+    for pose, scan in keyframes:
+        moved_m = math.dist(pose[:2], current_pose[:2])
+        relative = to_base_frame(current_pose, pose)
+        cos_yaw, sin_yaw = math.cos(relative[2]), math.sin(relative[2])
+        # The laser itself moved at most moved_m plus its offset swung about the axle.
+        limit_m = blind_radius_m + moved_m + 2.0 * math.hypot(lx, ly)
+        for x_m, y_m in _base_points(scan, laser_pose):
+            if math.hypot(x_m - lx, y_m - ly) > limit_m:
+                continue
+            bx = relative[0] + cos_yaw * x_m - sin_yaw * y_m
+            by = relative[1] + sin_yaw * x_m + cos_yaw * y_m
+            if math.hypot(bx - lx, by - ly) < blind_radius_m:
+                found.append((bx, by))
+    return found
+
+
+def outline_intrusion(scan, laser_pose, outline, min_points, extra_points=()):
+    """
+    Return which half of the outline holds at least min_points returns.
+
+    'front' (ahead of the axle), 'rear', 'both' or None. The Collision Monitor
+    stops on min_points returns inside a polygon, and a return inside the padded
+    footprint holds every polygon that contains it (2026-10-02 11:09). extra_points
+    are further (x, y) in the base frame (remembered returns in the blind range).
+    """
+    counts = {'front': 0, 'rear': 0}
+    for x_m, y_m in [*_base_points(scan, laser_pose), *extra_points]:
+        if _point_in_polygon(x_m, y_m, outline):
+            counts['front' if x_m >= 0.0 else 'rear'] += 1
+    held = [half for half in ('front', 'rear') if counts[half] >= min_points]
+    return 'both' if len(held) == 2 else (held[0] if held else None)
+
+
+def rear_swing_clearance(scan, laser_pose, radius_m, extra_points=()):
+    """
+    Return the forward travel that takes every return behind the axle out of the turn circle.
+
+    The base turns about its axle near the front, so its rear sweeps radius_m. A return
+    at (x < 0, y) inside that circle leaves it after sqrt(radius_m^2 - y^2) + x of
+    forward travel. Returns 0.0 when nothing behind the axle is inside the circle.
+    """
+    needed_m = 0.0
+    for x_m, y_m in [*_base_points(scan, laser_pose), *extra_points]:
+        if x_m < 0.0 and math.hypot(x_m, y_m) < radius_m:
+            needed_m = max(needed_m, math.sqrt(radius_m ** 2 - y_m ** 2) + x_m)
+    return needed_m
+
+
+def reverse_curve_waypoints(
+        start_pose: Sequence[float], target_pose: Sequence[float],
+        min_radius_m: float = REVERSE_CURVE_MIN_RADIUS_M,
+        max_distance_m: float = 2.0,
+        spacing_m: float = 0.025,
+) -> list[tuple[float, float, float]]:
+    """
+    Reverse from the start pose onto the target pose along one smooth curve.
+
+    A cubic Hermite curve leaves the start along its rear direction and arrives
+    along the target's rear direction, so a lateral or heading offset is taken
+    out while backing up instead of by turn-move-turn in front of the dock
+    (2026-10-01: a 10 cm staging offset cost a full extra turn). The robot faces
+    away from its motion at every point. Rejected when any part of the curve is
+    tighter than min_radius_m, so only small offsets are absorbed this way.
+    """
+    start = _pose(start_pose, 'start_pose')
+    target = _pose(target_pose, 'target_pose')
+    min_radius = _finite_number(min_radius_m, 'min_radius_m')
+    max_distance = _finite_number(max_distance_m, 'max_distance_m')
+    spacing = _finite_number(spacing_m, 'spacing_m')
+    if not 0.0 < max_distance <= MAX_REVERSE_DISTANCE_M:
+        raise ValueError('max_distance_m exceeds the accepted bound')
+    if not 0.0 < spacing <= MAX_WAYPOINT_SPACING_M:
+        raise ValueError('spacing_m exceeds the accepted bound')
+    chord = (target[0] - start[0], target[1] - start[1])
+    distance = math.hypot(*chord)
+    if distance <= ALREADY_AT_GOAL_DISTANCE_M:
+        raise ValueError('already at goal')
+    if distance > max_distance:
+        raise ValueError('reverse path exceeds max_distance_m')
+    if -sum(c * h for c, h in zip(chord, (math.cos(target[2]), math.sin(target[2])))) <= 0.0:
+        raise ValueError('start_pose must be in front of target_pose')
+    # Motion directions (rearward) scaled by the chord length.
+    d0 = (-math.cos(start[2]) * distance, -math.sin(start[2]) * distance)
+    d1 = (-math.cos(target[2]) * distance, -math.sin(target[2]) * distance)
+
+    def point(t):
+        h00, h10 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t
+        h01, h11 = -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+        return tuple(h00 * start[i] + h10 * d0[i] + h01 * target[i] + h11 * d1[i]
+                     for i in (0, 1))
+
+    def velocity(t):
+        a, b = 6 * t ** 2 - 6 * t, 3 * t ** 2 - 4 * t + 1
+        c, d = -6 * t ** 2 + 6 * t, 3 * t ** 2 - 2 * t
+        return tuple(a * start[i] + b * d0[i] + c * target[i] + d * d1[i] for i in (0, 1))
+
+    def acceleration(t):
+        a, b, c, d = 12 * t - 6, 6 * t - 4, -12 * t + 6, 6 * t - 2
+        return tuple(a * start[i] + b * d0[i] + c * target[i] + d * d1[i] for i in (0, 1))
+
+    count = max(2, math.ceil(distance / spacing))
+    waypoints = []
+    for index in range(count + 1):
+        t = index / count
+        vx, vy = velocity(t)
+        ax, ay = acceleration(t)
+        speed = math.hypot(vx, vy)
+        if speed <= 1e-9 or abs(vx * ay - vy * ax) > speed ** 3 / min_radius:
+            raise ValueError('reverse curve is tighter than min_radius_m')
+        if index == 0:
+            waypoints.append(start)
+        elif index == count:
+            waypoints.append(target)
+        else:
+            x, y = point(t)
+            waypoints.append((x, y, math.atan2(-vy, -vx)))
+    return waypoints
+
+
+def reverse_controller_overrides(controller_dict: dict) -> dict:
+    """Append an isolated, collision-enabled reverse Parking controller."""
+    if not isinstance(controller_dict, dict):
+        raise ValueError('controller parameters must be a mapping')
+    controllers = controller_dict.get('controller_plugins')
+    if not isinstance(controllers, list):
+        raise ValueError('controller_plugins must be a list')
+    if controllers.count('Parking') != 1:
+        raise ValueError('controller_plugins must contain Parking once')
+    if ('ParkingReverse' in controllers
+            or 'ParkingReverse' in controller_dict):
+        raise ValueError('ParkingReverse controller already exists')
+
+    parking = controller_dict.get('Parking')
+    if not isinstance(parking, dict):
+        raise ValueError('Parking configuration must be a mapping')
+    if parking.get('plugin') != RPP_PLUGIN:
+        raise ValueError('reverse parking requires Regulated Pure Pursuit')
+    desired_velocity = _finite_number(
+        parking.get('desired_linear_vel'), 'Parking.desired_linear_vel')
+    if desired_velocity <= 0.0:
+        raise ValueError('Parking.desired_linear_vel must be positive')
+
+    configured = deepcopy(controller_dict)
+    configured['controller_plugins'].append('ParkingReverse')
+    reverse = deepcopy(configured['Parking'])
+    reverse.update({
+        'use_rotate_to_heading': False,
+        'allow_reversing': True,
+        'desired_linear_vel': min(
+            desired_velocity, MAX_REVERSE_LINEAR_VELOCITY_MPS),
+    })
+    configured['ParkingReverse'] = reverse
+    graceful = configured.get('GracefulParking')
+    if isinstance(graceful, dict):
+        configured['controller_plugins'].append('GracefulReverse')
+        configured['GracefulReverse'] = {**graceful, 'allow_backward': True}
+    return configured
+
+
+def _clearly_free(metadata: dict, row: int, column: int) -> bool:
+    pixel = metadata['pixels'][row * metadata['width'] + column]
+    if pixel == 205:
+        return False
+    occupancy = (
+        pixel / 255.0 if metadata['negate'] else (255 - pixel) / 255.0)
+    return occupancy < metadata['free_thresh']
+
+
+def _convex_hull(
+        points: Sequence[Sequence[float]],
+) -> list[tuple[float, float]]:
+    ordered = sorted({
+        (float(point[0]), float(point[1])) for point in points
+    })
+    if len(ordered) < 3:
+        raise ValueError('footprint must enclose an area')
+
+    def cross(origin, first, second):
+        return ((first[0] - origin[0]) * (second[1] - origin[1])
+                - (first[1] - origin[1]) * (second[0] - origin[0]))
+
+    lower = []
+    for point in ordered:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
+            lower.pop()
+        lower.append(point)
+    upper = []
+    for point in reversed(ordered):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        raise ValueError('footprint must enclose an area')
+    return hull
+
+
+def _world_footprint(
+        pose: Sequence[float], footprint: Sequence[Sequence[float]],
+) -> list[tuple[float, float]]:
+    x_pose, y_pose, yaw = pose
+    cosine = math.cos(yaw)
+    sine = math.sin(yaw)
+    return [
+        (x_pose + x_local * cosine - y_local * sine,
+         y_pose + x_local * sine + y_local * cosine)
+        for x_local, y_local in footprint
+    ]
+
+
+def _polygon_intersects_cell(
+        polygon: Sequence[Sequence[float]], padding: float,
+        cell_left: float, cell_bottom: float, resolution: float,
+) -> bool:
+    cell = (
+        (cell_left, cell_bottom),
+        (cell_left + resolution, cell_bottom),
+        (cell_left + resolution, cell_bottom + resolution),
+        (cell_left, cell_bottom + resolution),
+    )
+    axes = [(1.0, 0.0), (0.0, 1.0)]
+    for start, end in zip(polygon, polygon[1:] + polygon[:1]):
+        delta_x = end[0] - start[0]
+        delta_y = end[1] - start[1]
+        length = math.hypot(delta_x, delta_y)
+        if length > 0.0:
+            axes.append((-delta_y / length, delta_x / length))
+    for axis_x, axis_y in axes:
+        polygon_projection = [
+            x_value * axis_x + y_value * axis_y
+            for x_value, y_value in polygon
+        ]
+        cell_projection = [
+            x_value * axis_x + y_value * axis_y
+            for x_value, y_value in cell
+        ]
+        if (max(polygon_projection) + padding < min(cell_projection)
+                or max(cell_projection) < min(polygon_projection) - padding):
+            return False
+    return True
+
+
+def _corridor_blockage(
+        source: dict, keepout: dict,
+        pieces: Sequence[tuple[Sequence[Sequence[float]], float]],
+) -> dict | None:
+    resolution = source['resolution']
+    origin_x, origin_y, _origin_yaw = source['origin']
+    width = source['width']
+    height = source['height']
+    for polygon, padding in pieces:
+        minimum_column = math.floor(
+            (min(point[0] for point in polygon) - padding - origin_x)
+            / resolution) - 1
+        maximum_column = math.floor(
+            (max(point[0] for point in polygon) + padding - origin_x)
+            / resolution) + 1
+        minimum_map_row = math.floor(
+            (min(point[1] for point in polygon) - padding - origin_y)
+            / resolution) - 1
+        maximum_map_row = math.floor(
+            (max(point[1] for point in polygon) + padding - origin_y)
+            / resolution) + 1
+        for map_row in range(minimum_map_row, maximum_map_row + 1):
+            cell_bottom = origin_y + map_row * resolution
+            for column in range(minimum_column, maximum_column + 1):
+                cell_left = origin_x + column * resolution
+                if not _polygon_intersects_cell(
+                        polygon, padding, cell_left, cell_bottom, resolution):
+                    continue
+                if not (0 <= map_row < height and 0 <= column < width):
+                    return {
+                        'reason': 'outside_grid',
+                        'column': column,
+                        'map_row': map_row,
+                    }
+                row = height - 1 - map_row
+                for grid_name, metadata in (
+                        ('map', source), ('keepout', keepout)):
+                    if not _clearly_free(metadata, row, column):
+                        index = row * width + column
+                        return {
+                            'reason': f'{grid_name}_not_free',
+                            'grid': grid_name,
+                            'column': column,
+                            'map_row': map_row,
+                            'image_row': row,
+                            'pixel': metadata['pixels'][index],
+                            'cell_bounds': (
+                                cell_left, cell_bottom,
+                                cell_left + resolution,
+                                cell_bottom + resolution),
+                        }
+    return None
+
+
+def static_corridor_clear(
+        map_yaml: Path, keepout_yaml: Path,
+        poses: Sequence[Sequence[float]],
+        footprint: Sequence[Sequence[float]],
+) -> bool:
+    """
+    Check a sampled footprint corridor against static map pixels.
+
+    This complements Nav2 path validation by treating unknown pixels as
+    blocked.  It checks only the supplied static map and keepout mask, not
+    live obstacles or the robot's runtime costmaps.
+    """
+    source = _map_metadata(Path(map_yaml).resolve())
+    keepout = _map_metadata(Path(keepout_yaml).resolve())
+    if (not math.isclose(
+            source['resolution'], keepout['resolution'], abs_tol=1e-12)
+            or source['origin'] != keepout['origin']
+            or source['width'] != keepout['width']
+            or source['height'] != keepout['height']):
+        raise ValueError('map and keepout grids must have identical geometry')
+    resolution = source['resolution']
+    if not math.isfinite(resolution) or resolution <= 0.0:
+        raise ValueError('map resolution must be positive and finite')
+    for metadata in (source, keepout):
+        if (metadata['negate'] not in (0, 1)
+                or not math.isfinite(metadata['free_thresh'])
+                or not 0.0 <= metadata['free_thresh'] <= 1.0):
+            raise ValueError('map occupancy metadata is invalid')
+
+    try:
+        checked_poses = tuple(_pose(pose, 'pose') for pose in poses)
+    except TypeError as error:
+        raise ValueError('poses must be a non-empty sequence') from error
+    if not checked_poses:
+        raise ValueError('poses must be a non-empty sequence')
+    try:
+        if len(footprint) < 3:
+            raise ValueError('footprint must contain at least three points')
+    except TypeError as error:
+        raise ValueError(
+            'footprint must contain at least three points') from error
+    footprint_points = []
+    for point in footprint:
+        try:
+            if len(point) != 2:
+                raise ValueError('footprint points must contain x and y')
+        except TypeError as error:
+            raise ValueError(
+                'footprint points must contain x and y') from error
+        footprint_points.append((
+            _finite_number(point[0], 'footprint'),
+            _finite_number(point[1], 'footprint')))
+
+    footprint_points = _convex_hull(footprint_points)
+    footprint_radius = max(
+        math.hypot(x_value, y_value)
+        for x_value, y_value in footprint_points)
+    world_footprints = [
+        _world_footprint(pose, footprint_points) for pose in checked_poses]
+    pieces = [(polygon, 0.0) for polygon in world_footprints]
+    for index, (current, following) in enumerate(zip(
+            checked_poses, checked_poses[1:])):
+        yaw_change = abs(_shortest_angle(following[2] - current[2]))
+        sagitta = footprint_radius * (1.0 - math.cos(yaw_change / 2.0))
+        swept_hull = _convex_hull(
+            world_footprints[index] + world_footprints[index + 1])
+        pieces.append((swept_hull, sagitta))
+    return _corridor_blockage(source, keepout, pieces) is None

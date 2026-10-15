@@ -1,0 +1,50 @@
+schema_version: 1
+id: corridor_keepout_roundtrip
+frame_id: map
+map_yaml: $HOME/maps/autonomous_20260826T161908.yaml
+keepout_mask_yaml: $HOME/maps/autonomous_20260826T161908_keepout_multi.yaml
+expected_mask_sha256: 40a99481046b2ad55fd4c5d3ad3e8b3a6d245fd7c808d32571f2828d4837df28
+# waypoint 직선 합이며 test_route_clearance.py가 좌표에서 다시 계산한다.
+planned_length_m: 76.42
+# 즉시 정지는 Collision Monitor가 담당하고, 이 값은 센서 스트림 상실 시
+# 경로 실행을 끝내는 2차 방어다. 임계 변경 근거는 evaluation 보고서에 둔다.
+sensor_freshness_s: 10.0
+# 늦은 배터리 메시지와 낮은 전압을 별도 조건으로 판정한다.
+battery_freshness_s: 30.0
+minimum_battery_v: 10.5
+# 복도 진행축의 약한 관측성은 안전 인터록과 성능 판정을 분리해 다룬다.
+# 임계 변경 이력과 실제 취소 값은 evaluation 보고서에 둔다.
+max_amcl_x_covariance: 50.0
+max_amcl_y_covariance: 50.0
+amcl_freshness_s: 60.0
+revisit_motion_amcl_freshness_s: 25.0
+revisit_motion_min_distance_m: 0.25
+revisit_motion_min_rotation_rad: 0.5
+revisit_goal_amcl_tolerance_m: 0.35
+# 전체 경로는 지도상의 home 근처에서만 시작한다. 중간 재개는 첫 잔여
+# waypoint를 별도 한도로 확인한다.
+start_pose: {x: 0.00, y: -0.10}
+max_route_start_distance_m: 1.0
+max_resume_start_distance_m: 6.0
+# 지도·금지구역에 대한 경로 여유는 test_route_clearance.py가 계산한다.
+waypoints:
+  - {id: outbound_01m, x: 1.00, y: -0.30}
+  - {id: outbound_06m, x: 6.00, y: -0.73}
+  - {id: outbound_10m, x: 10.00, y: -1.07}
+  - {id: outbound_14m, x: 14.00, y: -1.42}
+  - {id: outbound_18m, x: 18.00, y: -1.77}
+  - {id: outbound_22m, x: 22.00, y: -2.17}
+  - {id: outbound_26m, x: 26.00, y: -2.37}
+  - {id: outbound_30m, x: 30.00, y: -2.72}
+  - {id: outbound_34m, x: 34.00, y: -3.52}
+  - {id: turnaround, x: 37.50, y: -4.25}
+  - {id: return_34m, x: 34.00, y: -5.62}
+  - {id: return_30m, x: 30.00, y: -4.97}
+  - {id: return_26m, x: 26.00, y: -3.97}
+  - {id: return_22m, x: 22.00, y: -4.62}
+  - {id: return_18m, x: 18.00, y: -4.12}
+  - {id: return_14m, x: 14.00, y: -2.82}
+  - {id: return_10m, x: 10.00, y: -1.12}
+  - {id: return_06m, x: 6.00, y: -0.72}
+  - {id: return_02m, x: 2.00, y: -0.42}
+  - {id: home, x: 0.00, y: -0.10}

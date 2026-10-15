@@ -188,5 +188,24 @@
     "discovery_range": "SUBNET",
     "physical_motion_enabled": false,
     "synthetic_traction_guard_for_physical_robot": false
+  },
+  "integration": {
+    "status": "SOURCE_INTEGRATED_PC_RUNTIME_BUILD_VALIDATED",
+    "authority_repository": "https://github.com/mmporong/bimanual-robot",
+    "source_tree": "src/jdamr",
+    "imported_from_commit": "2e25c423926d02badd8e3461a32c587912f5dd0a",
+    "provenance_manifest": "config/navigation/jdamr_import_manifest.json",
+    "operator_entrypoint": "tools/jdamr/jdamr_depart.py",
+    "build_deploy_entrypoint": "tools/jdamr/runtime.py",
+    "branch_policy": "create_work_branch_from_latest_bimanual_main_then_validate_and_merge_pr",
+    "preserved_runtime_contract": {
+      "ros_package_names_unchanged": true,
+      "base_frame_origin": "front_axle_projection_on_floor",
+      "camera_lens_floor_height_m": 1.26,
+      "model_to_runtime_origin_offset_m": 0.105,
+      "four_wheel_firmware": true
+    },
+    "historical_contract_scope": "top-level source and precursor_service_roundtrip retain their original baseline provenance; they are not the active runtime source or a departure gate",
+    "movement_performed_during_integration": false
   }
 }

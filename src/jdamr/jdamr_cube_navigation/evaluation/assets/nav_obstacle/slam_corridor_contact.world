@@ -1,0 +1,375 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.8">
+  <world name="slam_corridor">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics" />
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands" />
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact" />
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster" />
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu" />
+    <light type="directional" name="sun">
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>50 12</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>50 12</size>
+            </plane>
+          </geometry>
+          <material>
+            <diffuse>0.78 0.78 0.78 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_north">
+      <static>true</static>
+      <pose>0 1.2 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>20 0.1 1</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>20 0.1 1</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_south">
+      <static>true</static>
+      <pose>0 -1.2 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>20 0.1 1</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>20 0.1 1</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_west">
+      <static>true</static>
+      <pose>-10 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.1 2.5 1</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.1 2.5 1</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_east">
+      <static>true</static>
+      <pose>10 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.1 2.5 1</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.1 2.5 1</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="feature_north_west">
+      <static>true</static>
+      <pose>-5.5 1.0 0.4 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5 0.3 0.8</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.5 0.3 0.8</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="feature_south_mid">
+      <static>true</static>
+      <pose>-1.0 -0.95 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.8 0.4 0.6</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.8 0.4 0.6</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="feature_north_east">
+      <static>true</static>
+      <pose>3.2 0.95 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.3 0.4 1.0</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.3 0.4 1.0</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="feature_south_east">
+      <static>true</static>
+      <pose>7.0 -0.95 0.35 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.6 0.4 0.7</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.6 0.4 0.7</size>
+            </box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <model name="g003_preloaded_route_obstacle">
+      <static>true</static>
+      <pose>0.0 20.0 0.5 0.0 0.0 0.0</pose>
+      <link name="body">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5 0.4 1.0</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.5 0.4 1.0</size>
+            </box>
+          </geometry>
+          <visibility_flags>4</visibility_flags>
+        </visual>
+        <sensor name="contact_sensor" type="contact">
+          <always_on>true</always_on>
+          <update_rate>50</update_rate>
+          <contact>
+            <collision>collision</collision>
+          </contact>
+        </sensor>
+      </link>
+    </model>
+    <model name="g003_preloaded_full_block">
+      <static>true</static>
+      <pose>0.0 25.0 0.5 0.0 0.0 0.0</pose>
+      <link name="body">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5 2.3 1.0</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.5 2.3 1.0</size>
+            </box>
+          </geometry>
+          <visibility_flags>4</visibility_flags>
+        </visual>
+        <sensor name="contact_sensor" type="contact">
+          <always_on>true</always_on>
+          <update_rate>50</update_rate>
+          <contact>
+            <collision>collision</collision>
+          </contact>
+        </sensor>
+      </link>
+    </model>
+    <model name="g003_preloaded_goal_occupied">
+      <static>true</static>
+      <pose>0.0 30.0 0.5 0.0 0.0 0.0</pose>
+      <link name="body">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>1.7 1.7 1.0</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>1.7 1.7 1.0</size>
+            </box>
+          </geometry>
+          <visibility_flags>4</visibility_flags>
+        </visual>
+        <sensor name="contact_sensor" type="contact">
+          <always_on>true</always_on>
+          <update_rate>50</update_rate>
+          <contact>
+            <collision>collision</collision>
+          </contact>
+        </sensor>
+      </link>
+    </model>
+    <model name="g003_preloaded_sub_minimum_probe">
+      <static>true</static>
+      <pose>0.0 35.0 0.5 0.0 0.0 0.0</pose>
+      <link name="body">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.02 0.02 1.0</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.02 0.02 1.0</size>
+            </box>
+          </geometry>
+          <visibility_flags>4</visibility_flags>
+        </visual>
+        <sensor name="contact_sensor" type="contact">
+          <always_on>true</always_on>
+          <update_rate>50</update_rate>
+          <contact>
+            <collision>collision</collision>
+          </contact>
+        </sensor>
+      </link>
+    </model>
+    <model name="g003_preloaded_front_observation_probe">
+      <static>true</static>
+      <pose>0.0 40.0 0.5 0.0 0.0 0.0</pose>
+      <link name="body">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5 0.4 1.0</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.5 0.4 1.0</size>
+            </box>
+          </geometry>
+          <visibility_flags>4</visibility_flags>
+        </visual>
+        <sensor name="contact_sensor" type="contact">
+          <always_on>true</always_on>
+          <update_rate>50</update_rate>
+          <contact>
+            <collision>collision</collision>
+          </contact>
+        </sensor>
+      </link>
+    </model>
+    <model name="g003_preloaded_contact_control">
+      <static>true</static>
+      <pose>0.0 45.0 0.2 0.0 0.0 0.0</pose>
+      <link name="body">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.14 0.12 0.4</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.14 0.12 0.4</size>
+            </box>
+          </geometry>
+          <visibility_flags>4</visibility_flags>
+        </visual>
+        <sensor name="contact_sensor" type="contact">
+          <always_on>true</always_on>
+          <update_rate>50</update_rate>
+          <contact>
+            <collision>collision</collision>
+          </contact>
+        </sensor>
+      </link>
+    </model>
+  </world>
+</sdf>

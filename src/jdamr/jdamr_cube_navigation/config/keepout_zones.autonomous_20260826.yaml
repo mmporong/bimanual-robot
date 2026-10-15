@@ -1,0 +1,32 @@
+schema_version: 1
+map_yaml: $HOME/maps/autonomous_20260826T161908.yaml
+safety_margin_m: 0.55
+annotation_alignment:
+  source: rviz_publish_point_manual_2026-09-01
+  method: two_four_point_polygons_in_map_frame
+  matched_features: 8
+  note: 왼쪽 계단 입구는 0.55m 팽창 후 경계가 벽선과 일치하도록 원점을 보정했다.
+verification:
+  source_map_sha256: ee9b0911f41a7da31a92eca67d261b2a96c286f6f49d65b3d6c884fb5937fc6e
+  expected_mask_sha256: 40a99481046b2ad55fd4c5d3ad3e8b3a6d245fd7c808d32571f2828d4837df28
+  expected_keepout_cells: 9406
+connectivity_checks:
+  - id: main_corridor_left_to_right
+    start: [-0.002, 0.000]
+    goal: [37.498, -4.300]
+    clearance_m: 0.25
+zones:
+  - id: keepout_1
+    enabled: true
+    polygon:
+      - [6.263780, -2.225145]
+      - [8.747318, -2.356887]
+      - [8.727464, -3.456606]
+      - [6.095974, -2.916945]
+  - id: keepout_2
+    enabled: true
+    polygon:
+      - [37.763397, -6.394963]
+      - [40.990551, -3.746852]
+      - [41.432625, -7.194964]
+      - [37.651196, -7.636807]

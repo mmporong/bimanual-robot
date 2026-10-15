@@ -1,0 +1,12 @@
+[Unit]
+Description=JD-AMR box face observer (depth_box_parking; perception only, no motion)
+After=jdamr-box-rgbd.service
+
+[Service]
+User=@RUN_USER@
+Nice=5
+CPUWeight=100
+KillSignal=SIGINT
+TimeoutStopSec=10
+Environment=ROS_DOMAIN_ID=12 ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST FASTDDS_BUILTIN_TRANSPORTS=UDPv4 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
+ExecStart=/bin/bash -c "set +u; source /opt/ros/jazzy/setup.bash; source @JDAMR_WS@/install/setup.bash; exec ros2 run jdamr_cube_navigation depth_box_parking --ros-args --params-file @JDAMR_WS@/install/jdamr_cube_navigation/share/jdamr_cube_navigation/config/depth_box_parking.yaml"

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-15T13:37:53+09:00",
+  "source_repository": {
+    "path_at_capture": "/home/lim/jdamr_rgbd_ws/src/jdamr_cube_ros",
+    "commit": "2e25c423926d02badd8e3461a32c587912f5dd0a",
+    "scope": "tracked main commit only; local RViz modification excluded"
+  },
+  "astra_camera": {
+    "official_remote": "https://github.com/orbbec/ros2_astra_camera.git",
+    "commit": "f7e71d9ce806e788cb48d8580aac2c778fba4214",
+    "checkout_state": "detached HEAD with the recorded 10-file working-tree patch",
+    "patch": "patches/ros2_astra_camera-f7e71d9-pi.patch",
+    "patch_sha256": "5400cb526f9ee09926c21adce73cb2fec5dd041784d1408f17a5d067111f7290",
+    "modified_files": [
+      "astra_camera/include/astra_camera/constants.h",
+      "astra_camera/include/astra_camera/ob_camera_node.h",
+      "astra_camera/include/astra_camera/point_cloud_proc/point_cloud_xyz.h",
+      "astra_camera/include/astra_camera/point_cloud_proc/point_cloud_xyzrgb.h",
+      "astra_camera/include/astra_camera/ros_param_backend.h",
+      "astra_camera/src/ob_camera_node.cpp",
+      "astra_camera/src/point_cloud_proc/point_cloud_xyz.cpp",
+      "astra_camera/src/point_cloud_proc/point_cloud_xyzrgb.cpp",
+      "astra_camera/src/ros_param_backend.cpp",
+      "astra_camera/src/uvc_camera_driver.cpp"
+    ]
+  },
+  "dashboard": {
+    "source_directory_at_capture": "/home/lim/ammr_dashboard",
+    "runtime_arguments": [
+      "--bind", "127.0.0.1", "--port", "8090",
+      "--scan-yaw-deg", "180", "--scan-x-m", "-0.010",
+      "--scan-y-m", "0", "--scan-display-frame", "base_footprint"
+    ],
+    "files": {
+      "../dashboard/ammr_dashboard.py": "1a98c8ad52c9f25ff967e619a1f146879f5bb235e50c52c65a90eaf0c9a636f5",
+      "../dashboard/dashboard.html": "df1f1da6aee908fce9f4f9c6fef4971ea1f59acd7b14f541e63a40fa4d71f0ab",
+      "../dashboard/dashboard.js": "0595f89cadfc17fd81994312c0e09a4bd782acfd3652af0238e69b749bc6a28e",
+      "../dashboard/host_metrics.py": "00db3f02b9713b73ad328ab7548185c10f1961f33c2fa00d489826bd9499121a"
+    }
+  },
+  "systemd_source_sha256": {
+    "/etc/systemd/system/jdamr-base.service": "178edb2a64d836e16d4dd5e30d9d29408b82ed994eb939f8be4bd57dc4949799",
+    "/etc/systemd/system/jdamr-base.service.d/90-local-dds.conf": "0a2490407b504050e263b2236fb3d44eafba2c5a9859d71435fd916bf9157846",
+    "/etc/systemd/system/jdamr-base.service.d/95-column-self-filter.conf": "a35c3d1d77e0387865244520b9cec057cd2fd3c33c139ef7d684a9a718da6185",
+    "/etc/systemd/system/jdamr-box-rgbd.service": "cc0e7c175dc2023ca3a288c16740c81c178586bde2af0a7f03d435b5044428fc",
+    "/etc/systemd/system/jdamr-box-observer.service": "d55155ccc3880f60ff4cc6cebd70e9594afa3200d62b50e5fc25e1c5351a57aa",
+    "/run/systemd/system/jdamr-box-observer.service.d/50-four-frames.conf": "2aac0d0ca99f562e84e39243714d1ca9a951d5fc1a590ce744dfc191ce490c98",
+    "/etc/systemd/system/jdamr-operator-mapping.service": "8e557bee0f6f39a2e2ddb05c58c232e0937f871fd36a76c6cc032cccc378ac4a",
+    "/etc/systemd/system/jdamr-ammr-dashboard.service": "12425c13a2c79c5611651f3a74daddd7b0a62b02d3fa23d63ccb4ca98e113338"
+  },
+  "hardware_paths": {
+    "base_controller": "/dev/ttyS0",
+    "lidar": "/dev/ydlidar_g4",
+    "lidar_resolved_at_capture": "/dev/ttyUSB0",
+    "udev_rules": ["udev/99-jdamr-uart.rules", "udev/99-ydlidar-g4.rules"]
+  }
+}

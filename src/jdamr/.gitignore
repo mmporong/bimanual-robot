@@ -1,0 +1,77 @@
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# user setting
+*.*~
+*.bak
+.svn
+.tags
+.tags_sorted_by_file
+*.cfgc
+*.txt.user*
+*-build/
+cpp/
+bin/
+build/
+msg_gen/
+srv_gen/
+docs/
+lib/
+cmake_install.cmake
+Makefile
+CMakeFiles/
+assets/
+# 기존 ROS 회귀와 패키지 설치에 필요한 작은 결정적 fixture
+!jdamr_cube_navigation/evaluation/assets/
+jdamr_cube_navigation/evaluation/assets/*
+!jdamr_cube_navigation/evaluation/assets/nav_obstacle/
+gen/
+build.xml
+lint.xml
+local.properties
+proguard-project.txt
+build-*/
+*.autosave
+*.pyc
+*.dat
+*.txt.user
+*.gch
+/install
+/log
+/maps
+# 세션 상태·실행 로그 (도구 산출물)
+.omc/
+capstone_pick/tools/logs/
+
+# ── 관제 대시보드가 쓰는 기록 (github.com/mmporong/robot-dashboard) ──
+# tools/ 는 ~/capstone_tools 심볼릭 링크의 실체라 여기에 데이터가 쌓인다.
+# MCAP 한 시행이 수백 MB가 되기도 한다(ros2 bag record 실기록 하나가 163MB였다).
+capstone_pick/tools/mcap/
+capstone_pick/tools/lerobot/
+capstone_pick/tools/bag_staging/
