@@ -704,7 +704,7 @@ def test_final_gap_comes_from_the_option_then_the_contract():
     assert BoxServiceRoute._final_gap_m(older) == pytest.approx(0.05)
     table = SimpleNamespace(final_gap_override_m=None, surface_mode='table_edge',
                             parking_contract={'target_front_gap_m': 0.01})
-    assert BoxServiceRoute._final_gap_m(table) == pytest.approx(0.05)
+    assert BoxServiceRoute._final_gap_m(table) == pytest.approx(0.01)
     table.final_gap_override_m = 0.02
     assert BoxServiceRoute._final_gap_m(table) == pytest.approx(0.02)
 
@@ -1365,7 +1365,49 @@ def test_t28_return_cli_requires_explicit_timeouts():
             parse_args(invalid)
 
 
-def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path):
+@pytest.mark.parametrize('cleanup_failure', [False, True])
+def test_resident_result_is_published_atomically_after_attempt(monkeypatch, tmp_path,
+                                                              cleanup_failure):
+    spool = tmp_path / 'spool'
+    spool.mkdir()
+    (spool / 'run.request').write_text(json.dumps({'argv': []}))
+    handlers = {}
+
+    def signal_handler(signum, handler):
+        previous = handlers.get(signum)
+        handlers[signum] = handler
+        return previous
+
+    monkeypatch.setattr(box_service.signal, 'signal', signal_handler)
+    monkeypatch.setattr(box_service.rclpy, 'init', lambda **k: None)
+    monkeypatch.setattr(box_service.rclpy, 'shutdown', lambda: None)
+    monkeypatch.setattr(box_service, 'parse_args', lambda argv: object())
+
+    def attempt(args, active):
+        handlers[box_service.signal.SIGTERM]()
+        if cleanup_failure:
+            raise RuntimeError('camera stop unconfirmed')
+        return 0
+
+    monkeypatch.setattr(box_service, 'run_attempt', attempt)
+    replace = Path.replace
+    publications = []
+
+    def publish(source, destination):
+        assert not destination.exists()
+        publications.append(json.loads(source.read_text()))
+        return replace(source, destination)
+
+    monkeypatch.setattr(Path, 'replace', publish)
+    assert box_service.serve(spool) == 0
+    expected = {'code': 1 if cleanup_failure else 0}
+    assert publications == [expected]
+    assert json.loads((spool / 'run.result').read_text()) == expected
+    assert sorted(p.name for p in spool.iterdir()) == ['run.lock', 'run.result']
+
+
+@pytest.mark.parametrize('camera_stop_ok', [True, False])
+def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path, camera_stop_ok):
     """Dwell and return only after a confirmed approach; exit 0 needs every step."""
     for name in ('registry', 'mount', 'geometry', 'route'):
         (tmp_path / f'{name}.yaml').write_text('{}\n')
@@ -1390,7 +1432,7 @@ def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path):
             self.visit_observed_box = Mock(return_value=Route.visit_ok)
             self.dwell_and_return_home = Mock(return_value=True)
             self.go_home = Mock(return_value=True)
-            self._camera = Mock(return_value=True)
+            self._camera = Mock(return_value=camera_stop_ok)
             self.finish_navigation = Mock(return_value=True)
             self.destroy_node, self.emit, self.request_stop = Mock(), Mock(), Mock()
             self.call_operator = Mock(return_value='CRITICAL')
@@ -1401,7 +1443,11 @@ def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path):
     for visit_ok, expected in ((False, 1), (True, 0)):
         Route.visit_ok = visit_ok
         log = tmp_path / f'visit_{visit_ok}.jsonl'
-        assert box_service.main([*argv, '--log', str(log)]) == expected
+        if camera_stop_ok:
+            assert box_service.main([*argv, '--log', str(log)]) == expected
+        else:
+            with pytest.raises(RuntimeError, match='camera stop unconfirmed'):
+                box_service.main([*argv, '--log', str(log)])
     failed, succeeded = created
     failed.dwell_and_return_home.assert_not_called()
     failed.go_home.assert_not_called()
@@ -1409,6 +1455,9 @@ def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path):
     for node in created:
         assert node.camera_on_demand is True
         node._camera.assert_called_with(False)
+        node.destroy_node.assert_called_once_with()
+        if not camera_stop_ok:
+            node.emit.assert_called_with('failed', phase='cleanup', reason='camera_stop_failed')
     # A cycle that stopped short calls the operator once; a finished one does not.
     failed.call_operator.assert_called_once_with()
     succeeded.call_operator.assert_not_called()
@@ -1791,12 +1840,14 @@ def test_resident_executor_runs_requests_in_one_context(tmp_path, monkeypatch):
 
     def attempt(args, active):
         calls.append(tuple(args.argv))
-        assert active == {'node': None}
+        assert active == {'node': None, 'stop_requested': False}
         if args.argv == ['b']:
             signal.raise_signal(signal.SIGTERM)   # leave after this attempt
         return 0 if args.argv == ['a'] else 1
 
     monkeypatch.setattr(box_service, 'run_attempt', attempt)
+    (tmp_path / '0.request').write_text(json.dumps({'argv': ['cancelled']}))
+    (tmp_path / '0.cancelled').touch()
     (tmp_path / '1.request').write_text(json.dumps({'argv': ['a']}))
     (tmp_path / '2.request').write_text(json.dumps({'argv': ['b']}))
     assert box_service.serve(tmp_path) == 0
@@ -1804,6 +1855,30 @@ def test_resident_executor_runs_requests_in_one_context(tmp_path, monkeypatch):
     assert json.loads((tmp_path / '1.result').read_text()) == {'code': 0}
     assert json.loads((tmp_path / '2.result').read_text()) == {'code': 1}
     assert not list(tmp_path.glob('*.running'))
+    assert not (tmp_path / '0.request').exists()
+
+
+def test_stop_during_node_construction_prevents_motion(tmp_path, monkeypatch):
+    mount = tmp_path / 'mount.yaml'
+    mount.write_text('{}')
+    args = SimpleNamespace(registry=mount, camera_mount=mount, geometry=mount,
+                           parking_contract=mount, log=tmp_path / 'events.jsonl')
+    monkeypatch.setattr(box_service, 'load_registry', lambda _: {})
+    monkeypatch.setattr(box_service, 'load_parking_contract', lambda _: {})
+    active = {'node': None, 'stop_requested': False}
+    node = Mock()
+
+    def construct(*_args, **_kwargs):
+        active['stop_requested'] = True  # SIGINT while no node existed yet.
+        return node
+
+    monkeypatch.setattr(box_service, 'BoxServiceRoute', construct)
+    assert box_service.run_attempt(args, active) == 1
+    node.request_operator_stop.assert_called_once_with()
+    node.visit_observed_box.assert_not_called()
+    node.go_home.assert_not_called()
+    node.finish_navigation.assert_called_once_with()
+    node.destroy_node.assert_called_once_with()
 
 
 class _ParameterClientStub:

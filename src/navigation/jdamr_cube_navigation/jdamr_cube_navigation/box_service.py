@@ -3,6 +3,7 @@
 import argparse
 from collections import deque
 from itertools import islice
+import fcntl
 import json
 import math
 from pathlib import Path
@@ -122,7 +123,6 @@ ESCAPE_PATH_CONTRACT = {
 # Held stop at the water station and the table before leaving (operator,
 # 2026-10-01: 5 s -> 2 s).
 STOP_DWELL_S = 2.0
-TABLE_EDGE_DEFAULT_GAP_M = 0.05
 SURFACE_MODES = ('front', 'table_edge')
 
 
@@ -1275,8 +1275,6 @@ class BoxServiceRoute(ServiceRoute):
         override = getattr(self, 'final_gap_override_m', None)
         if override is not None:
             return override
-        if getattr(self, 'surface_mode', 'front') == 'table_edge':
-            return TABLE_EDGE_DEFAULT_GAP_M
         return self.parking_contract.get('target_front_gap_m', DEFAULT_FRONT_GAP_M)
 
     def _fail_final(self, reason, **fields):
@@ -1800,8 +1798,8 @@ def parse_args(argv=None):
     parser.add_argument('--operator-link-timeout-s', type=float,
                         default=OPERATOR_LINK_TIMEOUT_S)
     parser.add_argument('--final-gap-m', type=float,
-                        help='front gap override; table_edge defaults to 0.05 m and front '
-                             "uses the parking contract's target_front_gap_m")
+                        help="front gap override; defaults to the parking contract's "
+                             'target_front_gap_m for either surface mode')
     parser.add_argument('--dwell-s', type=float, default=STOP_DWELL_S,
                         help='held stop at each box (longer for an external gap measurement)')
     args = parser.parse_args(argv)
@@ -1898,6 +1896,9 @@ def run_attempt(args, active=None):
                         signum, lambda *_: node.request_operator_stop())
             else:
                 active['node'] = node
+                if active.get('stop_requested', False):
+                    node.request_operator_stop()
+                    return 1
             if args.graceful_final:
                 node.final_approach_controller = 'GracefulParking'
                 node.dock_leg_controller = 'GracefulReverse'
@@ -1987,8 +1988,12 @@ def run_attempt(args, active=None):
                     active['node'] = None
                 if node is not None:
                     # Every attempt ends with the camera off, failed ones included.
-                    node._camera(False)
-                    node.destroy_node()
+                    try:
+                        if not node._camera(False):
+                            node.emit('failed', phase='cleanup', reason='camera_stop_failed')
+                            raise RuntimeError('camera stop unconfirmed')
+                    finally:
+                        node.destroy_node()
 
 
 def serve(spool):
@@ -2004,10 +2009,11 @@ def serve(spool):
     """
     spool = Path(spool)
     spool.mkdir(parents=True, exist_ok=True)
-    active = {'node': None}
+    active = {'node': None, 'stop_requested': False}
     leaving = {'now': False}
 
     def stop_attempt(*_):
+        active['stop_requested'] = True
         if active['node'] is not None:
             active['node'].request_operator_stop()
 
@@ -2027,7 +2033,17 @@ def serve(spool):
             request = requests[0]
             name = request.name[:-len('.request')]
             running = spool / f'{name}.running'
-            request.rename(running)
+            with (spool / f'{name}.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                if (spool / f'{name}.cancelled').exists():
+                    request.unlink(missing_ok=True)
+                    continue
+                active['stop_requested'] = False
+                try:
+                    request.rename(running)
+                except FileNotFoundError:
+                    # The PC cancelled an unclaimed request before this lock.
+                    continue
             try:
                 code = run_attempt(parse_args(json.loads(running.read_text())['argv']), active)
             except SystemExit as error:   # argparse rejected the request
@@ -2035,8 +2051,13 @@ def serve(spool):
             except Exception as error:  # noqa: B902 - report, keep serving
                 print(json.dumps({'failed': f'{type(error).__name__}: {error}'}), flush=True)
                 code = 1
-            (spool / f'{name}.result').write_text(json.dumps({'code': code}))
-            running.unlink()
+            with (spool / f'{name}.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                result = spool / f'{name}.result'
+                temporary = result.with_suffix('.result.tmp')
+                temporary.write_text(json.dumps({'code': code}))
+                temporary.replace(result)
+                running.unlink()
         return 0
     finally:
         for signum, handler in previous.items():

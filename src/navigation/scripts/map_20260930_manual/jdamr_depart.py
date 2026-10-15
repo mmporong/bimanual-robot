@@ -16,7 +16,7 @@ localization seeding through the existing `activate_navigation`, home teaching.
                                     (--click: RViz click instead, re-teaches home unless --keep-home)
     jdamr_depart.py go table_01     tabletop face: observe -> align -> contract gap (1 cm) -> dwell -> escape -> dock
     jdamr_depart.py health          read-only: does a fresh Pi process receive map/TF/scan
-    jdamr_depart.py recover         no-motion restart of sensors, session and display + init
+    jdamr_depart.py recover         no-motion restart of sensors/session + init; restore used display
     jdamr_depart.py status | stop | display-stop | session-stop
     jdamr_depart.py estop           latch the base driver stop (wheels at zero), stop the attempt
     jdamr_depart.py estop-reset     release it (refused while a velocity command still arrives)
@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
+from uuid import uuid4
 
 import yaml
 
@@ -63,9 +64,10 @@ PI_P2 = PI_BASE / 'aligned'
 PI_REGISTRY = PI_P2 / 'service_destinations.yaml'
 PI_SESSION = f'{PI_WS}/src/jdamr_cube_ros/jdamr_cube_navigation/scripts/restaurant_session.sh'
 # Resident box executor (2026-10-01): one DDS participant for every go, started with
-# the session. Without it, go falls back to one systemd unit per run.
+# the session. Every go uses its result protocol, including after a restart.
 EXECUTOR_UNIT = 'jdamr-box-executor'
 EXECUTOR_SPOOL = f'{PI_HOME}/jdamr_data/box_executor_spool'
+SSH_READ_TIMEOUT_S = 10
 PI_TOOLS = f'{PI_HOME}/jdamr_data/map_20260930_manual/tools'
 PI_SHARE = f'{PI_WS}/install/jdamr_cube_navigation/share/jdamr_cube_navigation'
 PI_BOX_CONTRACT = f'{PI_SHARE}/config/box_parking_contract.yaml'
@@ -225,7 +227,7 @@ def mark_localized(value):
 
 def session_active():
     return pi('systemctl is-active jdamr-restaurant-navigation.service',
-              check=False).stdout.strip() == 'active'
+              timeout=SSH_READ_TIMEOUT_S, check=False).stdout.strip() == 'active'
 
 
 def refuse_during_cycle(action):
@@ -233,7 +235,7 @@ def refuse_during_cycle(action):
     result = pi("systemctl list-units --type=service --state=active,activating,deactivating "
                 "--no-legend 'jdamr-table-cycle-*'; "
                 f"ls {EXECUTOR_SPOOL}/*.request {EXECUTOR_SPOOL}/*.running 2>/dev/null; true",
-                check=False)
+                timeout=SSH_READ_TIMEOUT_S, check=False)
     if result.returncode == 255:
         fail(f'ssh to the Pi failed; cannot tell whether a cycle is running: {result.stdout[-200:]}')
     busy = result.stdout.strip()
@@ -301,12 +303,15 @@ def pull_registry():
 
 
 # ---------------------------------------------------------------- display (PC)
-def cmd_display_start(_args):
-    missing = [u for u in DISPLAY_UNITS
+def cmd_display_start(args):
+    units = getattr(args, '_display_units', DISPLAY_UNITS)
+    record = getattr(args, 'record_diagnostics', False)
+    missing = [u for u in units
                if sh(f'systemctl --user is-active {u}', check=False).stdout.strip() != 'active']
     if not missing:
         log('display already running')
-        record_start()
+        if record:
+            record_start()
         return
     env = '--setenv=DISPLAY=:1 --setenv=XAUTHORITY=/run/user/1000/gdm/Xauthority'
     commands = {
@@ -316,7 +321,7 @@ def cmd_display_start(_args):
             'sleep 3; ros2 run nav2_util lifecycle_bringup map_server; wait'),
         'jdamr-p2-relay': (
             f'{PC_SOURCE}; exec python3 -m jdamr_cube_navigation.rviz_display_relay import '
-            f'--host {HOST.split("@")[0]}@jdamr.local --workspace {PI_WS}'),
+            f'--host {shlex.quote(HOST)} --workspace {shlex.quote(PI_WS)}'),
         'jdamr-p2-markers': (
             f'{PC_SOURCE}; exec ros2 run jdamr_cube_navigation service_visualization '
             f'--registry {REGISTRY} --annotation {ANNOTATION} --selected table_01'),
@@ -334,14 +339,15 @@ def cmd_display_start(_args):
            f'/bin/bash -c {shlex.quote(command)}')
     time.sleep(4)
     states = {u: sh(f'systemctl --user is-active {u}', check=False).stdout.strip()
-              for u in DISPLAY_UNITS}
+              for u in units}
     (P2 / 'display_units.txt').write_text(
         json.dumps({'started': time.time(), 'units': states,
                     'stop': 'jdamr_depart.py display-stop'}, indent=1))
     log(f'display units: {states}')
     if any(v != 'active' for v in states.values()):
         fail('a display unit is not active; see journalctl --user -u <unit>')
-    record_start()
+    if record:
+        record_start()
 
 
 def record_start():
@@ -445,25 +451,38 @@ def cmd_session_start(_args):
     log(f'Nav2 session {tail[-1] if tail else ""}: precision, prepare-only, '
         f'{SESSION_DISCOVERY}, composition={SESSION_COMPOSITION}; '
         'AMCL waits for init, motion servers inactive')
-    start_executor()
+    if not start_executor():
+        fail('Nav2 session is ready but the executor did not start; no motion requested')
 
 
 def executor_active():
-    return pi(f'systemctl is-active {EXECUTOR_UNIT}', check=False).stdout.strip() == 'active'
+    return pi(f'systemctl is-active {EXECUTOR_UNIT}',
+              timeout=SSH_READ_TIMEOUT_S, check=False).stdout.strip() == 'active'
 
 
 def start_executor():
     """Start the resident box executor once the Nav2 session is up (no motion)."""
     if executor_active():
-        return
+        return True
     command = (f'{PI_SOURCE}; exec python3 -m jdamr_cube_navigation.box_service '
                f'--serve {EXECUTOR_SPOOL}')
     pi(f'mkdir -p {EXECUTOR_SPOOL} && sudo -n systemd-run --unit={EXECUTOR_UNIT} --collect '
        f'--property=User={PI_USER} --property=KillSignal=SIGTERM --property=TimeoutStopSec=30 '
        f'--setenv=HOME={PI_HOME} --working-directory={PI_WS} /bin/bash -c {shlex.quote(command)}',
        check=False)
-    log(f'{EXECUTOR_UNIT}: ' + ('active' if executor_active() else 'not active (go runs one unit '
-                                                                    'per departure)'))
+    active = executor_active()
+    log(f'{EXECUTOR_UNIT}: ' + ('active' if active else 'not active'))
+    return active
+
+
+def restart_executor():
+    """Retry initial map discovery without resetting sensors, localization or displays."""
+    refuse_during_cycle('executor restart')
+    result = pi(f'sudo -n systemctl stop {EXECUTOR_UNIT}', timeout=60, check=False)
+    if result.returncode != 0 and executor_active():
+        fail('executor did not stop; no restart or departure was submitted')
+    if not start_executor():
+        fail('executor restart failed; no departure was submitted')
 
 
 def cmd_session_stop(_args):
@@ -519,7 +538,7 @@ LINK_LOST_GIVE_UP_S = 600.0
 def poll_pi(command):
     """Run a read on the Pi; None when ssh itself failed or hung (exit 255 or timeout)."""
     try:
-        result = pi(command, timeout=30, check=False)
+        result = pi(command, timeout=SSH_READ_TIMEOUT_S, check=False)
     except subprocess.TimeoutExpired:
         return None
     return None if result.returncode == 255 else result
@@ -673,15 +692,22 @@ def cmd_init(args):
 # ---------------------------------------------------------------- go
 def map_wait_failed(events):
     """Only the executor's first check ran and it received no map: nothing moved."""
+    events = [event for event in events if not (
+        event.get('event') == 'executor_failed' and event.get('code') == 1
+        and event.get('reason') == 'executor_exit_nonzero')
+        and not (event.get('event') == 'operator_call'
+                 and str(event.get('reason', '')).startswith('failed: ' + MAP_WAIT_FAILURE))
+        and not (event.get('event') == 'box_camera' and event.get('action') == 'stop'
+                 and event.get('ok') is True)]
     return (len(events) == 1 and events[0].get('event') == 'failed'
             and str(events[0].get('reason', '')).startswith(MAP_WAIT_FAILURE))
 
 
-def show_event(event):
+def show_event(event, *, notify=True):
     keep = {k: event[k] for k in ('event', 'level', 'category', 'phase', 'reason', 'waypoint_id',
                                   'terminal_status_code', 'nav2_error_code') if k in event}
     log('  ' + json.dumps(keep, ensure_ascii=False))
-    if event.get('event') == 'operator_call':
+    if notify and event.get('event') == 'operator_call':
         alert_operator(event)
 
 
@@ -713,6 +739,7 @@ def alert_operator(event):
 
 def run_cycle(args, state, table_id):
     """Start one box_service run on the Pi and follow its log until the unit ends."""
+    requested_s = getattr(args, '_request_started_monotonic_s', time.monotonic())
     region = state['regions'][table_id]
     surface_mode = getattr(args, 'surface_mode', 'table_edge')
     include_via = (not args.dock_only and (
@@ -724,14 +751,14 @@ def run_cycle(args, state, table_id):
     if args.region:
         region = {'xy': args.region[:2], 'radius_m': args.region[2],
                   'basis': f'operator-confirmed {surface_mode}'}
-    run = time.strftime('%Y%m%d_%H%M%S')
+    run = time.strftime('%Y%m%d_%H%M%S') + '_' + uuid4().hex[:8]
     run_dir = P2 / 'runs' / f'{table_id}_{run}'
     pi_run_dir = pi_path(run_dir)
     run_dir.mkdir(parents=True)
-    pi(f'mkdir -p {shlex.quote(str(pi_run_dir))}')
     record_diagnostics = getattr(args, 'record_diagnostics', False)
     bag_unit, monitors = None, None
     if record_diagnostics:
+        pi(f'mkdir -p {shlex.quote(str(pi_run_dir))}')
         # Start before the request so the bag includes the still pre-departure stretch.
         bag_unit = start_onboard_bag(run_dir, run)
         monitors = monitor_units(run)
@@ -740,14 +767,14 @@ def run_cycle(args, state, table_id):
                       'monitor_units': monitors})
         save_state(early)
     try:
-        unit = f'jdamr-table-cycle-{run.replace("_", "-")}'
         route_suffix = '' if include_via else '_direct'
         route = (Path(args.route) if args.route
                  else P2 / f'{table_id}{route_suffix}_route.yaml')
         # Refreshed by every poll below; the executor starts no further goal once it is
         # older than 30 s (the PC stop is the only remote stop without a physical one).
         heartbeat = f'{EXECUTOR_SPOOL}/{run}.heartbeat'
-        pi(f'mkdir -p {EXECUTOR_SPOOL} && touch {heartbeat}')
+        pi(f'mkdir -p {shlex.quote(str(pi_run_dir))} {EXECUTOR_SPOOL} && touch {heartbeat}',
+           timeout=SSH_READ_TIMEOUT_S)
         pi_route = pi_path(route)
         options = (f'--registry {PI_REGISTRY} --approach-route {pi_route} '
                    f'--camera-mount {PI_MOUNT} '
@@ -776,34 +803,63 @@ def run_cycle(args, state, table_id):
                       f'--via-route {pi_path(args.via_route or P2 / (VIA_ID + "_route.yaml"))} '
                       f'--via-region-xy {via["xy"][0]} {via["xy"][1]} '
                       f'--via-region-radius-m {via["radius_m"]}'))
-        if executor_active():
-            # The resident executor already knows the graph: no rediscovery per run.
-            unit = f'executor:{run}'
-            (run_dir / 'command.txt').write_text(f'{EXECUTOR_UNIT} request: {options}\n')
-            request = json.dumps({'argv': shlex.split(options)})
-            pi(f'mkdir -p {EXECUTOR_SPOOL} && cat > {EXECUTOR_SPOOL}/{run}.part && '
-               f'mv {EXECUTOR_SPOOL}/{run}.part {EXECUTOR_SPOOL}/{run}.request', stdin=request)
-
-            def running():
-                result = poll_pi(f'touch {heartbeat}; '
-                                 f'test -e {EXECUTOR_SPOOL}/{run}.result || echo running')
-                return None if result is None else result.stdout.strip() == 'running'
-        else:
-            command = f'{PI_SOURCE}; exec python3 -m jdamr_cube_navigation.box_service {options}'
-            (run_dir / 'command.txt').write_text(command + '\n')
-            pi(f'sudo -n systemd-run --unit={unit} --collect --property=User={PI_USER} '
-               '--property=KillMode=mixed --property=KillSignal=SIGINT '
-               '--property=TimeoutStopSec=20 '
-               f'--setenv=HOME={PI_HOME} --working-directory={PI_WS} /bin/bash -c '
-               f'{shlex.quote(command)}')
-
-            def running():
-                result = poll_pi(f'touch {heartbeat}; systemctl is-active {unit}')
-                return None if result is None else result.stdout.strip() in (
-                    'active', 'activating')
+        completion_error = None
+        if not start_executor():
+            fail('executor unavailable; no departure request was submitted')
+        # The resident executor already knows the graph: no rediscovery per run.
+        unit = f'executor:{run}'
+        (run_dir / 'command.txt').write_text(f'{EXECUTOR_UNIT} request: {options}\n')
+        request = json.dumps({'argv': shlex.split(options)})
+        prefix = f'{EXECUTOR_SPOOL}/{run}'
+        # Publish and an absent-request cancellation use the same lock: a late SSH
+        # command cannot dispatch motion after the PC has reported no submission.
+        publish = (f'set -e; '
+                   f'if test -e {prefix}.cancelled; then rm -f -- {prefix}.part; exit 1; fi; '
+                   f'mv {prefix}.part {prefix}.request')
         fresh = load_state()
         fresh.update({'last_unit': unit, 'last_run': str(run_dir)})
         save_state(fresh)
+        submission_uncertain = False
+        try:
+            submitted = pi(f'cat > {prefix}.part && '
+                           f'flock -x {prefix}.lock bash -c {shlex.quote(publish)}',
+                           stdin=request, timeout=SSH_READ_TIMEOUT_S, check=False)
+            submission_uncertain = submitted.returncode != 0
+        except subprocess.TimeoutExpired:
+            submission_uncertain = True
+        if submission_uncertain:
+            log('submission reply unavailable; following this run ID without resubmitting')
+
+        def running():
+            nonlocal completion_error
+            status = (f'touch {heartbeat}; '
+                      f'if test -e {prefix}.result; then cat {prefix}.result; '
+                      f'elif test -e {prefix}.request || test -e {prefix}.running; then '
+                      f'if systemctl is-active --quiet {EXECUTOR_UNIT}; then echo running; '
+                      f'else rm -f -- {prefix}.request; echo executor_unavailable; fi; '
+                      f'else touch {prefix}.cancelled; echo request_missing; fi')
+            result = poll_pi(f'flock -x {prefix}.lock bash -c {shlex.quote(status)}')
+            if result is None:
+                return None
+            if result.returncode == 0 and result.stdout.strip() == 'running':
+                return True
+            if result.stdout.strip() in ('executor_unavailable', 'request_missing'):
+                completion_error = {'event': 'executor_failed',
+                                    'reason': result.stdout.strip(), 'code': None}
+                return False
+            try:
+                document = json.loads(result.stdout)
+                code = document.get('code') if isinstance(document, dict) else None
+                if result.returncode != 0 or type(code) is not int or not 0 <= code <= 255:
+                    raise ValueError('invalid executor exit code')
+            except (ValueError, TypeError):
+                completion_error = {'event': 'executor_failed',
+                                    'reason': 'executor_result_invalid', 'code': None}
+            else:
+                if code != 0:
+                    completion_error = {'event': 'executor_failed',
+                                        'reason': 'executor_exit_nonzero', 'code': code}
+            return False
         if record_diagnostics:
             try:
                 start_drop_monitor(run_dir, run)
@@ -812,19 +868,35 @@ def run_cycle(args, state, table_id):
         stops = ('dock only' if args.dock_only else
                  f'{VIA_ID} -> {table_id}' if include_via else f'{table_id}')
         alerts = 'on' if load_state().get('operator_alerts', True) is not False else 'off'
-        log(f'DEPARTED {stops} -> dock: unit {unit}, log {run_dir}/cycle_events.jsonl, '
+        submission_label = 'SUBMISSION_UNCONFIRMED' if submission_uncertain else 'SUBMITTED'
+        log(f'{submission_label} {stops} -> dock: unit {unit}, log {run_dir}/cycle_events.jsonl, '
+            f'request_submit_s={time.monotonic() - requested_s:.3f}, '
             f'operator alerts {alerts}')
         seen, bag_checked, departed_s, lost_since = 0, False, time.monotonic(), None
+        first_event_reported = False
+        deferred_calls = []
+
+        def report_new(events):
+            for index in range(seen, len(events)):
+                event = events[index]
+                defer = (getattr(args, '_map_retry_allowed', False)
+                         and event.get('event') == 'operator_call'
+                         and map_wait_failed(events[:index + 1]))
+                show_event(event, notify=not defer)
+                if defer:
+                    deferred_calls.append(event)
+
         while True:
-            time.sleep(10)
             # The recorder needs ~13 s to subscribe on a loaded Pi (2026-10-01).
             if (record_diagnostics and not bag_checked
                     and time.monotonic() - departed_s >= ONBOARD_BAG_CHECK_S):
                 bag_checked = True
                 log('onboard bag: ' + (onboard_bag_bytes(run_dir) or 'nothing written yet'))
             events = read_events(str(pi_run_dir / 'cycle_events.jsonl'))
-            for event in events[seen:]:
-                show_event(event)
+            if events and not first_event_reported:
+                first_event_reported = True
+                log(f'executor first event after {time.monotonic() - requested_s:.3f} s')
+            report_new(events)
             # A failed read returns nothing; keep the count so nothing is repeated.
             seen = max(seen, len(events))
             alive = running()
@@ -837,6 +909,7 @@ def run_cycle(args, state, table_id):
                 elif time.monotonic() - lost_since > LINK_LOST_GIVE_UP_S:
                     fail(f'no ssh to the Pi for {LINK_LOST_GIVE_UP_S:.0f} s; the robot may still '
                          'be in its cycle: run status (and stop or estop) once the link is back')
+                time.sleep(1.0 if not seen else 10.0)
                 continue
             if lost_since is not None:
                 log(f'ssh to the Pi back after {time.monotonic() - lost_since:.0f} s')
@@ -844,12 +917,18 @@ def run_cycle(args, state, table_id):
             if not alive:
                 # The last lines may land between the read above and this check.
                 final = read_events(str(pi_run_dir / 'cycle_events.jsonl'))
-                for event in final[seen:]:
-                    show_event(event)
+                report_new(final)
+                if completion_error is not None:
+                    final.append(completion_error)
+                    show_event(completion_error)
+                if not map_wait_failed(final):
+                    for event in deferred_calls:
+                        alert_operator(event)
                 if record_diagnostics:
                     stop_monitors(monitors)
                     finish_onboard_bag(bag_unit, run_dir)
                 return final
+            time.sleep(1.0 if not seen else 10.0)
     except BaseException:
         # Ctrl-C, ssh or request failures: close and copy what was recorded.
         if record_diagnostics:
@@ -984,6 +1063,7 @@ def cmd_go(args):
 def go_one(args, table_id):
     """Run one dock-to-dock cycle for table_id; fail unless it ends confirmed at the dock."""
     started = time.time()
+    args._request_started_monotonic_s = time.monotonic()
     state = load_state()
     if 'regions' not in state or state.get('localized') is not True:
         fail('not localized: the session restarted or an init failed since the last init; '
@@ -991,26 +1071,26 @@ def go_one(args, table_id):
     if not session_active():
         fail('Nav2 session is not active')
     refuse_during_cycle('a new departure')
+    args._map_retry_allowed = True
     events = run_cycle(args, state, table_id)
     if map_wait_failed(events):
-        # 2026-09-30: new processes stopped receiving map/TF/scan from the running base
-        # and session; fresh services fixed it every time. The executor's own map check
-        # is the detector, so a healthy departure carries no extra check.
-        resumed = (args.skip_via or args.resume_at_observation or args.resume_parked_log
-                   or args.dock_only)
-        if resumed or state.get('init_local_only'):
-            fail('the executor received no map before moving; the robot is not at a globally '
-                 'matched init pose, so run recover --seed X Y YAW_DEG [--local-only], '
-                 'then go again')
+        # The completed attempt failed before motion. Refresh only its DDS context;
+        # keep the current pose, sensors and optional PC displays intact.
         stop_requested_since(started)
-        log('the executor received no map before moving; recovering without motion, '
-            'then departing once more')
-        args.seed, args.local_only = None, False
-        cmd_recover(args)
+        log('no map before motion; restarting only the executor and retrying once')
+        restart_executor()
         stop_requested_since(started)
         refuse_during_cycle('the re-departure')
+        args._map_retry_allowed = False
         events = run_cycle(args, load_state(), table_id)
+        if map_wait_failed(events):
+            fail('map still unavailable after one executor restart; no further departure '
+                 'or full recovery was started; current localization is preserved')
     names = [e.get('event') for e in events]
+    executor_failure = next((e for e in events if e.get('event') == 'executor_failed'), None)
+    if executor_failure is not None:
+        fail(f'executor failed: {executor_failure["reason"]} '
+             f'(code={executor_failure["code"]}); see the run log')
     arrived = [e for e in events if e.get('event') == 'home_arrived']
     home = bool(arrived) and arrived[-1].get('confirmation', {}).get('confirmed') is True
     log(f'cycle ended: parked={"box_approach_finished" in names} '
@@ -1085,10 +1165,19 @@ def cmd_recover(args):
         fail(f'Pi user {PI_USER} linger is {linger or "unknown"}; '
              f'run sudo loginctl enable-linger {PI_USER}')
     mark_localized(False)
-    cmd_display_stop(args)
+    used_display = tuple(u for u in DISPLAY_UNITS
+                         if sh(f'systemctl --user is-active {u}', check=False).stdout.strip()
+                         == 'active')
+    if used_display:
+        cmd_display_stop(args)
     cmd_session_stop(args)
     restart_sensor_services()
-    cmd_display_start(args)
+    if used_display:
+        try:
+            cmd_display_start(SimpleNamespace(
+                _display_units=used_display, record_diagnostics=False))
+        except (SystemExit, subprocess.TimeoutExpired, OSError) as error:
+            log(f'optional display restore failed ({error}); continuing Pi recovery')
     cmd_session_start(args)
     args.keep_home, args.seed_from_state = True, args.seed is None
     args.click = args.seed is not None
@@ -1116,9 +1205,21 @@ def cmd_stop(_args):
     # slow Pi must not hold back the stop (review 2026-10-06).
     unit = state.get('last_unit')
     if unit and unit.startswith('executor:'):
-        # SIGINT stops the running attempt; the executor stays for the next go.
-        pi(f'sudo -n systemctl kill --signal=SIGINT {EXECUTOR_UNIT}', check=False)
-        log(f'{unit}: stop sent to {EXECUTOR_UNIT}')
+        prefix = f'{EXECUTOR_SPOOL}/{unit.split(":", 1)[1]}'
+        cancel = (f'set -e; touch {prefix}.cancelled; '
+                  f'rm -f -- {prefix}.part {prefix}.request')
+        signal = f'sudo -n systemctl kill --signal=SIGINT {EXECUTOR_UNIT}'
+        # Signal existing motion first; cancel pending/late publication under the
+        # claim lock, then signal again to cover a concurrent request claim.
+        try:
+            result = pi(f'{signal} || true; '
+                        f'flock -x {prefix}.lock bash -c {shlex.quote(cancel)} && {signal}',
+                        timeout=SSH_READ_TIMEOUT_S, check=False)
+        except subprocess.TimeoutExpired:
+            fail(f'{unit}: stop reply timed out; cancellation unconfirmed')
+        if result.returncode != 0:
+            fail(f'{unit}: cancellation unconfirmed (exit {result.returncode})')
+        log(f'{unit}: pending request cancelled; stop sent to {EXECUTOR_UNIT}')
     elif unit:
         pi(f'sudo -n systemctl stop {unit}', check=False)
         log(f'{unit}: ' + pi(f'systemctl is-active {unit}', check=False).stdout.strip())
@@ -1195,9 +1296,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('sync', 'display-start', 'display-stop', 'session-start', 'session-stop',
+    for name in ('sync', 'display-stop', 'session-start', 'session-stop',
                  'stop', 'status', 'record-start', 'record-stop', 'estop', 'estop-reset'):
         sub.add_parser(name)
+    display = sub.add_parser('display-start')
+    display.add_argument('--record-diagnostics', action='store_true',
+                         help='also start the optional PC bag recorder')
     init = sub.add_parser('init')
     init.add_argument('--keep-home', action='store_true',
                       help='do not re-teach home at this placement')
@@ -1237,8 +1341,8 @@ def main():
                     help='planner + controller for the transit and staging legs '
                          '(default navfn-rpp, 2026-10-06 algorithm selection)')
     go.add_argument('--final-gap-m', type=float,
-                    help='front gap override (table_edge default 0.05 m; front uses the '
-                         'box parking contract target)')
+                    help='front gap override (both surface modes use the box parking '
+                         'contract target by default)')
     go.add_argument('--dwell-s', type=float,
                     help='held stop at each box (default 2 s; longer to measure the gap)')
     go.add_argument('--record-diagnostics', action='store_true',

@@ -36,6 +36,10 @@ finally:
         os.environ['JDAMR_DATA_ROOT'] = _old_data_root
 
 
+def is_submission(command):
+    return 'mv ' in command and '.part' in command and '.request' in command
+
+
 class Pi:
     """Scripted Pi: answers by command substring, records every command."""
 
@@ -120,15 +124,17 @@ def test_recover_and_session_stop_refuse_during_a_cycle(env, monkeypatch, action
 MAP_FAIL = [{'event': 'failed', 'reason': 'live map data unavailable: map'}]
 
 
-def test_map_wait_failure_recovers_once_and_departs_again(env, monkeypatch):
+def test_map_wait_failure_restarts_only_executor_once_and_keeps_localization(env, monkeypatch):
     monkeypatch.setattr(d, 'pi', Pi())
     runs, recovered = [], []
     results = iter([MAP_FAIL, [{'event': 'home_arrived', 'confirmation': {'confirmed': True}}]])
     monkeypatch.setattr(d, 'run_cycle', lambda *a: runs.append(a) or next(results))
-    monkeypatch.setattr(d, 'cmd_recover', lambda a: recovered.append(
-        (a.seed, a.local_only)))
+    before = d.load_state()
+    monkeypatch.setattr(d, 'restart_executor', lambda: recovered.append('executor'))
+    monkeypatch.setattr(d, 'cmd_recover', lambda a: pytest.fail('full recovery during go'))
     d.cmd_go(go_args())
-    assert len(runs) == 2 and recovered == [(None, False)]
+    assert len(runs) == 2 and recovered == ['executor']
+    assert d.load_state() == before
 
 
 def test_later_failures_are_not_retried(env, monkeypatch):
@@ -154,17 +160,22 @@ def test_recover_local_only_needs_a_seed(env, monkeypatch):
 
 @pytest.mark.parametrize('extra', [{'skip_via': True}, {'resume_at_observation': True},
                                    {'resume_parked_log': '/x y/log.jsonl'}, 'local_init'])
-def test_resumes_and_local_inits_get_guidance_not_auto_recovery(env, monkeypatch, extra):
+def test_map_retry_from_current_pose_never_reinitializes_or_repeats_forever(env, monkeypatch, extra):
     if extra == 'local_init':
         state = d.load_state()
         state['init_local_only'] = True
         d.save_state(state)
         extra = {}
     monkeypatch.setattr(d, 'pi', Pi())
-    monkeypatch.setattr(d, 'run_cycle', lambda *a: MAP_FAIL)
+    attempts, restarts = [], []
+    before = d.load_state()
+    monkeypatch.setattr(d, 'run_cycle', lambda *a: attempts.append(a) or MAP_FAIL)
+    monkeypatch.setattr(d, 'restart_executor', lambda: restarts.append(True))
     monkeypatch.setattr(d, 'cmd_recover', lambda a: pytest.fail('recovered'))
     with pytest.raises(SystemExit):
         d.cmd_go(go_args(**extra))
+    assert len(attempts) == 2 and restarts == [True]
+    assert d.load_state() == before
 
 
 def test_recover_requires_linger(env, monkeypatch):
@@ -281,6 +292,7 @@ def test_probe_timeout_is_an_error(env, monkeypatch):
 
 
 def test_session_restart_revokes_localization(env, monkeypatch):
+    monkeypatch.setattr(d, 'start_executor', lambda: True)
     monkeypatch.setattr(d, 'pi', lambda c, **k: SimpleNamespace(
         returncode=0, stdout='' if 'jdamr-table-cycle-*' in c else 'STARTED'))
     d.cmd_session_start(None)
@@ -288,6 +300,7 @@ def test_session_restart_revokes_localization(env, monkeypatch):
 
 
 def test_session_reuse_keeps_localization(env, monkeypatch):
+    monkeypatch.setattr(d, 'start_executor', lambda: True)
     monkeypatch.setattr(d, 'pi', lambda c, **k: SimpleNamespace(
         returncode=0, stdout='' if 'jdamr-table-cycle-*' in c else 'REUSED'))
     d.cmd_session_start(None)
@@ -327,7 +340,7 @@ def test_stop_during_recovery_prevents_the_second_departure(env, monkeypatch):
     monkeypatch.setattr(d, 'pi', Pi())
     runs = []
     monkeypatch.setattr(d, 'run_cycle', lambda *a: runs.append(a) or MAP_FAIL)
-    monkeypatch.setattr(d, 'cmd_recover', lambda a: d.cmd_stop(None))
+    monkeypatch.setattr(d, 'restart_executor', lambda: d.cmd_stop(None))
     with pytest.raises(SystemExit):
         d.cmd_go(go_args())
     assert len(runs) == 1
@@ -336,15 +349,19 @@ def test_stop_during_recovery_prevents_the_second_departure(env, monkeypatch):
 class ExecutorPi(Pi):
     """The resident executor is up; requests finish at once."""
 
-    def __init__(self):
+    def __init__(self, result='{"code": 0}'):
         super().__init__()
         self.stdins = []
+        self.result = result
 
     def __call__(self, command, timeout=120, check=True, stdin=None):
         self.stdins.append(stdin)
         if command == f'systemctl is-active {d.EXECUTOR_UNIT}':
             self.calls.append(command)
             return SimpleNamespace(returncode=0, stdout='active')
+        if 'if test -e ' in command and '.result' in command:
+            self.calls.append(command)
+            return SimpleNamespace(returncode=0, stdout=self.result)
         return super().__call__(command, timeout, check, stdin)
 
 
@@ -364,7 +381,8 @@ def test_go_hands_the_run_to_the_resident_executor(env, monkeypatch):
     assert state['last_unit'].startswith('executor:')
     assert 'onboard_bag_unit' not in state and 'monitor_units' not in state
     d.cmd_stop(SimpleNamespace())
-    assert f'sudo -n systemctl kill --signal=SIGINT {d.EXECUTOR_UNIT}' in pi.calls
+    assert any(f'sudo -n systemctl kill --signal=SIGINT {d.EXECUTOR_UNIT}' in c
+               for c in pi.calls)
 
 
 def test_default_run_interruption_does_not_stop_or_copy_unstarted_diagnostics(
@@ -399,7 +417,7 @@ def test_onboard_bag_brackets_the_run_and_is_copied(env, monkeypatch):
     monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
     d.run_cycle(go_args(record_diagnostics=True), d.load_state(), 'table_02')
     start = next(i for i, c in enumerate(pi.calls) if 'systemd-run --unit=jdamr-onboard-bag-' in c)
-    request = next(i for i, c in enumerate(pi.calls) if c.endswith('.request'))
+    request = next(i for i, c in enumerate(pi.calls) if is_submission(c))
     assert start < request
     assert all(topic in pi.calls[start] for topic in ('/odom', '/imu/data_raw', '/scan'))
     assert 'RuntimeMaxSec=' in pi.calls[start] and 'MemoryMax=' in pi.calls[start]
@@ -643,7 +661,7 @@ def test_departure_log_reports_the_spooled_stops(env, monkeypatch, capsys):
     monkeypatch.setattr(d, 'pi', pi)
     monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
     d.run_cycle(go_args(), d.load_state(), 'table_02')
-    assert 'DEPARTED table_02 -> dock:' in capsys.readouterr().out
+    assert 'SUBMITTED table_02 -> dock:' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize('extra', [
@@ -769,4 +787,303 @@ def test_status_and_departure_show_the_operator_alerts_state(env, monkeypatch):
     d.cmd_status(SimpleNamespace())
     d.run_cycle(go_args(), d.load_state(), 'table_02')
     assert 'operator alerts: off' in messages
-    assert any(m.startswith('DEPARTED') and m.endswith('operator alerts off') for m in messages)
+    assert any(m.startswith('SUBMITTED') and m.endswith('operator alerts off') for m in messages)
+
+
+@pytest.mark.parametrize('result', ['{"code": 1}', '{"code": 2}', '', '{', '{}',
+                                   '[]', '{"code": false}', '{"code": "0"}',
+                                   'executor_unavailable'])
+def test_failed_or_invalid_executor_result_cannot_be_hidden_by_home_event(
+        env, monkeypatch, result):
+    pi = ExecutorPi(result=result)
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: HOME_EVENTS.copy())
+    monkeypatch.setattr(d, 'cmd_init', lambda _args: pytest.fail('started next table'))
+    with pytest.raises(SystemExit):
+        d.cmd_go(go_args(table_ids=['table_02', 'table_01']))
+    assert len([c for c in pi.calls if is_submission(c)]) == 1
+    assert any('cat ' in c and '.result;' in c for c in pi.calls)
+
+
+def test_map_retry_requires_an_initial_map_failure_not_invalid_completion():
+    assert d.map_wait_failed([*MAP_FAIL, {'event': 'executor_failed', 'code': 1,
+                                        'reason': 'executor_exit_nonzero'}])
+    assert not d.map_wait_failed([*MAP_FAIL, {'event': 'executor_failed', 'code': None,
+                                            'reason': 'executor_result_invalid'}])
+
+
+MAP_FAILURE_EVENTS = [
+    *MAP_FAIL,
+    {'event': 'operator_call', 'reason': 'failed: live map data unavailable: map'},
+    {'event': 'box_camera', 'action': 'stop', 'ok': True},
+]
+
+
+@pytest.mark.parametrize('recovered', [True, False])
+def test_real_map_failure_metadata_retries_once_and_alerts_only_terminal_failure(
+        env, monkeypatch, recovered):
+    pi = ExecutorPi(result='{"code": 1}')
+    monkeypatch.setattr(d, 'pi', pi)
+    alerts, restarts = [], []
+    monkeypatch.setattr(d, 'alert_operator', alerts.append)
+    monkeypatch.setattr(d, 'read_events', lambda _path: (
+        HOME_EVENTS.copy() if pi.result == '{"code": 0}' else MAP_FAILURE_EVENTS.copy()))
+
+    def restart():
+        restarts.append(True)
+        if recovered:
+            pi.result = '{"code": 0}'
+
+    monkeypatch.setattr(d, 'restart_executor', restart)
+    if recovered:
+        d.cmd_go(go_args())
+    else:
+        with pytest.raises(SystemExit):
+            d.cmd_go(go_args())
+    assert restarts == [True]
+    assert len(alerts) == (0 if recovered else 1)
+    assert len([c for c in pi.calls if is_submission(c)]) == 2
+
+
+@pytest.mark.parametrize('extra', [
+    {'event': 'observation_route_selected'},
+    {'event': 'failed', 'phase': 'cleanup', 'reason': 'camera_stop_failed'},
+    {'event': 'box_camera', 'action': 'stop', 'ok': False},
+    {'event': 'operator_call', 'reason': 'emergency stop engaged'},
+])
+def test_map_retry_never_hides_motion_or_other_failures(extra):
+    assert not d.map_wait_failed([*MAP_FAILURE_EVENTS, extra])
+
+
+def test_predeparture_ssh_reads_and_submission_have_short_timeouts(env, monkeypatch):
+    pi = ExecutorPi()
+    requests = []
+
+    def record(command, **kwargs):
+        requests.append((command, kwargs.get('timeout', 120)))
+        return pi(command, **kwargs)
+
+    monkeypatch.setattr(d, 'pi', record)
+    monkeypatch.setattr(d, 'read_events', lambda _path: HOME_EVENTS.copy())
+    d.cmd_go(go_args())
+    submitted = next(i for i, (c, _) in enumerate(requests) if is_submission(c))
+    assert all(timeout <= 10 for _, timeout in requests[:submitted + 1])
+
+
+def test_departure_durations_use_monotonic_clock_not_stop_timestamp(env, monkeypatch):
+    pi = ExecutorPi()
+    clock = {'now': 123.0}
+    monkeypatch.setattr(d.time, 'time', lambda: 1800000000.0)
+    monkeypatch.setattr(d.time, 'monotonic', lambda: clock['now'])
+    messages = []
+    monkeypatch.setattr(d, 'log', messages.append)
+
+    def timed_pi(command, **kwargs):
+        if is_submission(command):
+            clock['now'] += 1.5
+        return pi(command, **kwargs)
+
+    monkeypatch.setattr(d, 'pi', timed_pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: HOME_EVENTS.copy())
+    d.cmd_go(go_args())
+    assert any('request_submit_s=1.500' in m for m in messages)
+    assert 'executor first event after 1.500 s' in messages
+
+
+@pytest.mark.parametrize('reply', ['timeout', 'ssh_error'])
+def test_ambiguous_submission_follows_same_run_without_reissuing(env, monkeypatch, reply):
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'read_events', lambda _path: HOME_EVENTS.copy())
+
+    def uncertain(command, **kwargs):
+        result = pi(command, **kwargs)
+        if is_submission(command):
+            assert d.load_state()['last_unit'].startswith('executor:')
+            if reply == 'timeout':
+                raise subprocess.TimeoutExpired('ssh', 10)
+            return SimpleNamespace(returncode=255, stdout='lost reply')
+        return result
+
+    monkeypatch.setattr(d, 'pi', uncertain)
+    d.cmd_go(go_args())
+    assert len([c for c in pi.calls if is_submission(c)]) == 1
+    assert any('.result' in c and not is_submission(c) for c in pi.calls)
+
+
+def test_cancelled_missing_submission_cannot_arrive_later(env, monkeypatch):
+    spool = env / 'spool'
+    spool.mkdir()
+    monkeypatch.setattr(d, 'EXECUTOR_SPOOL', str(spool))
+    pi = ExecutorPi(result='request_missing')
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: [])
+    events = d.run_cycle(go_args(), d.load_state(), 'table_02')
+    assert events[-1]['reason'] == 'request_missing'
+    publish = next(c for c in pi.calls if is_submission(c))
+    status = next(c for c in pi.calls if 'if test -e ' in c and '.result' in c)
+    # Execute only the generated spool protocol against temporary local paths.
+    # No request exists, so this branch never invokes systemctl.
+    missing = subprocess.run(['bash', '-c', status], capture_output=True, text=True, check=True)
+    assert missing.stdout.strip() == 'request_missing'
+    late = subprocess.run(['bash', '-c', publish], input='{"argv": []}',
+                          capture_output=True, text=True)
+    assert late.returncode == 1
+    assert list(spool.glob('*.cancelled'))
+    assert not list(spool.glob('*.request')) and not list(spool.glob('*.part'))
+
+
+@pytest.mark.parametrize('pending_suffix', ['part', 'request', 'running'])
+def test_stop_cancels_pending_publication_and_signals_claimed_request(
+        env, monkeypatch, pending_suffix):
+    spool = env / 'spool'
+    spool.mkdir()
+    monkeypatch.setattr(d, 'EXECUTOR_SPOOL', str(spool))
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: HOME_EVENTS.copy())
+    d.run_cycle(go_args(), d.load_state(), 'table_02')
+    run = d.load_state()['last_unit'].split(':', 1)[1]
+    (spool / f'{run}.{pending_suffix}').write_text('{"argv": []}')
+    publish = next(c for c in pi.calls if is_submission(c))
+    d.cmd_stop(None)
+    stop = pi.calls[-1]
+    # Stub only systemctl/sudo; run the actual lock and file operations locally.
+    commands = 'sudo() { return 0; }; ' + stop
+    subprocess.run(['bash', '-c', commands], capture_output=True, text=True, check=True)
+    late = subprocess.run(['bash', '-c', publish], input='{"argv": []}',
+                          capture_output=True, text=True)
+    assert late.returncode == 1
+    assert (spool / f'{run}.cancelled').exists()
+    assert not list(spool.glob('*.request')) and not list(spool.glob('*.part'))
+    assert (spool / f'{run}.running').exists() is (pending_suffix == 'running')
+    assert stop.count('kill --signal=SIGINT') == 2
+    assert stop.index('.cancelled') < stop.rindex('kill --signal=SIGINT')
+
+
+@pytest.mark.parametrize('reply', ['timeout', 'ssh_error'])
+def test_stop_never_reports_success_without_remote_reply(env, monkeypatch, reply, capsys):
+    state = d.load_state()
+    state['last_unit'] = 'executor:run'
+    d.save_state(state)
+
+    def unavailable(command, **kwargs):
+        assert kwargs['timeout'] == d.SSH_READ_TIMEOUT_S
+        if reply == 'timeout':
+            raise subprocess.TimeoutExpired('ssh', 10)
+        return SimpleNamespace(returncode=255, stdout='')
+
+    monkeypatch.setattr(d, 'pi', unavailable)
+    with pytest.raises(SystemExit) as raised:
+        d.cmd_stop(None)
+    assert raised.value.code == 1
+    output = capsys.readouterr().out
+    assert 'cancellation unconfirmed' in output and 'stop sent' not in output
+
+
+def test_restart_executor_never_falls_back_or_restarts_sensors(env, monkeypatch):
+    pi = Pi()
+    monkeypatch.setattr(d, 'pi', pi)
+    with pytest.raises(SystemExit):
+        d.restart_executor()
+    assert not any(unit in c for c in pi.calls for unit in d.SENSOR_UNITS)
+    assert d.load_state()['localized'] is True
+
+
+def test_restart_of_collected_executor_starts_even_when_stop_reports_missing(env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(d, 'refuse_during_cycle', lambda action: None)
+    monkeypatch.setattr(d, 'pi', lambda *a, **k: SimpleNamespace(returncode=1, stdout='not loaded'))
+    monkeypatch.setattr(d, 'executor_active', lambda: False)
+    monkeypatch.setattr(d, 'start_executor', lambda: calls.append('start') or True)
+    d.restart_executor()
+    assert calls == ['start']
+
+
+def test_executor_start_failure_cannot_dispatch_one_shot_or_revoke_pose(env, monkeypatch):
+    pi = Pi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'start_executor', lambda: False)
+    with pytest.raises(SystemExit):
+        d.cmd_go(go_args())
+    assert not any(is_submission(c) or 'jdamr-table-cycle-' in c for c in pi.calls
+                   if 'list-units' not in c)
+    assert d.load_state()['localized'] is True
+
+
+def test_session_start_reports_executor_failure(env, monkeypatch):
+    monkeypatch.setattr(d, 'pi', lambda c, **k: SimpleNamespace(
+        returncode=0, stdout='' if 'jdamr-table-cycle-*' in c else 'REUSED'))
+    monkeypatch.setattr(d, 'start_executor', lambda: False)
+    with pytest.raises(SystemExit):
+        d.cmd_session_start(None)
+    assert d.load_state()['localized'] is True
+
+
+def test_prepared_go_has_no_sleep_or_setup_before_submit_and_first_poll(env, monkeypatch):
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: HOME_EVENTS.copy())
+    monkeypatch.setattr(d.time, 'sleep', lambda _s: pytest.fail('delayed first poll'))
+    for name in ('cmd_recover', 'cmd_init', 'cmd_session_start', 'cmd_sync',
+                 'cmd_display_start', 'start_onboard_bag', 'start_drop_monitor'):
+        monkeypatch.setattr(d, name, lambda *a, **kw: pytest.fail('setup during prepared go'))
+    d.cmd_go(go_args())
+    assert len([c for c in pi.calls if is_submission(c)]) == 1
+
+
+def test_fast_runs_have_distinct_spool_names_within_one_second(env, monkeypatch):
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d.time, 'strftime', lambda _fmt: '20261015_120000')
+    monkeypatch.setattr(d, 'read_events', lambda _path: HOME_EVENTS.copy())
+    for _ in range(2):
+        d.run_cycle(go_args(), d.load_state(), 'table_02')
+    requests = [c for c in pi.calls if is_submission(c)]
+    assert len(requests) == 2 and requests[0] != requests[1]
+
+
+def test_display_relay_uses_configured_host_and_recording_is_opt_in(env, monkeypatch):
+    commands = []
+    monkeypatch.setattr(d, 'HOST', 'robot@192.0.2.10')
+    started = set()
+
+    def sh(command, **_kw):
+        commands.append(command)
+        if command.startswith('systemd-run'):
+            started.add(command.split('--unit=')[1].split()[0])
+        active = command.split()[-1] in started
+        return SimpleNamespace(returncode=0, stdout='active' if active else 'inactive')
+
+    monkeypatch.setattr(d, 'sh', sh)
+    records = []
+    monkeypatch.setattr(d, 'record_start', lambda: records.append(True))
+    d.cmd_display_start(None)
+    relay = next(c for c in commands if '--unit=jdamr-p2-relay ' in c)
+    assert '--host robot@192.0.2.10 ' in relay and 'jdamr.local' not in relay
+    assert records == []
+    d.cmd_display_start(SimpleNamespace(record_diagnostics=True))
+    assert records == [True]
+
+
+@pytest.mark.parametrize('display_active', [False, True])
+def test_manual_recovery_does_not_require_display_or_recording(env, monkeypatch, display_active):
+    monkeypatch.setattr(d, 'pi', Pi())
+    monkeypatch.setattr(d, 'sh', lambda *a, **k: SimpleNamespace(
+        returncode=0 if display_active else 3, stdout='active' if display_active else 'inactive'))
+    calls = []
+    for name in ('cmd_display_stop', 'cmd_session_stop', 'restart_sensor_services',
+                 'cmd_session_start', 'cmd_init'):
+        monkeypatch.setattr(d, name, lambda *a, n=name: calls.append(n))
+
+    def broken_display(args):
+        calls.append('display_restore')
+        assert args.record_diagnostics is False
+        raise SystemExit('X11 unavailable')
+
+    monkeypatch.setattr(d, 'cmd_display_start', broken_display)
+    monkeypatch.setattr(d, 'dds_health', lambda: ('ok', 'healthy'))
+    monkeypatch.setattr(d, 'record_start', lambda: pytest.fail('recording during recovery'))
+    d.cmd_recover(SimpleNamespace(seed=None, local_only=False))
+    assert 'cmd_init' in calls and 'cmd_session_start' in calls
+    assert ('display_restore' in calls) is display_active
+    assert ('cmd_display_stop' in calls) is display_active
