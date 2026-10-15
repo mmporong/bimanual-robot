@@ -13,11 +13,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dashboard_stop import open_stop_bus
-from servo.servo_record_ranges import SO101, validate_capture
-from servo.sts_bus import (A_D, A_I, A_LOCK, A_MAX_ANGLE, A_MIN_ANGLE,
-                          A_OFFSET, A_P, A_PHASE, A_POS, A_TORQUE, decode_offset)
+from apps.camera_dashboard.dashboard_stop import open_stop_bus
+from tools.servo.servo_record_ranges import SO101, validate_capture
+from tools.servo.sts_bus import A_D, A_I, A_LOCK, A_MAX_ANGLE, A_MIN_ANGLE, A_OFFSET, A_P, A_PHASE, A_POS, A_TORQUE, decode_offset
 
 FIELDS = {"min": (A_MIN_ANGLE, 2), "max": (A_MAX_ANGLE, 2),
           "offset_raw": (A_OFFSET, 2), "phase": (A_PHASE, 1),

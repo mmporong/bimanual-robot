@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1",
   "generator": "design/cad/generate_m1_coupons.py",
-  "source_doc": "docs/20260901_설계팀_제작인계패키지_P0.md",
+  "source_doc": "docs/architecture/20260901_설계팀_제작인계패키지_P0.md",
   "units": {
     "length": "mm",
     "volume": "cm3",

@@ -17,11 +17,8 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-if str(TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(TOOLS_DIR))
 
-from plan_body_side_grasp import URDF_PATH
+from src.manipulation.plan_body_side_grasp import URDF_PATH
 
 
 SCHEMA = "joint_reference_v1"

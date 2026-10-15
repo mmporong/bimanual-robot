@@ -8,8 +8,8 @@ from pathlib import Path
 SERVO_DIR = Path(__file__).resolve().parents[1] / "tools" / "servo"
 sys.path.insert(0, str(SERVO_DIR))
 
-from servo_check_phase import check_phase  # noqa: E402
-from sts_bus import FakeBus  # noqa: E402
+from tools.servo.servo_check_phase import check_phase  # noqa: E402
+from tools.servo.sts_bus import FakeBus  # noqa: E402
 
 
 class ServoPhaseCheckTest(unittest.TestCase):

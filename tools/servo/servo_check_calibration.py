@@ -4,14 +4,14 @@
 lerobot 은 연결할 때 서보의 오프셋·하한·상한을 JSON 과 비교해 하나라도 다르면 대화형
 재캘리브레이션에 들어간다. 텔레옵·녹화 전에 이걸로 먼저 확인한다.
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_check_calibration.py --port <팔로워 by-id> --json ~/.cache/huggingface/lerobot/calibration/robots/so_follower/follower.json
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_check_calibration --port <팔로워 by-id> --json ~/.cache/huggingface/lerobot/calibration/robots/so_follower/follower.json
 """
 import argparse
 import json
 from pathlib import Path
 
-from sts_bus import Bus, A_MIN_ANGLE, A_MAX_ANGLE, A_OFFSET, A_POS, RESOLUTION, decode_offset, find_port
+from tools.servo.sts_bus import Bus, A_MIN_ANGLE, A_MAX_ANGLE, A_OFFSET, A_POS, RESOLUTION, decode_offset, find_port
 
 FULL_TURN = {"wrist_roll"}
 

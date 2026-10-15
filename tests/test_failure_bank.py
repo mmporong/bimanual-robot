@@ -11,7 +11,7 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
-import failure_bank
+import tools.data.failure_bank as failure_bank
 
 
 class FailureBankTests(unittest.TestCase):
@@ -107,7 +107,7 @@ class FailureBankTests(unittest.TestCase):
             failure_bank.checked_documents(self.root / "bank")
 
     def test_cli_roundtrip(self):
-        cli = [sys.executable, str(REPO_ROOT / "tools/failure_bank.py")]
+        cli = [sys.executable, "-m", "tools.data.failure_bank"]
         captured = subprocess.run(cli + ["capture", "--input", str(self.input), "--evidence",
                                         str(self.evidence), "--root", str(self.root / "bank")],
                                   text=True, capture_output=True)
@@ -122,7 +122,7 @@ class FailureBankTests(unittest.TestCase):
 
     def test_invalid_json_returns_nonzero_without_traceback(self):
         self.input.write_text("{", encoding="utf-8")
-        result = subprocess.run([sys.executable, str(REPO_ROOT / "tools/failure_bank.py"),
+        result = subprocess.run([sys.executable, "-m", "tools.data.failure_bank",
                                  "capture", "--input", str(self.input), "--evidence",
                                  str(self.evidence), "--root", str(self.root / "bank")],
                                 text=True, capture_output=True)

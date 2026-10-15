@@ -11,8 +11,8 @@ lerobot 의 범위 기록은 6개 모터를 60 Hz 로 한꺼번에 읽는데, �
 --capture-only 는 후보 JSON만 새 파일에 저장한다. EEPROM에 쓰지 않는다.
 wrist_roll 은 lerobot 관례대로 0~4095 로 둔다. 서보는 움직이지 않는다(구동 꺼짐 확인).
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_record_ranges.py --port <by-id> --out <lerobot json> [--gripper-drive-mode 1] [--gripper-margin 40]
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_record_ranges --port <by-id> --out <lerobot json> [--gripper-drive-mode 1] [--gripper-margin 40]
 """
 import argparse
 import json
@@ -22,10 +22,8 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dashboard_stop import open_stop_bus
-from servo.sts_bus import (A_MIN_ANGLE, A_MAX_ANGLE, A_OFFSET, A_POS, A_TORQUE,
-                     RESOLUTION, decode_offset, find_port)
+from apps.camera_dashboard.dashboard_stop import open_stop_bus
+from tools.servo.sts_bus import A_MIN_ANGLE, A_MAX_ANGLE, A_OFFSET, A_POS, A_TORQUE, RESOLUTION, decode_offset, find_port
 
 SO101 = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 FULL_TURN = {"wrist_roll"}

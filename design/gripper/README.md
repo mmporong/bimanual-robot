@@ -8,7 +8,7 @@ ggao50 `SO101-Parallel-Gripper` 순정 평면 죠를 쓴다. 80 mm FinRay와 왼
 ## 왼쪽 현행 사양: SO-101 순정 회전식 죠
 
 - TPU FinRay, TPU 패드, 컵 오버캡을 장착하지 않는다.
-- URDF는 `src/hold_flow_description/urdf/so101_stock_gripper.xacro`를 사용한다.
+- URDF는 `src/description/hold_flow_description/urdf/so101_stock_gripper.xacro`를 사용한다.
 - FinRay 장착 때 기록한 ID 6 범위 `1454~2831`은 순정 죠 캘리브레이션으로 재사용하지 않는다.
 - 순정 죠 장착 후 완전 개폐 간섭을 확인하고 ID 6 범위를 다시 기록한다.
 - 순정 상태에서 마른 컵·젖은 컵 파지와 선반 재파지를 다시 검증한다.

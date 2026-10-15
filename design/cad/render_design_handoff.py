@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-URDF_PATH = REPO_ROOT / "src/hold_flow_description/urdf/hold_flow.urdf"
+URDF_PATH = REPO_ROOT / "src/description/hold_flow_description/urdf/hold_flow.urdf"
 SPEC_PATH = REPO_ROOT / "design/mechanical/hold_flow_mechanical_v0_2.yaml"
 MANIFEST_PATH = REPO_ROOT / "design/cad/exports/manifest.json"
 DEFAULT_OUTPUT = REPO_ROOT / "docs/assets/design_handoff"
@@ -117,7 +117,7 @@ def resolve_package_mesh(filename: str) -> Path:
     prefix = "package://hold_flow_description/"
     if not filename.startswith(prefix):
         raise ValueError(f"지원하지 않는 메시 URI: {filename}")
-    return REPO_ROOT / "src/hold_flow_description" / filename.removeprefix(prefix)
+    return REPO_ROOT / "src/description/hold_flow_description" / filename.removeprefix(prefix)
 
 
 def actor_from_mesh(path: Path, matrix: np.ndarray, rgb: tuple[float, float, float]) -> vtk.vtkActor:

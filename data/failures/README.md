@@ -166,17 +166,17 @@ strategy와 phase backend의 일치, phase 시간·순서·시작 상태 출처,
 
 ## 7. 파일과 검사
 
-- 실패 레코드 스키마: [`../schema/failure_record.schema.json`](../schema/failure_record.schema.json)
-- 가상 작성 예시: [`../schema/example_failure_record.json`](../schema/example_failure_record.json)
-- 에피소드 스키마: [`../schema/episode_metadata.schema.json`](../schema/episode_metadata.schema.json)
-- 포함·제외 기준: [`../schema/에피소드_포함제외_기준.md`](../schema/에피소드_포함제외_기준.md)
-- 수집 입력 예시: [`../schema/example_failure_capture.json`](../schema/example_failure_capture.json)
-- 저장·집계 명령: [`../../tools/failure_bank.py`](../../tools/failure_bank.py)
+- 실패 레코드 스키마: [`failure_record.schema.json`](../schema/failure_record.schema.json)
+- 가상 작성 예시: [`example_failure_record.json`](../schema/example_failure_record.json)
+- 에피소드 스키마: [`episode_metadata.schema.json`](../schema/episode_metadata.schema.json)
+- 포함·제외 기준: [`에피소드_포함제외_기준.md`](../schema/에피소드_포함제외_기준.md)
+- 수집 입력 예시: [`example_failure_capture.json`](../schema/example_failure_capture.json)
+- 저장·집계 명령: [`failure_bank.py`](../../tools/data/failure_bank.py)
 
 ```bash
 cd ~/bimanual-robot
-python3 tools/validate_failure_record.py
-python3 tools/validate_failure_record.py /path/to/failure-record-directory
+python3 -m tools.data.validate_failure_record
+python3 -m tools.data.validate_failure_record /path/to/failure-record-directory
 ```
 
 검증에는 `jsonschema`가 필요하다. 미설치로 전체 검증을 못 하는 경우 성공으로 처리하지
@@ -198,12 +198,12 @@ python3 tools/validate_failure_record.py /path/to/failure-record-directory
 
 ```bash
 cd ~/bimanual-robot
-python3 tools/failure_bank.py capture \
+python3 -m tools.data.failure_bank capture \
   --input data/schema/example_failure_capture.json \
   --evidence data/schema/example_episode_meta.json \
   --root "$HOME/robot-artifacts/failures"
-python3 tools/failure_bank.py verify-evidence "$HOME/robot-artifacts/failures"
-python3 tools/failure_bank.py summary "$HOME/robot-artifacts/failures" --include-examples
+python3 -m tools.data.failure_bank verify-evidence "$HOME/robot-artifacts/failures"
+python3 -m tools.data.failure_bank summary "$HOME/robot-artifacts/failures" --include-examples
 ```
 
 실험에서는 입력을 실제 관측으로 바꾸고 `FAIL-YYYYMMDD-NNNN` ID와 실제 파일을 지정한다.
@@ -226,10 +226,10 @@ phase backend·checkpoint 또는 PLANNED 산출물·결과·사람 개입 여부
 
 ```bash
 cd ~/bimanual-robot
-python3 tools/validate_failure_record.py "$HOME/robot-artifacts/failures"
-python3 tools/validate_episode_meta.py "$HOME/robot-artifacts/episode-meta" \
+python3 -m tools.data.validate_failure_record "$HOME/robot-artifacts/failures"
+python3 -m tools.data.validate_episode_meta "$HOME/robot-artifacts/episode-meta" \
   --failure-record-dir "$HOME/robot-artifacts/failures"
-python3 tools/failure_bank.py summary "$HOME/robot-artifacts/failures"
+python3 -m tools.data.failure_bank summary "$HOME/robot-artifacts/failures"
 ```
 
 집계는 EXAMPLE ID를 기본 제외하고 환경·전략·phase·backend·관측 코드·확정 원인·재시험·

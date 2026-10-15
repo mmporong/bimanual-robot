@@ -11,7 +11,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    'candidate', ROOT / 'tools/build_base_nav2_candidate.py')
+    'candidate', ROOT / 'tools/jdamr/build_base_nav2_candidate.py')
 candidate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(candidate)
 

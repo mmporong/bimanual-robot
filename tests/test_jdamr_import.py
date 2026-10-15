@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'src/jdamr'
+SOURCE = ROOT / 'src/navigation'
 RUNTIME_PACKAGES = {
     'jdamr_base_driver', 'jdamr_cube_bringup', 'jdamr_cube_cartographer',
     'jdamr_cube_description', 'jdamr_cube_gazebo', 'jdamr_cube_navigation',
@@ -31,7 +31,7 @@ def test_runtime_packages_are_embedded_and_have_unique_ros_names():
 
 def test_import_inventory_contains_no_agent_state_recordings_or_build_logs():
     manifest = json.loads((ROOT / 'config/navigation/jdamr_import_manifest.json').read_text())
-    assert manifest['destination'] == 'src/jdamr'
+    assert manifest['destination'] == 'src/navigation'
     assert len(manifest['source_commit']) == 40
     assert not manifest['uncommitted_source_rviz_imported']
     for item in manifest['files']:

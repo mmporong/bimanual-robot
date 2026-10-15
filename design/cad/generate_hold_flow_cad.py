@@ -25,7 +25,7 @@ from cadquery import exporters
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC_PATH = REPO_ROOT / "design/mechanical/hold_flow_mechanical_v0_3.yaml"
 DEFAULT_OUTPUT = REPO_ROOT / "design/cad/exports"
-ROS_CAD_MESH_DIR = REPO_ROOT / "src/hold_flow_description/meshes/cad"
+ROS_CAD_MESH_DIR = REPO_ROOT / "src/description/hold_flow_description/meshes/cad"
 PETG_DENSITY_G_CM3 = 1.27
 ALUMINUM_DENSITY_G_CM3 = 2.70
 K1_MAX_BUILD_MM = (300.0, 300.0, 300.0)

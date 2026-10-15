@@ -7,16 +7,15 @@
   3. 부하 상한 — 넘으면 즉시 정지 명령을 보내고 구동을 푼다
   4. 정지 감시 — 위치가 안 변하면 걸린 것으로 보고 멈춘다. 스톨을 유지하면 서보가 탄다
 
-    cd ~/bimanual-robot/tools/servo
-    python3 servo_goto.py --goal 3000
-    python3 servo_goto.py --goal 3000 --execute
+    cd ~/bimanual-robot
+    python3 -m tools.servo.servo_goto --goal 3000
+    python3 -m tools.servo.servo_goto --goal 3000 --execute
 """
 import argparse
 import signal
 import time
 
-from sts_bus import (Bus, FakeBus, A_MIN_ANGLE, A_MAX_ANGLE, A_TORQUE, A_ACCEL,
-                     A_GOAL, A_SPEED, A_POS, A_LOAD, A_TEMP, RESOLUTION, find_port)
+from tools.servo.sts_bus import Bus, FakeBus, A_MIN_ANGLE, A_MAX_ANGLE, A_TORQUE, A_ACCEL, A_GOAL, A_SPEED, A_POS, A_LOAD, A_TEMP, RESOLUTION, find_port
 
 STALL_SEC = 0.5        # 이 시간 동안 안 움직이면 걸린 것으로 본다
 STALL_TOL = 4          # 이 카운트 이하 변화는 안 움직인 것으로 친다

@@ -39,7 +39,7 @@ physical_execution_ready: false
 nominal_pregrasp:
   status: mesh_based_candidate_not_physical_calibration
   computed_at: 2026-09-29
-  source: src/hold_flow_description/urdf/hold_flow.urdf 및 순정 죠 메시의 단면 검토
+  source: src/description/hold_flow_description/urdf/hold_flow.urdf 및 순정 죠 메시의 단면 검토
   reference_cup_diameter_m: 0.080
   contact_center_tool_m: [-0.0404, 0.0, -0.020]
   gripper_open_rad: 1.45

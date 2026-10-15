@@ -20,18 +20,14 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-if str(TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(TOOLS_DIR))
 
-import ik_pick_place
-from dashboard_stop import open_stop_bus
-from plan_body_side_grasp import Chain, URDF_PATH, base_positions
-from servo.execute_safe_recovery import degrees_to_raw, read_required
-from servo.servo_record_ranges import validate_capture
-from servo.small_raw_jog import dashboard_monitor
-from servo.sts_bus import (A_LOCK, A_MAX_ANGLE, A_MIN_ANGLE, A_OFFSET, A_P, A_POS,
-                           A_TORQUE, decode_offset)
+import src.manipulation.ik_pick_place as ik_pick_place
+from apps.camera_dashboard.dashboard_stop import open_stop_bus
+from src.manipulation.plan_body_side_grasp import Chain, URDF_PATH, base_positions
+from tools.servo.execute_safe_recovery import degrees_to_raw, read_required
+from tools.servo.servo_record_ranges import validate_capture
+from tools.servo.small_raw_jog import dashboard_monitor
+from tools.servo.sts_bus import A_LOCK, A_MAX_ANGLE, A_MIN_ANGLE, A_OFFSET, A_P, A_POS, A_TORQUE, decode_offset
 
 JOINTS = ik_pick_place.JOINTS
 NAMES = ik_pick_place.NAMES

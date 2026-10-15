@@ -5,9 +5,9 @@ lerobot 은 연결할 때 서보의 Homing_Offset / Min / Max 를 JSON 과 비�
 다르면 대화형 재캘리브레이션으로 서보를 덮어쓴다. 그래서 JSON 은 "지금 서보에 있는
 값" 그대로여야 한다. 이 도구는 그 값을 읽어서 쓰는 것뿐이다. 서보는 움직이지 않는다.
 
-    cd ~/bimanual-robot/tools/servo
-    python3 export_lerobot_calibration.py --port <팔로워 by-id> --out <follower.json> --gripper-drive-mode 1
-    python3 export_lerobot_calibration.py --port <리더 by-id>   --out <leader.json>
+    cd ~/bimanual-robot
+    python3 -m tools.servo.export_lerobot_calibration --port <팔로워 by-id> --out <follower.json> --gripper-drive-mode 1
+    python3 -m tools.servo.export_lerobot_calibration --port <리더 by-id>   --out <leader.json>
 """
 import argparse
 import json
@@ -15,7 +15,7 @@ import shutil
 import time
 from pathlib import Path
 
-from sts_bus import Bus, A_MIN_ANGLE, A_MAX_ANGLE, A_OFFSET, decode_offset, find_port
+from tools.servo.sts_bus import Bus, A_MIN_ANGLE, A_MAX_ANGLE, A_OFFSET, decode_offset, find_port
 
 SO101 = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 

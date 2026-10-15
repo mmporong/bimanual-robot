@@ -23,7 +23,7 @@ from _common import (
 )
 
 
-SOURCE_ROOT = REPO_ROOT / "src/jdamr"
+SOURCE_ROOT = REPO_ROOT / "src/navigation"
 TOOLS_ROOT = SOURCE_ROOT / "scripts/map_20260930_manual"
 CAMERA_MOUNT = SOURCE_ROOT / "jdamr_cube_navigation/config/camera_mount_current.yaml"
 REMOTE_PROMOTE = REPO_ROOT / "tools/jdamr/remote_promote.py"

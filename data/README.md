@@ -4,11 +4,11 @@
 두고, 여기에는 저장 위치 인덱스와 데이터를 만드는 계약만 둔다.
 
 새 팀원이나 다른 AI가 실제 양팔 수집부터 비공개 Hub 업로드, 다른 GPU PC의 ACT 학습까지
-수행할 때는 [2026-09-11 양팔 IL 실행 인계](../docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)를
+수행할 때는 [2026-09-11 양팔 IL 실행 인계](../docs/guides/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)를
 단일 진입점으로 사용한다. 이 문서는 데이터 ID·스키마·평가 규약의 세부 원본이다.
 
 현행 태스크, 조작 phase와 `PLANNED_ALL / ACT_ALL / HYBRID` 비교 경계는
-[2026-09-07 물 서빙 로봇 회의 결정](../docs/20260907_물서빙로봇_회의결정과_실행범위.md)을
+[2026-09-07 물 서빙 로봇 회의 결정](../docs/meetings/20260907_물서빙로봇_회의결정과_실행범위.md)을
 따른다. 커넥터·범용 3태스크·음성 명령 데이터는 현행 데이터셋에 섞지 않는다.
 
 ## 1. 저장 위치 인덱스
@@ -89,10 +89,10 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
 
 - 스키마: [schema/episode_metadata.schema.json](schema/episode_metadata.schema.json)
 - 예시: [schema/example_episode_meta.json](schema/example_episode_meta.json)
-- 검사: `python3 tools/validate_episode_meta.py`
+- 검사: `python3 -m tools.data.validate_episode_meta`
 - 실패 분석 스키마: [schema/failure_record.schema.json](schema/failure_record.schema.json)
 - 실패 분석 예시: [schema/example_failure_record.json](schema/example_failure_record.json)
-- 실패 분석 검사: `python3 tools/validate_failure_record.py`
+- 실패 분석 검사: `python3 -m tools.data.validate_failure_record`
 
 필수 추적 범위:
 
@@ -137,7 +137,7 @@ LeRobot 표준 메타에 없는 수집 조건은 episode index로 조인하는 J
 `failure_code`는 관측된 증상을 빠르게 집계하기 위한 값이고, 확인된 원인은 별도 실패 분석
 레코드에 저장한다.
 
-실패 레코드의 생성·요약·증거 검사는 [`tools/failure_bank.py`](../tools/failure_bank.py)의
+실패 레코드의 생성·요약·증거 검사는 [`tools/data/failure_bank.py`](../tools/data/failure_bank.py)의
 `capture`, `summary`, `verify-evidence` 명령을 사용한다.
 
 | failure stage | failure code 예시 | 함께 보존할 것 |

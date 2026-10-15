@@ -15,7 +15,7 @@ pyvirtualcam(OBS Virtual Camera 백엔드)으로 계속 송출해서, lerobot의
     python astra_rgb_virtualcam_bridge.py
 
 데이터 수집 전에 이 스크립트를 띄워두고, lerobot 쪽 카메라 설정에서
-"OBS Virtual Camera"가 잡히는 index(`output/capture_indexed.py`로 재확인)를
+"OBS Virtual Camera"가 잡히는 index(`tools/camera/capture_indexed.py`로 재확인)를
 `--robot.cameras`의 `index_or_path`로 쓰면 된다.
 
 (bimanual-robot local patch, 2026-10-13: 자동 재연결)
@@ -71,7 +71,7 @@ def _connect_color_stream():
         print(
             "노출/화이트밸런스 고정 완료 "
             f"(gain={color_stream.camera.gain}, exposure={color_stream.camera.exposure}). "
-            "이 값은 docs/20261013_뎁스카메라_노출_화이트밸런스_고정.md 에 기록해두고 "
+            "이 값은 docs/guides/20261013_뎁스카메라_노출_화이트밸런스_고정.md 에 기록해두고 "
             "평가·추론 때도 반드시 동일하게 적용할 것."
         )
     else:

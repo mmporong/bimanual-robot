@@ -73,7 +73,7 @@ MS Team의 공용 저장소이며, 이동·양팔 조작·관제를 하나의 �
 초기 실물 통합 범위는 등록한 작업대·한 종류의 컵과 물통·상온의 물·한 테이블이다.
 웹의 4테이블·냉수/온수 선택 기능이 모든 조합의 물리 검증 완료를 뜻하지 않는다.
 온수 조작, 다중 로봇 배차, 사람과 함께 쓰는 매장 상시 운용, 범용 조립·음성 태스크는
-MVP에서 제외한다. 태스크 결정 원본은 [회의 결정과 실행 범위](docs/20260907_물서빙로봇_회의결정과_실행범위.md)다.
+MVP에서 제외한다. 태스크 결정 원본은 [회의 결정과 실행 범위](docs/meetings/20260907_물서빙로봇_회의결정과_실행범위.md)다.
 
 ## 하드웨어와 모델
 
@@ -104,8 +104,8 @@ MVP에서 제외한다. 태스크 결정 원본은 [회의 결정과 실행 범�
 확인하며, 보정 변경 뒤 이전 raw 목표·IK mapping·계획 packet을 그대로 재사용하지 않는다.
 영점·TCP·개구 대응과 실물 정밀도는 캘리브레이션 파일 저장 여부와 구분한다.
 
-기구·CAD·모델 생성과 검증은 [450×340 모델 설명](docs/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md),
-[CAD 출력물](design/cad/README.md), [URDF 설명](src/hold_flow_description/README.md)을 따른다.
+기구·CAD·모델 생성과 검증은 [450×340 모델 설명](docs/architecture/20260910_450x340_4분할상판_URDF_IsaacSim_모델.md),
+[CAD 출력물](design/cad/README.md), [URDF 설명](src/description/hold_flow_description/README.md)을 따른다.
 
 ## 이동·관제·조작의 연결
 
@@ -137,8 +137,8 @@ SQLite는 주문·큐·명령 이력을 보존하지만, DB 복구만으로 Isaa
 왕복 물리 검증은 1번 테이블 냉수 한 건에 한정한다. 충전 접점·충전 물리,
 반복 주문의 world reset, 다른 테이블·물통 조합은 별도 검증 대상이다.
 HTTP 응답 성공과 주문의 물리 성공을 구분한다.
-실행법은 [웹 관제](docs/20260922_웹주문_미션관제_dry-run.md)와
-[Action·IPC·왕복 executor](docs/20260922_ExecuteManipulationSkill_ROS2_Action.md)에 있다.
+실행법은 [웹 관제](docs/experiments/20260922_웹주문_미션관제_dry-run.md)와
+[Action·IPC·왕복 executor](docs/experiments/20260922_ExecuteManipulationSkill_ROS2_Action.md)에 있다.
 
 ### 실차 주행과 시뮬 주행
 
@@ -158,9 +158,9 @@ Collision Monitor를 유지했다. 사람 주변 운용 성능이나 전체 물 
 나눈 값이 아니며 1 cm 반복 성공을 뜻하지 않는다. 근접 접근의 마지막 경계 검출 소실과
 RPP의 1 cm XY 허용 오차로 목표에 못 미친 문제는 JD-AMR에서 수정·검증해 Pi에 반영했으며,
 수정 후 실물 시험은 아직 하지 않았다. 상세 조건과 측정 한계는
-[책상 주차와 4WD 전환 기록](src/jdamr/jdamr_cube_navigation/evaluation/20261013_TABLE_PARKING_AND_4WD_TRANSITION.md)에 있다.
+[책상 주차와 4WD 전환 기록](src/navigation/jdamr_cube_navigation/evaluation/20261013_TABLE_PARKING_AND_4WD_TRANSITION.md)에 있다.
 
-SLAM·실차 주행의 현행 소스는 이 저장소의 [src/jdamr](src/jdamr/README.md)다.
+SLAM·실차 주행의 현행 소스는 이 저장소의 [src/navigation](src/navigation/README.md)다.
 Cartographer·Nav2·면 정렬·정밀 주차·베이스와 라이다 드라이버·4륜 펌웨어를 함께 관리하며,
 [운영 도구](tools/jdamr/README.md)로 PC 빌드·Pi 배포·기존 출발 경로를 연결한다.
 기존 ROS 패키지명과 실차 전륜축 기준 TF를 유지한다. 양팔 설계 모델의 차체 중심 원점과는
@@ -168,8 +168,8 @@ Cartographer·Nav2·면 정렬·정밀 주차·베이스와 라이다 드라이�
 원본 JD-AMR 저장소와 외부 데이터 폴더의 코드 보존 사본은 이후 수정 기준으로 사용하지 않는다.
 
 새 작업은 이 저장소의 최신 `main`에서 브랜치를 만들어 검증·PR 병합한다.
-실행법과 설치 범위는 [주행 통합 사용법](docs/JDAMR_RUNTIME.md)에 있다.
-[선행 이식 문서](docs/20260912_JDAMR_SLAM_실기체이식.md)는 과거 준비 기록으로 보존한다.
+실행법과 설치 범위는 [주행 통합 사용법](docs/guides/JDAMR_RUNTIME.md)에 있다.
+[선행 이식 문서](docs/experiments/20260912_JDAMR_SLAM_실기체이식.md)는 과거 준비 기록으로 보존한다.
 지도·도크·station·footprint·TF·센서·도착 정렬은 같은 실행 자산을 사용한다.
 
 준비된 실차 세션에서 출발을 요청하면 기존 실행기로 이동·정렬·최종 접근을 이어간다.
@@ -196,8 +196,8 @@ Cartographer·Nav2·면 정렬·정밀 주차·베이스와 라이다 드라이�
 HYBRID 구현 시 기존 backend 종료, 관절 속도 0·허용 자세 확인, 잔여 action chunk 폐기,
 lease 해제 후 제어권 전환을 요구한다. 이 전환의 실물 통합 검증은 아직 남아 있다.
 IK와 정책 명령을 동시에 쓰지 않으며, 어느 phase를 IL로 바꿀지는 동일 평가 조건에서 결정한다.
-학습과 수집은 [양팔 IL·Hub·다른 PC 학습 인계](docs/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)를,
-실물 IK 계획·mock과 제한 사항은 [픽앤플레이스 준비](docs/20260929_IK_픽앤플레이스_실행전_준비.md)를 따른다.
+학습과 수집은 [양팔 IL·Hub·다른 PC 학습 인계](docs/guides/20260911_양팔_IL_데이터수집_HuggingFace_학습_인계.md)를,
+실물 IK 계획·mock과 제한 사항은 [픽앤플레이스 준비](docs/guides/20260929_IK_픽앤플레이스_실행전_준비.md)를 따른다.
 
 ## 시뮬레이션과 실물 전환
 
@@ -218,9 +218,9 @@ Isaac Sim 5.1에서 URDF를 가져와 독립 강체 컵·병과 그리퍼의 접
 상판 운반 → 이동·조작 통합 순서로 확인한다. Isaac 6.0은 목표 계약이며 5.1 실행 근거와 구분한다.
 고정 베이스의 정적 프리뷰도 물리 접촉 시험과 다르다.
 
-- [URDF 프리뷰·순정 죠 접촉 시험](docs/20260918_URDF_Isaac51_작업환경_프리뷰.md)
-- [양팔 PBD 물붓기](docs/20260921_양팔_PBD_물붓기_시뮬레이션.md)
-- [4테이블 식당·상판 운반·영상 생성](docs/20260921_식당_시뮬레이션_환경.md)
+- [URDF 프리뷰·순정 죠 접촉 시험](docs/architecture/20260918_URDF_Isaac51_작업환경_프리뷰.md)
+- [양팔 PBD 물붓기](docs/experiments/20260921_양팔_PBD_물붓기_시뮬레이션.md)
+- [4테이블 식당·상판 운반·영상 생성](docs/experiments/20260921_식당_시뮬레이션_환경.md)
 
 ## 물 양 판정
 
@@ -251,7 +251,7 @@ YOLO 검출 박스나 액면 높이 비율이 곧 부피는 아니다. 한 종�
 ```
 
 하드웨어·연결, 좌표·보정, 로직, 데이터 분포, 측정 문제를 분리한다.
-[failure bank](tools/failure_bank.py)는 근거 보존·해시 검증·집계를 담당하며,
+[failure bank](tools/data/failure_bank.py)는 근거 보존·해시 검증·집계를 담당하며,
 [실패 규약](data/failures/README.md)에 가설·조치·재시험을 연결한다.
 
 공통 평가에는 전체/phase별 성공 횟수와 전체 시도 수, 개입·재시도, cycle time,
@@ -275,6 +275,26 @@ Pi 5 전환은 후순위이며 주행·센서·통신 부하를 측정한 뒤 �
 
 ## 시작하기
 
+```text
+src/
+  navigation/    # 실차 SLAM·Nav2·주차·드라이버·펌웨어
+  manipulation/  # 양팔 IK·파지·붓기·복귀
+  perception/    # 카메라 보정·컵·액체 충전율
+  mission/       # 미션 상태·저장·ROS Action
+  description/   # 양팔 URDF/Xacro ROS 패키지
+apps/            # 주문·카메라 관제·프로젝트 소개 화면
+simulation/      # Isaac 장면·접촉·식당 왕복·영상 생성
+tools/           # 설치·AMR 운영·서보·학습 연동·검증
+tests/           # 분야별 공용 회귀
+docs/            # 실행법·설계·실험·회의·발표 자료
+```
+
+ROS 패키지명과 내부 launch/config/test 구조는 유지한다.
+config·calibration·design·data·research는 공유 원본으로 관리한다.
+실차 운영 명령은 `tools/jdamr/jdamr_depart.py`다. Pi 실행 경로와 지도·도크·상태는
+코드 폴더 이동과 별개이며 빌드만으로 Pi 서비스가 교체되지는 않는다.
+자세한 경로는 [소스 지도](src/README.md)와 [문서 지도](docs/README.md)를 따른다.
+
 개발 기준은 Ubuntu 24.04, ROS 2 Jazzy, C++17, Python 3.12, LeRobot 0.6.1이다.
 시뮬 물리 실행에는 Isaac Sim 5.1의 별도 Python 환경을 사용한다.
 구성 요소별 설치·빌드는 [ROS 패키지 설명](src/README.md)과 각 실행 문서를 따른다.
@@ -283,14 +303,14 @@ CPU 웹 관제만 확인할 때:
 
 ```bash
 cd "$HOME/bimanual-robot"
-python3 tools/service_order_server.py \
+python3 -m apps.service_order.service_order_server \
   --backend immediate --port 8765 \
   --state-dir "$HOME/.local/state/hold-flow/service"
 ```
 
 `http://127.0.0.1:8765/`에서 주문·큐·phase·이력을 확인한다. 이 모드는 물리 실행이 아니다.
 종료는 실행한 터미널에서 `Ctrl+C`를 사용한다. Isaac 연동에는
-[Action 실행 문서](docs/20260922_ExecuteManipulationSkill_ROS2_Action.md)의 서버·socket·backend 설정이 추가로 필요하다.
+[Action 실행 문서](docs/experiments/20260922_ExecuteManipulationSkill_ROS2_Action.md)의 서버·socket·backend 설정이 추가로 필요하다.
 
 문서·자동 요약과 모델을 검사할 때:
 
@@ -298,7 +318,7 @@ python3 tools/service_order_server.py \
 cd "$HOME/bimanual-robot"
 python3 tools/ci/check_local_markdown_links.py
 python3 tools/ci/sync_readme_status.py
-python3 src/hold_flow_description/scripts/validate_description.py
+python3 src/description/hold_flow_description/scripts/validate_description.py
 ```
 
 ## 다음 통합 작업
@@ -321,9 +341,12 @@ python3 src/hold_flow_description/scripts/validate_description.py
 | 경로 | 용도 |
 |---|---|
 | [design](design/cad/README.md) | 기구 사양·CAD·출력물 |
-| [src](src/README.md) | description·interfaces·mission 등 ROS 2 코드 경계 |
+| [src](src/README.md) | 주행·조작·인식·미션·URDF |
+| [apps](apps/README.md) | 주문·카메라 관제·프로젝트 소개 |
+| [simulation](simulation/README.md) | Isaac 시뮬레이션·영상 |
+| [tools](tools/README.md) | 설치·배포·실차 운영·공용 검증 |
 | [data](data/README.md) | 에피소드·평가·실패 계약과 외부 데이터 인덱스 |
-| [docs](docs/20260904_양팔로봇_프로젝트_인계.md) | 설계·실행법·팀 인계 |
+| [docs](docs/README.md) | 실행법·설계·실험·회의·발표 자료 |
 | [research](research/R33_산업용_피킹과_IL_ACT_적용경계.md) | 외부 연구의 적용 판단 |
 | [PROGRESS.md](PROGRESS.md) | 날짜별 실험·실패 수정·검증 근거·변경 이력 |
 

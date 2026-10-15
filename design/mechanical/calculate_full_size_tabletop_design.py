@@ -18,7 +18,7 @@ import yaml
 
 SPEC_PATH = Path(__file__).with_name("hold_flow_mechanical_v0_3.yaml")
 REPO_ROOT = SPEC_PATH.parents[2]
-URDF_PATH = REPO_ROOT / "src/hold_flow_description/urdf/hold_flow.urdf"
+URDF_PATH = REPO_ROOT / "src/description/hold_flow_description/urdf/hold_flow.urdf"
 sys.path.insert(0, str(URDF_PATH.parents[1] / "scripts"))
 from validate_description import link_transforms  # noqa: E402
 
