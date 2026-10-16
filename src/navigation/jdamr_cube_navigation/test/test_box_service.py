@@ -2456,6 +2456,48 @@ def test_zero_turn_remeasures_face_after_rotation_before_computing_final_distanc
         pytest.approx(0.125), precision=True, hold_heading=True)
 
 
+@pytest.mark.parametrize('direction', [-1.0, 1.0])
+@pytest.mark.parametrize('continuous', [False, True])
+def test_trim_crossing_reobserves_before_any_counter_rotation(direction, continuous):
+    node = object.__new__(BoxServiceRoute)
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node.surface_mode = 'table_edge'
+    node.final_gap_override_m = 0.01
+    node.parking_contract = {'yaw_tolerance_rad': math.radians(3.0)}
+    node.box_front_half_width_m = 0.225
+    yaw = [0.0]
+    events = []
+    node.capture_stationary_pose = lambda: ((0.0, 0.0, yaw[0]), {})
+    node._pose = Mock(return_value=PoseStamped())
+    node._frozen_in_odom = Mock(return_value=(None, lambda x, y, angle: (x, y, angle)))
+    node._table_approach_update = Mock(return_value=lambda _pose: {'remaining_m': 0.1})
+    node.emit = Mock()
+    def target_for(heading):
+        return {'face_center_map_xy_m': (0.3 * math.cos(heading), 0.3 * math.sin(heading)),
+                'outward_normal_map_xy': (-math.cos(heading), -math.sin(heading))}
+    target = target_for(direction * math.radians(0.8))
+    def turn(requested, **_kwargs):
+        events.append('turn')
+        turned = requested * 1.4
+        yaw[0] += turned
+        return turned
+    def observe():
+        events.append('observe')
+        return target_for(yaw[0] + direction * math.radians(0.2))
+    def drive(*_args, **_kwargs):
+        events.append('drive')
+        node._continuous_table_stop = {'target': dict(target)}
+        return 0.3
+    node._rotate_in_place = turn
+    node._drive_zero_turn = drive
+    reached, _ = node._zero_turn_final_approach(
+        target, 0.065, reobserve=observe, continuous_table=continuous)
+    assert reached
+    assert events == ['turn', 'observe', 'drive']
+
+
 def test_zero_turn_never_advances_using_pre_turn_face_when_new_observation_fails():
     node = object.__new__(BoxServiceRoute)
     node.stop_requested = False

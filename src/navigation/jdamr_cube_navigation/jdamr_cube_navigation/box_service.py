@@ -1496,9 +1496,8 @@ class BoxServiceRoute(ServiceRoute):
                     self._fail_final('final_trim_interrupted')
                     return False, None
                 trimmed = True
-                correction_rad = (self._rotate_in_place(remaining_rad, precision=True)
-                                  if continuous_table else
-                                  self._rotate_in_place(remaining_rad))
+                before_rad = remaining_rad
+                correction_rad = self._rotate_in_place(remaining_rad)
                 if correction_rad is None or not math.isfinite(correction_rad):
                     self._fail_final('final_trim_missed',
                                      residual_deg=round(math.degrees(residual), 2),
@@ -1507,6 +1506,14 @@ class BoxServiceRoute(ServiceRoute):
                 turned += correction_rad
                 remaining_rad = residual - turned
                 if abs(remaining_rad) <= FINAL_TRIM_TOLERANCE_RAD:
+                    break
+                if reobserve is not None and (
+                        remaining_rad * before_rad < 0.0
+                        or abs(remaining_rad) >= abs(before_rad)):
+                    # Recheck the face before counter-steering on the old sample.
+                    self.emit('table_trim_reobserve_requested',
+                              residual_before_rad=before_rad,
+                              residual_after_rad=remaining_rad)
                     break
             else:
                 # The trim target is finer than the final arrival contract. A

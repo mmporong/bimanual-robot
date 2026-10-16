@@ -1320,9 +1320,9 @@ class ServiceRoute(CorridorRoute):
             return None
         return measure()
 
-    def _rotate_in_place(self, delta_rad, *, precision=False):
+    def _rotate_in_place(self, delta_rad):
         """
-        Command (0, +-TRIM_ANGULAR_RADPS) until odom shows delta_rad turned.
+        Turn without translation, reducing the rate for small corrections.
 
         Same path as the controller (smoother, Collision Monitor); the stop is
         sent early by the smoother's deceleration and the stop latency. Returns the
@@ -1351,12 +1351,10 @@ class ServiceRoute(CorridorRoute):
             state['last'] = yaw
             return state['turned']
 
-        speed_radps = TRIM_ANGULAR_RADPS
-        if precision:
-            # Reduce tiny corrections relative to the existing observed coast angle.
-            speed_radps = min(speed_radps, max(
-                PRECISION_HEADING_MAX_RADPS,
-                speed_radps * abs(delta_rad) / (2.0 * TRIM_STOP_RAD)))
+        # All face and dock trims share this damping; callers cannot bypass it.
+        speed_radps = min(TRIM_ANGULAR_RADPS, max(
+            PRECISION_HEADING_MAX_RADPS,
+            TRIM_ANGULAR_RADPS * abs(delta_rad) / (2.0 * TRIM_STOP_RAD)))
         command = Twist()
         command.angular.z = math.copysign(speed_radps, delta_rad)
         # At most half the turn: a trim just over the minimum must still turn.

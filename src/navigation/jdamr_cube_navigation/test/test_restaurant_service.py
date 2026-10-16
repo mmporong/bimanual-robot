@@ -3350,7 +3350,7 @@ def test_a_trim_just_over_the_minimum_still_turns(monkeypatch):
     node.parking_tf = SimpleNamespace(lookup_transform=lookup)
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', lambda *a, **k: None)
     turned = node._rotate_in_place(math.radians(0.32))
-    assert restaurant_service.TRIM_ANGULAR_RADPS in published
+    assert any(0.0 < rate < restaurant_service.TRIM_ANGULAR_RADPS for rate in published)
     assert turned >= math.radians(0.16)
 
 
@@ -3435,26 +3435,53 @@ def test_transit_variants_pick_their_trees(monkeypatch, variant, planners, contr
         assert [e.get('controller_id') for e in root.iter('FollowPath')] == [controller]
 
 
-def test_precision_tiny_trim_reduces_coast_error_without_reversing():
+@pytest.mark.parametrize('requested_deg', [0.32, 0.59, 0.87, 1.2, -0.32, -0.59, -0.87, -1.2])
+def test_default_tiny_trim_stays_within_tolerance_without_reversing(requested_deg):
     node = route()
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
         transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
-    rates = []
+    commands = []
     def direct(command, done, measure, deadline, event):
-        rate = abs(command.angular.z)
-        rates.append(rate)
+        commands.append((command.linear.x, command.angular.z))
         turned = 0.0
         while not done(turned):
-            turned += rate * 0.02
-        # Same plant latency at both rates, based on the existing coast observation.
-        return turned + restaurant_service.TRIM_STOP_RAD * rate / restaurant_service.TRIM_ANGULAR_RADPS
+            turned += command.angular.z * 0.02
+        return turned + command.angular.z * 0.19
     node._direct_motion = direct
-    requested = math.radians(0.59)
-    coarse = node._rotate_in_place(requested)
-    fine = node._rotate_in_place(requested, precision=True)
-    assert 0 < rates[1] < rates[0]
-    assert abs(fine - requested) < abs(coarse - requested)
-    assert abs(fine - requested) < math.radians(0.3)
+    requested = math.radians(requested_deg)
+    turned = node._rotate_in_place(requested)
+    assert len(commands) == 1
+    linear, angular = commands[0]
+    assert linear == 0.0
+    assert 0 < abs(angular) < restaurant_service.TRIM_ANGULAR_RADPS
+    assert angular * requested > 0.0
+    assert abs(turned - requested) < math.radians(0.3)
+
+
+@pytest.mark.parametrize('requested_deg', [-1.2, 1.2])
+def test_dock_trim_uses_same_damped_turn_without_an_opt_in(requested_deg):
+    node = route()
+    yaw = [0.0]
+    rates = []
+    node._odom_pose = lambda: (0.0, 0.0, yaw[0])
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
+        transform=SimpleNamespace(rotation=SimpleNamespace(
+            x=0., y=0., z=math.sin(yaw[0] / 2), w=math.cos(yaw[0] / 2)))))
+    def direct(command, done, measure, deadline, event):
+        rates.append(command.angular.z)
+        turned = 0.0
+        while not done(turned):
+            turned += command.angular.z * 0.02
+        turned += command.angular.z * 0.19
+        yaw[0] += turned
+        return turned
+    node._direct_motion = direct
+    target = math.radians(requested_deg)
+    assert node._trim_dock_heading({'yaw': target})
+    assert len(rates) == 1
+    assert 0 < abs(rates[0]) < restaurant_service.TRIM_ANGULAR_RADPS
+    assert rates[0] * target > 0.0
+    assert abs(yaw[0] - target) <= restaurant_service.DOCK_HEADING_TOLERANCE_RAD
 
 
 @pytest.mark.parametrize('interruption', ['none', 'operator', 'link'])
