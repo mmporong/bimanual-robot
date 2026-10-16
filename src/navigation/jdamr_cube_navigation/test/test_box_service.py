@@ -2601,3 +2601,41 @@ def test_moving_table_rejects_unhealthy_inputs_and_unbounded_extension(monkeypat
         node.box_status['edge_endpoints_optical_m'] = [[-0.4, 0.25, 1.0], [0.4, 0.25, 1.0]]
     with pytest.raises(RuntimeError):
         update((0.2, 0.0, 0.0))
+
+
+def test_moving_table_stability_reset_keeps_last_accepted_face(monkeypatch):
+    node, clock, update, lookup = _moving_table_route(monkeypatch)
+    valid = deepcopy(node.box_status)
+    update((0.2, 0.0, 0.0))
+    for stamp in (12.0, 12.1):
+        clock[0] = stamp
+        node.box_status = {**valid, 'stamp_s': stamp, 'stable': False,
+                           'reason': 'collecting_stability',
+                           'edge_endpoints_optical_m': [[-0.4, 0.25, 0.805],
+                                                        [0.4, 0.25, 0.805]]}
+        node.box_status_received_s = stamp
+        result = update((0.35, 0.0, 0.0))
+    assert result['remaining_m'] == pytest.approx(0.105)
+    assert result['basis'] == 'moving_stability_reset_frozen_odom'
+    assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
+    clock[0] = 12.2
+    node.box_status = {**valid, 'stamp_s': 12.2,
+                       'edge_endpoints_optical_m': [[-0.4, 0.25, 0.805],
+                                                    [0.4, 0.25, 0.805]]}
+    node.box_status_received_s = clock[0]
+    assert update((0.35, 0.0, 0.0))['remaining_m'] == pytest.approx(0.105)
+    assert lookup.call_count == 1
+
+
+def test_post_trim_reobservation_keeps_configuration_and_requires_fresh_face(monkeypatch):
+    node = _observer_node(monkeypatch, scan=False)
+    node.surface_mode = 'table_edge'
+    node.box_status['surface_kind'] = 'table_edge'
+    node._configure_observer.return_value = False
+    target = {'face_center_map_xy_m': (0.5, 0.0)}
+    monkeypatch.setattr(box_service, 'compute_table_edge_docking_target', Mock(return_value=target))
+    assert node.observe_target({}, 0.065, 0.01, (0.5, 0.0), 0.6,
+                               reuse_configuration=True) == target
+    node._configure_observer.assert_not_called()
+    node.capture_stationary_pose.assert_called_once()
+    assert box_service.compute_table_edge_docking_target.call_args.kwargs['now_s'] == pytest.approx(10.2)

@@ -3433,3 +3433,25 @@ def test_transit_variants_pick_their_trees(monkeypatch, variant, planners, contr
         used = [e.get('planner_id') for e in root.iter() if e.get('planner_id')]
         assert sorted(set(used)) == sorted(planners)
         assert [e.get('controller_id') for e in root.iter('FollowPath')] == [controller]
+
+
+def test_precision_tiny_trim_reduces_coast_error_without_reversing():
+    node = route()
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
+        transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    rates = []
+    def direct(command, done, measure, deadline, event):
+        rate = abs(command.angular.z)
+        rates.append(rate)
+        turned = 0.0
+        while not done(turned):
+            turned += rate * 0.02
+        # Same plant latency at both rates, based on the existing coast observation.
+        return turned + restaurant_service.TRIM_STOP_RAD * rate / restaurant_service.TRIM_ANGULAR_RADPS
+    node._direct_motion = direct
+    requested = math.radians(0.59)
+    coarse = node._rotate_in_place(requested)
+    fine = node._rotate_in_place(requested, precision=True)
+    assert 0 < rates[1] < rates[0]
+    assert abs(fine - requested) < abs(coarse - requested)
+    assert abs(fine - requested) < math.radians(0.3)

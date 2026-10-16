@@ -1320,7 +1320,7 @@ class ServiceRoute(CorridorRoute):
             return None
         return measure()
 
-    def _rotate_in_place(self, delta_rad):
+    def _rotate_in_place(self, delta_rad, *, precision=False):
         """
         Command (0, +-TRIM_ANGULAR_RADPS) until odom shows delta_rad turned.
 
@@ -1351,11 +1351,18 @@ class ServiceRoute(CorridorRoute):
             state['last'] = yaw
             return state['turned']
 
+        speed_radps = TRIM_ANGULAR_RADPS
+        if precision:
+            # Reduce tiny corrections relative to the existing observed coast angle.
+            speed_radps = min(speed_radps, max(
+                PRECISION_HEADING_MAX_RADPS,
+                speed_radps * abs(delta_rad) / (2.0 * TRIM_STOP_RAD)))
         command = Twist()
-        command.angular.z = math.copysign(TRIM_ANGULAR_RADPS, delta_rad)
+        command.angular.z = math.copysign(speed_radps, delta_rad)
         # At most half the turn: a trim just over the minimum must still turn.
-        early_rad = min(TRIM_STOP_RAD, abs(delta_rad) / 2.0)
-        deadline_s = time.monotonic() + abs(delta_rad) / TRIM_ANGULAR_RADPS + TRIM_EXTRA_S
+        early_rad = min(TRIM_STOP_RAD * speed_radps / TRIM_ANGULAR_RADPS,
+                        abs(delta_rad) / 2.0)
+        deadline_s = time.monotonic() + abs(delta_rad) / speed_radps + TRIM_EXTRA_S
         return self._direct_motion(
             command, lambda turned: abs(turned) >= abs(delta_rad) - early_rad, measure,
             deadline_s, 'trim_rotation_stopped')

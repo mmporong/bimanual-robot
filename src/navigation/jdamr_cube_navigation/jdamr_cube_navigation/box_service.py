@@ -575,7 +575,7 @@ class BoxServiceRoute(ServiceRoute):
         return self._configure_observer(self._observer_camera_mount, region_radius_m)
 
     def observe_target(self, camera_mount, front_extent_m, gap_m, region_xy,
-                       region_radius_m, timeout_s=12.0):
+                       region_radius_m, timeout_s=12.0, *, reuse_configuration=False):
         """
         Capture a stationary robot and a new stable surface, never a cached one.
 
@@ -591,7 +591,7 @@ class BoxServiceRoute(ServiceRoute):
         robot_pose, _ = self.capture_stationary_pose()
         self._observation_pose_diagnostic(robot_pose, camera_mount, region_xy)
         self._observer_camera_mount = camera_mount
-        if (not self._set_depth_window(region_radius_m)
+        if (not reuse_configuration and not self._set_depth_window(region_radius_m)
                 and (getattr(self, 'surface_mode', 'front') == 'table_edge'
                      or getattr(self, 'require_observer_configuration', False))):
             raise RuntimeError('observer surface and camera parameters unavailable')
@@ -1324,7 +1324,7 @@ class BoxServiceRoute(ServiceRoute):
         def reobserve():
             return self.observe_target(
                 camera_mount, front_extent_m, self._final_gap_m(),
-                region_xy, region_radius_m)
+                region_xy, region_radius_m, reuse_configuration=True)
 
         return self._zero_turn_final_approach(
             target, front_extent_m, reobserve=reobserve, continuous_table=True)
@@ -1404,10 +1404,21 @@ class BoxServiceRoute(ServiceRoute):
                     self.emit('table_approach_face_updated', observation_stamp_s=stamp,
                               reference_frame='odom', face_center_xy_m=list(face),
                               outward_normal_xy=list(normal))
-                elif observation.get('reason') == 'no_table_edge_candidate':
+                elif (observation.get('reason') == 'no_table_edge_candidate'
+                      or (observation.get('reason') == 'collecting_stability'
+                          and observation.get('detected') is True
+                          and observation.get('stable') is False
+                          and observation.get('surface_kind') == 'table_edge'
+                          and observation.get('frame_id') == 'camera_color_optical_frame'
+                          and observation.get('control_ready') is False)):
+                    # Moving-camera stability can reset while the edge remains visible.
+                    # Keep the last accepted face; never adopt an unstable candidate.
                     state['occluded_frames'] += 1
                     if state['occluded_frames'] >= quorum:
-                        state['basis'] = 'healthy_edge_occlusion_frozen_odom'
+                        state['basis'] = (
+                            'healthy_edge_occlusion_frozen_odom'
+                            if observation.get('reason') == 'no_table_edge_candidate'
+                            else 'moving_stability_reset_frozen_odom')
                         state['occlusion_latched'] = True
                 elif time.monotonic() - state['last_valid_s'] > OBSERVER_SILENT_S:
                     raise RuntimeError('table approach stable face unavailable')
@@ -1485,7 +1496,9 @@ class BoxServiceRoute(ServiceRoute):
                     self._fail_final('final_trim_interrupted')
                     return False, None
                 trimmed = True
-                correction_rad = self._rotate_in_place(remaining_rad)
+                correction_rad = (self._rotate_in_place(remaining_rad, precision=True)
+                                  if continuous_table else
+                                  self._rotate_in_place(remaining_rad))
                 if correction_rad is None or not math.isfinite(correction_rad):
                     self._fail_final('final_trim_missed',
                                      residual_deg=round(math.degrees(residual), 2),
