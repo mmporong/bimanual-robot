@@ -195,6 +195,42 @@ def test_dock_departure_uses_live_monitor_instead_of_global_snapshot_rejection(
     node._execute_reverse_once.assert_called_once()
 
 
+def test_dock_entry_heading_uses_damped_stopped_trim():
+    node = dock_departure_route()
+    node._odom_pose = Mock(side_effect=[(0.25, 0.0, -0.1786), (0.25, 0.0, 0.005)])
+    node._rotate_in_place = Mock(return_value=0.1836)
+    assert node._turn_to_dock_heading({'yaw': 0.0}, math.radians(1.5),
+                                      'entry_heading_checker')
+    node._rotate_in_place.assert_called_once_with(pytest.approx(0.1786))
+    node._execute_reverse_once.assert_not_called()
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_dock_straight_uses_heading_hold_without_rpp_steering(failed):
+    node = dock_departure_route()
+    actual = [0.7, 0.0, 0.0]
+    node._odom_pose = lambda: tuple(actual)
+    node._make_reverse_path = lambda start, end, **_: node._odom_path([start, end])
+    node._frozen_in_odom = lambda path: (path, lambda *pose: pose)
+    node._execute_reverse_path = Mock(return_value=True)
+    node._turn_to_dock_heading = Mock(return_value=True)
+    node._trim_dock_heading = Mock(return_value=True)
+    node._verify_parking_stop = Mock(return_value=True)
+    node.confirmation = {'confirmed': True}
+
+    def drive(distance_m, **kwargs):
+        assert distance_m == pytest.approx(-0.7)
+        assert kwargs['precision'] and kwargs['hold_heading']
+        actual[0] = 0.0
+        return None if failed else distance_m
+
+    node._drive_zero_turn = Mock(side_effect=drive)
+    assert node._dock_straight(tuple(actual), (0.0, 0.0, 0.0), None,
+                               node.parking_contract) is (not failed)
+    node._drive_zero_turn.assert_called_once()
+    node._execute_reverse_path.assert_not_called()
+
+
 def test_dock_departure_input_retry_keeps_frozen_goal_without_adding_distance(
         dock_departure_static_corridor):
     node = dock_departure_route()

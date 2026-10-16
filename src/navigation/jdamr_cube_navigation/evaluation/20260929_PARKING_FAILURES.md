@@ -1565,3 +1565,44 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 표시 중계·RViz·기록기는 띄우지 않았다. PC와 Pi 대시보드를 종료할 때는 위 짝을 함께 종료한다. 새 인계 문서·원격 push는 수행하지 않았다. 남은 문제는 1번의 양 모서리 1 cm 미달, 도크 map/odom 불일치, 복귀 전역 단일 검사 종료와 입력 지연이다.
 
 **후면에 거리가 남았다는 사용자 보고 후 정지 진단:** 등록부의 `rear_gap_measurement.gap_m=0.03`은 `scope="taught placement; no closed-loop rear range measurement"`인 사용자 배치 기록이다. 현재 후면 도킹은 테이블 간격 측정 피드백이 아니라 등록 지도 좌표와 동결 odom 목표를 사용한다. 낮은 라이다의 차체 폭 후방 띠에서 3스캔의 가까운 반사체는 rear 기준 약 0.987–0.997 m였으며 상판 간격으로 해석하지 않는다. 지도 목표–현재 pose를 차체 축으로 투영하면 전방 약 19.56 mm·좌측 약 63.91 mm여서 지도 오차 66.83 mm를 추가 후진 거리로 사용할 수 없다. 진단은 이동 없이 수행했고 `post_return_rear_gap_diagnostic.json`에 보존했다. 실제 뒤쪽 간격이 남았다는 보고를 존중하며 도킹 미완료 상태를 유지한다.
+
+
+### 22.11 주차·후진 뒤 지연과 도크 반복 동작의 분석·수정
+
+**범위:** 사용자가 1번 테이블 주차 후와 후진 뒤 긴 지연, 도크 전 과도한 회전·전후진을 수정하도록 요청했다. 로봇은 §22.10의 도크 근처 정지 상태로 유지했다. 뒤이은 상용 서빙로봇 비교 질문은 같은 수정 작업의 설계 설명으로 처리했으며 새 실물 주행을 요청한 것으로 해석하지 않았다.
+
+**실제 시간 분리:** §22.10의 3개 run `cycle_events.jsonl` wall time과 PC `command.txt` 생성 시각을 대조했다.
+
+| 구간 | 시간 | 확인한 의미 |
+|---|---:|---|
+| 1번 최종 정지→카메라 정리 종료 | 2.733초 | 실패 판정·정리 |
+| 그 마지막 이벤트→후진 재개 명령 생성 | 89.491초 | 에이전트/PC 로그 확인·재개 공백 |
+| resume 시작→dwell 완료 | 3.059초 | 기존 2초 대기와 정지 확인 |
+| 후진 결과→이탈 확인 | 2.268초 | 정지 자세·면 이격 확인 |
+| 이탈 확인→복귀 실패 통보 | 0.422초 | 단일 전역 경로 거부; 긴 native 정지는 아님 |
+| 그 마지막 이벤트→dock-only 명령 생성 | 69.833초 | 에이전트/PC 재개 공백 |
+| 각 command 파일→첫 Pi 이벤트 | 7.259/9.849/2.945초 | 요청 전달·실행 준비 변동 |
+
+기존 `visit_observed_box=False`는 `if ok and return_home` 분기로 복귀를 건너뛰었다. 다음 이탈과 복귀는 별도 PC 명령이 필요했다. 이 공백을 로봇이 90초 동안 센서를 안정화했다고 설명하지 않는다. 제출 전 35초/5초 차이는 invocation 시작·각 SSH 단계 시각이 없어 전체 원인을 확정하지 않았다. 제출 전 순차 SSH와 이후 별도 이벤트/결과 SSH·10초 polling은 통신/완료 인지 비용이며 이번에 무작정 polling을 늘려 Pi 부하를 추가하지 않았다.
+
+**도크 움직임의 실제 전이:** staging에 도착한 뒤 약 -67.3° Spin, 약 9.9 cm 옆 오프셋을 흡수하는 곡선 후진, +10.23° 입구 보정, 직선 후진이 이어졌다. 첫 후진 말기 +5.36° 크기의 heading 잔차가 기존 5° 분기를 넘자 전진 이탈→입구 반대 보정→후진이 실행됐다. 그 뒤 최초 지도 오차 184.08 mm로 전체 지도 재접근이 발생했고 재접근에서도 추가 회전·곡선·직선·마지막 trim이 있었다. 약 111초의 복귀 중 대부분은 이 실제 동작과 확인이었다. 작은 단계가 누적되는 구조, 곡선/직선 RPP의 끝 heading, odom/지도 불일치가 구분되는 문제이며 무작위 주행으로 단정하지 않는다.
+
+**적용한 수정:**
+
+1. Fine table의 양수·유한 양쪽 간격 중 가까운 쪽은 목표 부근이지만 먼 쪽이 미달이면, 가까운 상태에서 더 전진하지 않고 기존 면 기준 후진 이탈→새 면 관측→정렬·접근을 같은 visit/deadline에서 1회 수행한다. 동결 면으로 정지했으면 그 면도 odom 좌표로 보존한다. 관측을 잃거나 이탈을 확인하지 못하면 새 접근을 보내지 않는다.
+2. 재차 간격 판정에 미달하더라도 정지·양수 간격·유효 입력이 확인된 불완전 정지에 한해 기존 이탈/복귀를 같은 실행에서 수행한다. `incomplete_parking_return_*`에 분리 기록하고 정밀주차 실패와 종료 코드 1은 유지한다. 운영자 정지·링크 소실·센서 불량을 자동 복귀로 확대하지 않는다. 정상 복귀와 같이 RGB-D/관측기를 끈 뒤 지도 복귀를 수행한다.
+3. 입구 heading은 기존 감쇠 `_rotate_in_place`로 맞추고 정지한 뒤 재측정한다. 기본 `ParkingReverse`의 마지막 직선은 기존 `_drive_zero_turn(precision=True, hold_heading=True)`를 재사용한다. RPP의 횡방향 추종 조향을 마지막 직선에서 제거하며, 원래 동결 odom 목표와 기존 2 cm position checker 범위·home 계약은 유지한다. 입력 공백 뒤 새 전체 거리를 더하지 않고 같은 목표의 남은 거리만 재개한다. 선택 가능한 `GracefulReverse`는 기존 FollowPath 동작을 유지한다.
+4. 모든 해당 명령은 기존 `cmd_vel_nav→velocity_smoother→Collision Monitor→base`를 거친다. guard/link/stop/timeout/정지 미확인 원인을 latch해 정지 뒤 우연히 입력이 회복돼도 성공으로 오판하지 않는다. 회전 중 링크 소실과 stale 입력 뒤 재회전 문제는 독립 검토에서 찾아 보강했다. 각 입구/최종 trim은 입력·링크 상태를 다시 확인한다.
+5. 전역 후진 경로 snapshot이 false일 때는 정지 상태에서 기존 1 Hz costmap의 업데이트 두 번에 걸쳐 최대 3회 재확인한다. 정적 map/keepout 실패는 RPC 전에 거부하고, 재확인 중 stop/link/guard 실패면 대기를 끝낸다. 지속 장애물을 무시하거나 기존 최종 목표·1 cm 계약을 완화하지 않았다. 기존 도크 지도 확인·재접근 상한도 유지한다.
+
+**검증:** box/restaurant/input recovery 665건, reverse/parking contract/parking integration/standalone 139건, Python compile·diff 검사가 통과했다. 그 뒤 카메라 종료 1줄을 보강하고 fallback 8건을 다시 통과했다. 독립 verifier는 최종 두 소스 SHA와 8건을 확인해 승인했다. 가상 clock/odom/센서/명령 plant에서 양쪽 gap 재접근 1회·새 관측 소실·기존 deadline, 절대 후진 목표를 보존한 scan 복구, 회전/후진 중 운영자 stop·링크 소실, 지속/일시 경로 거부를 검증했다. plant는 이상적 이동 모델이므로 실제 4WD 마찰·미끄럼·외부 1 cm 정확도는 증명하지 않는다.
+
+**배포·정리:** Pi source/install 4경로 SHA와 모듈 import, 실행기 ready를 확인했다. box SHA는 `e4bdad507f8dd76ec9887c2711fe2d02753656cc69fe1d92166db3f145bb981a`, restaurant SHA는 `51c5fa8e86a90584e13155f10b2038607c3ae72efb29c8fe7e9463e7bcd228d8`다. 첫 백업은 `$HOME/.local/state/jdamr/smooth-docking/20261016_152043/`, 최종 백업은 `20261016_152421/`다. PC receipt는 `$HOME/.local/state/bimanual-robot/smooth_docking_deployment.json`이다. 배포 helper의 import 명령 shell 인용 오류와 이미 정지해 unloaded된 unit의 stop 응답 처리를 바로잡았고, stdin import PASS 뒤 idle 실행기를 재시작했다. 베이스·Nav2·도크·지도·마스크·카메라 장착은 바꾸지 않았다.
+
+- 배포 뒤 fresh odometry age 0.01초·선속도/각속도 0, spool request/running 0, RGB-D/관측기 inactive/PID 0이다. 이동 요청은 없었다.
+- 유지 PID: Pi base 50055, Nav2 51198, idle executor 61193, dashboard 4251. PC dashboard/link는 §22.10과 같은 1212114/2496089다. 사용자 화면과 다음 명령용 세션이므로 유지했으며 종료 명령은 §22.10과 같다. 새 상주 진단·중계·기록기는 없다.
+- 현재 위치는 도크 근처·정확한 도크 도착 미확정, 자동 재개 미승인이다. 수정 뒤 실차 재주행·성공 주차·원격 push를 수행하지 않았다.
+
+**상용 로봇 비교와 남은 한계:** [Nav2 도킹 공식 절차](https://docs.nav2.org/rolling/tutorials/general_tutorials/using_docking/)는 staging 뒤 검출한 목표 pose를 갱신하는 접근 제어와 접촉/충전 확인을 설명한다. [Rotation Shim 공식 설명](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/controller_plugins/configuring_rotation_shim_controller/)은 heading을 고려하지 않는 NavFn 계열과 운동학 경로를 만드는 planner의 차이를 설명한다. 현재 코드가 Rotation Shim 플러그인을 사용한다는 뜻은 아니다. [BellaBot 제조사 자료](https://www.pudurobotics.com/product/detail/bellabot)는 LiDAR·visual SLAM과 RGB-D 등 다중 센서를 제시한다. 공개 제품 자료만으로 테이블 앞 1 cm 정렬 성능을 보증한다고 해석하지 않는다.
+
+현재 전면은 근접 상판 경계가 가려진 뒤 동결 면/odom에 의존하며 후면은 상대 간격 센서가 연결돼 있지 않다. 베이스 드라이버는 `ds=(dl+dr)/2`, `dth=(dr-dl)/wheel_separation`으로 odom을 적분하고 IMU는 별도 토픽으로 발행한다. 이번에 IMU 융합·회전 보정값·기구 제원은 바꾸지 않았다. 4WD의 실제 회전 미끄럼과 전륜축 runtime frame에 대한 운동학 기준점은 추가 확인할 항목이며, 이 하나가 현재 지도 오차 전체 원인이라고 확정하지 않는다. 눈에 띄는 단계 전환과 반복을 줄이는 것은 소프트웨어로 가능하지만, 끝까지 목표를 관측하는 센서 배치와 실제 운동 오차를 해결하지 않은 채 상용 수준의 연속 동작·1 cm 정확도를 달성했다고 기록하지 않는다.

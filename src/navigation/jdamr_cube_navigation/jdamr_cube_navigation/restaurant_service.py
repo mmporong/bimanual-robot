@@ -19,7 +19,8 @@ from jdamr_cube_navigation.corridor_route import (
     _quaternion_yaw, AMCL_QOS, CorridorRoute, ODOM_TRAIL_STEP_M, PATH_BLOCKED_NAV2_CODES,
     spin_node)
 from jdamr_cube_navigation.parking import (
-    ENTRY_HEADING_TOLERANCE_DEG, load_parking_contract, MAXIMUM_CONTRACT_VALUES, ParkingHold,
+    DOCK_POSITION_TOLERANCE_M, ENTRY_HEADING_TOLERANCE_DEG, load_parking_contract,
+    MAXIMUM_CONTRACT_VALUES, ParkingHold,
     pose_errors,
 )
 from jdamr_cube_navigation.reverse_parking import (
@@ -79,6 +80,10 @@ DOCK_END_TURN_MAX_RAD = math.radians(5.0)
 # front corner about 2 cm ahead of the right (operator, 2026-10-06).
 DOCK_HEADING_TOLERANCE_RAD = math.radians(1.0)
 DOCK_TRIM_ATTEMPTS = 3
+# The configured global costmap updates at 1 Hz; recheck a rejected snapshot
+# across two updates while stopped before reporting a blocked reverse path.
+REVERSE_PATH_UPDATE_S = 1.0
+REVERSE_PATH_CHECK_ATTEMPTS = 3
 ENTRY_HEADING_CHECKER = 'entry_heading_checker'
 ENTRY_HEADING_TOLERANCE_RAD = math.radians(ENTRY_HEADING_TOLERANCE_DEG)
 # Events whose reason may explain why a cycle stopped short (operator_call).
@@ -1277,6 +1282,7 @@ class ServiceRoute(CorridorRoute):
         DIRECT_SETTLE_S has passed.
         """
         publisher = self._escape_publisher()
+        self._last_direct_motion_failure = None
         value = measure()
         published_s = guarded_s = 0.0
         try:
@@ -1284,8 +1290,11 @@ class ServiceRoute(CorridorRoute):
                 now_s = time.monotonic()
                 if now_s - guarded_s >= DIRECT_GUARD_PERIOD_S:
                     guarded_s = now_s
-                    failure = self._guard_failure(False) or (watch() if watch else None)
+                    failure = (self._guard_failure(False)
+                               or (None if self._operator_link_ready() else 'operator_link_lost')
+                               or (watch() if watch else None))
                     if failure:
+                        self._last_direct_motion_failure = failure
                         self.emit(event, reason=failure)
                         break
                 if now_s - published_s >= 0.05:
@@ -1293,6 +1302,10 @@ class ServiceRoute(CorridorRoute):
                     published_s = time.monotonic()
                 spin_node(self, timeout_sec=0.02)
                 value = measure()
+            if self.stop_requested:
+                self._last_direct_motion_failure = 'operator_stop'
+            elif time.monotonic() >= deadline_s and not done(value):
+                self._last_direct_motion_failure = 'direct_motion_timeout'
         finally:
             for _repeat in range(5):
                 publisher.publish(Twist())
@@ -1316,6 +1329,7 @@ class ServiceRoute(CorridorRoute):
                 stationary_since_s = None
             spin_node(self, timeout_sec=0.02)
         if not stopped_confirmed:
+            self._last_direct_motion_failure = 'odometry did not confirm stop'
             self.emit(event, reason='odometry did not confirm stop')
             return None
         return measure()
@@ -1361,9 +1375,10 @@ class ServiceRoute(CorridorRoute):
         early_rad = min(TRIM_STOP_RAD * speed_radps / TRIM_ANGULAR_RADPS,
                         abs(delta_rad) / 2.0)
         deadline_s = time.monotonic() + abs(delta_rad) / speed_radps + TRIM_EXTRA_S
-        return self._direct_motion(
+        turned_rad = self._direct_motion(
             command, lambda turned: abs(turned) >= abs(delta_rad) - early_rad, measure,
             deadline_s, 'trim_rotation_stopped')
+        return None if getattr(self, '_last_direct_motion_failure', None) else turned_rad
 
     def _drive_zero_turn(self, distance_m, watch=None, precision=False,
                          hold_heading=False, target_update=None):
@@ -2322,13 +2337,25 @@ class ServiceRoute(CorridorRoute):
             raise RuntimeError('reverse path collision validation unavailable')
         request = IsPathValid.Request()
         request.path = checked
-        result = self._wait(self.validate_reverse_path.call_async(request), 3.0)
-        # Report indices of the original path, not of the validated tail.
-        self.emit('reverse_path_checked', valid=result.is_valid,
-                  invalid_pose_indices=[index + offset
-                                        for index in result.invalid_pose_indices],
-                  **excluded)
-        return result.is_valid and not result.invalid_pose_indices
+        for attempt in range(REVERSE_PATH_CHECK_ATTEMPTS):
+            result = self._wait(self.validate_reverse_path.call_async(request), 3.0)
+            # Report indices of the original path, not of the validated tail.
+            self.emit('reverse_path_checked', valid=result.is_valid,
+                      invalid_pose_indices=[index + offset
+                                            for index in result.invalid_pose_indices],
+                      attempt=attempt + 1, **excluded)
+            if result.is_valid and not result.invalid_pose_indices:
+                return True
+            if attempt + 1 == REVERSE_PATH_CHECK_ATTEMPTS:
+                return False
+            self.emit('reverse_path_waiting_for_update', attempt=attempt + 1)
+            until_s = time.monotonic() + REVERSE_PATH_UPDATE_S
+            while time.monotonic() < until_s:
+                if (self.stop_requested or not self._operator_link_ready()
+                        or self._guard_failure(False)):
+                    return False
+                spin_node(self, timeout_sec=0.05)
+        return False
 
     def _footprint_outline(self):
         """
@@ -2693,10 +2720,14 @@ class ServiceRoute(CorridorRoute):
                 self.emit('reverse_staging_out_of_tolerance', reason=str(error),
                           actual_pose=list(start), frame='odom')
                 return False
-            if not self._execute_reverse_path(
+            if controller == 'ParkingReverse':
+                reached = self._drive_dock_straight(dock, home)
+            else:
+                reached = self._execute_reverse_path(
                     legs[-1], path_contract=home, goal_checker_id='dock_position_checker',
                     final=False, send_path=self._odom_path(points),
-                    controller_id=controller):
+                    controller_id=controller)
+            if not reached:
                 return False
             _x, _y, yaw = self._odom_pose()
             error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
@@ -2732,6 +2763,9 @@ class ServiceRoute(CorridorRoute):
         still judges the stop. False only without odom.
         """
         for trims in range(DOCK_TRIM_ATTEMPTS + 1):
+            if (self.stop_requested or not self._departure_ready()
+                    or not self._navigation_ready(require_fresh_amcl=False)):
+                return False
             _x, _y, yaw = self._odom_pose()
             error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
             if (abs(error) <= DOCK_HEADING_TOLERANCE_RAD or trims == DOCK_TRIM_ATTEMPTS
@@ -2767,21 +2801,57 @@ class ServiceRoute(CorridorRoute):
 
     def _turn_to_dock_heading(self, dock, limit_rad, goal_checker_id,
                               event='dock_heading_measured'):
-        """
-        Turn in place to the dock heading where the robot stands, if over limit_rad.
+        """Set the entry heading with damped trims and remeasure after stopping."""
+        for attempt in range(DOCK_TRIM_ATTEMPTS + 1):
+            _x, _y, yaw = self._odom_pose()
+            error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
+            self.emit(event, delta_yaw_rad=error, attempt=attempt,
+                      goal_checker_id=goal_checker_id)
+            if (self.stop_requested or not self._departure_ready()
+                    or not self._navigation_ready(require_fresh_amcl=False)):
+                return False
+            if abs(error) <= limit_rad:
+                return True
+            if attempt == DOCK_TRIM_ATTEMPTS or self._rotate_in_place(error) is None:
+                return False
+        return False
 
-        The forward Parking controller turns to the goal heading in place (as in the
-        box face alignment) and its goal checker ends the turn inside the tolerance.
-        """
-        x, y, yaw = self._odom_pose()
-        error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
-        self.emit(event, delta_yaw_rad=error)
-        if abs(error) <= limit_rad:
-            return True
-        return self._execute_reverse_once(
-            self._odom_path([(x, y, yaw), (x, y, dock['yaw'])]),
-            goal_checker_id=goal_checker_id, final=False, controller_id='Parking',
-            motion='turn_in_place')
+    def _drive_dock_straight(self, dock, home):
+        """Close the frozen odom target with heading hold, without RPP steering."""
+        tolerance_m = min(home['xy_tolerance_m'], DOCK_POSITION_TOLERANCE_M)
+
+        def attempt():
+            if (self.stop_requested or not self._departure_ready()
+                    or not self._navigation_ready(require_fresh_amcl=False)):
+                reason = self._guard_failure(False)
+                if not self.stop_requested and self._input_gap_recoverable(reason):
+                    self._retry_guard_reason = reason
+                return False
+            x_m, y_m, yaw_rad = self._odom_pose()
+            dx_m, dy_m = dock['x'] - x_m, dock['y'] - y_m
+            if math.hypot(dx_m, dy_m) <= tolerance_m:
+                return True
+            distance_m = dx_m * math.cos(yaw_rad) + dy_m * math.sin(yaw_rad)
+            lateral_m = -dx_m * math.sin(yaw_rad) + dy_m * math.cos(yaw_rad)
+            if distance_m >= 0.0 or abs(lateral_m) > tolerance_m:
+                self.emit('reverse_staging_out_of_tolerance', frame='odom',
+                          remaining_forward_m=distance_m, lateral_error_m=lateral_m)
+                return False
+            travelled_m = self._drive_zero_turn(
+                distance_m, precision=True, hold_heading=True,
+                watch=lambda: None if self._operator_link_ready() else 'operator_link_lost')
+            reason = (getattr(self, '_last_direct_motion_failure', None)
+                      or self._guard_failure(False))
+            if reason:
+                if self._input_gap_recoverable(reason):
+                    self._retry_guard_reason = reason
+                return False
+            if travelled_m is None or self.stop_requested or not self._departure_ready():
+                return False
+            end_x, end_y, _yaw = self._odom_pose()
+            return math.hypot(dock['x'] - end_x, dock['y'] - end_y) <= tolerance_m
+
+        return self._run_with_input_recovery(attempt)
 
     def _execute_reverse_once(self, path, goal_checker_id='parking_goal_checker',
                               verify_contract=None, final=True, verify_waypoint=None,

@@ -961,6 +961,7 @@ class BoxServiceRoute(ServiceRoute):
             raise RuntimeError(
                 'execution requires explicit nominal-camera candidate trial')
         self.candidate_trial = candidate_trial is True
+        self.incomplete_gap_stop = False
         self._continuous_table_stop = None
         self.box_geometry = geometry
         surface_mode = getattr(self, 'surface_mode', 'front')
@@ -1126,6 +1127,7 @@ class BoxServiceRoute(ServiceRoute):
                     return False
         fine_table = surface_mode == 'table_edge' and self._final_gap_m() <= 0.01
         corrections = 0
+        realignment_reapproached = False
         previous_gap_m = None
         frozen_target_odom = None
         if not fine_table:
@@ -1251,6 +1253,43 @@ class BoxServiceRoute(ServiceRoute):
             if gap_confirmed:
                 self.run_deadline_s = None
                 return True
+            self.incomplete_gap_stop = (
+                fine_table and all(math.isfinite(gap) and gap > 0.0 for gap in corner_gaps))
+            if self.incomplete_gap_stop:
+                self.last_box_face = (
+                    {'reference_frame': 'odom', 'face_center_xy_m': list(face),
+                     'outward_normal_xy': list(outward)}
+                    if confirmation_basis == 'frozen_table_edge_odom_stop' else
+                    {'face_center_map_xy_m': list(face),
+                     'outward_normal_map_xy': list(outward)})
+            # A skewed stop cannot advance when one corner is already close.
+            # Back out using the observed face, then align to a fresh observation
+            # within this visit and its original budget, rather than ending it.
+            if (fine_table and not realignment_reapproached
+                    and all(math.isfinite(gap) and gap > 0.0 for gap in corner_gaps)
+                    and nearest_gap_m <= target_gap_m + gap_tolerance_m
+                    and max(corner_gaps) > target_gap_m + gap_tolerance_m):
+                if (self.stop_requested or not self._operator_link_ready()
+                        or not self._navigation_ready(require_fresh_amcl=False)):
+                    return False
+                realignment_reapproached = True
+                self.emit('table_realignment_reapproach',
+                          estimated_front_corner_gaps_m=corner_gaps,
+                          target_front_gap_m=target_gap_m)
+                self.incomplete_gap_stop = False
+                if not self._leave_parked_pose():
+                    return False
+                try:
+                    target = self.observe_target(
+                        camera_mount, front_extent_m, target_gap_m, region_xy, region_radius_m)
+                except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
+                    self.emit('failed', phase='table_realignment_reobserve', reason=str(error))
+                    return False
+                approached, straight_to_odom = self._straight_final_approach(target, front_extent_m)
+                if not approached:
+                    return False
+                previous_gap_m = None
+                continue
             # Corrections consume fresh stopped observations within the same task
             # budget; a lost face or an overshoot never dispatches another advance.
             if (not fine_table or not all(math.isfinite(gap) for gap in corner_gaps)
@@ -1272,6 +1311,7 @@ class BoxServiceRoute(ServiceRoute):
             self.emit('final_gap_correction', correction=corrections,
                       estimated_front_corner_gaps_m=corner_gaps,
                       target_front_gap_m=target_gap_m)
+            self.incomplete_gap_stop = False
             self._final_failure_reported = False
             if confirmation_basis == 'frozen_table_edge_odom_stop':
                 approached, straight_to_odom = self._zero_turn_final_approach(
@@ -2109,6 +2149,14 @@ def run_attempt(args, active=None):
             # Exit 0 only when every requested stage, including the return, succeeded.
             if ok and args.return_home:
                 ok = node.dwell_and_return_home(args.dwell_s, args.return_timeout_s)
+            elif (args.return_home and getattr(node, 'incomplete_gap_stop', False)
+                    and not node.stop_requested and node._operator_link_ready()
+                    and node._navigation_ready(require_fresh_amcl=False)):
+                node.emit('incomplete_parking_return_started', parking_success=False)
+                node._camera(False)
+                returned = node.go_home(execute=True, timeout_s=args.return_timeout_s)
+                node.emit('incomplete_parking_return_finished', home_confirmed=returned,
+                          parking_success=False)
             return _attempt_code(node, ok)
         except (ValueError, RuntimeError) as error:
             if node is not None:

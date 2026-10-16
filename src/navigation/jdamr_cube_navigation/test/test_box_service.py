@@ -1408,7 +1408,10 @@ def test_resident_result_is_published_atomically_after_attempt(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize('camera_stop_ok', [True, False])
-def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path, camera_stop_ok):
+@pytest.mark.parametrize('incomplete,stopped,linked', [
+    (False, False, True), (True, False, True), (True, True, True), (True, False, False)])
+def test_failed_visit_returns_only_after_confirmed_incomplete_stop(
+        monkeypatch, tmp_path, camera_stop_ok, incomplete, stopped, linked):
     """Dwell and return only after a confirmed approach; exit 0 needs every step."""
     for name in ('registry', 'mount', 'geometry', 'route'):
         (tmp_path / f'{name}.yaml').write_text('{}\n')
@@ -1433,6 +1436,10 @@ def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path, camera_stop_
             self.visit_observed_box = Mock(return_value=Route.visit_ok)
             self.dwell_and_return_home = Mock(return_value=True)
             self.go_home = Mock(return_value=True)
+            self.incomplete_gap_stop = incomplete and not Route.visit_ok
+            self.stop_requested = stopped and not Route.visit_ok
+            self._operator_link_ready = Mock(return_value=linked)
+            self._navigation_ready = Mock(return_value=True)
             self._camera = Mock(return_value=camera_stop_ok)
             self.finish_navigation = Mock(return_value=True)
             self.destroy_node, self.emit, self.request_stop = Mock(), Mock(), Mock()
@@ -1451,7 +1458,10 @@ def test_t28_failed_visit_never_returns_home(monkeypatch, tmp_path, camera_stop_
                 box_service.main([*argv, '--log', str(log)])
     failed, succeeded = created
     failed.dwell_and_return_home.assert_not_called()
-    failed.go_home.assert_not_called()
+    if incomplete and not stopped and linked:
+        failed.go_home.assert_called_once_with(execute=True, timeout_s=500.0)
+    else:
+        failed.go_home.assert_not_called()
     # Every attempt ends with the box camera off, the failed one included.
     for node in created:
         assert node.camera_on_demand is True
@@ -2247,6 +2257,45 @@ def test_one_centimetre_table_correction_never_advances_after_overshoot(mission)
     assert not invoke(mission)
     mission._straight_final_approach.assert_called_once()
     assert mission.emit.call_args.args == ('box_gap_not_confirmed',)
+
+
+@pytest.mark.parametrize('case', ['success', 'escape_failed', 'face_lost', 'still_skewed'])
+def test_skewed_near_corner_reapproaches_once_without_ending_the_visit(mission, case):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = 0.01
+    yaw = math.radians(0.75)
+    skewed = (1.0 - 0.012 - 0.065 * math.cos(yaw), 0.0, yaw)
+    final = skewed if case == 'still_skewed' else (0.925, 0.0, 0.0)
+    mission.capture_stationary_pose.side_effect = [((0, 0, 0), {}), (skewed, {}), (final, {})]
+    order, deadlines = [], []
+    target = deepcopy(mission.observe_target.return_value)
+
+    def observe(*_args):
+        order.append('observe')
+        if case == 'face_lost' and 'escape' in order:
+            raise RuntimeError('depth unavailable')
+        return deepcopy(target)
+
+    def approach(*_args):
+        order.append('approach')
+        deadlines.append(mission.run_deadline_s)
+        return True, None
+
+    def escape():
+        order.append('escape')
+        assert mission.last_box_face['face_center_map_xy_m'] == [1.0, 0.0]
+        return case != 'escape_failed'
+
+    mission.observe_target.side_effect = observe
+    mission._straight_final_approach.side_effect = approach
+    mission._leave_parked_pose = Mock(side_effect=escape)
+    assert invoke(mission) is (case == 'success')
+    assert order.count('escape') == 1
+    assert order.count('approach') == (1 if case in {'escape_failed', 'face_lost'} else 2)
+    assert all(value == deadlines[0] and value is not None for value in deadlines)
+    if case == 'success':
+        assert order[order.index('escape') + 1:][:2] == ['observe', 'approach']
+        assert mission.emit.call_args.args == ('box_approach_finished',)
 
 
 def test_one_centimetre_table_correction_has_a_bounded_iteration_count(mission):
