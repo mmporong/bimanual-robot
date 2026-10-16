@@ -1606,3 +1606,16 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **상용 로봇 비교와 남은 한계:** [Nav2 도킹 공식 절차](https://docs.nav2.org/rolling/tutorials/general_tutorials/using_docking/)는 staging 뒤 검출한 목표 pose를 갱신하는 접근 제어와 접촉/충전 확인을 설명한다. [Rotation Shim 공식 설명](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/controller_plugins/configuring_rotation_shim_controller/)은 heading을 고려하지 않는 NavFn 계열과 운동학 경로를 만드는 planner의 차이를 설명한다. 현재 코드가 Rotation Shim 플러그인을 사용한다는 뜻은 아니다. [BellaBot 제조사 자료](https://www.pudurobotics.com/product/detail/bellabot)는 LiDAR·visual SLAM과 RGB-D 등 다중 센서를 제시한다. 공개 제품 자료만으로 테이블 앞 1 cm 정렬 성능을 보증한다고 해석하지 않는다.
 
 현재 전면은 근접 상판 경계가 가려진 뒤 동결 면/odom에 의존하며 후면은 상대 간격 센서가 연결돼 있지 않다. 베이스 드라이버는 `ds=(dl+dr)/2`, `dth=(dr-dl)/wheel_separation`으로 odom을 적분하고 IMU는 별도 토픽으로 발행한다. 이번에 IMU 융합·회전 보정값·기구 제원은 바꾸지 않았다. 4WD의 실제 회전 미끄럼과 전륜축 runtime frame에 대한 운동학 기준점은 추가 확인할 항목이며, 이 하나가 현재 지도 오차 전체 원인이라고 확정하지 않는다. 눈에 띄는 단계 전환과 반복을 줄이는 것은 소프트웨어로 가능하지만, 끝까지 목표를 관측하는 센서 배치와 실제 운동 오차를 해결하지 않은 채 상용 수준의 연속 동작·1 cm 정확도를 달성했다고 기록하지 않는다.
+
+
+### 22.12 도크 시작 뒤쪽 keepout 겹침의 직진 탈출과 연속 접근 후보 보류
+
+**관찰:** `table_01_20261016_161625_82b528c7`은 이동 전 `dock_departure_path_checked=false`로 끝났다. 정지 map pose `(0.111854, 0.098619, 0.175672 rad)`와 외곽 `x=-0.28..0.07, y=-0.275..0.275 m`에서 최초 위치만 keepout black cell(column70, map_row110, world bounds x=-0.20..-0.15/y=-0.05..0.00 m)과 겹쳤다. 전방 0.025..0.700 m의 28개 pose는 free였다. 이는 뒤쪽 기존 겹침을 향후 진입 장애물과 구분하지 못한 출발 거부이며 전방 실물 장애물이 확인됐다는 뜻이 아니다. PC의 해당 run `departure_static_diagnostic.json`에 정지 진단을 보존했다.
+
+**조치:** `static_corridor_clear(..., allow_rear_keepout_escape=True)`를 도크 직진 이탈 한 호출에서만 사용한다. 고정 yaw·측방 변위 0·단조 전진을 만족하고, 최초 외곽과 겹친 셀 중 keepout negate=0 black cell이며 셀 전체가 시작 base 뒤쪽이고 최종 외곽이 완전히 벗어나는 셀만 면제한다. source map의 occupied/unknown, unknown keepout, 앞쪽/새 keepout, 회전/후진, 최종 겹침은 거부한다. 기본 corridor 검사와 live Collision Monitor는 유지한다.
+
+**검증·배포:** 기존 static/departure 17건·신규 8개 경계 사례 통과, 독립 reviewer의 고정 후보 2개 승인을 받았다. 배포 SHA는 restaurant `b8497fdd42a10f6ce8fca083600512666d0080a7331cebfe6019b338cac71904`, reverse `3e1cabbd1865dfe247c66d41f9b0790f7d3df9b331b2aaf72a89507d57a2942b`다. Pi source/install 4경로 일치·import·실행기 PID64151 active를 확인했다. 복원본 `$HOME/.local/state/jdamr/departure-rear-overlap/20261016_162145/`, PC receipt `$HOME/.local/state/bimanual-robot/departure_rear_overlap_fix/deployment.json`. Nav2·AMCL·지도·keepout·센서·속도는 바꾸지 않았다. 이어 제출한 `table_01_20261016_162157_2dce7549`은 도크 0.7 m 이탈과 급수대 관측 위치 도착을 완료했으며 이 항목 작성 시점에는 진행 중이다.
+
+**배포하지 않은 후보:** 이동 중 책상 면 heading 추종·원형 필터·전진 감속과 0.24 m/s 통로 속도 후보는 관련 948건을 통과했지만, 독립 검토에서 계획 경로와 실제 곡선의 정적 keepout 검사 불일치를 발견해 배포하지 않았다. 실제 nominal 곡선/외곽 검사 및 5 cm 이전 heading 수렴 보완이 남았다. 0.24 설정의 live monitor 재구성도 미완료다. RGB는 현재 주차 서비스에서 비활성이며 RGB 영역 분할과 동기·좌표 정합을 거친 깊이 결합은 향후 항목으로 구분한다. 이 후보를 현재 실차에 반영한 연속 제어·RGB 주차 성공으로 기록하지 않는다.
+
+**후속:** `162157_2dce7549`는 급수대 면 관측이 불안정한 뒤 탐색 기준 정지 pose 캡처에서 AMCL age24.302초·quiet exemption dyaw0.056rad로 종료됐다. 도크 이탈은 완료했으므로 반복하지 않았다. 기존 `/request_nomotion_update` 서비스 응답을 확인하고 `162425_234ffa1b`를 `--with-via --resume-at-observation`으로 제출했다. 카메라 준비와 급수대 관측 위치 재개까지 확인했으며 주차/복귀 결과는 아직 미확정이다. 새 pose를 만들어 발행하거나 도크로 위치를 덮어쓰지 않았다.

@@ -1792,7 +1792,7 @@ class ServiceRoute(CorridorRoute):
             if not static_corridor_clear(
                     Path(self.registry['map']['yaml_path']),
                     Path(self.registry['keepout']['yaml_path']), points,
-                    self._reverse_footprint()):
+                    self._reverse_footprint(), allow_rear_keepout_escape=True):
                 self.emit('dock_departure_path_checked', valid=False,
                           reason='static_obstacle_unknown_keepout_or_map_boundary')
                 return False

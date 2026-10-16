@@ -529,6 +529,7 @@ def _polygon_intersects_cell(
 def _corridor_blockage(
         source: dict, keepout: dict,
         pieces: Sequence[tuple[Sequence[Sequence[float]], float]],
+        ignored_keepout_cells=frozenset(),
 ) -> dict | None:
     resolution = source['resolution']
     origin_x, origin_y, _origin_yaw = source['origin']
@@ -563,6 +564,9 @@ def _corridor_blockage(
                 row = height - 1 - map_row
                 for grid_name, metadata in (
                         ('map', source), ('keepout', keepout)):
+                    if (grid_name == 'keepout'
+                            and (column, map_row) in ignored_keepout_cells):
+                        continue
                     if not _clearly_free(metadata, row, column):
                         index = row * width + column
                         return {
@@ -584,6 +588,7 @@ def static_corridor_clear(
         map_yaml: Path, keepout_yaml: Path,
         poses: Sequence[Sequence[float]],
         footprint: Sequence[Sequence[float]],
+        *, allow_rear_keepout_escape: bool = False,
 ) -> bool:
     """
     Check a sampled footprint corridor against static map pixels.
@@ -639,6 +644,35 @@ def static_corridor_clear(
         for x_value, y_value in footprint_points)
     world_footprints = [
         _world_footprint(pose, footprint_points) for pose in checked_poses]
+    ignored_keepout_cells = set()
+    if allow_rear_keepout_escape:
+        start = checked_poses[0]
+        cosine, sine = math.cos(start[2]), math.sin(start[2])
+        previous_forward = 0.0
+        for pose in checked_poses:
+            dx, dy = pose[0] - start[0], pose[1] - start[1]
+            forward = dx * cosine + dy * sine
+            lateral = -dx * sine + dy * cosine
+            if (abs(_shortest_angle(pose[2] - start[2])) > 1e-9
+                    or abs(lateral) > 1e-9 or forward < previous_forward - 1e-9):
+                return False
+            previous_forward = forward
+        while True:
+            blockage = _corridor_blockage(
+                source, keepout, [(world_footprints[0], 0.0)], ignored_keepout_cells)
+            if blockage is None:
+                break
+            if (blockage.get('grid') != 'keepout' or keepout['negate'] != 0
+                    or blockage.get('pixel') != 0):
+                return False
+            left, bottom, right, top = blockage['cell_bounds']
+            corners = ((left, bottom), (right, bottom), (right, top), (left, top))
+            if (max((x - start[0]) * cosine + (y - start[1]) * sine
+                    for x, y in corners) >= 0.0
+                    or _polygon_intersects_cell(
+                        world_footprints[-1], 0.0, left, bottom, resolution)):
+                return False
+            ignored_keepout_cells.add((blockage['column'], blockage['map_row']))
     pieces = [(polygon, 0.0) for polygon in world_footprints]
     for index, (current, following) in enumerate(zip(
             checked_poses, checked_poses[1:])):
@@ -647,4 +681,4 @@ def static_corridor_clear(
         swept_hull = _convex_hull(
             world_footprints[index] + world_footprints[index + 1])
         pieces.append((swept_hull, sagitta))
-    return _corridor_blockage(source, keepout, pieces) is None
+    return _corridor_blockage(source, keepout, pieces, ignored_keepout_cells) is None

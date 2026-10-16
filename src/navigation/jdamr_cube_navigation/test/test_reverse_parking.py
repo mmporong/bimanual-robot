@@ -188,6 +188,41 @@ def test_static_corridor_accepts_only_clear_map_and_keepout_cells(tmp_path):
          (-0.04, 0.02)])
 
 
+@pytest.mark.parametrize('case,allowed', [
+    ('rear', True), ('front', False), ('unknown', False), ('map', False),
+    ('turn', False), ('reverse', False), ('new_cell', False), ('still_overlapping', False),
+])
+def test_dock_escape_leaves_only_existing_rear_black_keepout_cells(tmp_path, case, allowed):
+    width, height = 15, 9
+    source_pixels = [254] * (width * height)
+    mask_pixels = list(source_pixels)
+    rear_index = (height - 1 - 4) * width + 3
+    mask_pixels[rear_index] = 0
+    if case == 'front':
+        mask_pixels[rear_index] = 254
+        mask_pixels[(height - 1 - 4) * width + 6] = 0
+    elif case == 'unknown':
+        mask_pixels[rear_index] = 205
+    elif case == 'map':
+        source_pixels[rear_index] = 0
+    elif case == 'new_cell':
+        mask_pixels[(height - 1 - 4) * width + 8] = 0
+    source = _write_grid(tmp_path, 'map', source_pixels, width=width, height=height)
+    keepout = _write_grid(tmp_path, 'keepout', mask_pixels, width=width, height=height)
+    end = (1.0, 0.45, 0.0)
+    if case == 'turn':
+        end = (1.0, 0.45, 0.1)
+    elif case == 'reverse':
+        end = (0.5, 0.45, 0.0)
+    elif case == 'still_overlapping':
+        end = (0.61, 0.45, 0.0)
+    footprint = [(-0.28, -0.04), (0.07, -0.04), (0.07, 0.04), (-0.28, 0.04)]
+    poses = [(0.6, 0.45, 0.0), end]
+    assert not static_corridor_clear(source, keepout, poses, footprint)
+    assert static_corridor_clear(
+        source, keepout, poses, footprint, allow_rear_keepout_escape=True) is allowed
+
+
 @pytest.mark.parametrize('grid_name,pixel', [
     ('map', 205),
     ('map', 0),
