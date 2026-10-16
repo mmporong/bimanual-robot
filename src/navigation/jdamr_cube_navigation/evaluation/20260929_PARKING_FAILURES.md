@@ -1413,3 +1413,15 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - 확장 전 후보는 별도 verifier가 경로 연결·도크/관측/최종 위치와 실제 footprint sweep의 차단 셀 0을 확인했다. 이 승인을 확장 후 도크 겹침 후보에 재사용하지 않는다. 최종 적용 때는 PC·Pi 마스크와 등록부 및 모든 route의 SHA를 함께 대조해야 한다.
 
 로봇 이동은 중지 상태를 유지한다. 도크 주변 기하 정합, 수정 코드의 실차 연속 접근·주차 간격, 급수대 포함 왕복과 후진 복귀는 남은 확인 항목이다. RViz·표시 중계는 꺼 두고, 사용자 화면용 PC `robot-dashboard`·`robot-dashboard-link`와 Pi `jdamr-ammr-dashboard` 및 다음 요청용 idle `jdamr-box-executor`를 유지한다. 종료 명령은 PC `systemctl --user stop robot-dashboard robot-dashboard-link`, Pi `sudo systemctl stop jdamr-ammr-dashboard jdamr-box-executor`다. 깊이 카메라·관측기는 앞선 사이클 정리로 중지돼 있으며 최신 영상이 실행 중이라고 주장하지 않는다.
+
+
+### 22.4 사용자 3 cm 배치 근거로 도크 테이블 경계 수정·반영
+
+사용자는 현재 차체가 테이블과 평행하고 약 3 cm 떨어져 있으며, 도크점 또는 킵아웃을 그 배치에 맞춰 조정해도 된다고 허용했다. 후진 도크 문맥의 뒤쪽 간격으로 해석했다. 이는 §22.3 당시 부족했던 물리 배치 근거이며, 차체만 비우는 좁은 통로를 임의로 그린 것이 아니다.
+
+- 정지 스캔 40개의 현재 map TF는 `(-0.03559, 0.04841, 0.33810 rad)`였고, 정합 후보는 `(0.11441, 0.16841, 0.12867 rad)`, 5 cm inlier 35.29%, 전역 후보와 일치했다. 두 값 차이 19.2 cm·12°는 내부 대조이며 외부 측정 오차가 아니다. 기존 비이동 활성화 후 native `teach-home --parking-direction reverse`로 `(0.12002282933008113, 0.16495971131874898, 0.13404527824949672 rad)`를 등록했다. 이전 도크 좌표는 백업에 보존했다.
+- 차체 rear는 실차 URDF의 뒤 레일 중심 -0.265 m와 두께 절반 0.010 m로 -0.275 m다. 사용자 평행 배치의 진행 방향 `n=(0.9910293759, 0.1336442148)`과 3 cm를 적용해 테이블 전면을 `n·p=-0.1640079393`으로 추정했다. 도크 테이블 전체 전면을 이 직선으로 바꿨고 급수대 영역과 이어지게 했다. 앞쪽 검은 셀 일부는 해당 테이블 소속이 확정되지 않았으므로 새 전면 근거에서 제외했지만 원본 정적 지도 점유는 그대로 유지한다.
+- 도크 표식의 후면 간격은 등록부 `teaching.rear_gap_measurement`에 기록해 기존 앞쪽 간격 필드와 섞지 않았다. 사용자 대략값·단일 배치에 근거한 설정이며 정확한 테이블 각도·후진 복귀 3 cm 정밀도를 새로 검증한 것이 아니다. 기존 도크 위치 허용오차나 후면 거리 센서를 이번 작업에서 바꾸지 않았다.
+- 새 마스크 SHA는 `8278dcef38b06d469b53f32b1c6ab2c5a14b27f23523f27bcb83aa11ab4a8526`이다. 기존 비자유 픽셀 삭제 0, 추가 여유 0 m, 원본 지도 격자와 동일하다. 실제 Nav2 footprint의 home↔0.7 m staging 1 cm 간격 71 pose, 급수대·테이블 관측/최종/탈출과 경유·직행 정적 sweep는 독립 `static_corridor_clear` 검증을 통과했다. 정적 검증을 실제 Nav2 계획이나 동적 장애물 통과로 확대하지 않는다.
+- PC·Pi·저장소 번들의 keepout·도크 등록부·5 route를 맞추고 모든 `expected_mask_sha256`을 새 값으로 변경했다. 원래 unknown 마스크는 `keepout_base_unknown.{pgm,yaml}`로 보존해 다음 갱신이 이전 상판 영역을 누적해서 남기지 않게 했다. Pi 14경로 해시와 마스크 재로딩 후 transient-local 발행 마스크의 기대 occupancy 바이트 일치를 확인했다. 관련 운영 도구·정적 자산 검사 22건과 diff 검사가 통과했다.
+- 원본·정지 관측·초기화·도크 등록 로그·파생 평면·동기화 receipt·새 프리뷰는 `$HOME/jdamr_data/map_20260930_manual/aligned/runs/dock_table_fit_20261016_121145/`에 있다. Pi 복원본은 `$HOME/.local/state/jdamr/dock-table-assets/dock_table_fit_20261016_121145/`다. 새 임시 상주 프로세스는 남기지 않았으며 기존 사용자 대시보드·베이스·Nav2·idle 실행기를 유지했다. 이번에는 이동 명령·실차 왕복·원격 push를 수행하지 않았다.

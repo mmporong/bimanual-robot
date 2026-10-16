@@ -8,36 +8,43 @@ map:
 keepout:
   yaml_path: /home/lim/jdamr_data/map_20260930_manual/aligned/keepout.yaml
   yaml_sha256: 41889c8a8d16fa94ad2e5c0fe730d2227676adf54b4ea93a8c2b267d54939344
-  image_sha256: 616c0caf306980111eec95ca940a94c9bf30409ff1c179a61103a68ceb37e191
+  image_sha256: 8278dcef38b06d469b53f32b1c6ab2c5a14b27f23523f27bcb83aa11ab4a8526
 home:
   id: home_dock
   priority: 1
-  x_m: 0.12685095998538692
-  y_m: 0.057200166122187035
-  yaw_rad: 0.11115982800318104
+  x_m: 0.12002282933008113
+  y_m: 0.16495971131874898
+  yaw_rad: 0.13404527824949672
   approach_offset_m: 0.7
   target_front_gap_m: null
   teaching:
     source: map_to_base_link_tf
-    captured_at: '2026-10-12T08:24:21.613797+00:00'
+    captured_at: '2026-10-16T03:14:07.462149+00:00'
     observation:
       confirmed: true
       reason: confirmed
       position_error_m: 0.0
       yaw_error_rad: 0.0
-      hold_s: 1.019899672000065
+      hold_s: 1.0276525340013904
       physical_accuracy: NOT_MEASURED
       source_ages_s:
-      - 0.000850572999979704
-      - 0.002607768529907184
-      - 0.0426341765299072
+      - 0.0008704499996383674
+      - 0.33178664266503904
+      - 0.37181742266503903
       amcl_xy_covariance_m2:
-      - 0.0023160363599044696
-      - 0.0020051847630256593
-      amcl_yaw_covariance_rad2: 0.005527723239889069
+      - 0.002254258355364536
+      - 0.00243895343935497
+      amcl_yaw_covariance_rad2: 0.005196296128385286
       command_observed: false
     physical_accuracy: NOT_MEASURED
     table_gap_m: null
     gap_measurement_note: null
-  parking_direction: forward
+    rear_gap_measurement:
+      gap_m: 0.03
+      reference: chassis_rear_to_dock_table
+      source: operator_report
+      parallel: true
+      scope: taught placement; no closed-loop rear range measurement
+      source_run: dock_table_fit_20261016_121145
+  parking_direction: reverse
 tables: []
