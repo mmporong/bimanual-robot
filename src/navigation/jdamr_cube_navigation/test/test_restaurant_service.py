@@ -3455,3 +3455,48 @@ def test_precision_tiny_trim_reduces_coast_error_without_reversing():
     assert 0 < rates[1] < rates[0]
     assert abs(fine - requested) < abs(coarse - requested)
     assert abs(fine - requested) < math.radians(0.3)
+
+
+@pytest.mark.parametrize('interruption', ['none', 'operator', 'link'])
+def test_live_depth_gap_waits_stopped_and_resumes_same_target(monkeypatch, interruption):
+    node = route()
+    clock, position, requested = [0.0], [0.0], [0.0]
+    commands = []
+    def publish(message):
+        requested[0] = message.linear.x
+        commands.append((clock[0], message.linear.x, message.angular.z))
+    def spin(*_a, **_k):
+        clock[0] += 0.02
+        position[0] += requested[0] * 0.02
+        node.latest_motion = (clock[0], requested[0], 0.0)
+        if ((interruption == 'operator' and clock[0] >= 1.6)
+                or (interruption == 'link' and clock[0] >= 3.0)):
+            node.stop_requested = True
+    def update(actual):
+        if actual[0] > 0.01 and clock[0] < 1.9:
+            raise RuntimeError('table approach depth stale or future-dated')
+        return {'remaining_m': 0.04 - actual[0]}
+    node._guard_failure = lambda *_a: ('scan stale: recovering' if 1.7 <= clock[0] < 2.1 else None)
+    node._operator_link_ready = lambda: not (interruption == 'link' and 1.5 <= clock[0] < 2.0)
+    node.latest_motion = (-1.0, 0.0, 0.0)
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=position[0], y=0., z=0.),
+            rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    travelled = node._drive_zero_turn(.022, precision=True, hold_heading=True,
+                                     target_update=update)
+    first_zero = next(i for i, (_t, v, _w) in enumerate(commands) if v == 0.)
+    assert all(v == 0. and w == 0. for t, v, w in commands[first_zero:] if t < 2.1)
+    events = _events(node)
+    assert any(e['event'] == 'table_approach_waiting_for_input' for e in events)
+    if interruption != 'none':
+        assert travelled is None
+        assert not any(e['event'] == 'table_approach_input_recovered' for e in events)
+        assert position[0] < .02
+    else:
+        assert travelled == pytest.approx(.04, abs=.003)
+        assert any(e['event'] == 'table_approach_input_recovered' for e in events)
+        assert any(t >= 2.1 and v > 0. for t, v, _w in commands)

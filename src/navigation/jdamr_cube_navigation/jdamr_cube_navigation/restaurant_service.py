@@ -1425,6 +1425,7 @@ class ServiceRoute(CorridorRoute):
                     command.linear.x = min(command.linear.x, next_speed)
                 except (KeyError, TypeError, ValueError, RuntimeError) as error:
                     state['target_failure'] = str(error) or type(error).__name__
+                    state['resume_speed_mps'] = command.linear.x
                     command.linear.x = command.angular.z = 0.0
             if hold_heading and state['target_failure'] is None:
                 error_rad = math.atan2(
@@ -1448,7 +1449,7 @@ class ServiceRoute(CorridorRoute):
             if timing['checked_s'] is not None:
                 timing['loop_s'] = min(0.1, max(0.0, now_s - timing['checked_s']))
             timing['checked_s'] = now_s
-            live_speed_mps = speed_mps
+            live_speed_mps = abs(command.linear.x) or speed_mps
             motion = getattr(self, 'latest_motion', None)
             odom_age_s = 0.0
             if motion is not None and all(math.isfinite(value) for value in motion):
@@ -1489,10 +1490,51 @@ class ServiceRoute(CorridorRoute):
         else:
             deadline_s = (time.monotonic() + abs(distance_m) / speed_mps
                           + STRAIGHT_ESCAPE_EXTRA_S)
-        travelled_m = self._direct_motion(
-            command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
-            watch=motion_watch if hold_heading or target_update is not None else watch,
-            confirm_stopped=precision)
+        recoverable_depth_failures = {
+            'table approach observer silent',
+            'table approach depth stale or future-dated',
+            'table approach observer latency',
+        }
+        while True:
+            travelled_m = self._direct_motion(
+                command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
+                watch=motion_watch if hold_heading or target_update is not None else watch,
+                confirm_stopped=precision)
+            if (target_update is None or travelled_m is None or self.stop_requested
+                    or state['tf_failure'] is not None
+                    or state['target_failure'] not in recoverable_depth_failures):
+                break
+            reason = state['target_failure']
+            resume_speed = state.get('resume_speed_mps', speed_mps)
+            paused_s = time.monotonic()
+            self.emit('table_approach_waiting_for_input', reason=reason,
+                      travelled_m=state['travelled'], target_preserved=True)
+            # A temporary depth gap pauses this same odom-frozen move. No goal,
+            # nonzero velocity or changed stop point is sent while inputs are bad.
+            link_lost = False
+            while not self.stop_requested:
+                spin_node(self, timeout_sec=0.05)
+                if not link_lost and not self._operator_link_ready():
+                    link_lost = True
+                if link_lost or self._guard_failure(False):
+                    continue
+                state['target_failure'] = None
+                command.linear.x = resume_speed
+                measure()
+                if state['tf_failure'] is not None:
+                    break
+                if state['target_failure'] is None:
+                    self.emit('table_approach_input_recovered',
+                              paused_s=time.monotonic() - paused_s,
+                              travelled_m=state['travelled'], target_preserved=True)
+                    break
+                if state['target_failure'] not in recoverable_depth_failures:
+                    break
+            if self.stop_requested or state['tf_failure'] or state['target_failure']:
+                command.linear.x = command.angular.z = 0.0
+                break
+            deadline_s += time.monotonic() - paused_s
+            timing['checked_s'] = None
         if precision:
             self.emit('precision_straight_finished',
                       requested_distance_m=distance_m,
