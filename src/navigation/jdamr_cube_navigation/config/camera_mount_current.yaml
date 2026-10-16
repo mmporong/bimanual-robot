@@ -89,3 +89,70 @@ camera_mount:
         - -0.8351787647922502
         - -0.5495615426292061
         plane_rms_m: 0.0050721144189802645
+  table_edge_calibration:
+    enabled: true
+    status: derived
+    yaw_offset_rad: -0.037999564732025065
+    plane_offset_bias_m: 0.027985701059102468
+    reference_transform:
+      x_m: -0.275
+      y_m: 0.0
+      z_m: 1.26
+      roll_rad: -0.03011453253432204
+      pitch_rad: 0.5837829655386328
+      yaw_rad: -0.0007507445375463481
+    provenance:
+      derived_at: '2026-10-16'
+      unit:
+        yaw_offset_rad: rad
+        plane_offset_bias_m: m
+      valid_for: 현재 4륜 차체·카메라 장착과 약 0.78m 높이 책상의 근거리 주차 보정 후보
+      reference_mean_gap_range_m: [0.035, 0.08735]
+      target_extrapolation: 10mm 목표는 적합 자료보다 가까우며 외부 실측으로 검증되지 않음
+      method: 로봇 기준 좌43mm/우27mm 실측으로 만든 면을 정지 LiDAR 상대 정합으로 운반하고, 후진 뒤 정상 검출 20장의
+        2D plane offset/yaw와 비교한 중앙값
+      physical_camera_transform_changed: false
+      operator_pitch_approx_deg: 30
+      operator_pitch_scope: 각도계 실측이 아닌 참고값이며 이 값에 맞춰 물리 RPY를 덮어쓰지 않음
+      reference_width_m: 0.45
+      reference_front_extent_m: 0.065
+      reference_left_gap_m: 0.043
+      reference_right_gap_m: 0.027
+      frame_confirmation: 로봇이 바라보는 방향의 좌우
+      external_reference_count: 1
+      fresh_depth_observations: 20
+      motion_comparison:
+        scan_to_scan_translation_body_m:
+        - -0.05228481485731033
+        - 0.0025829064000367523
+        scan_to_scan_yaw_deg: 0.06337501509473303
+        residual_rms_m: 0.013303697102667525
+        matched: 378
+        points: 520
+        odom_delta_m:
+        - 0.017086182303237413
+        - 0.050587549235723894
+        odom_distance_m: 0.05339510992006902
+        scope: 정지 LiDAR 두 관측의 최근접점 SVD 정합. 외부 거리 실측 아님
+      evidence: $HOME/jdamr_data/map_20260930_manual/aligned/runs/table_fix_20261016_102002/parking_20261016_102137_07bfdaef/stationary_depth_20261016_103123
+      independent_physical_validation: false
+      invalidate_when: 카메라 위치/각도, 차체 앞끝/폭 기준 또는 깊이 센서 처리 변경
+      reference_views:
+      - role: 정지 실측 위치의 이전 관측·odom 기반 회귀 대조
+        raw_normal_xy:
+        - -0.9999998243117841
+        - -0.0005927701079613823
+        raw_offset_m: 0.07104312343143906
+        reference_normal_xy:
+        - -0.9993677013337663
+        - 0.03555555555555555
+        reference_offset_m: 0.09995890058669482
+      - role: 후진 뒤 정상 경계 관측. 보정 적합 자료
+        raw_normal_xy:
+        - -0.9999970613883762
+        - -0.0024242967253103316
+        raw_offset_m: 0.12449223488472119
+        reference_normal_xy:
+        - -0.9993277619019003
+        - 0.03666093686935561
+        reference_offset_m: 0.1523024924973079

@@ -122,7 +122,7 @@ PATH_BLOCKED_FORWARD_MAX_M = 0.35
 # 10 Hz cycle.
 STRAIGHT_ESCAPE_SPEED_MPS = 0.05
 PRECISION_STRAIGHT_MIN_SPEED_MPS = 0.01
-PRECISION_STRAIGHT_TARGET_S = 2.0
+PRECISION_STRAIGHT_TARGET_S = 4.0
 # A 1/s proportional correction removes a one-degree drift without snapping the
 # chassis. 0.02 rad/s is below the 0.08 rad/s in-place trim and, on the configured
 # 0.51 m wheel separation, keeps both wheels moving forward at the 0.01 m/s
@@ -1453,6 +1453,12 @@ class ServiceRoute(CorridorRoute):
         travelled_m = self._direct_motion(
             command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
             watch=motion_watch if hold_heading else watch, confirm_stopped=precision)
+        if precision:
+            self.emit('precision_straight_finished',
+                      requested_distance_m=distance_m,
+                      travelled_m=travelled_m, speed_mps=speed_mps,
+                      loop_s=timing['loop_s'],
+                      odom_tf_failed=state['tf_failure'] is not None)
         return None if state['tf_failure'] is not None else travelled_m
 
     def _departure_ready(self):

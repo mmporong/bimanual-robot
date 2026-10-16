@@ -98,6 +98,43 @@ def _validated_table_observation(document, mount, now_s):
     return endpoints_base, table_height_m, edge_rms_m
 
 
+def _calibrated_table_line(center, normal, camera_mount):
+    """Apply a task calibration to line normal and signed base-origin distance."""
+    calibration = camera_mount['camera_mount'].get('table_edge_calibration', {})
+    if not isinstance(calibration, dict):
+        raise ValueError('table-edge calibration must be a mapping')
+    if calibration.get('enabled', False) is False:
+        return center, normal, None
+    if (calibration.get('enabled') is not True
+            or calibration.get('status') not in {'derived', 'measured'}):
+        raise ValueError('table-edge calibration must be enabled and derived or measured')
+    yaw, bias = _finite_fields(
+        calibration, ('yaw_offset_rad', 'plane_offset_bias_m'),
+        'table_edge_calibration')
+    reference_mount = _finite_fields(
+        calibration.get('reference_transform', {}),
+        ('x_m', 'y_m', 'z_m', 'roll_rad', 'pitch_rad', 'yaw_rad'),
+        'table_edge_calibration.reference_transform')
+    if not all(math.isclose(old, current, abs_tol=1e-9, rel_tol=0.0)
+               for old, current in zip(reference_mount, _validated_mount(camera_mount))):
+        raise ValueError('table-edge calibration mount has changed')
+    raw_offset = -sum(center[i] * normal[i] for i in (0, 1))
+    corrected_normal = _rotate_xy(normal[0], normal[1], yaw)
+    corrected_offset = raw_offset + bias
+    rotated_center = _rotate_xy(center[0], center[1], yaw)
+    corrected_center = tuple(
+        rotated_center[i] - bias * corrected_normal[i] for i in (0, 1))
+    return corrected_center, corrected_normal, {
+        'applied': True,
+        'yaw_offset_rad': yaw,
+        'plane_offset_bias_m': bias,
+        'raw_normal_base_xy': normal,
+        'raw_plane_offset_m': raw_offset,
+        'corrected_plane_offset_m': corrected_offset,
+        'scope': 'table_line_observation_not_physical_camera_transform',
+    }
+
+
 def compute_table_edge_docking_target(
         observation, camera_mount, robot_pose, *, requested_gap_m,
         front_extent_m, now_s):
@@ -128,6 +165,12 @@ def compute_table_edge_docking_target(
         normal_x = -normal_x
         normal_y = -normal_y
 
+    (center_x, center_y), (normal_x, normal_y), calibration = _calibrated_table_line(
+        (center_x, center_y), (normal_x, normal_y), camera_mount)
+    if calibration is not None:
+        # Keep the tangent and corrected plane normal perpendicular.
+        basis_x, basis_y = -normal_y, normal_x
+
     center_offset_m = extent_m + gap_m
     target_base_x = center_x + normal_x * center_offset_m
     target_base_y = center_y + normal_y * center_offset_m
@@ -156,4 +199,5 @@ def compute_table_edge_docking_target(
         'edge_basis_map_xy': (basis_map_x, basis_map_y),
         'edge_rms_m': edge_rms_m,
         'surface_kind': 'table_edge',
+        'table_edge_calibration': calibration,
     }

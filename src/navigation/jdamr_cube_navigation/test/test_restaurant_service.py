@@ -2588,7 +2588,11 @@ def test_zero_turn_drive_commands_no_rotation_and_stops_at_the_distance(monkeypa
     assert published[-5:] == [(0.0, 0.0)] * 5
 
 
-def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(monkeypatch):
+@pytest.mark.parametrize('distance_m, expected_speed', [
+    (0.022, 0.01), (0.08, 0.02), (0.30, 0.05),
+])
+def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
+        monkeypatch, distance_m, expected_speed):
     node = route()
     clock = [0.0]
     position = [0.0]
@@ -2621,16 +2625,19 @@ def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(monke
     monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
 
-    travelled = node._drive_zero_turn(0.022, precision=True)
+    travelled = node._drive_zero_turn(distance_m, precision=True)
 
-    expected_speed = 0.022 / restaurant_service.PRECISION_STRAIGHT_TARGET_S
     assert {round(v, 6) for v, _w in published if v} == {round(expected_speed, 6)}
     assert published[-5:] == [(0.0, 0.0)] * 5
     assert velocity[0] == pytest.approx(0.0)
-    assert first_stop_position[0] < 0.022
-    assert position[0] > first_stop_position[0]
+    assert first_stop_position[0] < distance_m
+    assert position[0] >= first_stop_position[0]
     assert travelled == pytest.approx(position[0])
-    assert travelled <= 0.022 + 0.003
+    assert travelled <= distance_m + 0.003
+    finished = [event for event in _events(node)
+                if event['event'] == 'precision_straight_finished']
+    assert finished[-1]['travelled_m'] == pytest.approx(travelled)
+    assert finished[-1]['speed_mps'] == pytest.approx(expected_speed)
 
 
 def test_precision_zero_turn_fails_without_fresh_stopped_odometry(monkeypatch):
