@@ -297,12 +297,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if not self._camera(True):
                 return False
             requested_s = self._camera_requested_s
-        deadline_s = time.monotonic() + timeout_s
+        wait_started_s = time.monotonic()
+        deadline_s = wait_started_s + timeout_s
         while not self.stop_requested and time.monotonic() < deadline_s:
             received_s = getattr(self, 'box_status_received_s', None)
             if received_s is not None and received_s >= requested_s:
+                ready_s = time.monotonic()
                 self.emit('box_camera_ready',
-                          waited_s=round(time.monotonic() - requested_s, 1))
+                          # Preserve the legacy elapsed time, which includes transit.
+                          waited_s=round(ready_s - requested_s, 1),
+                          blocking_wait_s=round(ready_s - wait_started_s, 3))
                 return True
             spin_node(self, timeout_sec=0.1)
         self.emit('box_camera_ready', ready=False, timeout_s=timeout_s)
@@ -1043,7 +1047,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         with self._localization_bound(resume_at_observation):
             if not self.wait_until_ready(timeout=10.0):
                 raise RuntimeError('localization or sensor data unavailable')
-            if not self._parking_parameters_ready():
+            # Normal starts validate this in preflight; observation resumes skip it.
+            if resume_at_observation and not self._parking_parameters_ready():
                 raise RuntimeError('parking controller parameters unavailable')
             if execute and not self._precision_collision_ready(geometry):
                 raise RuntimeError('precision collision-monitor profile unavailable')

@@ -83,6 +83,31 @@ def test_plan_only_does_not_observe_or_move(mission):
     mission._precision_collision_ready.assert_not_called()
 
 
+@pytest.mark.parametrize('ready', [True, False])
+def test_normal_visit_queries_parking_parameters_once_through_preflight(mission, ready):
+    mission._parking_parameters_ready.return_value = ready
+    mission.preflight.side_effect = mission._parking_parameters_ready
+    assert invoke(mission) is ready
+    mission._parking_parameters_ready.assert_called_once()
+    if not ready:
+        mission.execute.assert_not_called()
+        mission.observe_target.assert_not_called()
+
+
+def test_observation_resume_rejects_missing_parking_parameters_before_motion(mission):
+    mission._parking_parameters_ready.return_value = False
+    with pytest.raises(RuntimeError, match='parking controller parameters unavailable'):
+        mission.visit_observed_box(
+            'route', {}, {'front_to_wheel_axis': {'value': 0.065},
+                          'wheel_outer_width': {'value': 0.540}},
+            'table_01', (1, 0), 0.6, execute=True,
+            candidate_trial=True, resume_at_observation=True)
+    mission._parking_parameters_ready.assert_called_once()
+    mission.preflight.assert_not_called()
+    mission.execute.assert_not_called()
+    mission.observe_target.assert_not_called()
+
+
 def test_transit_alignment_final_sequence(mission):
     assert invoke(mission)
     # The final approach is the straight odom leg, not a planned execute.
@@ -314,6 +339,7 @@ def test_resume_observation_skips_transit_but_keeps_both_parking_phases(mission)
     assert mission.execute.call_count == 1
     mission._straight_final_approach.assert_called_once()
     mission.preflight.assert_not_called()
+    mission._parking_parameters_ready.assert_called_once()
     assert [call.args[2] for call in mission.observe_target.call_args_list] == [0.45, 0.05]
     mission.verify_live_maps.assert_called()
     mission._precision_collision_ready.assert_called_once()
@@ -2180,6 +2206,27 @@ def test_box_camera_ready_needs_an_observer_status_after_the_start(monkeypatch):
     monkeypatch.setattr(box_service.rclpy, 'spin_once', lambda *_a, **_k: None)
     assert node._camera_ready(timeout_s=1.0) is False
     assert node.events[-1] == ('box_camera_ready', {'ready': False, 'timeout_s': 1.0})
+
+
+@pytest.mark.parametrize('status_ready, expected_wait_s', [(True, 0.0), (False, 2.0)])
+def test_camera_readiness_separates_background_transit_from_blocking_wait(
+        monkeypatch, status_ready, expected_wait_s):
+    node = _camera_node()
+    node._camera_requested_s = 100.0
+    node.box_status_received_s = 110.0 if status_ready else None
+    clock = [126.5]
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+
+    def spin(*_a, **_k):
+        clock[0] += 2.0
+        node.box_status_received_s = clock[0]
+
+    monkeypatch.setattr(box_service.rclpy, 'spin_once', spin)
+    assert node._camera_ready(timeout_s=30.0)
+    event, fields = node.events[-1]
+    assert event == 'box_camera_ready'
+    assert fields['waited_s'] == 26.5 + expected_wait_s
+    assert fields['blocking_wait_s'] == expected_wait_s
 
 
 def test_transit_option_selects_the_planner_and_controller_trees():
