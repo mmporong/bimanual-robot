@@ -1404,22 +1404,21 @@ class BoxServiceRoute(ServiceRoute):
                     self.emit('table_approach_face_updated', observation_stamp_s=stamp,
                               reference_frame='odom', face_center_xy_m=list(face),
                               outward_normal_xy=list(normal))
-                elif (observation.get('reason') == 'no_table_edge_candidate'
-                      or (observation.get('reason') == 'collecting_stability'
-                          and observation.get('detected') is True
-                          and observation.get('stable') is False
-                          and observation.get('surface_kind') == 'table_edge'
-                          and observation.get('frame_id') == 'camera_color_optical_frame'
-                          and observation.get('control_ready') is False)):
-                    # Moving-camera stability can reset while the edge remains visible.
-                    # Keep the last accepted face; never adopt an unstable candidate.
+                elif observation.get('reason') == 'no_table_edge_candidate':
                     state['occluded_frames'] += 1
                     if state['occluded_frames'] >= quorum:
-                        state['basis'] = (
-                            'healthy_edge_occlusion_frozen_odom'
-                            if observation.get('reason') == 'no_table_edge_candidate'
-                            else 'moving_stability_reset_frozen_odom')
+                        state['basis'] = 'healthy_edge_occlusion_frozen_odom'
                         state['occlusion_latched'] = True
+                elif (observation.get('reason') == 'collecting_stability'
+                      and observation.get('detected') is True
+                      and observation.get('stable') is False
+                      and observation.get('surface_kind') == 'table_edge'
+                      and observation.get('frame_id') == 'camera_color_optical_frame'
+                      and observation.get('control_ready') is False):
+                    # Carry the accepted face only until moving stability recovers.
+                    # A visible candidate must not permanently disable depth updates.
+                    state['occluded_frames'] = 0
+                    state['basis'] = 'moving_stability_reset_carried_odom'
                 elif time.monotonic() - state['last_valid_s'] > OBSERVER_SILENT_S:
                     raise RuntimeError('table approach stable face unavailable')
             heading = math.atan2(-state['normal'][1], -state['normal'][0])

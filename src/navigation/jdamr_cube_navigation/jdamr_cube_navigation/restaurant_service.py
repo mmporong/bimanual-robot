@@ -2357,7 +2357,7 @@ class ServiceRoute(CorridorRoute):
         actual, _ = self.capture_stationary_pose()
         return actual
 
-    def _go_home_reverse(self, pose, execute):
+    def _go_home_reverse(self, pose, execute, *, _map_reapproach=False):
         """
         Align outside the dock, then follow a bounded reverse path via Nav2.
 
@@ -2366,6 +2366,7 @@ class ServiceRoute(CorridorRoute):
         uses its single contract for every step, exactly as before.
         """
         full_config = route_config(self.registry, pose)
+        self._dock_map_recovery = None
         self.config, self.waypoints = full_config, full_config['waypoints']
         target = tuple(pose[key] for key in ('x_m', 'y_m', 'yaw_rad'))
         home = getattr(self, 'home_contract', None) or self.parking_contract
@@ -2381,7 +2382,8 @@ class ServiceRoute(CorridorRoute):
         if precision_home:
             self._home_goal_checker()
         actual = None
-        if (execute and getattr(self, 'parking_command', None) is not None
+        if (execute and not _map_reapproach
+                and getattr(self, 'parking_command', None) is not None
                 and getattr(self, 'parking_odom', None) is not None):
             try:
                 actual = self._parking_observation()['actual_pose']
@@ -2459,6 +2461,18 @@ class ServiceRoute(CorridorRoute):
         actual, _evidence = self.capture_stationary_pose()
         if precision_home:
             success = self._dock_straight(actual, target, pre_dock, home)
+            recovery = self._dock_map_recovery
+            if (not success and recovery is not None and not _map_reapproach
+                    and not self.stop_requested and self._operator_link_ready()
+                    and self._navigation_ready(require_fresh_amcl=False)):
+                # Leave along the established odom axis before any new heading.
+                # Replan from outside the dock so map drift and lateral error are
+                # both included in the next staging/curve/freeze operation.
+                self.emit('dock_map_reapproach_requested',
+                          reason=self.confirmation.get('reason'),
+                          confirmation=self.confirmation)
+                if self._pull_out_to(*recovery):
+                    return self._go_home_reverse(pose, execute, _map_reapproach=True)
         else:
             try:
                 path = self._make_reverse_path(actual, target, **path_kwargs)
@@ -2552,7 +2566,8 @@ class ServiceRoute(CorridorRoute):
         up to DOCK_END_TURN_MAX_RAD off is trimmed in place there to
         DOCK_HEADING_TOLERANCE_RAD; a larger one pulls straight out to that
         start, sets the heading and enters once more. Staging was confirmed on the map; every leg
-        runs and is confirmed in odom as frozen here, so AMCL jumps cannot bend it.
+        runs in odom as frozen here, so AMCL jumps cannot bend it. Final arrival
+        must also agree with the original registered map pose.
         """
         controller = getattr(self, 'dock_leg_controller', 'ParkingReverse')
         # The straight part starts on the dock axis, heading set first.
@@ -2607,9 +2622,21 @@ class ServiceRoute(CorridorRoute):
             if abs(error) <= DOCK_END_TURN_MAX_RAD:
                 if not self._trim_dock_heading(dock):
                     return False
-                return self._verify_parking_stop(
+                if not self._verify_parking_stop(
                     len(self.waypoints) - 1, dock, None,
-                    contract={**home, 'reference_frame': 'odom'})
+                    contract={**home, 'reference_frame': 'odom'}):
+                    return False
+                odom_confirmation = dict(self.confirmation or {})
+                map_dock = dict(zip(('x', 'y', 'yaw'), target))
+                confirmed = self._verify_parking_stop(
+                    len(self.waypoints) - 1, map_dock, None, contract=home)
+                self.emit('dock_pose_frame_confirmation',
+                          odom_confirmation=odom_confirmation,
+                          map_confirmation=self.confirmation, confirmed=confirmed)
+                if (not confirmed and (self.confirmation or {}).get('reason') in {
+                        'position_out_of_tolerance', 'yaw_out_of_tolerance'}):
+                    self._dock_map_recovery = (entry_odom, dock['yaw'])
+                return confirmed
         self.emit('dock_heading_out_of_tolerance', delta_yaw_rad=error,
                   attempts=DOCK_ENTRY_ATTEMPTS)
         return False

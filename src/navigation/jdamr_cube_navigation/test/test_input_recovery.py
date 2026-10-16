@@ -1486,6 +1486,67 @@ def _home_stub_node(monkeypatch, tmp_path, contract, home_contract):
     return node, world, stage
 
 
+@pytest.mark.parametrize('map_results,reason,stop,shortcut,expected', [
+    ([True], 'confirmed', False, False, True),
+    ([False, True], 'position_out_of_tolerance', False, False, True),
+    ([False, True], 'yaw_out_of_tolerance', False, False, True),
+    ([False, True], 'yaw_out_of_tolerance', False, True, True),
+    ([False, False], 'yaw_out_of_tolerance', False, False, False),
+    ([False], 'parking TF stale', False, False, False),
+    ([False], 'yaw_out_of_tolerance', True, False, False),
+])
+def test_dock_requires_map_confirmation_and_replans_after_pullout(
+        monkeypatch, tmp_path, map_results, reason, stop, shortcut, expected):
+    node, world, _stage = _home_stub_node(monkeypatch, tmp_path, BOX_CONTRACT, CONTRACT)
+    home = load_parking_contract(CONTRACT)
+    order = []
+    map_checks = []
+    outcomes = iter(map_results)
+    freeze = node._frozen_in_odom
+    pullout = node._pull_out_to
+    def frozen(path):
+        order.append('freeze')
+        return freeze(path)
+    def pulled(entry, heading):
+        order.append('pullout')
+        ok = pullout(entry, heading)
+        if shortcut:
+            node.parking_command = (0.0, 0.0, 0.0)
+            node.parking_odom = (0.0, SimpleNamespace(sec=0, nanosec=0), 0.0, 0.0)
+            node._parking_observation = lambda **_kwargs: {
+                'actual_pose': (HOME['x_m'], HOME['y_m'], HOME['yaw_rad'])}
+        return ok
+    def verify(index, waypoint, _handle, **kwargs):
+        frame = kwargs['contract']['reference_frame']
+        if frame == 'odom' or index == 0:
+            node.confirmation = {'confirmed': True, 'reason': 'confirmed'}
+            return True
+        map_checks.append((waypoint, kwargs['contract']))
+        ok = next(outcomes)
+        order.append('map_pass' if ok else 'map_fail')
+        node.confirmation = {'confirmed': ok, 'reason': 'confirmed' if ok else reason}
+        if not ok and stop:
+            node.stop_requested = True
+        return ok
+    node._frozen_in_odom = frozen
+    node._pull_out_to = pulled
+    node._verify_parking_stop = verify
+    assert node._go_home_reverse(HOME, True) is expected
+    retry = len(map_results) == 2
+    assert len(map_checks) == len(map_results)
+    assert all((wp['x'], wp['y'], wp['yaw']) ==
+               (HOME['x_m'], HOME['y_m'], HOME['yaw_rad']) and contract == home
+               for wp, contract in map_checks)
+    assert order.count('pullout') == int(retry)
+    assert order.count('freeze') == 1 + int(retry)
+    if retry:
+        assert order == ['freeze', 'map_fail', 'pullout', 'freeze',
+                         'map_pass' if expected else 'map_fail']
+        assert node.plan_pose.call_count == 2
+    assert any(e['event'] == 'home_arrived' for e in _events(node)) is expected
+    assert not any(e.get('already_at_home') for e in _events(node))
+
+
 def test_t25a_dock_retry_rebuilds_with_home_contract(monkeypatch, tmp_path):
     """Rebuild a resumed dock path with the 5 cm home contract, not 1 cm."""
     node, _world, stage = _home_stub_node(monkeypatch, tmp_path, BOX_CONTRACT, CONTRACT)
@@ -1562,10 +1623,11 @@ def test_t26_precision_staging_and_dock_use_home_contract(monkeypatch, tmp_path)
     verified = node._verify_parking_stop.call_args_list
     assert verified[0].args[0] == 0 and verified[0].args[2] is None
     assert verified[0].args[1]['x'] == pytest.approx(stage['x'])
-    # Staging is confirmed on the map; the dock leg in odom (AMCL jumps, 2026-09-30).
+    # Staging and final map placement must agree with the odom leg confirmation.
     assert verified[0].kwargs.get('contract') == home
     assert all(item.kwargs.get('contract') == {**home, 'reference_frame': 'odom'}
-               for item in verified[1:])
+               for item in verified[1:-1])
+    assert verified[-1].kwargs.get('contract') == home
     kinds = [kind for kind, _goal in world.motions]
     # Reaching the dock heading exactly needs no in-place turn.
     assert kinds == ['FollowPath']
@@ -1664,7 +1726,9 @@ def test_t27_dock_heading_is_set_outside_the_dock(
     assert len(measured) == entries
     verified = node._verify_parking_stop.call_args_list[-1]
     home = load_parking_contract(CONTRACT)
-    assert verified.kwargs['contract'] == {**home, 'reference_frame': 'odom'}
+    assert node._verify_parking_stop.call_args_list[-2].kwargs['contract'] == {
+        **home, 'reference_frame': 'odom'}
+    assert verified.kwargs['contract'] == home
 
 
 def test_t27d_dock_trim_is_measured_again_until_within_one_degree(monkeypatch, tmp_path):

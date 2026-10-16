@@ -2658,15 +2658,15 @@ def test_moving_table_stability_reset_keeps_last_accepted_face(monkeypatch):
         node.box_status_received_s = stamp
         result = update((0.35, 0.0, 0.0))
     assert result['remaining_m'] == pytest.approx(0.105)
-    assert result['basis'] == 'moving_stability_reset_frozen_odom'
+    assert result['basis'] == 'moving_stability_reset_carried_odom'
     assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
     clock[0] = 12.2
     node.box_status = {**valid, 'stamp_s': 12.2,
                        'edge_endpoints_optical_m': [[-0.4, 0.25, 0.805],
                                                     [0.4, 0.25, 0.805]]}
     node.box_status_received_s = clock[0]
-    assert update((0.35, 0.0, 0.0))['remaining_m'] == pytest.approx(0.105)
-    assert lookup.call_count == 1
+    assert update((0.35, 0.0, 0.0))['remaining_m'] == pytest.approx(0.205)
+    assert lookup.call_count == 2
 
 
 def test_post_trim_reobservation_keeps_configuration_and_requires_fresh_face(monkeypatch):
