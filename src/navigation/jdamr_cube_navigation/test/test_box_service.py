@@ -269,7 +269,8 @@ def test_occluded_five_millimetre_correction_reuses_original_odom_face(mission):
         {'latency_limited': True, 'fresh_frames': 8,
          'fresh_rejection_reasons': {'no_table_edge_candidate'}},
         {'fresh_frames': 7, 'fresh_rejection_reasons': {'no_table_edge_candidate'}},
-        {'fresh_frames': 8, 'fresh_rejection_reasons': {'no_table_edge_candidate'},
+        {'latency_limited': True, 'fresh_frames': 8,
+         'fresh_rejection_reasons': {'no_table_edge_candidate'},
          'latency_reasons': {'observer_silent'}},
         {'fresh_frames': 8, 'fresh_rejection_reasons': {'stale_or_future_depth'}},
     ])
@@ -2350,7 +2351,8 @@ def test_table_fine_approach_reobserves_at_visible_stage_without_retreat(start_x
     if len(stages) > 1:
         assert calls[-1][0]['face_center_map_xy_m'] == (1.01, 0.0)
         assert callable(calls[0][2]['reobserve'])
-    assert calls[-1][2] == {'allow_trim': False}
+    assert callable(calls[-1][2]['reobserve'])
+    assert 'allow_trim' not in calls[-1][2]
 
 
 def test_default_parking_routes_one_centimetre_table_to_precision_approach():
@@ -2531,3 +2533,66 @@ def test_table_fine_approach_does_not_dispatch_final_leg_when_link_lost_during_o
     assert node._table_fine_approach(target, 0.065) == (False, None)
     node._zero_turn_final_approach.assert_called_once()
     assert node.emit.call_args.kwargs['reason'] == 'final_trim_interrupted'
+
+
+def test_near_table_alignment_never_navigates_to_a_behind_goal(mission):
+    mission.surface_mode = 'table_edge'
+    mission.capture_stationary_pose.side_effect = [
+        ((0.75, 0.0, 0.0), {}), ((0.885, 0.0, 0.0), {})]
+    original = box_service.load_route('route')
+    original['waypoints'][-1].update(x=0.75, y=0.0)
+    behind = {**_table_edge_final_target(1.0), 'x_m': 0.485,
+              'observation_robot_pose_map': [0.75, 0.0, 0.0]}
+    final = _table_edge_final_target(1.0)
+    mission.observe_target.side_effect = [behind, final, final]
+
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': 0.065},
+                      'wheel_outer_width': {'value': 0.540}},
+        'table_01', (1, 0), 0.6, execute=True,
+        candidate_trial=True, resume_at_observation=True)
+
+    mission.execute.assert_not_called()
+    mission.plan_pose.assert_called_once()
+    mission._straight_final_approach.assert_called_once_with(final, 0.065)
+    assert any(call.args == ('table_alignment_transit_skipped',)
+               for call in mission.emit.call_args_list)
+
+
+def test_recovered_depth_history_does_not_block_fresh_table_occlusion():
+    node = object.__new__(BoxServiceRoute)
+    error = box_service.BoxObservationUnavailable(
+        'stable detected table_edge surface is required', retryable=True,
+        fresh_frames=24, required_fresh_frames=8,
+        fresh_rejection_reasons={'no_table_edge_candidate'},
+        latency_reasons={'box observation is stale or future-dated'})
+    assert node._fresh_table_edge_occlusion(error)
+    error.latency_limited = True
+    assert not node._fresh_table_edge_occlusion(error)
+
+
+def test_table_stage_occlusion_closes_remaining_gap_in_original_odom():
+    node = object.__new__(BoxServiceRoute)
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node.surface_mode = 'table_edge'
+    node.final_gap_override_m = 0.01
+    node.box_front_half_width_m = 0.225
+    node._table_observation_context = ({}, (1.0, 0.0), 0.6)
+    node.capture_stationary_pose = Mock(return_value=((0.5, 0.0, 0.0), {}))
+    node.observe_target = Mock(side_effect=box_service.BoxObservationUnavailable(
+        'stable detected table_edge surface is required', retryable=True,
+        fresh_frames=24, required_fresh_frames=8,
+        fresh_rejection_reasons={'no_table_edge_candidate'},
+        latency_reasons={'box observation is stale or future-dated'}))
+    to_odom = lambda x, y, yaw: (x + 2.0, y - 1.0, yaw)
+    node._zero_turn_final_approach = Mock(side_effect=[(True, to_odom), (True, to_odom)])
+    node.emit = Mock()
+    target = _table_edge_final_target(1.0)
+    assert node._table_fine_approach(target, 0.065) == (True, to_odom)
+    call = node._zero_turn_final_approach.call_args
+    assert call.args[0]['face_center_map_xy_m'] == pytest.approx((3.0, -1.0))
+    assert call.args[0]['outward_normal_map_xy'] == pytest.approx((-1.0, 0.0))
+    assert call.kwargs == {'allow_trim': False, 'frozen_to_odom': to_odom}
+    assert target['face_center_map_xy_m'] == (1.0, 0.0)

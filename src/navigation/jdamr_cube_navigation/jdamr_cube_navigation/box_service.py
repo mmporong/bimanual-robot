@@ -707,6 +707,7 @@ class BoxServiceRoute(ServiceRoute):
                         now_s=now_s)
                     target.update({
                         'front_extent_m': front_extent_m,
+                        'observation_robot_pose_map': list(robot_pose),
                         'front_extent_provenance': self._json_evidence(
                             getattr(self, 'front_extent_provenance', None)),
                         'physical_accuracy': 'NOT_EXTERNALLY_MEASURED',
@@ -1068,6 +1069,19 @@ class BoxServiceRoute(ServiceRoute):
                                             else 'lidar_depth_front_face'),
                               target_front_gap_m=(self._final_gap_m()
                                                   if phase == 'final_approach' else gap_m))
+                    if phase == 'face_alignment' and surface_mode == 'table_edge':
+                        observed_pose = target.get('observation_robot_pose_map', actual)
+                        forward_m = (
+                            (target['x_m'] - observed_pose[0]) * math.cos(observed_pose[2])
+                            + (target['y_m'] - observed_pose[1]) * math.sin(observed_pose[2]))
+                        if forward_m <= 0.0:
+                            # A nearby table needs a normal trim and forward approach,
+                            # not a forward-only navigation goal behind the base.
+                            self.emit('table_alignment_transit_skipped',
+                                      reason='alignment_target_behind_observer',
+                                      target_forward_m=forward_m)
+                            planned = {'ok': True, 'alignment_skipped': True}
+                            break
                     if phase == 'face_alignment':
                         # Judged by the alignment goal checker, not the final contract.
                         planned = self.plan_pose(
@@ -1089,6 +1103,8 @@ class BoxServiceRoute(ServiceRoute):
                 if not planned['ok']:
                     self.emit('failed', phase=phase, planning=planned)
                     return False
+                if planned.get('alignment_skipped'):
+                    continue
                 if phase == 'final_approach':
                     self._final_failure_reported = False
                     approached, straight_to_odom = self._straight_final_approach(
@@ -1264,7 +1280,6 @@ class BoxServiceRoute(ServiceRoute):
         return (isinstance(error, BoxObservationUnavailable)
                 and error.reason == 'stable detected table_edge surface is required'
                 and error.retryable and not error.latency_limited
-                and not error.latency_reasons
                 and isinstance(error.required_fresh_frames, int)
                 and error.required_fresh_frames >= 1
                 and error.fresh_frames >= error.required_fresh_frames
@@ -1311,21 +1326,43 @@ class BoxServiceRoute(ServiceRoute):
         if nearest_gap_m > FINAL_PLAN_GAP_M + FINAL_STRAIGHT_TOLERANCE_M:
             self.emit('table_visible_alignment_stage', target_front_gap_m=FINAL_PLAN_GAP_M,
                       estimated_nearest_front_gap_m=nearest_gap_m)
-            reached, _ = self._zero_turn_final_approach(
+            reached, stage_to_odom = self._zero_turn_final_approach(
                 target, front_extent_m, gap_m=FINAL_PLAN_GAP_M, reobserve=reobserve)
             if not reached:
                 return False, None
             try:
                 target.update(reobserve())
             except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
-                self._fail_final('table_alignment_observation_lost', detail=str(error))
-                return False, None
+                if stage_to_odom is None or not self._fresh_table_edge_occlusion(error):
+                    self._fail_final('table_alignment_observation_lost', detail=str(error))
+                    return False, None
+                # The trim may have refreshed the target before the stage moved.
+                face = target['face_center_map_xy_m']
+                outward = target['outward_normal_map_xy']
+                face_x, face_y, _ = stage_to_odom(face[0], face[1], 0.0)
+                tip_x, tip_y, _ = stage_to_odom(
+                    face[0] + outward[0], face[1] + outward[1], 0.0)
+                frozen_target = {
+                    **target,
+                    'face_center_map_xy_m': (face_x, face_y),
+                    'outward_normal_map_xy': (tip_x - face_x, tip_y - face_y),
+                }
+                self.emit('table_alignment_edge_occluded',
+                          fresh_frames=error.fresh_frames,
+                          confirmation_basis='frozen_table_edge_odom_stop')
+                if (self.stop_requested or not self._operator_link_ready()
+                        or not self._navigation_ready(require_fresh_amcl=False)):
+                    self._fail_final('final_trim_interrupted')
+                    return False, None
+                return self._zero_turn_final_approach(
+                    frozen_target, front_extent_m, allow_trim=False,
+                    frozen_to_odom=stage_to_odom)
         if (self.stop_requested or not self._operator_link_ready()
                 or not self._navigation_ready(require_fresh_amcl=False)):
             self._fail_final('final_trim_interrupted')
             return False, None
         reached, to_odom = self._zero_turn_final_approach(
-            target, front_extent_m, allow_trim=False)
+            target, front_extent_m, reobserve=reobserve)
         self.last_box_face = {
             'face_center_map_xy_m': list(target['face_center_map_xy_m']),
             'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
