@@ -1400,6 +1400,7 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - 테이블 최종 접근은 기존 정지 각도 보정 뒤 단일 직진으로 바꿨다. 이동 중 새 유효 면을 해당 관측 시각의 odom TF로 옮겨 남은 거리를 갱신한다. 건강한 근접 가림 quorum 뒤에는 마지막 면을 동결하고 추가 관측으로 목표를 다시 늘리지 않는다. 이동 중 각도 탐색은 하지 않는다.
 - 기존 속도 명령·충돌 감지·링크·스캔·odometry 유효성·정지 확인 경로를 사용한다. 가드·시간 종료는 목표 도달로 반환하지 않으며 정지 후 settle 구간에서 목표를 갱신하지 않는다. 중간 5 cm 정지와 종료 후 12초 재관측을 생략하고, 최종 동결 값은 내부 추정으로 기록한다.
 - 대상 box service·restaurant service·keepout·출발 모의 검사 632건 통과, 별도 verifier도 632건 통과했다. callback 실패·가드 중단·정지 후 목표 갱신 금지·가림 뒤 가짜 fresh 면 무시 회귀를 확인했다. 연속 접근 수정본의 실차 주차는 아직 수행하지 않았다.
+- `a31f00f`의 Python 3모듈을 Pi 소스·설치 6개 경로에 이전 SHA 확인 후 백업·반영했고 새 SHA를 모두 대조했다. 상주 실행기만 재시작해 active와 새 모듈 import를 확인했다. 복구본은 `$HOME/.local/state/jdamr/continuous-table/20261016_120517/`, PC 반영 근거는 `$HOME/.local/state/bimanual-robot/continuous_table_deployment.json`이다. 마스크·지도·물리 장착·펌웨어는 변경하지 않았고 이동 요청은 제출하지 않았다.
 
 ### 22.3 검은 지도 셀 기반 테이블 킵아웃 후보
 
