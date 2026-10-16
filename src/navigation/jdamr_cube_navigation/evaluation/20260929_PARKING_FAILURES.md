@@ -1451,3 +1451,65 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **중지 상태와 남은 일:** 기존 stop을 보낸 뒤 fresh odometry의 선속도·각속도 0, spool의 request/running 0개를 확인했다. 운영 상태에는 급수대 주차·대기·이탈과 1번 테이블 이동·정렬을 완료로, 남은 1번 최종 접근·이탈·후진 도크 복귀를 대기로 보존했다. 상위 작업은 `paused_by_operator`이며 다음 사용자 이동 요청 전에는 재개하지 않는다. 모든 실패에서 이동을 무조건 반복하는 공통 루프를 구현했다고 주장하지 않는다. 앞선 AGENTS 운영 규칙의 상위 작업 보존과 이번 세 종류의 입력 복구 구현은 구분한다.
 
 카메라·관측기는 진단 후 inactive/PID 0으로 정리했다. RViz·표시 중계는 계속 꺼 두고 기존 사용자 대시보드·베이스·Nav2·idle 실행기를 유지한다. 대시보드 종료는 PC `systemctl --user stop robot-dashboard robot-dashboard-link`와 Pi `sudo systemctl stop jdamr-ammr-dashboard`를 함께 사용한다. 다음 요청 대기용 실행기 종료 명령은 Pi `sudo systemctl stop jdamr-box-executor`다. 새 임시 프로세스는 남기지 않았고 이동 명령·원격 push는 수행하지 않았다. 수정본의 실차 입력 지연 회복, 최종 1 cm 간격과 후진 도크 복귀는 미검증이다.
+
+### 22.6 반복 정렬의 누락 경로 수정과 실행기 왕복 완료·후속 실물 실패
+
+**재점검 요청과 범위:** 사용자는 좌우 반복 정렬이 이전에도 발생했던 문제라고 지적하고 로봇을 등록된 도크로 옮겼다고 알렸다. 우선 정지를 유지하고 이전 테이블 위치추정·중간 접근 재개를 무효화했다. 도크는 새로 등록하지 않았다.
+
+- 과거 JD-AMR `3cbd779`는 중간 미세 정렬과 최종 허용각을 구분한 수정이고, `b511aed`는 가까운 테이블 뒤쪽의 45 cm 목표로 잘못 주행하던 경로를 건너뛴 수정이다. 작은 회전의 정지 후 회전량을 줄이는 변경과는 다르다. `1de8d2a`는 이 감속을 `continuous_table=True`에만 적용했다. 재귀에서도 그 값은 보존되므로 현행 1 cm 연속 접근에서 옵션이 유실된 증거는 없었다.
+- 반면 도크 `_trim_dock_heading()`과 나머지 미세 접근 호출은 기존 고정 속도를 사용했다. 테이블 보정은 같은 면 관측에 대한 odom 보정을 최대 3회 하고, fresh 관측으로 최대 2회 재귀하므로 잔차 부호가 바뀌면 반복 반전할 수 있는 조건도 남았다. 재점검 당시 Pi box/restaurant 소스·설치 4경로는 저장소와 일치했다. 단순 미배포나 과거 코드 복원으로 귀속하지 않는다.
+- Nav2의 거친 면 정렬은 별도 `Parking` 컨트롤러 경로다. 이번 변경에 그 회전 속도·goal checker를 포함하지 않았다. 모든 형태의 좌우 움직임이 같은 원인이라고 단정하지 않는다.
+
+**수정·검증 (`5835cef`):** `_rotate_in_place()`의 `precision` opt-in을 없애 모든 기존 호출에 작은 회전 감속을 적용했다. 1.74° 이상에서는 최대 0.08 rad/s로 기존과 같으며, 정지 선행량·시간 예산은 선택한 실제 속도를 따른다. 테이블 재관측 callback이 있을 때 odom 잔차가 부호를 바꾸거나 개선되지 않으면 과거 면에 대한 추가 보정 대신 기존 fresh 재관측·정지 pose 취득·새 면 잔차 판정을 먼저 거친다. fresh 각도 허용값·재귀 상한·최종 양 모서리 판정·정지·센서·링크 검사는 유지했다. 새 실패 차단 조건을 추가하지 않았다.
+
+- 양방향 0.32/0.59/0.87/1.2° 기본 회전과 양방향 1.2° 도크 plant 10건, 연속/기존 테이블 양방향의 `회전→새 면 관측→전진` 순서 4건은 수정 전 실패·수정 후 통과했다. box/restaurant 전체 489건 통과, 별도 verifier 표적 16건·기존 회전 3건 및 diff 검사 통과다. 모형 결과를 실차 회전 정확도로 간주하지 않는다.
+- Pi 소스·설치 6경로를 대조·백업했고 box/restaurant 두 모듈이 바뀌었으며 keepout 모듈은 동일하다. 새 모듈 import와 실행기 active를 확인했다. 복원본은 `$HOME/.local/state/jdamr/continuous-table/20261016_132559/`, PC receipt는 `$HOME/.local/state/bimanual-robot/alignment_recurrence_deployment.json`이다.
+
+**도크 재배치의 비이동 위치추정:** `$HOME/jdamr_data/map_20260930_manual/aligned/runs/alignment_recurrence_20261016_132540/`에 사용자 보고·fresh 40스캔·정합·초기 pose·native 활성화 원본을 남겼다. 등록 도크 주변 정합 후보 `(0.125023, 0.139960, 0.099139 rad)`와 전역 후보가 일치했고 5 cm inlier는 37.76%였다. 기존 비이동 활성화 후 AMCL은 `(0.126325, 0.141585, 0.094262 rad)`로 정합 후보와 2.08 mm·0.279° 차이였다. 이는 내부 일치 확인이다. 도크 등록값·테이블 지역·경로·마스크는 변경하지 않았고 이 준비 단계에서는 이동을 요청하지 않았다.
+
+**후속 출발과 결과:** 사용자의 새 출발 요청에 기존 `go table_01`을 제출했다. 추가 코드·테스트·리뷰·문서 작업을 출발 앞에 넣지 않았다. 원본은 `$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261016_132710_39ed71a7/`다.
+
+- 기본 급수대 경유를 포함해 급수대 접근·대기·후진 이탈, 1번 테이블 접근·대기·후진 이탈, 도크 후진 복귀를 완료했다. 실행기 결과 `code: 0`, `home_arrived.parking_direction=reverse`, 첫 실행 이벤트부터 마지막까지 221.72초다. 제출 전 대기나 전체 요청 경과 시간을 이 값으로 바꾸지 않는다.
+- 급수대는 보정 후 잔차 -0.10185°였다. 1번 테이블은 fresh 관측 잔차 -0.57047° 뒤 같은 음의 방향 보정 -0.408°를 하고 -0.19315°로 줄었다. 도크 마지막 보정은 1회였다. 이번 실행에서 좌우 반복 반전은 확인되지 않았으나 모든 배치의 제거를 보장하지 않는다. `table_trim_reobserve_requested` 분기는 이번 실제 주행에서 발생하지 않았고 plant 회귀로 확인했다.
+- 입력 지연 대기/회복은 총 7쌍(급수대 5·1번 2)이었다. 모두 같은 목표를 유지한 채 복구했고 마지막 `target_failure`는 null이었다. 기록된 `paused_s`는 정지 확인을 마친 뒤의 대기 시간만 뜻하며 감속·정지 확인 시간을 합친 전체 중단 시간으로 해석하지 않는다. 지연 자체의 원인은 여전히 미확정이다.
+
+| 지점 | 좌측 내부 간격 | 우측 내부 간격 | 내부 방향 오차 |
+|---|---:|---:|---:|
+| 급수대 | 10.588 mm | 9.141 mm | 0.184° |
+| 1번 테이블 | 11.448 mm | 8.916 mm | 0.322° |
+
+위 표는 원시 배열의 순서가 우측·좌측임을 반영했다. 두 지점 모두 `confirmation_basis=frozen_table_edge_odom_stop`, `internal_estimate_only=true`, `final_depth_measurement=false`이며 외부 실측 간격이 아니다. 도크 정지 확인 오차는 내부 위치 14.28 mm·각도 0.171°다. 이전 사용자 배치의 뒤쪽 3 cm를 이번 복귀의 새 실측값으로 쓰지 않는다.
+
+**종료 정리:** fresh odometry 선속도·각속도 0을 확인하고 상위 작업을 완료로 기록했다. 카메라·관측기는 inactive/PID 0이며 추가 이동을 요청하지 않았다. 원시 이벤트·결과·종료 대시보드·요약은 같은 run의 `cycle_events.jsonl`, `result.json`, `final_dashboard_state.json`, `post_run_summary.json`에 있다. 사용자 화면용 PC `robot-dashboard`·`robot-dashboard-link`, Pi `jdamr-ammr-dashboard`와 다음 명령용 idle `jdamr-box-executor`는 유지한다. 실제 PID는 `retained_pc_services.txt`, `retained_pi_services.txt`에 보존했다. 종료 명령은 앞 절과 같고 새 임시 상주 프로세스는 남기지 않았다. 이 실행으로 입력 지연 회복과 후진 도크를 포함한 전체 순서의 실행기 완료는 확인했으나, 반복 성능·외부 1 cm 정확도·도크 뒤쪽 3 cm 정확도는 아직 미검증이다. 원격 push는 수행하지 않았다.
+
+**후속 실물 보고로 판정 보완:** 사용자는 도크의 차체 뒤쪽 좌/우 모서리–테이블 간격이 약 5/11 cm이며 기울어졌고, 급수대 주차도 5–7 cm였다고 보고했다. 원시 `code: 0`은 보존하고 `operator_post_cycle_report.json`, `outcome_interpretation.json`에 실물 정밀주차 실패를 별도로 기록했다. 앞선 내부 1 cm 수치를 외부 성공으로 해석하지 않는다. 도크 종료 지도 오차는 약 112 mm·6.967°였고, 정지 후 `post_cycle_stationary_dock/scan.json`의 40스캔과 `refine.json`은 지역·전역 정합이 일치하면서 등록 도크 대비 약 149.16 mm·7° 차이를 보였다(inlier 33.11%). RViz 지도 축만의 기울기라고 처리하지 않는다.
+
+### 22.7 도크 지도 오차 판정과 안정 면 재획득 수정
+
+**확정한 소스 문제:** 도크 최종 판정은 staging 때 동결한 지도→odom 변환에서 만든 목표와 odom 정지만 확인했다. 당시 원래 지도 목표와의 오차를 최종 판정에 넣지 않았다. 또한 깊이 `collecting_stability`가 임시 상태인데도 면 소실을 영구 latch해 이후 안정 관측을 반영하지 않았다. 첫 왕복은 급수대 마지막 승인 관측 후 약 18.06초, 1번 약 16.95초를 동결 면·odom으로 진행했다. 이 두 결함은 확인됐으나 급수대 실물 5–7 cm 거리 오차의 전체 원인이 확정된 것은 아니다.
+
+**수정 (`782a2c6`):**
+
+- 도크 odom 정지 확인 뒤 원래 지도 목표·home 계약으로도 확인하고 두 좌표계의 근거를 `dock_pose_frame_confirmation`에 나눠 남긴다. 지도 위치·방향 허용오차 초과 때만 기존 동결 축 이탈 후 후진 진입을 한 번 다시 수행한다. 재접근에서는 `already_at_home` 단축을 사용하지 않는다. TF·입력·정지·링크 실패를 같은 후진 복구로 확대하지 않는다.
+- 건강한 `collecting_stability`는 마지막 승인 면을 임시 유지하되 `occluded_frames=0`으로 두어 이후 안정 면 갱신을 허용한다. 불안정 후보를 새 제어 면으로 채택하지 않으며, 건강한 실제 `no_table_edge_candidate` quorum의 기존 동결은 유지한다.
+- 관련 전체 스위트 629건을 통과한 뒤 재접근 단축 차단 회귀를 보강했고, 마지막 표적 7건·별도 verifier·diff 검사를 통과했다. 마지막 변경 뒤 전체 630건을 다시 실행했다고 주장하지 않는다.
+
+**Pi 반영:** 소스·설치 6경로 SHA 대조, 변경 모듈 import, 실행기 active를 확인했다. box SHA는 `7cc169777ed59d76a0db9602adcf97aed880f0e77be98dc5609a4fef84ca8944`, restaurant SHA는 `3fa1eb3906c022dea070e129137946d73c7fd6525cd49651acbc6631b2b8a9d3`다. keepout 모듈·마스크는 바꾸지 않았다. 백업은 `$HOME/.local/state/jdamr/continuous-table/20261016_134701/`, receipt는 `$HOME/.local/state/bimanual-robot/dock_map_and_depth_reacquisition_deployment.json`이다.
+
+### 22.8 급수대 이탈 후 1번 테이블 이동 중 충돌·사용자 정지
+
+**실행과 현상:** 사용자가 주요 문제 개선 후 출발을 요청해 run `$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261016_134726_cdd7abb7/`을 시작했다. 급수대 접근에서 안정화 임시 유지 이후 `table_approach_face_updated`가 다시 기록돼 면 재획득 수정의 해당 분기는 실차에서 관측됐다. 내부 정지 간격은 좌/우 8.874/10.512 mm, 방향 오차 0.209°였다. 최종은 `healthy_edge_occlusion_frozen_odom`이며 새 근접 깊이·외부 간격 실측이 아니다.
+
+- 급수대 후진 이탈 목표가 완료되고 `box_escape_finished.face_distance_m=0.522139`였다. 이 값은 base 원점에서 면까지의 거리이며 차체 앞끝 간격이 아니다.
+- 그 다음 기존 `table_01_pre=(0.438,-1.817)`와 `table_01_observation=(0.858,-1.817,yaw=0)`를 하나의 `NavigateThroughPoses`로 보냈다. Nav2는 관측점 도착 성공을 반환했으나 사용자는 이 전진·좌회전 구간에서 테이블에 부딪혔다고 보고했다. 정확한 접촉 시간·부위는 계측되지 않았다.
+- 사용자가 정지를 요청했고 기존 stop을 적용했다. 이후 1번 면 관측은 실패했고 하위 실행은 `code: 1`로 끝났다. 소프트웨어의 관측점 도착을 충돌 없는 이동으로 판정하지 않는다. 도크 복귀까지 진행하지 않았으므로 §22.7 도크 재접근 수정은 실물 미검증이다.
+
+**코드·좌표 대조로 확인한 사항:**
+
+1. `scripts/map_20260930_manual/jdamr_depart.py`의 경로 생성은 과거 박스 앞면에서 `PRE_M=1.00`만큼 떨어진 점을 사용한다. 현행 1번 pre점은 같은 run의 깊이 기반 급수대 상판 직선 추정에서 법선 거리 약 6.1–6.3 cm다. 앞선 대화의 약 8 cm는 x좌표 차이였으며 기울어진 직선까지의 거리와 구분한다. 이 비교는 관측 직선 연장과 지도 좌표 추정이며 상판 전체 외곽을 실측한 값이 아니다.
+2. `restaurant_service.py`의 `_execute_service_once()`·`_execute_through_once()`는 두 경유점을 연속 목표로 보낸다. `home_exit`도 경로를 만드는 점이며, 그곳까지 직진 이탈을 마쳐야 회전을 허용하는 별도 단계가 아니다. 따라서 사용자 요구인 `도크에서 어느 정도 전진한 뒤 회전`을 현재 경유점만으로 보장할 수 없다.
+3. `config/table_keepout_current.yaml`의 급수대 전면 최대 x는 0.0 m이고, 검은 지도 셀·다리 후보를 연결한 경계다. 깊이 관측 상판 직선의 x는 약 0.354–0.355 m여서 표현이 일치하지 않는다. 상판 돌출·지도 위치추정·카메라 보정 각각의 기여는 아직 분리하지 못했다. 다리 위치만으로 상판 외곽이 확정된다고 취급하지 않는다.
+
+**원인 판단과 남은 조치:** 기존 경유점이 깊이 관측 상판 가까이 놓이고, 직진 이탈과 방향 전환이 분리되지 않으며, 상판과 낮은 라이다 킵아웃 표현이 다르다는 점이 유력한 소프트웨어 원인이다. 전체 접촉 궤적·명령 속도 기록이 없어 충돌 순간의 세부 원인이나 모터 배선 결함을 확정하지 않는다. 먼저 실제 통로에 맞는 경유 경로와 차체 회전 공간, 상판 점유 표현을 맞춰야 한다. 단순히 후진 거리만 늘리면 기존 pre점으로 다시 접근할 수 있다. **충돌 경로·킵아웃 수정은 아직 적용하지 않았다.**
+
+**증거·종료 상태:** `operator_collision_report.json`, `cycle_events.jsonl`, `result.json`, `after_collision_dashboard_state.json`, `collision_route_analysis.json`을 같은 run에 보존했다. 정지 후 선속도·각속도 0과 spool request/running 0개를 확인했다. 카메라 정리 실패 뒤 관측기만 남아 있었으며 정확한 `jdamr-box-observer`·`jdamr-box-rgbd` 유닛을 정리해 둘 다 inactive/PID 0을 확인했다(`post_stop_services.txt`, `post_stop_camera_cleanup.txt`). idle 실행기 PID는 44888이며 사용자 대시보드·베이스·Nav2는 유지한다. 종료 명령은 §22.5와 같다. 상위 작업은 `stopped_by_operator_after_collision`, 실물 성공 false, 자동 재개 미승인이다. 충돌 뒤 위치를 도크로 덮어쓰거나 추가 주행·원격 push를 수행하지 않았다.
