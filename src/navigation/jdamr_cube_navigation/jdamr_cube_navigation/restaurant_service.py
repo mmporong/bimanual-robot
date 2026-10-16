@@ -1770,7 +1770,16 @@ class ServiceRoute(CorridorRoute):
                 'y': y_m + distance_m * i / count * math.sin(yaw_rad),
                 'yaw': yaw_rad}) for i in range(count + 1)]
             path.header = path.poses[0].header
-            if not self._reverse_path_valid(path):
+            # The live Collision Monitor checks the straight exit while driving.
+            # A single global-costmap snapshot must not terminate dock departure;
+            # retain the static map/keepout check for the whole swept footprint.
+            points = [(p.pose.position.x, p.pose.position.y, yaw_rad) for p in path.poses]
+            if not static_corridor_clear(
+                    Path(self.registry['map']['yaml_path']),
+                    Path(self.registry['keepout']['yaml_path']), points,
+                    self._reverse_footprint()):
+                self.emit('dock_departure_path_checked', valid=False,
+                          reason='static_obstacle_unknown_keepout_or_map_boundary')
                 return False
             frozen, _ = self._frozen_in_odom(path)
             self._dock_departure = {'path': frozen, 'start': actual, 'motion_complete': False}

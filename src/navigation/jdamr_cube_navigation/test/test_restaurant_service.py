@@ -135,13 +135,24 @@ def dock_departure_route():
     node.get_clock = lambda: SimpleNamespace(now=lambda: Time())
     node._pose = lambda index, waypoint: CorridorRoute._pose(node, index, waypoint)
     node._reverse_path_valid = Mock(return_value=True)
+    node.registry.update({'map': {'yaml_path': 'map.yaml'},
+                          'keepout': {'yaml_path': 'keepout.yaml'}})
+    node._reverse_footprint = Mock(return_value=[(-0.28, -0.275), (0.07, -0.275),
+                                               (0.07, 0.275), (-0.28, 0.275)])
     node._frozen_in_odom = Mock(side_effect=lambda path: (path, None))
     node._execute_reverse_once = Mock(return_value=True)
     node._execute_through_once = Mock(return_value=True)
     return node
 
 
-def test_dock_departure_finishes_straight_before_transit_can_turn():
+@pytest.fixture
+def dock_departure_static_corridor(monkeypatch):
+    checker = Mock(return_value=True)
+    monkeypatch.setattr(restaurant_service, 'static_corridor_clear', checker)
+    return checker
+
+
+def test_dock_departure_finishes_straight_before_transit_can_turn(dock_departure_static_corridor):
     node = dock_departure_route()
     calls = []
     node._execute_reverse_once.side_effect = lambda *a, **k: calls.append('straight') or True
@@ -149,7 +160,7 @@ def test_dock_departure_finishes_straight_before_transit_can_turn():
     assert node.execute(final_parking=False)
     assert calls == ['straight', 'transit']
     assert node._resume_waypoint_index == 1
-    path = node._reverse_path_valid.call_args.args[0]
+    path = node._frozen_in_odom.call_args.args[0]
     start, end = path.poses[0].pose, path.poses[-1].pose
     assert end.position.x - start.position.x == pytest.approx(0.7 * math.cos(0.4))
     assert end.position.y - start.position.y == pytest.approx(0.7 * math.sin(0.4))
@@ -163,10 +174,11 @@ def test_dock_departure_finishes_straight_before_transit_can_turn():
 @pytest.mark.parametrize('blocked,stopped,failed', [(True, False, False),
                                                   (False, True, False),
                                                   (False, False, True)])
-def test_dock_departure_never_dispatches_transit_before_clearance(blocked, stopped, failed):
+def test_dock_departure_never_dispatches_transit_before_clearance(
+        blocked, stopped, failed, dock_departure_static_corridor):
     node = dock_departure_route()
     node.stop_requested = stopped
-    node._reverse_path_valid.return_value = not blocked
+    dock_departure_static_corridor.return_value = not blocked
     node._execute_reverse_once.return_value = not failed
     assert not node.execute(final_parking=False)
     node._execute_through_once.assert_not_called()
@@ -174,7 +186,17 @@ def test_dock_departure_never_dispatches_transit_before_clearance(blocked, stopp
         node._execute_reverse_once.assert_not_called()
 
 
-def test_dock_departure_input_retry_keeps_frozen_goal_without_adding_distance():
+def test_dock_departure_uses_live_monitor_instead_of_global_snapshot_rejection(
+        dock_departure_static_corridor):
+    node = dock_departure_route()
+    node._reverse_path_valid.return_value = False
+    assert node.execute(final_parking=False)
+    node._reverse_path_valid.assert_not_called()
+    node._execute_reverse_once.assert_called_once()
+
+
+def test_dock_departure_input_retry_keeps_frozen_goal_without_adding_distance(
+        dock_departure_static_corridor):
     node = dock_departure_route()
     node._execute_reverse_once.side_effect = [False, True]
     node._wait_for_input_recovery = Mock(return_value=True)
@@ -203,7 +225,8 @@ def test_transit_without_departure_metadata_keeps_existing_route():
     node._execute_through_once.assert_called_once()
 
 
-def test_transit_input_recovery_does_not_repeat_completed_dock_departure():
+def test_transit_input_recovery_does_not_repeat_completed_dock_departure(
+        dock_departure_static_corridor):
     node = dock_departure_route()
     node._wait_for_input_recovery = Mock(return_value=True)
 
@@ -223,7 +246,8 @@ def test_transit_input_recovery_does_not_repeat_completed_dock_departure():
     'odom stale: age=1s',
     'stationary teaching unavailable: need fresh TF, odometry and localization',
 ])
-def test_departure_stop_input_gap_retries_confirmation_without_resending_motion(reason):
+def test_departure_stop_input_gap_retries_confirmation_without_resending_motion(
+        reason, dock_departure_static_corridor):
     node = dock_departure_route()
     node.capture_stationary_pose.side_effect = [
         ((0.0, 0.0, 0.4), {}), RuntimeError(reason), ((0.65, 0.27, 0.4), {})]
@@ -237,7 +261,8 @@ def test_departure_stop_input_gap_retries_confirmation_without_resending_motion(
 
 
 @pytest.mark.parametrize('raise_on_stop', [False, True])
-def test_operator_stop_during_departure_confirmation_never_starts_transit(raise_on_stop):
+def test_operator_stop_during_departure_confirmation_never_starts_transit(
+        raise_on_stop, dock_departure_static_corridor):
     node = dock_departure_route()
 
     def capture():

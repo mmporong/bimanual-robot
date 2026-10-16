@@ -1513,3 +1513,55 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **원인 판단과 남은 조치:** 기존 경유점이 깊이 관측 상판 가까이 놓이고, 직진 이탈과 방향 전환이 분리되지 않으며, 상판과 낮은 라이다 킵아웃 표현이 다르다는 점이 유력한 소프트웨어 원인이다. 전체 접촉 궤적·명령 속도 기록이 없어 충돌 순간의 세부 원인이나 모터 배선 결함을 확정하지 않는다. 먼저 실제 통로에 맞는 경유 경로와 차체 회전 공간, 상판 점유 표현을 맞춰야 한다. 단순히 후진 거리만 늘리면 기존 pre점으로 다시 접근할 수 있다. **충돌 경로·킵아웃 수정은 아직 적용하지 않았다.**
 
 **증거·종료 상태:** `operator_collision_report.json`, `cycle_events.jsonl`, `result.json`, `after_collision_dashboard_state.json`, `collision_route_analysis.json`을 같은 run에 보존했다. 정지 후 선속도·각속도 0과 spool request/running 0개를 확인했다. 카메라 정리 실패 뒤 관측기만 남아 있었으며 정확한 `jdamr-box-observer`·`jdamr-box-rgbd` 유닛을 정리해 둘 다 inactive/PID 0을 확인했다(`post_stop_services.txt`, `post_stop_camera_cleanup.txt`). idle 실행기 PID는 44888이며 사용자 대시보드·베이스·Nav2는 유지한다. 종료 명령은 §22.5와 같다. 상위 작업은 `stopped_by_operator_after_collision`, 실물 성공 false, 자동 재개 미승인이다. 충돌 뒤 위치를 도크로 덮어쓰거나 추가 주행·원격 push를 수행하지 않았다.
+
+
+### 22.9 도크 배치 해석·직진 이탈·사륜 외곽과 비이동 준비
+
+**배치 계약:** 사용자가 도크에 뒀다고 알리면 후면은 테이블, 전면은 통로를 보는 배치다. 방향 질문을 반복하지 않는다. 이전 테이블 위치추정으로 제출했던 관측점 재개 `table_01_20261016_140332_2c793e23`은 배치 정정 후 취소했으며 이동 승인 이벤트는 0개였다. `operator_location_correction.json`에 보존했다. 등록 도크를 다시 가르치지 않았다.
+
+**준비 수정 (`6d509b9`):**
+
+- 경로의 `dock_departure_distance_m`은 기존 이탈 거리 0.7 m를 사용한다. 출발 정지 heading에서 직선을 만들고 odom에 동결해 `FollowPath(Parking)`로 이탈을 마친 뒤 나머지 경유점을 보낸다. 성공한 이동 뒤 입력 공백에서는 정지 확인만 재시도한다. 정지·입력 공백·후속 transit 재시도에 완료 구간 재전송이 없도록 했다.
+- 1번 pre를 `(0.858,-1.270)`으로 옮겼으며 관측점 `(0.858,-1.817,yaw=0)`은 유지했다. 이전 pre `(0.438,-1.817)`가 급수대 관측 직선에 약 6 cm로 붙었던 경유 문제를 수정했다. 이 비교와 새 경로 회전 외곽 검사는 지도·관측 기하 근거이며 실측 상판 외곽이나 충돌 없는 반복 주행 증명이 아니다. 킵아웃·도크·1 cm 목표는 변경하지 않았다.
+- 양팔 설계가 사륜이어도 실행 URDF에는 후방 caster와 이륜 외곽이 남아 있었다. 실행 후륜축 `x=-0.210,y=±0.255,z=0.0329 m` 및 전륜과 같은 바퀴를 반영했다. wheelbase 0.210 m는 사용자 대칭 배치와 설계값의 전륜축 원점 변환으로 계산한 값이며 새 줄자 실측이 아니다. 기존 패딩을 유지해 local/global footprint와 회전·후진 StopZone에 후륜을 포함하고 양쪽 costmap의 외곽 검증을 보강했다. 라이다·카메라 extrinsic은 바꾸지 않았다.
+- 해당 단계 관련 7개 스위트 833건, standalone/runtime 23건, 변경 Python compile·diff 검사가 통과했다. 코드 검토가 찾은 완료 이동 재전송과 global-only 옛 외곽 허용을 수정한 뒤 구체 결함 0건을 확인했다. LSP 검증은 실행하지 못했으며 이를 검증 완료로 포함하지 않는다.
+
+**Pi 배포와 초기화:** `$HOME/.local/state/bimanual-robot/dock_departure_4wd_deployment.json`에 14경로 SHA와 native readback을 보존했다. Pi 백업은 `$HOME/.local/state/jdamr/dock-departure-4wd/20261016_142845/pi/`, PC 백업은 같은 시각의 `pc/`다. inactive/dead·MainPID 0인 정확한 transient Nav2 unit fragment를 재확인·백업 후 정리해 재기동했다. 이 한 건의 복구이며 향후 자동 정리 기능을 구현한 것은 아니다.
+
+- 첫 비이동 `init_20261016_140433`은 inlier 18.46%·전역 불일치로 실패했다. beam/laser TF 변경이나 180° 반전 근거는 없었고, 지도에 없는 후방의 일관된 scan 점 군집이 관측됐다. 물체의 정체나 초기화 실패 전체 원인은 확정하지 않았다.
+- 베이스/라이다 재기동 뒤 `init_20261016_143746`의 fresh 40스캔은 inlier 45.45%·전역 정합 일치였다. 비이동 활성화 정지 확인과 `command_observed=false`가 남아 있다. 지도·등록 도크·마스크·임계값을 바꾸거나 pose를 강제하지 않았다. 정상화의 세부 원인을 재기동 하나로 확정하지 않는다.
+- 최신 native readback은 양쪽 costmap 외곽 일치·후륜 포함, rear wheel joint 2개·caster 0개, controller/planner active로 PASS다. 초기 활성화 전 local costmap RPC 실패는 별도 필드에 보존했으며 현재 readback 실패로 해석하지 않는다. 준비 시점에는 주행 요청을 보내지 않았다.
+
+### 22.10 도크 출발 단일 전역 검사 종료 수정과 후속 실차 결과
+
+**출발 거부의 관측과 수정:** 사용자 출발 요청의 `table_01_20261016_144259_95104796`은 `reverse_path_checked(valid=false, invalid_pose_indices=[])` 뒤 종료됐다. 도크 직진 이동 승인 이벤트는 없었다. 같은 정지 TF `(0.130297,0.135227,0.096042 rad)`에서 재확인한 0.7 m 경로의 29개 지점은 모두 true였다. 거부 순간의 장애물·costmap 변화는 기록이 충분하지 않아 false positive로 단정하지 않는다. **한 번의 전역 snapshot 결과만으로 새 도크 이탈을 종료한 소스 분기**는 확인했다.
+
+- `_depart_dock_straight()`의 중복 전역 `IsPathValid` 선검사만 제거했다. 정적 map·keepout의 전체 swept footprint, FollowPath의 기존 센서·링크·정지 확인, 실시간 Collision Monitor는 유지한다. 다른 후진·도크 진입의 검사는 이번 변경 범위가 아니다.
+- 표적 회귀 11건·독립 verifier의 두 파일 diff 검토·diff 검사가 통과했다. 전체 스위트를 다시 실행했다고 주장하지 않는다. Pi 소스·설치 `restaurant_service.py` SHA는 `29a5fb7342d865ff8e23ddf68299c1a77764510669bef3f4c6ae1abd69689216`으로 일치했다. 백업은 `$HOME/.local/state/jdamr/dock-departure-snapshot/20261016_144628/`이며 베이스·Nav2·위치추정을 재시작하지 않고 idle 실행기만 재기동했다.
+
+**사용자가 요청한 주행의 진행:**
+
+| run (`$HOME/jdamr_data/map_20260930_manual/aligned/runs/` 아래) | 결과 |
+|---|---|
+| `table_01_20261016_144647_05015f5a` | 도크 직진 이탈·급수대 주차/이탈·1번 접근을 실행했으나 양쪽 간격 판정 미달, code 1 |
+| `table_01_20261016_145049_a85b11e2` | 기존 resume-parked 경로로 1번 후진 이탈 완료, 도크 nominal path의 전역 검사 false로 종료 |
+| `table_01_20261016_145234_3972a6e1` | 재확인한 도크 경로가 전부 true인 뒤 기존 dock-only 재개, 후진 진입·지도 오차 1회 재접근 후 지도 위치 허용오차 초과, code 1 |
+
+- 첫 재출발에서 `dock_departure_motion_complete`·`dock_departure_finished`가 다음 transit 승인보다 먼저 기록됐다. 도크 출발의 단계 분리는 실차로 실행됐으나 전체 충돌 방지·정밀도 반복 성공을 보장하지 않는다.
+- 급수대 내부 추정은 좌/우 9.014/8.856 mm이며 접근·정지·대기·이탈이 기록됐다. 1번은 좌/우 14.664/8.797 mm·면 방향 오차 0.747°로 양쪽 간격 기준에 미달했다. 원시 corner 배열은 우측·좌측 순서다. 대화에서 순서를 뒤집어 말한 것을 정정했다. `final_depth_measurement=false`인 동결 면·odom 추정이며 외부 실측 성공이 아니다. 가까운 모서리가 목표 안쪽이라 추가 전진으로 해결하지 않고 기존 이탈/복귀를 사용했다.
+- 깊이 입력 시각 공백은 같은 목표를 유지한 정지·재개로 회복했다. 입력 지연 자체가 해결됐다는 뜻은 아니다.
+- 복귀 전역 검사도 나중의 whole path와 모든 단일 지점은 true였다. 단일 거부의 세부 원인은 미확정이며 복귀 쪽 선검사 종료는 이번 소스 수정에 포함하지 않았다.
+- 최종 도크 정지는 odom 오차 14.05 mm·0.149°로 확인됐지만 지도 오차는 66.83 mm·2.334°였다. 최초 진입의 지도 위치 오차 184.08 mm 뒤 기존 1회 재접근이 실행됐고, 그 뒤에도 성공 판정에 미달했다. 좌표를 덮어쓰거나 허용오차를 늘려 성공으로 만들지 않았다. 상위 결과는 **부분 실행·도크 근처 정지, 정확한 도크 도착 미확정**이다.
+
+**종료 근거와 유지 서비스:** 마지막 run의 `cycle_events.jsonl`, `final_dashboard_state.json`, `post_run_summary.json`, `retained_pi_services.txt`, `retained_pc_services.txt`에 근거를 보존했다. fresh odometry age 0.02 s·선속도/각속도 0, spool request/running 0개, 카메라·관측기 inactive/PID 0이다. 자동 재개는 미승인으로 기록했다. 사용자가 보던 대시보드와 다음 명령에 필요한 기존 세션은 유지한다.
+
+| 서비스 | PID | 유지 이유·종료 명령 |
+|---|---:|---|
+| PC `robot-dashboard`, `robot-dashboard-link` | 1212114, 2496089 | 사용자 조작 화면; `systemctl --user stop robot-dashboard robot-dashboard-link` |
+| Pi `jdamr-ammr-dashboard`, `jdamr-box-executor` | 4251, 54265 | 화면 backend·idle 명령 실행기; `sudo systemctl stop jdamr-ammr-dashboard jdamr-box-executor` |
+| Pi `jdamr-restaurant-navigation` | 51198 | 기존 Nav2 세션; PC에서 `python3 "$HOME/bimanual-robot/tools/jdamr/jdamr_depart.py" session-stop` |
+| Pi `jdamr-base` | 50055 | 베이스 센서·라이다; Pi에서 `sudo systemctl stop jdamr-base` |
+
+표시 중계·RViz·기록기는 띄우지 않았다. PC와 Pi 대시보드를 종료할 때는 위 짝을 함께 종료한다. 새 인계 문서·원격 push는 수행하지 않았다. 남은 문제는 1번의 양 모서리 1 cm 미달, 도크 map/odom 불일치, 복귀 전역 단일 검사 종료와 입력 지연이다.
+
+**후면에 거리가 남았다는 사용자 보고 후 정지 진단:** 등록부의 `rear_gap_measurement.gap_m=0.03`은 `scope="taught placement; no closed-loop rear range measurement"`인 사용자 배치 기록이다. 현재 후면 도킹은 테이블 간격 측정 피드백이 아니라 등록 지도 좌표와 동결 odom 목표를 사용한다. 낮은 라이다의 차체 폭 후방 띠에서 3스캔의 가까운 반사체는 rear 기준 약 0.987–0.997 m였으며 상판 간격으로 해석하지 않는다. 지도 목표–현재 pose를 차체 축으로 투영하면 전방 약 19.56 mm·좌측 약 63.91 mm여서 지도 오차 66.83 mm를 추가 후진 거리로 사용할 수 없다. 진단은 이동 없이 수행했고 `post_return_rear_gap_diagnostic.json`에 보존했다. 실제 뒤쪽 간격이 남았다는 보고를 존중하며 도킹 미완료 상태를 유지한다.
