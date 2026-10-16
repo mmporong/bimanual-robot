@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import math
 import os
+import shutil
 import socket
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest import mock
+import xml.etree.ElementTree as ET
 
 import yaml
 
@@ -29,6 +32,56 @@ def load(name: str, path: Path):
 
 
 class StandaloneRuntimeTest(unittest.TestCase):
+    def test_generated_table_route_stays_outside_recorded_opposing_table_turn_sweep(self):
+        assets = ROOT / 'config/navigation/jdamr_runtime'
+        geometry = yaml.safe_load((ROOT / 'src/navigation/jdamr_cube_description/config/'
+                                    'new_base_geometry.yaml').read_text())
+        robot = ET.parse(ROOT / 'src/navigation/jdamr_cube_description/urdf/new_base_real.urdf')
+        rear_joint = robot.find("joint[@name='lower_rear_rail_joint']/origin")
+        rear_rail = robot.find("link[@name='lower_rear_rail_link']/collision/geometry/box")
+        rear_m = -float(rear_joint.attrib['xyz'].split()[0]) + float(
+            rear_rail.attrib['size'].split()[0]) / 2
+        # The whole wheel-width rectangle contains both front and rear drive wheels.
+        radius_m = math.hypot(max(rear_m, geometry['front_to_wheel_axis']['value']),
+                              geometry['wheel_outer_width']['value'] / 2)
+        face = (0.3537144070752165, -1.3372212134060284)
+        normal = (0.9987897624345229, 0.04918343680538581)
+
+        def clearance(point):
+            return sum((point[i] - face[i]) * normal[i] for i in (0, 1))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            aligned = Path(temporary) / 'map_20260930_manual/aligned'
+            shutil.copytree(assets, aligned)
+            with mock.patch.dict(os.environ, {'JDAMR_DATA_ROOT': temporary}):
+                helper = load('jdamr_route_geometry_test', ROOT / 'src/navigation/scripts/'
+                              'map_20260930_manual/jdamr_depart.py')
+            helper.pi = mock.Mock(side_effect=AssertionError('no remote operation'))
+            helper.sh = mock.Mock(side_effect=AssertionError('no process operation'))
+            home = yaml.safe_load((aligned / 'service_destinations.yaml').read_text())['home']
+            helper.write_routes(tuple(home[k] for k in ('x_m', 'y_m', 'yaw_rad')))
+            route = yaml.safe_load((aligned / 'table_01_route.yaml').read_text())
+            pre, observation = route['waypoints']
+            self.assertEqual((observation['x'], observation['y'], observation['yaw']),
+                             (0.858, -1.817, 0.0))
+            self.assertEqual(pre['x'], observation['x'])
+            for step in range(21):
+                point = tuple(pre[k] + (observation[k] - pre[k]) * step / 20
+                              for k in ('x', 'y'))
+                self.assertGreater(clearance(point), radius_m)
+            self.assertLess(clearance((0.438, -1.817)), radius_m)
+            for name in ('water_station_route.yaml', 'table_01_direct_route.yaml',
+                         'table_02_direct_route.yaml'):
+                generated = yaml.safe_load((aligned / name).read_text())
+                self.assertEqual(generated['waypoints'][0]['id'], 'home_exit')
+                self.assertEqual(generated['dock_departure_distance_m'], helper.HOME_EXIT_M)
+                bundled = yaml.safe_load((assets / name).read_text())
+                self.assertEqual(generated['waypoints'], bundled['waypoints'])
+                self.assertEqual(generated['expected_mask_sha256'], bundled['expected_mask_sha256'])
+            table2 = yaml.safe_load((aligned / 'table_02_route.yaml').read_text())
+            self.assertEqual(table2['waypoints'], yaml.safe_load(
+                (assets / 'table_02_route.yaml').read_text())['waypoints'])
+
     def test_existing_owned_user_bus_fills_missing_terminal_environment(self):
         common = load('jdamr_bus_common', TOOLS / '_common.py')
         with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_UNIX) as bus:

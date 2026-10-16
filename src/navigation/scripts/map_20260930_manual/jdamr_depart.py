@@ -103,10 +103,9 @@ RECORD_TOPICS = ('/tf', '/tf_static', '/scan', '/plan', '/amcl_pose')
 DESTINATIONS = json.loads((P2 / 'destinations.json').read_text())['destinations']
 VIA_ID = 'water_station'
 TABLES = ('table_01', 'table_02')
-# Distances from the face along its outward normal (box_service: final 0.115, face
-# alignment 0.515, escape 0.565). Pre and observation lie on the same straight line so
-# the robot arrives facing the box; their 0.42 m spacing stays above the BT goal
-# tolerance (0.15 m). Pre 1.00 keeps 0.54 m between the water face and table_01's pre.
+# Nominal observation and escape distances from destinations.json's face.
+# Table_01 joins its observation point along the aisle instead of returning
+# toward the opposing water table's old box-based pre-point.
 PRE_M, OBSERVE_M, ESCAPE_M = 1.00, 0.58, 0.565
 HOME_EXIT_M = 0.70
 
@@ -122,6 +121,9 @@ def approach_waypoints(dest_id):
     pre_x, pre_y, normal = along_normal(dest_id, PRE_M)
     obs_x, obs_y, _ = along_normal(dest_id, OBSERVE_M)
     facing = math.atan2(-math.sin(normal), -math.cos(normal))
+    if dest_id == 'table_01':
+        pre_x = obs_x
+        pre_y = along_normal(VIA_ID, ESCAPE_M)[1]
     return [{'id': f'{dest_id}_pre', 'x': round(pre_x, 3), 'y': round(pre_y, 3)},
             {'id': f'{dest_id}_observation', 'x': round(obs_x, 3), 'y': round(obs_y, 3),
              'yaw': round(facing, 4)}]
@@ -268,6 +270,8 @@ def write_routes(home):
             'target_basis': f'destinations.json {DESTINATIONS[dest_id]["source"]}',
             'start_basis': basis,
         }
+        if dest_id == VIA_ID:
+            route['dock_departure_distance_m'] = HOME_EXIT_M
         path = P2 / f'{dest_id}_route.yaml'
         path.write_text(yaml.safe_dump(route, sort_keys=False, allow_unicode=True))
         if dest_id in TABLES:
@@ -276,6 +280,7 @@ def write_routes(home):
                 'start_pose': {'x': round(hx, 3), 'y': round(hy, 3)},
                 'waypoints': [exit_wp, *waypoints],
                 'start_basis': 'registered dock pose; water stop omitted',
+                'dock_departure_distance_m': HOME_EXIT_M,
             }
             (P2 / f'{dest_id}_direct_route.yaml').write_text(
                 yaml.safe_dump(dock_route, sort_keys=False, allow_unicode=True))

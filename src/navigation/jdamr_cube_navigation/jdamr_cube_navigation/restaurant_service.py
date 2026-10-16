@@ -1639,6 +1639,12 @@ class ServiceRoute(CorridorRoute):
         finally:
             self._intermediate_localization = previous
 
+    @staticmethod
+    def _input_gap_recoverable(reason):
+        return (CorridorRoute._input_gap_recoverable(reason)
+                or (isinstance(reason, str) and reason.startswith(
+                    'stationary teaching unavailable: need fresh TF, odometry and localization')))
+
     def execute(self, *, final_parking=True, alignment=False, staging=False, face=False):
         """Bound transit and parking actions and retain their terminal result."""
         if not isinstance(final_parking, bool):
@@ -1654,6 +1660,7 @@ class ServiceRoute(CorridorRoute):
         # caller's stage and a final leg is always strict, input recovery included.
         intermediate = not final_parking and (
             not alignment or getattr(self, '_intermediate_localization', False))
+        self._dock_departure = None
         with self._localization_bound(intermediate):
             return self._run_with_input_recovery(
                 lambda: self._execute_service_once(
@@ -1664,6 +1671,23 @@ class ServiceRoute(CorridorRoute):
         """Retry only a canceled input gap, never an unresolved action."""
         if not self.navigate.wait_for_server(timeout_sec=2.0):
             return False
+        distance_m = self.config.get('dock_departure_distance_m')
+        if (distance_m is not None and not (final_parking or alignment or staging)
+                and self._resume_waypoint_index == 0):
+            try:
+                departed = self._depart_dock_straight(distance_m)
+            except RuntimeError as error:
+                reason = self._guard_failure(False) or str(error)
+                if self.stop_requested:
+                    return False
+                if not self._input_gap_recoverable(reason):
+                    raise
+                self._retry_guard_reason = reason
+                self.emit('dock_departure_waiting_for_input', reason=reason)
+                return False
+            if not departed:
+                return False
+            self._resume_waypoint_index = 1
         through = getattr(self, 'navigate_through', None)
         if (through is not None and not (final_parking or alignment or staging)
                 and len(self.waypoints) - self._resume_waypoint_index >= 2):
@@ -1726,6 +1750,55 @@ class ServiceRoute(CorridorRoute):
             finally:
                 if not self.finish_navigation():
                     raise RuntimeError('navigation cancellation unconfirmed')
+        return True
+
+    def _depart_dock_straight(self, distance_m):
+        """Finish the dock exit along the stopped heading before transit may turn."""
+        if self.stop_requested:
+            return False
+        if (isinstance(distance_m, bool) or not isinstance(distance_m, (float, int))
+                or not math.isfinite(distance_m) or distance_m <= 0.0
+                or len(self.waypoints) < 2 or self.waypoints[0]['id'] != 'home_exit'):
+            raise ValueError('dock departure requires a positive distance and first home_exit')
+        if self._dock_departure is None:
+            actual, _ = self.capture_stationary_pose()
+            x_m, y_m, yaw_rad = actual
+            count = max(2, math.ceil(distance_m / 0.025))
+            path = RosPath()
+            path.poses = [self._pose(0, {
+                'x': x_m + distance_m * i / count * math.cos(yaw_rad),
+                'y': y_m + distance_m * i / count * math.sin(yaw_rad),
+                'yaw': yaw_rad}) for i in range(count + 1)]
+            path.header = path.poses[0].header
+            if not self._reverse_path_valid(path):
+                return False
+            frozen, _ = self._frozen_in_odom(path)
+            self._dock_departure = {'path': frozen, 'start': actual, 'motion_complete': False}
+            self.emit('dock_departure_started', distance_m=distance_m,
+                      start_pose_map=list(actual), tracking_frame='odom')
+        departure = self._dock_departure
+        frozen, start = departure['path'], departure['start']
+        saved_config, saved_waypoints = self.config, self.waypoints
+        self.waypoints = [saved_waypoints[0]]
+        self.config = {**saved_config, 'waypoints': self.waypoints}
+        try:
+            if not departure['motion_complete']:
+                reached = self._execute_reverse_once(
+                    frozen, goal_checker_id='dock_position_checker', final=False,
+                    controller_id='Parking', motion='dock_departure')
+                if reached:
+                    departure['motion_complete'] = True
+                    self.emit('dock_departure_motion_complete', distance_m=distance_m)
+        finally:
+            self.config, self.waypoints = saved_config, saved_waypoints
+        if not departure['motion_complete'] or self.stop_requested:
+            return False
+        after, _ = self.capture_stationary_pose()
+        if self.stop_requested:
+            return False
+        self.emit('dock_departure_finished', distance_m=distance_m,
+                  start_pose_map=list(start), stopped_pose_map=list(after),
+                  tracking_frame='odom')
         return True
 
     def _execute_through_once(self):

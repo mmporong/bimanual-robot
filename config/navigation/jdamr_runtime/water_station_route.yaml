@@ -25,3 +25,4 @@ target_basis: 'destinations.json 2026-10-06 re-measured after the box was put ba
   0.050/0.097, depth 0.068/0.099 vary with AMCL x). Before: depth-camera face from
   run table_02_20260930_150238 (0.06, -1.21)'
 start_basis: registry home taught at the operator placement (start = dock)
+dock_departure_distance_m: 0.7

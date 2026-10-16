@@ -1234,7 +1234,42 @@ def test_stop_zones_follow_the_narrow_frame_beside_the_wheels():
     footprint = json.loads(
         document['local_costmap']['local_costmap']['ros__parameters']['footprint'])
     assert _inside(footprint, (0.0, 0.272), True)     # wheel side, inside the 5 mm
-    assert not _inside(footprint, (-0.2, 0.26), True)  # beside the 0.45 m frame
+    assert _inside(footprint, (-0.21, 0.272), True)    # rear drive wheel padding
+    assert not _inside(footprint, (-0.11, 0.26), True)  # narrow frame between axles
+
+
+def test_costmaps_and_turn_stops_cover_all_four_drive_wheels():
+    document = yaml.safe_load(PARAMS.read_text())
+    geometry = yaml.safe_load((
+        ROOT / 'jdamr_cube_description/config/new_base_geometry.yaml').read_text())
+    radius_m = geometry['wheel_radius_initial']['value']
+    half_width_m = geometry['wheel_outer_width']['value'] / 2
+    corners = [(axle_m + offset_m, side_m)
+               for axle_m in (0.0, -geometry['wheelbase']['value'])
+               for offset_m in (-radius_m, radius_m)
+               for side_m in (-half_width_m, half_width_m)]
+    stop = document['collision_monitor']['ros__parameters']['StopZone']
+    polygons = [yaml.safe_load(document[name][name]['ros__parameters']['footprint'])
+                for name in ('local_costmap', 'global_costmap')]
+    polygons += [yaml.safe_load(stop[name]['points']) for name in
+                 ('rotation', 'rotation_clockwise', 'translation_forward',
+                  'translation_backward', 'stopped')]
+    assert all(_inside(polygon, corner, True) for polygon in polygons for corner in corners)
+
+
+@pytest.mark.parametrize('stale_costmaps', [
+    ('local_costmap',), ('global_costmap',), ('local_costmap', 'global_costmap')])
+def test_stale_front_wheels_only_footprint_is_rejected(tmp_path, stale_costmaps):
+    document = yaml.safe_load(PARAMS.read_text())
+    old = [[.07, .23], [.038, .23], [.038, .275], [-.038, .275],
+           [-.038, .23], [-.28, .23], [-.28, -.23], [-.038, -.23],
+           [-.038, -.275], [.038, -.275], [.038, -.23], [.07, -.23]]
+    for name in stale_costmaps:
+        document[name][name]['ros__parameters']['footprint'] = json.dumps(old)
+    path = tmp_path / 'old_two_wheel_footprint.yaml'
+    path.write_text(yaml.safe_dump(document))
+    with pytest.raises(RuntimeError, match='does not cover the measured body'):
+        _load_validator(path)(None)
 
 
 def test_footprint_narrower_than_the_measured_frame_is_rejected(tmp_path):
@@ -1375,9 +1410,11 @@ def _write_stop_zones(tmp_path, polygons, name):
 def test_a_groove_between_perimeter_samples_is_rejected(tmp_path):
     """Review 2026-10-06: a 1 mm groove to x=-0.27 passed the 5 mm perimeter samples."""
     groove = [[0.12, 0.23], [0.038, 0.23], [0.038, 0.275], [-0.038, 0.275], [-0.038, 0.23],
+              [-0.172, 0.23], [-0.172, 0.275], [-0.248, 0.275], [-0.248, 0.23],
               [-0.28, 0.23], [-0.28, 0.1022], [-0.27, 0.1022], [-0.27, 0.1012],
               [-0.28, 0.1012], [-0.28, -0.1012], [-0.27, -0.1012], [-0.27, -0.1022],
-              [-0.28, -0.1022], [-0.28, -0.23], [-0.038, -0.23], [-0.038, -0.275],
+              [-0.28, -0.1022], [-0.28, -0.23], [-0.248, -0.23], [-0.248, -0.275],
+              [-0.172, -0.275], [-0.172, -0.23], [-0.038, -0.23], [-0.038, -0.275],
               [0.038, -0.275], [0.038, -0.23], [0.12, -0.23]]
     with pytest.raises(RuntimeError, match='stopped StopZone does not contain footprint'):
         _load_validator(_write_stop_zones(tmp_path, {'stopped': groove}, 'groove.yaml'))(None)
@@ -1386,7 +1423,9 @@ def test_a_groove_between_perimeter_samples_is_rejected(tmp_path):
 def test_a_narrowed_front_band_is_rejected(tmp_path):
     """Review 2026-10-06: the band x 0.07-0.12 cut to |y| <= 0.05 passed the front-X check."""
     general = [[0.12, 0.05], [0.07, 0.05], [0.07, 0.23], [0.038, 0.23], [0.038, 0.275],
-               [-0.038, 0.275], [-0.038, 0.23], [-0.28, 0.23], [-0.28, -0.23],
+               [-0.038, 0.275], [-0.038, 0.23], [-0.172, 0.23], [-0.172, 0.275],
+               [-0.248, 0.275], [-0.248, 0.23], [-0.28, 0.23], [-0.28, -0.23],
+               [-0.248, -0.23], [-0.248, -0.275], [-0.172, -0.275], [-0.172, -0.23],
                [-0.038, -0.23], [-0.038, -0.275], [0.038, -0.275], [0.038, -0.23],
                [0.07, -0.23], [0.07, -0.05], [0.12, -0.05]]
     straight = [[0.12, 0.05], [0.07, 0.05], [0.07, 0.23], [0.038, 0.23], [0.038, 0.275],

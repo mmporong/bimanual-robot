@@ -22,3 +22,4 @@ purpose: table_02 box observation approach; not a final parking goal
 target_basis: destinations.json LiDAR box corner fit from the dock (aligned/box_scan_150112.json)
   after the operator moved the boxes; face width 0.31 m assumed from table_02
 start_basis: registered dock pose; water stop omitted
+dock_departure_distance_m: 0.7
