@@ -1359,3 +1359,22 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - 마지막 전진 계획량은 약 55.32 mm였다. 최종 전진 후 새 면 관측은 가림으로 얻지 못했다. 마지막 유효 면과 동결 odom의 내부 추정 간격은 오른쪽 6.18 mm·왼쪽 5.91 mm, 차이는 약 0.27 mm다. `confirmation_basis=frozen_table_edge_odom_stop`, `final_depth_measurement=false`를 유지한다.
 - 목표 10 mm에서 약 4 mm 더 가까운 내부 값이므로 `box_gap_not_confirmed`, 종료 코드 1로 끝났다. 1 cm 성공으로 보고하지 않는다.
 - 종료 odometry의 선속도·각속도는 모두 0이었다. 추가 이동·자동 복귀는 수행하지 않았다. 처음 안내에서 이를 새 깊이 관측값으로 잘못 설명했으나 원시 이벤트의 동결 odom 기반 내부 값임을 확인해 정정했다. 근접 상태의 실제 좌우 간격을 사용자에게 요청했으며 외부 측정 응답은 대기 중이다. 이 관측 한 건만으로 거리 보정 상수를 추가하지 않는다.
+
+### 21.9 로봇 좌우 실측 기준 보정과 1 cm 재주차
+
+**후속 실측:** §21.8 실행 뒤 사용자가 로봇이 바라보는 기준 왼쪽 43 mm·오른쪽 27 mm로 확인했다. 이전 내부 추정 우 6.18 mm·좌 5.91 mm와 맞지 않으므로 이전 실행의 실물 1 cm 정확도는 성립하지 않는다. 카메라 하향 약 30°는 각도계 측정이 아닌 참고값으로 받았다. 반복 간격 측정을 매 출발 조건으로 요구하지 않도록 운영 규칙에 반영했다.
+
+**관측 대조와 근거:** 같은 정지 위치에서 깊이 20장을 보존했다. 상판 면은 있지만 하단 후보 아래 깊이값이 0이어서 실제 깊이 불연속을 확인하지 못했다. 0값 경계를 강제 수용하면 실측과 반대 방향의 기울기가 나와 이를 책상 앞면으로 사용하지 않았다. 기존 웹 조종기로 짧은 후진 중 HTTP 응답 제한시간을 넘겼고, deadman 정지 뒤 실제 odom 이동량 53.40 mm와 정지를 확인했다. 후진 뒤 정상 검출은 20/20장이었다. 두 정지 LiDAR 관측의 최근접점 SVD 상대 정합은 후진 약 52.35 mm·yaw +0.0634°, 잔차 RMS 13.30 mm·대응점 378/520개였다. 바퀴 이동량과 약 1 mm 차이지만 외부 거리 측정이나 전체 주행 오차의 증명은 아니다.
+
+**변경 (`fac0bad`):** 실측 좌우 간격·차체 폭으로 정의한 책상 면을 LiDAR 상대 변환으로 후진 위치에 운반하고 정상 깊이 관측 20장의 2D line과 비교했다. 관측 면 yaw 보정 -0.037999565 rad·signed plane offset +0.027985701 m를 적용했다. 물리 카메라 R/P/Y·URDF는 바꾸지 않았고 `n'=R(δ)n`, `d'=d+bias`, `center'=R(δ)center-bias*n'`를 task 관측에 한 번 적용한다. 기준 장착 6값이 바뀌면 재사용을 거부한다. 설정 provenance에 단일 외부 실측, 약 0.78 m 상판, 적합 평균 간격 35–87.35 mm, 도출 당시 10 mm 외삽의 외부 검증 부재와 후속 단일 배치 좌우 12 mm 확인(분해능·반복성 미확정)을 명시했다. 다른 높이·장착의 보편적 깊이 보정으로 취급하지 않는다. 마지막 precision 직진의 거리별 속도를 낮추고 계획량·정지 후 odom 이동량을 이벤트에 남긴다. 기존 충돌 감지·입력 유효성·timeout·정지 확인 경로는 유지한다.
+
+**검증·반영:** ROS Jazzy와 PC overlay에서 table target·restaurant service·box service 표적 검사 491건 통과, 독립 verifier 재실행 491건 통과, diff 검사 통과. Pi 소스·설치의 두 Python 모듈과 소스·설치·운영 장착 설정 7개 경로를 이전 SHA 확인 후 백업·반영하고 새 SHA를 대조했다. 복구본은 `$HOME/.local/state/jdamr/table-line-calibration/20261016_105516/`, PC 반영 근거는 `$HOME/.local/state/bimanual-robot/table_line_calibration_deployment.json`이다. 지도·도크·펌웨어·물리 장착값과 현재 위치추정은 유지했다.
+
+**재주차 결과:** `parking_20261016_105558_b898bae7`, 제출부터 종료 이벤트까지 약 57.9초. 현재 위치에서 기존 실행기의 `--resume-at-final-approach --zero-turn-final --final-gap-m 0.01`을 사용했고, 도크 복귀는 요청하지 않았다. 처음 방향 보정은 -2.155° 회전 후 fresh 면 잔차 -0.157°였다. 중간 전진 계획 36.72 mm·정지 후 odom 37.67 mm, 마지막 전진 계획 38.49 mm·정지 후 odom 38.81 mm였다. 마지막 속도는 0.01 m/s였다.
+
+- 결과 JSON은 `code: 0`, 종료 선속도·각속도는 0이다. 내부 계산은 로봇 기준 왼쪽 10.46 mm·오른쪽 8.92 mm, 평균 9.69 mm, 방향 오차 약 0.196°로 기존 양쪽 모서리 허용 범위에 들었다.
+- 실행기의 판정은 `confirmation_basis=frozen_table_edge_odom_stop`, `internal_estimate_only=true`, `final_depth_measurement=false`, `physical_accuracy=NOT_EXTERNALLY_MEASURED`다. 최종 근접면은 가려졌으므로 내부값을 새 깊이 실측으로 바꾸지 않는다. 이번 결과 뒤 추가 외부 간격 측정을 요구하지 않았다.
+- **종료 뒤 사용자 실측:** "좌우측 모두 1.2"를 이전 보고와 같은 cm로 받아 로봇 기준 왼쪽·오른쪽 모두 12 mm로 기록했다. 목표 10 mm보다 각각 +2 mm이며 기존 거리 허용 범위 ±3 mm 안이다. 보고된 좌우 간격 차이는 0 mm지만 측정 분해능·실제 각도는 미확정이다. 이번 배치 한 건의 외부 간격 확인이며 반복 정밀도 검증은 아니다. `operator_measurement.json`을 추가했고 원시 실행 이벤트의 내부 판정 필드는 유지했다. 추가 2 mm 이동이나 실측에 맞춘 재보정은 수행하지 않았다.
+- 정지 깊이·라이다·보정 계산 원본은 이전 실행 아래 `stationary_depth_20261016_103123/`에, 최신 command·원시 event·결과·종료 화면·정리 상태는 같은 데이터 루트의 이번 `parking_.../`에 있다. 데이터는 Git에 넣지 않았다.
+
+**화면·프로세스 정리:** 열과 표시 부하를 줄이기 위해 기존 `display-stop`으로 RViz와 PC/Pi 표시 중계·표시 노드를 종료했다. 주차 후 추가 연산을 줄이도록 `jdamr-box-observer.service`를 중지하며, 다음 `--camera-always-on` 실행에는 이 관측기를 먼저 기동해야 한다. 사용자 요청 화면을 위해 PC `robot-dashboard.service`·`robot-dashboard-link.service`, Pi `jdamr-ammr-dashboard.service`·`jdamr-box-rgbd.service`는 유지한다. 정리는 PC `systemctl --user stop robot-dashboard robot-dashboard-link`, Pi `sudo systemctl stop jdamr-ammr-dashboard jdamr-box-rgbd`를 함께 사용한다. 기존 상주 `jdamr-box-executor.service`는 다음 명령의 재탐색 지연을 줄이도록 idle로 유지하며 종료 명령은 `sudo systemctl stop jdamr-box-executor`다. 새 임시 기록기·터널·속도 발행 프로세스는 남기지 않았다.

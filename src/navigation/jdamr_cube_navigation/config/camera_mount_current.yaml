@@ -108,7 +108,7 @@ camera_mount:
         plane_offset_bias_m: m
       valid_for: 현재 4륜 차체·카메라 장착과 약 0.78m 높이 책상의 근거리 주차 보정 후보
       reference_mean_gap_range_m: [0.035, 0.08735]
-      target_extrapolation: 10mm 목표는 적합 자료보다 가까우며 외부 실측으로 검증되지 않음
+      target_extrapolation: 10mm 목표는 적합 자료보다 가까움. 도출 시 미검증이었고 후속 단일 배치에서 좌우 12mm를 확인함
       method: 로봇 기준 좌43mm/우27mm 실측으로 만든 면을 정지 LiDAR 상대 정합으로 운반하고, 후진 뒤 정상 검출 20장의
         2D plane offset/yaw와 비교한 중앙값
       physical_camera_transform_changed: false
@@ -135,7 +135,18 @@ camera_mount:
         odom_distance_m: 0.05339510992006902
         scope: 정지 LiDAR 두 관측의 최근접점 SVD 정합. 외부 거리 실측 아님
       evidence: $HOME/jdamr_data/map_20260930_manual/aligned/runs/table_fix_20261016_102002/parking_20261016_102137_07bfdaef/stationary_depth_20261016_103123
-      independent_physical_validation: false
+      independent_physical_validation_at_derivation: false
+      post_calibration_validation:
+        run_id: parking_20261016_105558_b898bae7
+        source: 사용자 종료 후 간격 보고. 좌우측 모두 1.2를 이전 보고와 같은 cm로 해석
+        left_gap_m: 0.012
+        right_gap_m: 0.012
+        target_gap_m: 0.01
+        target_error_m: 0.002
+        frame: robot_forward_frame
+        measurement_resolution_m: null
+        repeatability_validated: false
+        scope: 단일 배치의 외부 실측. 정확히 10mm 또는 반복 정밀도를 증명하지 않음
       invalidate_when: 카메라 위치/각도, 차체 앞끝/폭 기준 또는 깊이 센서 처리 변경
       reference_views:
       - role: 정지 실측 위치의 이전 관측·odom 기반 회귀 대조
