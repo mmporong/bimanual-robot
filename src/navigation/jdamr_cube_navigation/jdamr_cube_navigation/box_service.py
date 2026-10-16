@@ -24,6 +24,7 @@ from jdamr_cube_navigation.parking import (
     DEFAULT_FRONT_GAP_M, load_parking_contract, MAXIMUM_CONTRACT_VALUES,
     MAXIMUM_FRONT_GAP_M, MINIMUM_FRONT_GAP_M, pose_errors,
 )
+from jdamr_cube_navigation.rear_box_service import RearBoxParkingMixin
 from jdamr_cube_navigation.restaurant_service import (
     LIVE_APPROACH_MAX_M, OPERATOR_LINK_TIMEOUT_S, SCAN_MEMORY_KEYFRAMES,
     ServiceRoute, TRANSIT_VARIANTS)
@@ -217,7 +218,7 @@ def last_logged_face(path):
     return face
 
 
-class BoxServiceRoute(ServiceRoute):
+class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
     """Keep every movement on the existing Nav2 and collision-monitor path."""
 
     def __init__(self, *args, **kwargs):
@@ -2096,6 +2097,8 @@ def parse_args(argv=None):
                         help='parking surface: legacy box front or tabletop front edge')
     parser.add_argument('--home-only', action='store_true',
                         help='return to the dock only (needs --execute and --return-home)')
+    parser.add_argument('--rear-box-only', action='store_true',
+                        help='park against the rear LiDAR box at the current location')
     parser.add_argument('--via-route', type=Path)
     parser.add_argument('--via-region-xy', nargs=2, type=float)
     parser.add_argument('--via-region-radius-m', type=float, default=0.6)
@@ -2148,6 +2151,9 @@ def parse_args(argv=None):
         parser.error('--return-home requires --return-timeout-s')
     if args.home_only and not args.return_home:
         parser.error('--home-only requires --execute and --return-home')
+    if args.rear_box_only and (args.home_only or args.return_home or args.via_id
+                               or args.resume_parked_from_log):
+        parser.error('--rear-box-only cannot be combined with a transit or return task')
     if args.return_timeout_s is not None and (
             not math.isfinite(args.return_timeout_s) or args.return_timeout_s <= 0.0):
         parser.error('--return-timeout-s must be finite and positive')
@@ -2226,6 +2232,11 @@ def run_attempt(args, active=None):
             node.operator_link_timeout_s = args.operator_link_timeout_s
             node.final_gap_override_m = args.final_gap_m
             ok = True
+            if getattr(args, 'rear_box_only', False):
+                ok = node.park_rear_box(
+                    geometry, args.approach_route,
+                    execute=args.execute, timeout_s=args.task_timeout_s)
+                return _attempt_code(node, ok)
             if args.home_only:
                 # Dock return alone, e.g. to re-dock after a crooked stop; it may run
                 # down to the running cutoff, since it goes to the charger.

@@ -545,6 +545,27 @@ def test_go_passes_the_transit_variant(env, monkeypatch):
     assert argv[argv.index('--transit') + 1] == 'navfn-mppi'
 
 
+def test_rear_box_request_has_no_transit_via_or_home_task(env, monkeypatch):
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: [
+        {'event': 'rear_box_parking_finished', 'confirmed': True}])
+    d.run_cycle(go_args(rear_box_only=True, final_gap_m=.01), d.load_state(), 'table_02')
+    argv = json.loads(next(s for s in pi.stdins if s))['argv']
+    assert '--rear-box-only' in argv
+    assert '--return-home' not in argv
+    assert '--via-id' not in argv
+    assert '--search' not in argv
+    assert argv[argv.index('--final-gap-m') + 1] == '0.01'
+
+
+def test_rear_box_success_does_not_require_map_home_arrival(env, monkeypatch):
+    monkeypatch.setattr(d, 'pi', Pi())
+    monkeypatch.setattr(d, 'run_cycle', lambda *a: [
+        {'event': 'rear_box_parking_finished', 'confirmed': True}])
+    d.cmd_go(go_args(rear_box_only=True))
+
+
 def test_operator_alerts_can_be_switched_off_for_test_runs(env, monkeypatch):
     sent = []
     monkeypatch.setattr(d, 'sh', lambda command, **k: sent.append(command) or

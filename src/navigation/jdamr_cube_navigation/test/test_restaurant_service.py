@@ -2985,18 +2985,20 @@ def test_live_control_validates_filtered_heading_and_uses_shared_speed_law(monke
     (0.0, 0.15, 12.0), (0.0, 0.45, -12.0),
     (math.pi - 0.03, 0.15, 8.0), (-math.pi + 0.03, 0.45, -8.0),
 ])
+@pytest.mark.parametrize('direction', [-1.0, 1.0])
 def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
-        monkeypatch, heading, gap_m, offset_deg):
+        monkeypatch, heading, gap_m, offset_deg, direction):
     node = route()
     clock, commands, velocity = [0.0], [], [0.0, 0.0]
     pose = [0.0, 0.0, heading + math.radians(offset_deg)]
-    front, half_width = 0.065, 0.225
-    normal = (-math.cos(heading), -math.sin(heading))
+    front, half_width = (0.065 if direction > 0 else 0.275), 0.225
+    normal = (-direction * math.cos(heading), -direction * math.sin(heading))
     initial_lead = (
         front * math.cos(math.radians(offset_deg))
         + half_width * abs(math.sin(math.radians(offset_deg))))
     face_distance = initial_lead + gap_m
-    face = (face_distance * math.cos(heading), face_distance * math.sin(heading))
+    face = (direction * face_distance * math.cos(heading),
+            direction * face_distance * math.sin(heading))
 
     def publish(message):
         velocity[:] = [message.linear.x, message.angular.z]
@@ -3027,18 +3029,19 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
 
     assert node._drive_zero_turn(
-        gap_m - 0.01, precision=True, hold_heading=True, target_update=update) is not None
+        direction * (gap_m - 0.01), precision=True,
+        hold_heading=True, target_update=update) is not None
     error = math.atan2(math.sin(pose[2] - heading), math.cos(pose[2] - heading))
-    front_center = (pose[0] + front * math.cos(pose[2]),
-                    pose[1] + front * math.sin(pose[2]))
+    front_center = (pose[0] + direction * front * math.cos(pose[2]),
+                    pose[1] + direction * front * math.sin(pose[2]))
     gaps = [sum((front_center[i] + side * half_width * (-math.sin(pose[2]),
                                                         math.cos(pose[2]))[i]
                  - face[i]) * normal[i] for i in (0, 1)) for side in (-1, 1)]
     assert all(0.007 <= gap <= 0.013 for gap in gaps)
     assert abs(error) <= math.radians(0.3)
     moving = [command for command in commands if command != (0.0, 0.0)]
-    assert moving and all(linear > 0.0 for linear, _angular in moving)
-    assert max(linear for linear, _angular in moving) <= 0.05
+    assert moving and all(direction * linear > 0.0 for linear, _angular in moving)
+    assert max(abs(linear) for linear, _angular in moving) <= 0.05
     angular = [w for _v, w in moving if w]
     assert all(w * offset_deg < 0.0 for w in angular)
     first_zero = commands.index((0.0, 0.0))

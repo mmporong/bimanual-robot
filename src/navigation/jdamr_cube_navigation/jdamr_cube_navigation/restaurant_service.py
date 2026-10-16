@@ -1399,8 +1399,9 @@ class ServiceRoute(CorridorRoute):
         It runs only between goals. Returns the signed travel along the start heading
         once the base is at rest, or None without odom.
         """
-        if target_update is not None and not (precision and hold_heading and distance_m > 0.0):
-            raise ValueError('live approach requires forward precision heading hold')
+        if target_update is not None and not (precision and hold_heading and distance_m != 0.0):
+            raise ValueError('live approach requires nonzero precision heading hold')
+        direction = math.copysign(1.0, distance_m)
         base_frame = self.parking_contract['robot_base_frame']
 
         def odom_pose():
@@ -1458,7 +1459,7 @@ class ServiceRoute(CorridorRoute):
                                 and not callable(state['validate_control'])):
                             raise RuntimeError('invalid table control validator')
                     else:
-                        command.linear.x = min(command.linear.x, next_speed)
+                        command.linear.x = direction * min(abs(command.linear.x), next_speed)
                 except (KeyError, TypeError, ValueError, RuntimeError) as error:
                     state['target_failure'] = str(error) or type(error).__name__
                     state['resume_speed_mps'] = command.linear.x
@@ -1477,7 +1478,7 @@ class ServiceRoute(CorridorRoute):
                         if state['validate_control'] is not None:
                             state['validate_control']((x_m, y_m, yaw), heading)
                         linear, angular = face_approach_command(state['remaining_m'], error_rad)
-                        command.linear.x = linear
+                        command.linear.x = direction * linear
                         command.angular.z = angular
                     except (ValueError, RuntimeError) as error:
                         state['target_failure'] = str(error)

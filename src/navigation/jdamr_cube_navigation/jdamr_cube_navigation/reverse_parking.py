@@ -485,14 +485,27 @@ def _convex_hull(
 def _circumscribed_support_polygon(
         points: Sequence[Sequence[float]],
         direction_count: int = CACHED_CORRIDOR_SUPPORT_DIRECTIONS,
+        additional_directions: Sequence[Sequence[float]] = (),
 ) -> list[tuple[float, float]]:
-    """Bound a point cloud by a fixed-size outer support polygon."""
+    """Bound a point cloud by a bounded-size outer support polygon."""
     if direction_count < 8 or direction_count % 4:
         raise ValueError('direction_count must be a multiple of four and at least eight')
     directions = [
         (math.cos(2.0 * math.pi * index / direction_count),
          math.sin(2.0 * math.pi * index / direction_count))
         for index in range(direction_count)]
+    for direction in additional_directions:
+        normal_x = _finite_number(direction[0], 'support direction')
+        normal_y = _finite_number(direction[1], 'support direction')
+        length = math.hypot(normal_x, normal_y)
+        if length <= 1e-12:
+            raise ValueError('support direction must have positive length')
+        unit = (normal_x / length, normal_y / length)
+        if not any(
+                abs(unit[0] - existing[0]) <= 1e-12
+                and abs(unit[1] - existing[1]) <= 1e-12
+                for existing in directions):
+            directions.append(unit)
     supports = []
     for normal_x, normal_y in directions:
         support = max(
@@ -500,12 +513,18 @@ def _circumscribed_support_polygon(
             for x_value, y_value in points)
         supports.append(support + max(1e-12, abs(support) * 1e-12))
 
-    quarter = direction_count // 4
+    minimum_x = min(point[0] for point in points)
+    maximum_x = max(point[0] for point in points)
+    minimum_y = min(point[1] for point in points)
+    maximum_y = max(point[1] for point in points)
+    epsilon = max(
+        1e-12, max(abs(minimum_x), abs(maximum_x),
+                   abs(minimum_y), abs(maximum_y)) * 1e-12)
     polygon = [
-        (-supports[2 * quarter], -supports[3 * quarter]),
-        (supports[0], -supports[3 * quarter]),
-        (supports[0], supports[quarter]),
-        (-supports[2 * quarter], supports[quarter]),
+        (minimum_x - epsilon, minimum_y - epsilon),
+        (maximum_x + epsilon, minimum_y - epsilon),
+        (maximum_x + epsilon, maximum_y + epsilon),
+        (minimum_x - epsilon, maximum_y + epsilon),
     ]
     for (normal_x, normal_y), support in zip(directions, supports):
         clipped = []
@@ -665,10 +684,12 @@ def _corridor_blockage(
 class CachedStaticCorridorValidator:
     """Reuse one verified map pair and footprint for conservative path checks.
 
-    Each call reduces all sampled footprint poses to one convex swept hull.  The
-    hull is padded by the largest between-sample rotation sagitta, so it contains
-    every piece checked by :func:`static_corridor_clear`.  It may therefore
-    reject extra free space, but cannot make a blocked exact corridor free.
+    Each call reduces all sampled footprint poses to one outer support polygon.
+    Fixed map axes bound its cost, while start/end footprint-edge normals avoid
+    excess at the actual body angle.  Maximum between-sample rotation sagitta
+    padding keeps every piece checked by :func:`static_corridor_clear` inside.
+    It may therefore reject extra free space, but cannot make a blocked exact
+    corridor free.
     """
 
     def __init__(
@@ -714,6 +735,14 @@ class CachedStaticCorridorValidator:
         self._source = source
         self._keepout = keepout
         self._footprint = tuple(_convex_hull(footprint_points))
+        edge_normals = []
+        for start, end in zip(
+                self._footprint, self._footprint[1:] + self._footprint[:1]):
+            delta_x = end[0] - start[0]
+            delta_y = end[1] - start[1]
+            length = math.hypot(delta_x, delta_y)
+            edge_normals.append((-delta_y / length, delta_x / length))
+        self._footprint_edge_normals = tuple(edge_normals)
         self._footprint_radius = max(
             math.hypot(x_value, y_value)
             for x_value, y_value in self._footprint)
@@ -730,7 +759,16 @@ class CachedStaticCorridorValidator:
         swept_points = []
         for pose in checked_poses:
             swept_points.extend(_world_footprint(pose, self._footprint))
-        swept_hull = _circumscribed_support_polygon(swept_points)
+        support_directions = []
+        for pose in (checked_poses[0], checked_poses[-1]):
+            cosine = math.cos(pose[2])
+            sine = math.sin(pose[2])
+            support_directions.extend(
+                (cosine * normal_x - sine * normal_y,
+                 sine * normal_x + cosine * normal_y)
+                for normal_x, normal_y in self._footprint_edge_normals)
+        swept_hull = _circumscribed_support_polygon(
+            swept_points, additional_directions=support_directions)
         maximum_sagitta = 0.0
         for current, following in zip(checked_poses, checked_poses[1:]):
             yaw_change = abs(_shortest_angle(following[2] - current[2]))

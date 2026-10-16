@@ -386,6 +386,36 @@ def test_cached_static_corridor_bounds_swept_polygon_axes(tmp_path, monkeypatch)
     assert vertex_counts and max(vertex_counts) <= 16
 
 
+def test_cached_static_corridor_uses_body_edge_axes_at_rotated_pose(tmp_path):
+    """Avoid a fixed-world support corner touching keepout beside the body."""
+    width = height = 80
+    source_pixels = [254] * (width * height)
+    keepout_pixels = list(source_pixels)
+    keepout_pixels[(height - 1 - 23) * width + 31] = 0
+    source = _write_grid(
+        tmp_path, 'map', source_pixels, width=width, height=height,
+        resolution=0.02)
+    keepout = _write_grid(
+        tmp_path, 'keepout', keepout_pixels, width=width, height=height,
+        resolution=0.02)
+    footprint = [
+        (-0.28, -0.275), (0.07, -0.275),
+        (0.07, 0.275), (-0.28, 0.275)]
+    pose = (0.8, 0.8, math.radians(11.25))
+    from jdamr_cube_navigation import reverse_parking
+    metadata = reverse_parking._map_metadata(source)
+    mask = reverse_parking._map_metadata(keepout)
+    fixed_world_support = reverse_parking._circumscribed_support_polygon(
+        reverse_parking._world_footprint(pose, footprint))
+
+    assert reverse_parking._corridor_blockage(
+        metadata, mask, [(fixed_world_support, 0.0)],
+        skip_clearly_free_cells=True) is not None
+    assert static_corridor_clear(source, keepout, [pose], footprint)
+    assert CachedStaticCorridorValidator(
+        source, keepout, footprint)([pose])
+
+
 @pytest.mark.parametrize('poses', [
     [],
     [(math.nan, 0.45, 0.0)],

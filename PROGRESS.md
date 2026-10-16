@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-10-16 | 후면 하단 박스 라이다 관측과 1 cm 접근 추가
+
+- 사용자가 앞선 실차 주차가 잘됐다고 보고했다. 외부 줄자 수치·반복 횟수는 추가로 받지 않았으므로 사용자 성공 보고로 구분한다. 이후 도크 뒤 하단에 박스를 놓고 라이다 관측·1 cm 주차를 요청했다.
+- 노트북 연결이 aicampus_287로 바뀌어 Pi 192.168.0.159 접속이 끊겼다. 앞선 연결 aicampus_286으로 복원해 Pi에 접속했다. fresh 정지 스캔 12장 모두에서 새 후면 박스 면을 검출했다. 지지점 58–62개, 중앙 간격 11.58–11.91 mm, 직사각형 뒤 모서리로 연장한 최소 간격 3.20–4.12 mm, 면 각도 -2.21–-1.91°는 내부 라이다 추정이다. 원본은 `$HOME/.local/state/bimanual-robot/rear_box_parking/scan_20261016_174326.json`이다.
+- 기존 실행기에 `--rear-box-only`를 추가했다. 후방 라이다 최근접 깊이층→횡방향 직선 추정→stamped odom 면 추적→같은 guarded precision 경로로 후진하며 거리·각도를 함께 보정한다. 초기 정지를 확인하고, 가까운데 기울어져 있으면 기존 직진 이탈을 한 번 수행한다. 관측 대상은 최초 odom 면에 고정해 누적 이동·다른 면 최종 성공 오판을 막는다. 기존 전면 모드·HOME 등록·keepout·Collision Monitor·속도 설정은 보존했다.
+- 관련 682건·독립 638건 및 PC 명령 2건·production 4개 lint를 통과했다. Pi 순수 검출 120회 median 8.02 ms/p95 10.74 ms/최대 14.62 ms였다. source/install 4쌍 SHA·import 후 idle 실행기를 재시작했다. 첫 배포 복원본은 `$HOME/.local/state/jdamr/rear-box/20261016_175948/`다.
+- 첫 run `table_01_20261016_180006_0311aada`는 약 20 cm 직진 이탈 뒤 정적 검사에서 멈췄고 후진 이동은 0이었다. 실제 stepped 외곽 대신 `_reverse_footprint()`의 사각형을 사용한 과대 검사를 `_footprint_outline()`으로 고쳤다(padding이 있으면 기존 bounding fallback 유지). 재개 run `table_01_20261016_180401_03e297fb`는 이탈을 반복하지 않았고 약 5.4 mm 후진 후 다시 검사에서 정지했다.
+- 추가 원인은 world 고정 16방향 외접 support polygon의 과대 범위다. 실제 pose/관측 기반 20개 각도 조합 중 8개에서 cached=False/exact=True를 재현했다. 시작·끝 실제 외곽 변의 법선을 support 축에 더해 8개 모두 cached/exact=True로 수정했다. 전체 swept points와 sagitta 포함·지도·keepout은 유지한다. Pi 80회 median 12.53 ms/p95 13.65 ms/최대 16.47 ms, 독립 포함성 2,000건과 회귀를 통과했다.
+- `table_01_20261016_181236_dff590ad`는 이탈을 반복하지 않고 16.30 cm 후진했다. 마지막 raw 각도 -0.309° 한 프레임이 기존 0.3° 정렬 기준을 넘어 약 2.7 cm에서 정지했다. 후면 모드만 정지 8프레임의 원형 법선·signed offset 평균을 사용하고, 이동 중에도 같은 0.35초 필터로 법선·offset을 함께 갱신하도록 수정했다. 원시 대상 변경·timestamp·센서·정지 검사는 유지했다.
+- 최종 `table_01_20261016_181732_6a4c955f`는 현재 위치에서 17.51 mm 후진하고 `rear_box_parking_finished.confirmed=true`, CLI exit 0으로 완료했다. 최종 양 뒤 모서리 간격은 11.398/12.419 mm, 면 각도 0.12993°로 **라이다·차체 제원의 내부 추정**이다. 외부 줄자 정확도·반복성·충전 접촉 성공으로 해석하지 않는다. 대시보드 fresh odom(age 0.02초) 선속도/각속도0, spool request/running0을 확인했다.
+- 최종 관련 7개 스위트 766건 통과, 독립 후면 검토 40건·cached 검사 67건과 production/test lint 통과다. ROS overlay를 누락한 검증에서는 package index 조회 22건이 실패했고 올바른 overlay에서 같은 766건을 다시 실행해 모두 통과했다. 최종 service SHA `2c9d1f25a2248f0f7ca46f48c997f52b411b6d2ed052fef14b389df6bd672fc8`, reverse SHA `cbd1a6a95a8a88ff266c51a14daa24f15f1571177ac3c2c6ede6dcf3b5d41093`가 Pi source/install과 일치한다. 마지막 복원본은 Pi `$HOME/.local/state/jdamr/rear-box/20261016_181710/`, 진단·배포 receipt·최종 대시보드/결과는 PC `$HOME/.local/state/bimanual-robot/rear_box_parking/`에 있다. 4개 run의 `cycle_events.jsonl`은 양쪽 `$HOME/jdamr_data/map_20260930_manual/aligned/runs/`에 보존한다.
+- 사용자 대시보드와 다음 명령을 위해 Pi base PID50055·Nav2 PID51198·idle executor PID75956·dashboard PID4251, PC dashboard/link PID1212114/2496089를 유지한다. PC 종료는 `systemctl --user stop robot-dashboard robot-dashboard-link`, Pi 종료는 `sudo systemctl stop jdamr-ammr-dashboard jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. RGB-D/관측기는 inactive/PID0이며 새 상주 진단 프로세스를 남기지 않았다. 이번 모드는 기존 HOME 자동 복귀에 연결하지 않은 단독 접근이며 도크 좌표·충전 판정은 바꾸지 않았다.
+
 ## 2026-10-16 | 고정 테이블 탐색·관측 지연·연속 접근과 도크 반복 보정 수정
 
 - 기존 검증본 `4a60970`·0.12 m/s로 `table_01_20261016_162425_234ffa1b`를 급수대 관측점부터 재개했다. 급수대→1번→후진 도크를 실행기 기준 292.64초에 완료했다. 전면 우/좌 내부 간격은 급수대 8.84/12.34 mm, 1번 8.75/12.77 mm이며 동결 면·odom 추정이다. 외부 1 cm 정확도 성공으로 판정하지 않는다.

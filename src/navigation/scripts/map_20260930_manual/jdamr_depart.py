@@ -747,7 +747,8 @@ def run_cycle(args, state, table_id):
     requested_s = getattr(args, '_request_started_monotonic_s', time.monotonic())
     region = state['regions'][table_id]
     surface_mode = getattr(args, 'surface_mode', 'table_edge')
-    include_via = not args.dock_only and not args.skip_via
+    rear_box_only = getattr(args, 'rear_box_only', False)
+    include_via = not rear_box_only and not args.dock_only and not args.skip_via
     via = state['regions'].get(VIA_ID)
     if include_via and via is None:
         fail(f'{VIA_ID} region is required by the selected via mode')
@@ -785,9 +786,10 @@ def run_cycle(args, state, table_id):
                    f'--table-id {table_id} --region-xy {region["xy"][0]} {region["xy"][1]} '
                    f'--region-radius-m {region["radius_m"]} '
                    f'--log {pi_run_dir}/cycle_events.jsonl '
-                   f'--candidate-trial --execute --search --task-timeout-s {TASK_TIMEOUT_S} '
-                   f'--return-home --return-timeout-s {RETURN_TIMEOUT_S} '
-                   f'--operator-heartbeat {heartbeat} '
+                   f'--candidate-trial --execute --task-timeout-s {TASK_TIMEOUT_S} '
+                   + ('--rear-box-only ' if rear_box_only else
+                      f'--search --return-home --return-timeout-s {RETURN_TIMEOUT_S} ')
+                   + f'--operator-heartbeat {heartbeat} '
                    f'--surface-mode {surface_mode} '
                    + (' --home-only ' if args.dock_only else '')
                    + (' --graceful-final ' if args.graceful_final else '')
@@ -868,7 +870,7 @@ def run_cycle(args, state, table_id):
                 start_drop_monitor(run_dir, run)
             except Exception as error:  # diagnostics must not end run tracking mid-drive
                 log(f'monitor start failed ({error}); the run continues without it')
-        stops = ('dock only' if args.dock_only else
+        stops = ('rear box only' if rear_box_only else 'dock only' if args.dock_only else
                  f'{VIA_ID} -> {table_id}' if include_via else f'{table_id}')
         alerts = 'on' if load_state().get('operator_alerts', True) is not False else 'off'
         submission_label = 'SUBMISSION_UNCONFIRMED' if submission_uncertain else 'SUBMITTED'
@@ -1038,6 +1040,9 @@ def cmd_go(args):
     if with_via and surface_mode != 'table_edge':
         fail('--with-via is only valid with --surface-mode table_edge')
     tables = list(getattr(args, 'table_ids', None) or [args.table_id])
+    if getattr(args, 'rear_box_only', False) and (
+            len(tables) != 1 or args.dock_only or with_via or args.resume_parked_log):
+        fail('--rear-box-only requires one standalone parking attempt')
     if len(tables) > 1 and (args.skip_via or args.resume_at_observation
                             or args.resume_parked_log
                             or args.dock_only or args.route or args.region):
@@ -1094,6 +1099,12 @@ def go_one(args, table_id):
     if executor_failure is not None:
         fail(f'executor failed: {executor_failure["reason"]} '
              f'(code={executor_failure["code"]}); see the run log')
+    if getattr(args, 'rear_box_only', False):
+        parked = [e for e in events if e.get('event') == 'rear_box_parking_finished']
+        if not parked or parked[-1].get('confirmed') is not True:
+            fail('rear box parking not confirmed; see the run log')
+        log('후면 박스 1cm 주차 완료(라이다 내부 추정)')
+        return
     arrived = [e for e in events if e.get('event') == 'home_arrived']
     home = bool(arrived) and arrived[-1].get('confirmation', {}).get('confirmed') is True
     log(f'cycle ended: parked={"box_approach_finished" in names} '
@@ -1332,6 +1343,8 @@ def main():
     go.add_argument('--with-via', action='store_true',
                     help='explicitly include the water-station stop (already the default)')
     go.add_argument('--dock-only', action='store_true', help='return to the dock only (re-dock)')
+    go.add_argument('--rear-box-only', action='store_true',
+                    help='current-location rear LiDAR box parking, without transit')
     go.add_argument('--surface-mode', choices=('front', 'table_edge'), default='table_edge',
                     help='parking surface (default table_edge; use front for legacy box parking)')
     go.add_argument('--graceful-final', action='store_true',

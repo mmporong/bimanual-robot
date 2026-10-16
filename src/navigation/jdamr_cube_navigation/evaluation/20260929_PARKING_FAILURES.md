@@ -1643,3 +1643,21 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **검증·비이동 배포:** 관련 10개 테스트 파일 1,058건 통과(21.43초), 독립 6개 스위트 817건 통과(14.30초), production 5개 모듈 ament_flake8·AST·diff 검사가 통과했고 독립 리뷰는 PASS다. 초기 후보에서 새 깊이마다 정확 corridor 전체를 동기 검사해 PC 약 1초, 첫 캐시 후보도 Pi 30° 자세에서 p95 168 ms를 썼다. 최종본은 지도를 한 번 읽고 전체 swept footprint를 16방향 외접 support polygon과 최대 회전 sagitta로 포함시킨다. clearly-free 셀은 SAT를 생략하고 unknown/blocked/outside는 유지한다. 최종 Pi 실제 지도·외곽의 합성 각도별 30회 전체 callback p95는 -30/-12/0/+12/+30°에서 43.83/23.88/18.89/24.30/43.17 ms, 전체 최대 88.05 ms였다. 이는 계측한 조건의 처리 시간이며 실제 주행 성능이나 모든 시스템 부하에서의 지연 상한을 보장하지 않는다.
 
 소스·설치 5모듈 10경로 SHA 일치와 import, idle 실행기 PID70616 active, spool request/running 0을 확인했다. 백업은 `$HOME/.local/state/jdamr/continuous-fixed-station/20261016_171004/`, PC receipt·성능 결과는 `$HOME/.local/state/bimanual-robot/continuous_fixed_station/`이다. Nav2 PID51198·베이스 PID50055는 재시작하지 않았고 속도 0.12 m/s를 보존했다. 카메라·관측기는 inactive/PID0이며 새 주행은 보내지 않았다. 배포 후 대시보드 fresh odom 선속도0·각속도0, 수신 나이0.02초를 확인했다. 유지 서비스와 종료 명령은 PROGRESS 최상단에 있다. 기존 깊이-gap 대기 중 operator link가 끊기면 정지를 유지하며 즉시 반환하지 않고 상위 timeout까지 기다리는 동작은 후속 MEDIUM으로 남겼다. 이번 새 제어의 실차 재주행과 정확도 검증, 큰 반경 transit 경로 개선은 아직 남아 있다.
+
+
+### 22.14 후면 하단 박스 라이다 주차와 외곽 근사·각도 잡음 수정
+
+**요청·관측:** 사용자가 도크 뒤 라이다 높이에 박스를 배치하고 1 cm 후면 주차를 요청했다. 노트북 Wi-Fi를 aicampus_287에서 기존 aicampus_286으로 복원한 뒤 Pi 192.168.0.159에 연결했다. 정지 스캔 12장 모두 최근접 후면 층에서 58–62개 점·약 20–21 cm의 면을 검출했다. 중앙 간격 11.58–11.91 mm와 면 각도 -2.21–-1.91°로부터 차체 양 뒤 모서리에 연장한 최소 간격은 3.20–4.12 mm였다. 라이다 기반 추정이며 외부 실측은 없다. 원본은 PC `$HOME/.local/state/bimanual-robot/rear_box_parking/scan_20261016_174326.json`이다.
+
+**구현:** 저장소 루트에서 `python3 tools/jdamr/jdamr_depart.py go table_01 --rear-box-only --final-gap-m 0.01`을 사용한다. 기존 상주 실행기에 후면 박스 단독 모드를 더했고 테이블 경유·등록 HOME 복귀·깊이 카메라는 실행하지 않는다. stamped scan/odom 면을 추적하며 기존 precision 속도 경로로 후진한다. 가까운데 기울어진 초기 배치에서는 검증된 직진 이탈을 한 번 사용한다. 실제 차체 제원·정적 지도/keepout·Collision Monitor·링크/정지/입력 검사는 유지한다. 첫 승인 odom 평면에 대한 변화 검사로 먼 벽·다른 박스와의 대상 교체를 막는다.
+
+**실행별 관찰·원인·조치:**
+
+1. `table_01_20261016_180006_0311aada`: 약 20 cm 전진 이탈 뒤 후진 0 m에서 정적 검사 실패. 계단형 실제 외곽 대신 후진용 bounding rectangle을 사용한 과대 범위가 확인됐다. `_footprint_outline()`을 사용하도록 수정했다. runtime padding이 있으면 기존 보수적 fallback을 유지한다.
+2. `table_01_20261016_180401_03e297fb`: 이탈 반복 없이 약 5.4 mm 후진한 뒤 정적 검사 실패. 실제 지도·자세·각도 조합 8개에서 cached=False/exact=True를 재현했다. 고정 world 16축 외접 polygon에 시작·끝 실제 convex footprint 변의 법선을 추가하고 전체 swept point의 최대 support를 사용했다. exact sweep 포함과 sagitta padding은 유지하며 8개 모두 cached/exact=True로 확인했다. Pi 80회 p95 13.65 ms·최대 16.47 ms다.
+3. `table_01_20261016_181236_dff590ad`: 16.30 cm 후진해 약 2.7 cm까지 접근했다. raw 한 프레임 -0.309°가 기존 0.3° 정렬 기준을 넘어 종료됐다. 후면 stationary 관측은 마지막 프레임 대신 8프레임의 circular normal·signed offset 평균을 사용하고, 이동 중에도 같은 0.35초 법칙으로 heading/offset을 함께 필터링한다. 동일 filtered plane을 거리·명령·preview에 사용하며 raw 대상 변경 검사와 로그는 유지한다. 반복 stamp는 필터를 갱신하지 않고 timestamp 역행은 거부한다. 전면 주차의 기존 허용오차는 바꾸지 않았다.
+4. `table_01_20261016_181732_6a4c955f`: 현재 위치에서 17.51 mm 후진한 뒤 `rear_box_parking_finished.confirmed=true`, CLI exit 0으로 완료했다. 양 뒤 모서리 내부 간격 11.398/12.419 mm·각도 0.12993°다. 목표 10 mm의 기존 ±3 mm 판정을 양쪽 모두 통과했으며, 실제 외부 정확도·반복성·충전 접촉 성공은 미검증이다.
+
+**검증·배포:** 최종 관련 7개 스위트 766건을 통과했다. 최초 broad 검사에서는 ROS overlay를 빠뜨려 package index 조회 22건이 실패했고 overlay를 적용해 같은 스위트를 모두 통과했다. 독립 검토는 cached 검사 67건·무작위 swept point 포함성 2,000건, 최종 후면 40건과 lint를 확인해 PASS했다. Pi source/install의 최종 service SHA는 `2c9d1f25a2248f0f7ca46f48c997f52b411b6d2ed052fef14b389df6bd672fc8`, reverse SHA는 `cbd1a6a95a8a88ff266c51a14daa24f15f1571177ac3c2c6ede6dcf3b5d41093`다. 첫 전체 배포와 두 외곽 수정·최종 필터 배포의 receipt는 PC `$HOME/.local/state/bimanual-robot/rear_box_parking/`에 보존했다. 마지막 Pi 백업은 `$HOME/.local/state/jdamr/rear-box/20261016_181710/`다. 4개 run의 `cycle_events.jsonl`은 PC/Pi 양쪽 `$HOME/jdamr_data/map_20260930_manual/aligned/runs/`에 있다.
+
+**최종 상태·잔여 범위:** fresh odom age 0.02초·선속도/각속도0, spool request/running0을 확인했다. 사용자 화면과 다음 요청을 위해 Pi base PID50055·Nav2 PID51198·idle executor PID75956·dashboard PID4251, PC dashboard/link PID1212114/2496089를 유지한다. 종료는 PC `systemctl --user stop robot-dashboard robot-dashboard-link`, Pi `sudo systemctl stop jdamr-ammr-dashboard jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. RGB-D/관측기는 inactive/PID0이며 새 상주 진단 프로세스는 없다. 이 박스 상대 접근은 단독 모드이고 기존 HOME 자동 복귀의 마지막 단계에 아직 연결하지 않았다. 0 cm 접촉·충전 전류 판정, 외부 정밀도·반복성, 급수대→테이블 transit 회전 개선은 별도 후속 범위다.
