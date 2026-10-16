@@ -2384,6 +2384,7 @@ def test_table_fine_approach_uses_one_continuous_move_without_five_cm_stop(start
     node._zero_turn_final_approach.assert_called_once()
     call = node._zero_turn_final_approach.call_args
     assert call.kwargs['continuous_table'] is True
+    assert call.kwargs['allow_trim'] is False
     assert 'gap_m' not in call.kwargs
     node.observe_target.assert_not_called()
 
@@ -2400,6 +2401,54 @@ def test_default_parking_routes_one_centimetre_table_to_precision_approach():
     assert node._straight_final_approach(target, 0.065) == (True, 'odom')
     node._table_fine_approach.assert_called_once_with(target, 0.065)
     node._parking_final_approach.assert_not_called()
+
+
+@pytest.mark.parametrize('escape', [False, True])
+def test_near_skewed_table_backs_out_once_before_continuous_reapproach(escape):
+    node = object.__new__(BoxServiceRoute)
+    node._table_observation_context = ({}, (1.0, 0.0), 0.6)
+    node._final_gap_m = Mock(return_value=0.01)
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node._last_direct_motion_failure = 'table alignment requires more clearance'
+    node._zero_turn_final_approach = Mock(side_effect=[(False, None), (True, 'odom')])
+    node._leave_parked_pose = Mock(return_value=escape)
+    node.observe_target = Mock(return_value=_table_edge_final_target(1.0))
+    node.emit = Mock()
+    node.run_deadline_s = 123.0
+    result = node._table_fine_approach(_table_edge_final_target(1.0), 0.065)
+    assert result == ((True, 'odom') if escape else (False, None))
+    assert node._zero_turn_final_approach.call_count == (2 if escape else 1)
+    assert node.observe_target.call_count == int(escape)
+    assert node.run_deadline_s == 123.0
+
+
+def test_fine_table_starts_with_heading_error_without_a_stationary_trim():
+    node = object.__new__(BoxServiceRoute)
+    node.surface_mode = 'table_edge'
+    node.final_gap_override_m = 0.01
+    node.parking_contract = {'yaw_tolerance_rad': math.radians(1.0)}
+    node.box_front_half_width_m = 0.225
+    node.capture_stationary_pose = Mock(return_value=((0.5, 0.0, 0.12), {}))
+    node._odom_pose = Mock(return_value=(0.5, 0.0, 0.12))
+    node._frozen_in_odom = Mock(return_value=(RosPath(), lambda x, y, yaw: (x, y, yaw)))
+    node._rotate_in_place = Mock(side_effect=AssertionError('stationary trim requested'))
+    node._table_approach_update = Mock(return_value=lambda _pose: {
+        'remaining_m': 0.4, 'heading_rad': 0.0})
+    node._continuous_table_stop = None
+    node.emit = Mock()
+    target = _table_edge_final_target(1.0)
+
+    def drive(*_args, **kwargs):
+        assert kwargs['target_update']((0.5, 0.0, 0.12))['heading_rad'] == 0.0
+        node._continuous_table_stop = {'target': dict(target)}
+        return 0.4
+
+    node._drive_zero_turn = drive
+    reached, transform = node._table_fine_approach(target, 0.065)
+    assert reached and callable(transform)
+    node._rotate_in_place.assert_not_called()
 
 
 def test_final_table_leg_freezes_face_before_computing_distance():
@@ -2624,6 +2673,7 @@ def _moving_table_route(monkeypatch):
     node._final_gap_m = Mock(return_value=0.01)
     node._odom_pose = Mock(return_value=(0.0, 0.0, 0.0))
     node.emit = Mock()
+    node._table_approach_validator = Mock(return_value=Mock())
     node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(
         nanoseconds=int(clock[0] * 1e9)))
     monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
@@ -2652,10 +2702,95 @@ def test_moving_table_distance_uses_stamped_pose_and_revises_far_face(monkeypatc
     result = update((0.2, 0.0, 0.0))
     # Frame edge x=.43 plus stamped odom x=.1 is world x=.53, not current x=.63.
     assert result['remaining_m'] == pytest.approx(0.255)
+    assert result['heading_rad'] == pytest.approx(0.0)
     assert lookup.call_args.args[2].nanoseconds == 10_100_000_000
     assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
     update((0.21, 0.0, 0.0))
     assert lookup.call_count == 1
+
+
+@pytest.mark.parametrize('yaw', [-0.15, 0.15])
+def test_moving_table_supplies_observed_heading_in_stamped_odom(monkeypatch, yaw):
+    node, _clock, update, lookup = _moving_table_route(monkeypatch)
+    lookup.return_value.transform.rotation = SimpleNamespace(
+        x=0.0, y=0.0, z=math.sin(yaw / 2.0), w=math.cos(yaw / 2.0))
+    assert update((0.2, 0.0, 0.0))['heading_rad'] == pytest.approx(yaw)
+
+
+@pytest.mark.parametrize('clear', [False, True])
+def test_live_table_corridor_uses_frozen_map_conversion_and_runtime_footprint(monkeypatch, clear):
+    node = object.__new__(BoxServiceRoute)
+    node.registry = {'map': {'yaml_path': '/map.yaml'},
+                     'keepout': {'yaml_path': '/mask.yaml'}}
+    node.box_front_half_width_m = 0.225
+    node._final_gap_m = Mock(return_value=0.01)
+    node._reverse_footprint = Mock(return_value=[(-0.28, -0.275), (0.07, 0.275)])
+    monkeypatch.setattr(box_service, 'face_approach_waypoints', Mock(return_value=[
+        (0.0, 0.0, 0.1), (0.1, 0.01, 0.0)]))
+    check = Mock(return_value=clear)
+    factory = Mock(return_value=check)
+    monkeypatch.setattr(box_service, 'CachedStaticCorridorValidator', factory)
+    validate = node._table_approach_validator(
+        0.065, lambda pose: (pose[0] + 10.0, pose[1] - 1.0, pose[2] + 0.3))
+    if clear:
+        validate((0.0, 0.0, 0.1), (0.5, 0.0), (-1.0, 0.0), 0.08)
+    else:
+        with pytest.raises(RuntimeError, match='static corridor blocked'):
+            validate((0.0, 0.0, 0.1), (0.5, 0.0), (-1.0, 0.0), 0.08)
+    assert box_service.face_approach_waypoints.call_args.kwargs['command_heading_rad'] == 0.08
+    assert check.call_args.args[0] == [(10.0, -1.0, 0.4), (10.1, -0.99, 0.3)]
+    assert factory.call_args.args[2] == node._reverse_footprint.return_value
+
+
+def test_near_fine_table_reuses_face_and_skips_separate_alignment_goal(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = 0.01
+    mission.capture_stationary_pose.side_effect = [
+        ((0.5, 0.0, 0.0), {}), ((0.925, 0.0, 0.0), {})]
+    original = box_service.load_route('route')
+    original['waypoints'][-1].update(x=0.5, y=0.0)
+    mission.observe_target.return_value = _table_edge_final_target(1.0)
+
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': 0.065},
+                      'wheel_outer_width': {'value': 0.540}},
+        'table_01', (1, 0), 0.6, execute=True,
+        candidate_trial=True, resume_at_observation=True)
+
+    mission.execute.assert_not_called()
+    mission.plan_pose.assert_called_once()
+    mission._straight_final_approach.assert_called_once()
+    assert [call.args[2] for call in mission.observe_target.call_args_list] == [0.45, 0.01]
+    assert any(call.args == ('table_alignment_transit_skipped',)
+               and call.kwargs['reason'] == 'within_continuous_approach_range'
+               for call in mission.emit.call_args_list)
+
+
+@pytest.mark.parametrize('degrees,expected', [(2.377, None), (-0.798, None),
+                                             (20.0, 20.0), (-45.0, -30.0), (None, None)])
+def test_known_table_search_never_scans_away_from_center(degrees, expected):
+    budget = box_service.BoxSearchBudget(target_directed=True)
+    result = budget.next_rotation(None if degrees is None else math.radians(degrees))
+    if expected is None:
+        assert result is None
+    else:
+        assert result == pytest.approx(math.radians(expected))
+        assert budget.next_rotation(math.radians(degrees)) is None
+
+
+def test_known_table_view_recovery_uses_reverse_not_a_forward_goal_behind(mission):
+    mission.surface_mode = 'table_edge'
+    mission._reverse_smoother_ready = Mock(return_value=True)
+    mission._make_reverse_path = Mock(return_value='map_path')
+    mission._reverse_path_valid = Mock(return_value=True)
+    mission._frozen_in_odom = Mock(return_value=('odom_path', None))
+    mission._execute_reverse_path = Mock(return_value=True)
+    assert mission._reposition_search()
+    args = mission._make_reverse_path.call_args.args
+    assert args[1] == pytest.approx((-0.2, 0.0, 0.0))
+    mission.execute.assert_not_called()
+    mission.plan_pose.assert_not_called()
+    assert mission._execute_reverse_path.call_args.kwargs['send_path'] == 'odom_path'
 
 
 def test_moving_table_healthy_occlusion_keeps_same_odom_face(monkeypatch):

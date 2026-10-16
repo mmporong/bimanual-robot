@@ -2,8 +2,8 @@
 
 import argparse
 from collections import deque
-from itertools import islice
 import fcntl
+from itertools import islice
 import json
 import math
 from pathlib import Path
@@ -27,7 +27,9 @@ from jdamr_cube_navigation.parking import (
 from jdamr_cube_navigation.restaurant_service import (
     LIVE_APPROACH_MAX_M, OPERATOR_LINK_TIMEOUT_S, SCAN_MEMORY_KEYFRAMES,
     ServiceRoute, TRANSIT_VARIANTS)
+from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, verify_identity
+from jdamr_cube_navigation.surface_approach import face_approach_waypoints
 from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
 from nav2_msgs.action import Spin
 from nav_msgs.msg import Path as RosPath
@@ -164,10 +166,11 @@ class BoxObservationUnavailable(RuntimeError):
 class BoxSearchBudget:
     """Issue at most one full turn as fixed, auditable search increments."""
 
-    def __init__(self):
+    def __init__(self, *, target_directed=False):
         self.steps_used = 0
         self.cumulative_yaw_rad = 0.0
         self.reposition_attempted = False
+        self.target_directed = target_directed
 
     def next_rotation(self, toward_rad=None):
         """
@@ -178,6 +181,12 @@ class BoxSearchBudget:
         """
         if self.steps_used >= SEARCH_MAX_STEPS:
             return None
+        if self.target_directed:
+            # A registered table is not an unknown object somewhere in the room.
+            if (toward_rad is None or not math.isfinite(toward_rad)
+                    or abs(toward_rad) < SEARCH_DIRECTED_MIN_RAD
+                    or self.steps_used):
+                return None
         step = SEARCH_STEP_RAD
         if (toward_rad is not None and math.isfinite(toward_rad)
                 and abs(toward_rad) >= SEARCH_DIRECTED_MIN_RAD):
@@ -354,6 +363,11 @@ class BoxServiceRoute(ServiceRoute):
                     half_fov_rad = math.atan2(width / 2.0, fx)
             fields = {'robot_pose': list(robot_pose), 'region_xy': list(region_xy),
                       'half_fov_rad': half_fov_rad, 'depth_minimum_m': MINIMUM_DISTANCE_M}
+            fixed_heading = getattr(self, '_known_table_heading_rad', None)
+            self.last_table_heading_error_rad = (
+                None if fixed_heading is None else math.atan2(
+                    math.sin(fixed_heading - robot_pose[2]),
+                    math.cos(fixed_heading - robot_pose[2])))
             try:
                 mount_x, mount_y, _z, _roll, _pitch, mount_yaw = _validated_mount(
                     camera_mount)
@@ -839,6 +853,24 @@ class BoxServiceRoute(ServiceRoute):
 
     def _reposition_search(self):
         """Try one planned nearby view after a collision or timeout Spin result."""
+        if getattr(self, 'surface_mode', 'front') == 'table_edge':
+            if (self.stop_requested or not self._navigation_ready(require_fresh_amcl=False)
+                    or not self._parking_parameters_ready(reverse=True)
+                    or not self._reverse_smoother_ready()):
+                return False
+            actual, _ = self.capture_stationary_pose()
+            goal = (actual[0] - 0.2 * math.cos(actual[2]),
+                    actual[1] - 0.2 * math.sin(actual[2]), actual[2])
+            path = self._make_reverse_path(actual, goal, path_contract=ESCAPE_PATH_CONTRACT)
+            if not self._reverse_path_valid(path):
+                return False
+            frozen, _ = self._frozen_in_odom(path)
+            self.emit('box_search_reposition', motion='reverse_same_heading',
+                      candidate=dict(zip(('x', 'y', 'yaw'), goal)))
+            return self._execute_reverse_path(
+                path, path_contract=ESCAPE_PATH_CONTRACT, send_path=frozen,
+                goal_checker_id='alignment_goal_checker', final=False,
+                retry_goal=dict(zip(('x', 'y', 'yaw'), goal)))
         if (self.stop_requested or not self._navigation_ready(require_fresh_amcl=False)
                 or getattr(self, 'last_search_error_code', None) not in (
                     Spin.Result.COLLISION_AHEAD, Spin.Result.TIMEOUT)):
@@ -899,8 +931,16 @@ class BoxServiceRoute(ServiceRoute):
                         or not error.retryable):
                     raise
                 delta_yaw_rad = search_budget.next_rotation(
-                    toward_rad=getattr(self, 'last_region_bearing_error_rad', None))
+                    toward_rad=getattr(
+                        self, 'last_table_heading_error_rad'
+                        if getattr(search_budget, 'target_directed', False)
+                        else 'last_region_bearing_error_rad', None))
                 if delta_yaw_rad is None:
+                    if (getattr(search_budget, 'target_directed', False)
+                            and not search_budget.reposition_attempted):
+                        search_budget.reposition_attempted = True
+                        if self._reposition_search():
+                            continue
                     self.emit(
                         'box_search_exhausted', phase=phase,
                         reason=error.reason,
@@ -972,6 +1012,8 @@ class BoxServiceRoute(ServiceRoute):
             raise RuntimeError(
                 'final approach resume requires executed table_edge observation resume')
         route = load_route(route_path)
+        self._known_table_heading_rad = (
+            route['waypoints'][-1].get('yaw') if surface_mode == 'table_edge' else None)
         front_extent = geometry['front_to_wheel_axis']
         front_extent_m = front_extent['value']
         self.front_extent_provenance = front_extent
@@ -1044,22 +1086,30 @@ class BoxServiceRoute(ServiceRoute):
         if not self._camera_ready():
             self.emit('failed', phase='box_camera_ready')
             return False
-        search_budget = BoxSearchBudget()
+        search_budget = BoxSearchBudget(target_directed=surface_mode == 'table_edge')
         # Face alignment happens while depth is still in its usable range.
         straight_to_odom = None
         phases = ((('final_approach', FINAL_PLAN_GAP_M),)
                   if resume_at_final_approach else
                   (('face_alignment', 0.45), ('final_approach', FINAL_PLAN_GAP_M)))
+        continuous_target = None
         for phase, gap_m in phases:
             # Observation and face alignment are intermediate; the final approach,
             # its confirmation and the final capture keep the strict AMCL bounds.
             with self._localization_bound(phase == 'face_alignment'):
                 plan_input_recovered = False
                 while True:
-                    target = self._observe_with_search(
-                        camera_mount, front_extent_m, gap_m, region_xy,
-                        region_radius_m, phase=phase, search_enabled=search,
-                        search_budget=search_budget)
+                    if continuous_target is None:
+                        target = self._observe_with_search(
+                            camera_mount, front_extent_m, gap_m, region_xy,
+                            region_radius_m, phase=phase, search_enabled=search,
+                            search_budget=search_budget)
+                    else:
+                        target, continuous_target = continuous_target, None
+                        face = target['face_center_map_xy_m']
+                        normal = target['outward_normal_map_xy']
+                        target.update(x_m=face[0] + normal[0] * (front_extent_m + gap_m),
+                                      y_m=face[1] + normal[1] * (front_extent_m + gap_m))
                     target.update(id=phase, priority=1, approach_offset_m=0.5)
                     # The escape before any return starts from the last planned face.
                     self.last_box_face = {
@@ -1074,6 +1124,27 @@ class BoxServiceRoute(ServiceRoute):
                                                   if phase == 'final_approach' else gap_m))
                     if phase == 'face_alignment' and surface_mode == 'table_edge':
                         observed_pose = target.get('observation_robot_pose_map', actual)
+                        residual = math.atan2(
+                            math.sin(target['yaw_rad'] - observed_pose[2]),
+                            math.cos(target['yaw_rad'] - observed_pose[2]))
+                        normal = target['outward_normal_map_xy']
+                        face = target['face_center_map_xy_m']
+                        remaining_m = (sum((observed_pose[i] - face[i]) * normal[i]
+                                           for i in (0, 1))
+                                       - front_lead_m(front_extent_m,
+                                                      self.box_front_half_width_m, residual)
+                                       - self._final_gap_m())
+                        if (self._final_gap_m() <= 0.01
+                                and abs(residual) <= FINAL_TRIM_MAX_RAD
+                                and 0.0 < remaining_m / math.cos(residual) <= LIVE_APPROACH_MAX_M):
+                            # No motion occurred: reuse this accepted face for the final
+                            # plan, then refine it from stamped depth while approaching.
+                            continuous_target = dict(target)
+                            self.emit('table_alignment_transit_skipped',
+                                      reason='within_continuous_approach_range',
+                                      remaining_m=remaining_m, heading_error_rad=residual)
+                            planned = {'ok': True, 'alignment_skipped': True}
+                            break
                         forward_m = (
                             (target['x_m'] - observed_pose[0]) * math.cos(observed_pose[2])
                             + (target['y_m'] - observed_pose[1]) * math.sin(observed_pose[2]))
@@ -1285,7 +1356,8 @@ class BoxServiceRoute(ServiceRoute):
                 except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
                     self.emit('failed', phase='table_realignment_reobserve', reason=str(error))
                     return False
-                approached, straight_to_odom = self._straight_final_approach(target, front_extent_m)
+                approached, straight_to_odom = self._straight_final_approach(
+                    target, front_extent_m)
                 if not approached:
                     return False
                 previous_gap_m = None
@@ -1357,17 +1429,55 @@ class BoxServiceRoute(ServiceRoute):
         return self._parking_final_approach(target, front_extent_m)
 
     def _table_fine_approach(self, target, front_extent_m):
-        """Trim once, then consume moving depth in one continuous approach."""
-        camera_mount, region_xy, region_radius_m = self._table_observation_context
+        """Align to the observed normal while closing the gap in one move."""
         self._continuous_table_stop = None
-
-        def reobserve():
-            return self.observe_target(
-                camera_mount, front_extent_m, self._final_gap_m(),
-                region_xy, region_radius_m, reuse_configuration=True)
-
+        result = self._zero_turn_final_approach(
+            target, front_extent_m, allow_trim=False, continuous_table=True)
+        if (result[0] or getattr(self, '_last_direct_motion_failure', None)
+                != 'table alignment requires more clearance'):
+            return result
+        if (self.stop_requested or not self._operator_link_ready()
+                or not self._navigation_ready(require_fresh_amcl=False)):
+            return result
+        self.last_box_face = {
+            'face_center_map_xy_m': list(target['face_center_map_xy_m']),
+            'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
+        self.emit('table_alignment_clearance_reapproach', original_deadline_preserved=True)
+        if not self._leave_parked_pose():
+            return False, None
+        mount, region, radius = self._table_observation_context
+        try:
+            target.update(self.observe_target(
+                mount, front_extent_m, self._final_gap_m(), region, radius,
+                reuse_configuration=True))
+        except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
+            self._fail_final('table_clearance_reobserve_failed', detail=str(error))
+            return False, None
         return self._zero_turn_final_approach(
-            target, front_extent_m, reobserve=reobserve, continuous_table=True)
+            target, front_extent_m, allow_trim=False, continuous_table=True)
+
+    def _table_approach_validator(self, front_extent_m, to_map_pose):
+        """Check the nominal steering corridor with the verified static footprint."""
+        footprint = self._reverse_footprint()
+        map_yaml = Path(self.registry['map']['yaml_path'])
+        keepout_yaml = Path(self.registry['keepout']['yaml_path'])
+        check = CachedStaticCorridorValidator(map_yaml, keepout_yaml, footprint)
+
+        def validate(actual, face, normal, command_heading_rad):
+            try:
+                preview = face_approach_waypoints(
+                    actual, face, normal, front_extent_m, self.box_front_half_width_m,
+                    self._final_gap_m(), command_heading_rad=command_heading_rad)
+            except ValueError as error:
+                raise RuntimeError(str(error)) from error
+            if len(preview) == 1:
+                # The observed-face precision band already closes beyond the
+                # costmap plan endpoint. Its relative gap checks remain in force.
+                return
+            if not check([to_map_pose(pose) for pose in preview]):
+                raise RuntimeError('table approach static corridor blocked')
+
+        return validate
 
     def _table_approach_update(self, target, front_extent_m, to_odom):
         """Use moving depth at its odom timestamp, then carry the face to stop."""
@@ -1379,6 +1489,9 @@ class BoxServiceRoute(ServiceRoute):
             dx, dy = point[0] - anchor[0], point[1] - anchor[1]
             return cosine * dx + sine * dy, -sine * dx + cosine * dy
 
+        validate = self._table_approach_validator(
+            front_extent_m, lambda pose: (*to_map(pose), pose[2] - anchor[2]))
+
         face = target['face_center_map_xy_m']
         normal = target['outward_normal_map_xy']
         frozen_face = to_odom(*face, 0.0)[:2]
@@ -1389,8 +1502,22 @@ class BoxServiceRoute(ServiceRoute):
                  'stamp': initial.get('stamp_s'), 'input_stamp': initial.get('stamp_s'),
                  'basis': 'initial_stopped_face', 'start': self._odom_pose(),
                  'last_valid_s': time.monotonic(), 'occluded_frames': 0,
-                 'occlusion_latched': False}
+                 'occlusion_latched': False, 'precision_band_latched': False,
+                 'validated_input': None, 'validated_pose': None,
+                 'validated_heading': None}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
+
+        def validate_control(actual, filtered_heading):
+            heading_change = (math.inf if state['validated_heading'] is None else abs(
+                math.atan2(math.sin(filtered_heading - state['validated_heading']),
+                           math.cos(filtered_heading - state['validated_heading']))))
+            if (state['validated_input'] != state['input_stamp']
+                    or state['validated_pose'] is None
+                    or math.dist(actual[:2], state['validated_pose'][:2]) >= 0.025
+                    or heading_change >= FINAL_TRIM_TOLERANCE_RAD):
+                validate(actual, state['face'], state['normal'], filtered_heading)
+                state.update(validated_input=state['input_stamp'], validated_pose=actual,
+                             validated_heading=filtered_heading)
 
         def update(actual):
             observation = self.box_status
@@ -1409,7 +1536,7 @@ class BoxServiceRoute(ServiceRoute):
                 if state['input_stamp'] is not None and stamp < state['input_stamp']:
                     raise RuntimeError('table approach depth clock regressed')
                 state['input_stamp'] = stamp
-                if state['occlusion_latched']:
+                if state['occlusion_latched'] or state['precision_band_latched']:
                     pass
                 elif (observation.get('detected') is True
                         and observation.get('stable') is True
@@ -1470,6 +1597,9 @@ class BoxServiceRoute(ServiceRoute):
                        for i in (0, 1))
                    - front_lead_m(front_extent_m, self.box_front_half_width_m, residual))
             remaining = (gap - self._final_gap_m()) / math.cos(residual)
+            if gap <= FINAL_PLAN_GAP_M + 0.0005 and abs(residual) <= FINAL_TRIM_TOLERANCE_RAD:
+                state['precision_band_latched'] = True
+                state['basis'] = 'aligned_face_frozen_for_precision_band'
             travelled = math.hypot(actual[0] - state['start'][0],
                                    actual[1] - state['start'][1])
             if travelled + max(0.0, remaining) > LIVE_APPROACH_MAX_M:
@@ -1485,7 +1615,8 @@ class BoxServiceRoute(ServiceRoute):
                            'x_m': face_map[0] + normal_map[0] * offset,
                            'y_m': face_map[1] + normal_map[1] * offset},
                 'basis': state['basis'], 'observation_stamp_s': state['stamp']}
-            return {'remaining_m': remaining, 'basis': state['basis']}
+            return {'remaining_m': remaining, 'heading_rad': heading, 'basis': state['basis'],
+                    'validate_control': validate_control}
 
         return update
 
@@ -1601,7 +1732,8 @@ class BoxServiceRoute(ServiceRoute):
         after = math.atan2(math.sin(face_heading - actual[2]),
                            math.cos(face_heading - actual[2]))
         # The trim was judged in odom; a map heading this far off means AMCL moved.
-        if abs(after) > self.parking_contract['yaw_tolerance_rad']:
+        if (not continuous_table
+                and abs(after) > self.parking_contract['yaw_tolerance_rad']):
             self._fail_final('final_trim_missed', residual_deg=round(math.degrees(residual), 2),
                              residual_after_deg=round(math.degrees(after), 2))
             return False, None
@@ -1643,7 +1775,8 @@ class BoxServiceRoute(ServiceRoute):
             if stopped is not None:
                 target.update(stopped['target'])
             reached = travelled_m is not None and stopped is not None
-        elif getattr(self, 'surface_mode', 'front') == 'table_edge' and self._final_gap_m() <= 0.01:
+        elif (getattr(self, 'surface_mode', 'front') == 'table_edge'
+              and self._final_gap_m() <= 0.01):
             self._continuous_table_stop = None
             travelled_m = self._drive_zero_turn(travel_m, precision=True, hold_heading=True)
         else:

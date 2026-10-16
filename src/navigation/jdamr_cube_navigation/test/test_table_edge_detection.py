@@ -1,7 +1,9 @@
 """Synthetic projection tests for table-top front-edge detection."""
 
 from dataclasses import replace
+import json
 import math
+from pathlib import Path
 
 from jdamr_cube_navigation.box_top_detection import (
     CameraIntrinsics,
@@ -13,6 +15,7 @@ from jdamr_cube_navigation.table_edge_detection import (
     _visible_front_edge,
     detect_table_edge,
     TableEdgeConfig,
+    TableEdgeDetection,
 )
 
 import numpy as np
@@ -181,6 +184,68 @@ def test_stability_rejects_changed_table_edge_direction():
 
     assert results == [False] * 8
     assert tracker.frame_count == 1
+
+
+def test_stability_rejects_three_dimensional_line_tilt_with_same_xz_heading():
+    # Rotation about the optical Z axis changes a line's Y component while its
+    # projected X-Z heading and closest point can remain identical.
+    def observation(angle):
+        tangent = np.array((math.cos(angle), math.sin(angle), 0.0))
+        center = np.array((0.0, 0.0, 0.5))
+        return TableEdgeDetection(
+            center_x_m=0.0, center_y_m=0.0, front_distance_m=0.5,
+            edge_angle_rad=0.0, confidence=0.9, inlier_count=100,
+            plane_normal=(0.0, -1.0, 0.0), table_height_m=0.75,
+            width_m=0.4, depth_extent_m=0.5, plane_rms_m=0.001,
+            candidate_count=100, surface_kind='table_edge', edge_rms_m=0.001,
+            edge_endpoints_optical_m=tuple(tuple(p) for p in (
+                center - 0.2 * tangent, center + 0.2 * tangent)))
+
+    tracker = DetectionStability(required_frames=8)
+    frames = (observation(0.0), observation(math.radians(6.0)))
+    assert [tracker.update(frames[i % 2]) for i in range(8)] == [False] * 8
+
+
+@pytest.mark.parametrize('perpendicular_shift_m,stable', [(0.0, True), (0.06, False)])
+def test_stability_tracks_line_offset_instead_of_visible_segment_midpoint(
+        perpendicular_shift_m, stable):
+    configured = config()
+    depth, _, _ = _render_table(configured, background_depth_m=1.8)
+    detection = detect_table_edge(depth, INTRINSICS, configured)
+    assert detection is not None
+    endpoints = np.asarray(detection.edge_endpoints_optical_m)
+    tangent = endpoints[1] - endpoints[0]
+    tangent /= np.linalg.norm(tangent)
+    normal = np.cross(tangent, (0.0, 1.0, 0.0))
+    normal /= np.linalg.norm(normal)
+    shifted = endpoints + tangent * 0.10 + normal * perpendicular_shift_m
+    center = shifted.mean(axis=0)
+    changed = replace(detection, center_x_m=center[0], center_y_m=center[1],
+                      front_distance_m=center[2],
+                      edge_endpoints_optical_m=tuple(tuple(p) for p in shifted))
+    tracker = DetectionStability(required_frames=8)
+    results = [tracker.update((detection, changed)[i % 2]) for i in range(8)]
+    assert results == [False] * 7 + [stable]
+
+
+def test_recorded_stationary_water_face_stabilizes_despite_segment_cropping():
+    fixture = json.loads((Path(__file__).parent / 'fixtures/table_edge_stability_20261016.json')
+                         .read_text())
+    tracker = DetectionStability(required_frames=8)
+    results = []
+    for frame in fixture['observations']:
+        detection = TableEdgeDetection(
+            center_x_m=frame['lateral_error_m'], center_y_m=frame['vertical_position_m'],
+            front_distance_m=frame['front_distance_m'], width_m=frame['width_m'],
+            depth_extent_m=frame['depth_extent_m'],
+            edge_angle_rad=math.radians(frame['edge_angle_deg']),
+            plane_normal=tuple(frame['plane_normal']), plane_rms_m=frame['plane_rms_m'],
+            inlier_count=frame['inlier_count'], candidate_count=frame['candidate_count'],
+            confidence=frame['confidence'], surface_kind='table_edge',
+            edge_endpoints_optical_m=tuple(tuple(p) for p in frame['edge_endpoints_optical_m']),
+            table_height_m=frame['table_height_m'], edge_rms_m=frame['edge_rms_m'])
+        results.append(tracker.update(detection))
+    assert results == [False] * 7 + [True] * 9
 
 
 def test_stability_uses_table_edge_geometry_when_fitted_plane_tilt_varies():

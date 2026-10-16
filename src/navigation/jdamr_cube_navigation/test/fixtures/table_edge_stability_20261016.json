@@ -1,0 +1,824 @@
+{
+  "measured_at": "2026-10-16",
+  "source_run": "table_01_20261016_162425_234ffa1b",
+  "source_log_sha256": "3c64d592f41740774e7163731925b7a5532899726d68c8d0e675b8f82b616de7",
+  "scope": "persisted final 16 stationary water-station detections; not all 55 fresh frames",
+  "observations": [
+    {
+      "stamp_s": 1792135494.5715067,
+      "age_s": 0.14303231239318848,
+      "input_age_s": 0.004382610321044922,
+      "processing_duration_s": 0.13872719099163078,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 5,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652521311714139,
+          -0.019977402533085144,
+          0.8921354049480069
+        ],
+        [
+          0.288169809281101,
+          0.01065037378671335,
+          0.891206312897131
+        ]
+      ],
+      "table_height_m": 0.7701899579556244,
+      "edge_rms_m": 0.0024131968562035463,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.891670858922569,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.441670858922569,
+      "lateral_error_m": -0.08854116094515646,
+      "vertical_position_m": -0.004663514373185897,
+      "edge_angle_deg": -0.07065499881609479,
+      "width_m": 0.7540447892861322,
+      "height_m": 0.7701899579556244,
+      "depth_extent_m": 0.5151153794568135,
+      "plane_normal": [
+        0.03349148357794385,
+        -0.8402818198788989,
+        -0.5411143905947745
+      ],
+      "plane_rms_m": 0.0041335620503267865,
+      "inlier_count": 3986,
+      "candidate_count": 4966,
+      "confidence": 0.8494011172276473,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135494.8036337,
+      "age_s": 0.14793848991394043,
+      "input_age_s": 0.002176523208618164,
+      "processing_duration_s": 0.1458348979940638,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 6,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.46525796403662656,
+          -0.01977917383997719,
+          0.8918643215505115
+        ],
+        [
+          0.22794140303238264,
+          0.007805522661558003,
+          0.8916400392732675
+        ]
+      ],
+      "table_height_m": 0.770492142679108,
+      "edge_rms_m": 0.002717023803479821,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8917521804118895,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4417521804118895,
+      "lateral_error_m": -0.11865828050212196,
+      "vertical_position_m": -0.005986825589209593,
+      "edge_angle_deg": -0.018537852265496903,
+      "width_m": 0.6937480293943159,
+      "height_m": 0.770492142679108,
+      "depth_extent_m": 0.5126844865214552,
+      "plane_normal": [
+        0.03327665418281346,
+        -0.840632727564719,
+        -0.5405823541640057
+      ],
+      "plane_rms_m": 0.004169249613509284,
+      "inlier_count": 3975,
+      "candidate_count": 4968,
+      "confidence": 0.8381961730620577,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135495.0080092,
+      "age_s": 0.13819360733032227,
+      "input_age_s": 0.002353191375732422,
+      "processing_duration_s": 0.1359137599938549,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 7,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652425748333975,
+          -0.020231116785514806,
+          0.8923840120040805
+        ],
+        [
+          0.28817824829033317,
+          0.010442640698632892,
+          0.891164597367413
+        ]
+      ],
+      "table_height_m": 0.7703255910644677,
+      "edge_rms_m": 0.0029504724779510112,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8917743046857467,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4417743046857467,
+      "lateral_error_m": -0.08853216327153215,
+      "vertical_position_m": -0.004894238043440957,
+      "edge_angle_deg": -0.09273336893032472,
+      "width_m": 0.7540459555535673,
+      "height_m": 0.7703255910644677,
+      "depth_extent_m": 0.5126844865214552,
+      "plane_normal": [
+        0.033351983279075466,
+        -0.8406911443857491,
+        -0.5404868591952371
+      ],
+      "plane_rms_m": 0.004138049216664369,
+      "inlier_count": 3988,
+      "candidate_count": 4981,
+      "confidence": 0.8305246758050847,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135495.2120037,
+      "age_s": 0.1508195400238037,
+      "input_age_s": 0.004456520080566406,
+      "processing_duration_s": 0.1464534429978812,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 1,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.46525352107627804,
+          -0.019917781146053658,
+          0.891955151341742
+        ],
+        [
+          0.288178378599982,
+          0.010327768802316438,
+          0.8915957873270844
+        ]
+      ],
+      "table_height_m": 0.7702420533659158,
+      "edge_rms_m": 0.002867686418172278,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8917754693344132,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4417754693344132,
+      "lateral_error_m": -0.08853757123814801,
+      "vertical_position_m": -0.00479500617186861,
+      "edge_angle_deg": -0.02732833557510714,
+      "width_m": 0.7540388251833936,
+      "height_m": 0.7702420533659158,
+      "depth_extent_m": 0.5126606559048628,
+      "plane_normal": [
+        0.03347724944101634,
+        -0.8403629544750741,
+        -0.5409892591501134
+      ],
+      "plane_rms_m": 0.004122111478518721,
+      "inlier_count": 3976,
+      "candidate_count": 4957,
+      "confidence": 0.8336771917076709,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135495.446857,
+      "age_s": 0.14596319198608398,
+      "input_age_s": 0.002079010009765625,
+      "processing_duration_s": 0.14395304399658926,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 2,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.465255136252639,
+          -0.01989043015742309,
+          0.8918907251784978
+        ],
+        [
+          0.28817468717064476,
+          0.010439159635586571,
+          0.891403353614798
+        ]
+      ],
+      "table_height_m": 0.7702549195735406,
+      "edge_rms_m": 0.0023550465456686227,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8916470393966479,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4416470393966479,
+      "lateral_error_m": -0.08854022454099711,
+      "vertical_position_m": -0.004725635260918259,
+      "edge_angle_deg": -0.03706294719381929,
+      "width_m": 0.7540401981139293,
+      "height_m": 0.7702549195735406,
+      "depth_extent_m": 0.511012365614414,
+      "plane_normal": [
+        0.03348580051849849,
+        -0.840523781275865,
+        -0.5407388226060316
+      ],
+      "plane_rms_m": 0.004126771339946983,
+      "inlier_count": 3961,
+      "candidate_count": 4953,
+      "confidence": 0.8515450294624465,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135495.6487174,
+      "age_s": 0.15076398849487305,
+      "input_age_s": 0.0030198097229003906,
+      "processing_duration_s": 0.14781847500125878,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 3,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652565740191592,
+          -0.019806053232295045,
+          0.89174628776304
+        ],
+        [
+          0.22869590226836672,
+          0.007702566877260522,
+          0.8918759183402851
+        ]
+      ],
+      "table_height_m": 0.7705233022557605,
+      "edge_rms_m": 0.0027091196476445975,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8918111030516626,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.44181110305166255,
+      "lateral_error_m": -0.11828033587539624,
+      "vertical_position_m": -0.006051743177517261,
+      "edge_angle_deg": 0.010702872515614702,
+      "width_m": 0.6944975020329502,
+      "height_m": 0.7705233022557605,
+      "depth_extent_m": 0.511012365614414,
+      "plane_normal": [
+        0.03342095533774128,
+        -0.8405533896287003,
+        -0.5406968086904298
+      ],
+      "plane_rms_m": 0.004041983426776705,
+      "inlier_count": 3955,
+      "candidate_count": 4937,
+      "confidence": 0.8405090775040118,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135495.8814702,
+      "age_s": 0.13647007942199707,
+      "input_age_s": 0.004996538162231445,
+      "processing_duration_s": 0.13153630099259317,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 4,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652500808702346,
+          -0.02004571123645729,
+          0.891936907885886
+        ],
+        [
+          0.22868443833666272,
+          0.008041914536020068,
+          0.8914089383834352
+        ]
+      ],
+      "table_height_m": 0.7705578315727737,
+      "edge_rms_m": 0.00279860362528482,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8916729231346605,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4416729231346605,
+      "lateral_error_m": -0.11828282126678595,
+      "vertical_position_m": -0.0060018983502186105,
+      "edge_angle_deg": -0.043592612166942116,
+      "width_m": 0.6945029232625576,
+      "height_m": 0.7705578315727737,
+      "depth_extent_m": 0.5109885349978216,
+      "plane_normal": [
+        0.03360238767256415,
+        -0.8403518256030047,
+        -0.5409987881210087
+      ],
+      "plane_rms_m": 0.004069278372890028,
+      "inlier_count": 3972,
+      "candidate_count": 4969,
+      "confidence": 0.8369404191487909,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135496.0851367,
+      "age_s": 0.13925695419311523,
+      "input_age_s": 0.003203153610229492,
+      "processing_duration_s": 0.1361261470010504,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 5,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652461892070055,
+          -0.02013694195138473,
+          0.8920766814344648
+        ],
+        [
+          0.28817612213123733,
+          0.010452649928836811,
+          0.8916139778595527
+        ]
+      ],
+      "table_height_m": 0.7702429260836227,
+      "edge_rms_m": 0.0032046941654331642,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8918453296470088,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4418453296470088,
+      "lateral_error_m": -0.08853503353788408,
+      "vertical_position_m": -0.0048421460112739595,
+      "edge_angle_deg": -0.03518738199830145,
+      "width_m": 0.7540431794322238,
+      "height_m": 0.7702429260836227,
+      "depth_extent_m": 0.5160347709449111,
+      "plane_normal": [
+        0.03378379211741419,
+        -0.840280285563935,
+        -0.541098601996678
+      ],
+      "plane_rms_m": 0.004153317952018428,
+      "inlier_count": 3959,
+      "candidate_count": 4938,
+      "confidence": 0.8213826169775444,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135496.2896075,
+      "age_s": 0.14695286750793457,
+      "input_age_s": 0.0047206878662109375,
+      "processing_duration_s": 0.1423167589964578,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 6,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.46525010171209646,
+          -0.020036888780151318,
+          0.8920313341413878
+        ],
+        [
+          0.1909475997164388,
+          0.006538051509095923,
+          0.8914378469721641
+        ]
+      ],
+      "table_height_m": 0.7706732405723269,
+      "edge_rms_m": 0.00289073250706926,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.891734590556776,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.44173459055677594,
+      "lateral_error_m": -0.13715125099782882,
+      "vertical_position_m": -0.006749418635527697,
+      "edge_angle_deg": -0.051820206998318984,
+      "width_m": 0.6567358700714392,
+      "height_m": 0.7706732405723269,
+      "depth_extent_m": 0.5126844865214552,
+      "plane_normal": [
+        0.033546935984595884,
+        -0.8404318554232915,
+        -0.5408778970117093
+      ],
+      "plane_rms_m": 0.004113507234808517,
+      "inlier_count": 3984,
+      "candidate_count": 4962,
+      "confidence": 0.8330082464956396,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135496.5212488,
+      "age_s": 0.13175439834594727,
+      "input_age_s": 0.0020530223846435547,
+      "processing_duration_s": 0.12977298100304324,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 7,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652466312794711,
+          -0.020099245950354953,
+          0.8921135406986483
+        ],
+        [
+          0.2881800700470532,
+          0.01031637979494507,
+          0.8918946210537055
+        ]
+      ],
+      "table_height_m": 0.7701965746044592,
+      "edge_rms_m": 0.003196353042977907,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8920040808761769,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4420040808761769,
+      "lateral_error_m": -0.08853328061620894,
+      "vertical_position_m": -0.004891433077704941,
+      "edge_angle_deg": -0.01664816409166545,
+      "width_m": 0.7540404183378082,
+      "height_m": 0.7701965746044592,
+      "depth_extent_m": 0.5109084254800699,
+      "plane_normal": [
+        0.03375612545582821,
+        -0.8400713162755663,
+        -0.5414247016578095
+      ],
+      "plane_rms_m": 0.004208996603527955,
+      "inlier_count": 3969,
+      "candidate_count": 4952,
+      "confidence": 0.820783697839326,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135496.7270367,
+      "age_s": 0.1412186622619629,
+      "input_age_s": 0.002114534378051758,
+      "processing_duration_s": 0.1391760740079917,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 1,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.46525041647018217,
+          -0.01993332720916944,
+          0.8918388845995899
+        ],
+        [
+          0.3207520760216905,
+          0.010913920735637269,
+          0.8925576319597673
+        ]
+      ],
+      "table_height_m": 0.770180292524137,
+      "edge_rms_m": 0.00386115130888615,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8921982582796786,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.44219825827967857,
+      "lateral_error_m": -0.07224917022424585,
+      "vertical_position_m": -0.004509703236766085,
+      "edge_angle_deg": 0.052393191102178084,
+      "width_m": 0.7866078994689619,
+      "height_m": 0.770180292524137,
+      "depth_extent_m": 0.512580546387111,
+      "plane_normal": [
+        0.03348435103571542,
+        -0.840600580281957,
+        -0.5406195174661698
+      ],
+      "plane_rms_m": 0.004185553681847224,
+      "inlier_count": 3964,
+      "candidate_count": 4953,
+      "confidence": 0.7978908452794292,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135496.9608314,
+      "age_s": 0.1396336555480957,
+      "input_age_s": 0.0029096603393554688,
+      "processing_duration_s": 0.13678834000893403,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 2,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652560577298787,
+          -0.019855124744692094,
+          0.891739239058026
+        ],
+        [
+          0.22868490158067442,
+          0.008037407376801505,
+          0.8916853835957912
+        ]
+      ],
+      "table_height_m": 0.7704584565936352,
+      "edge_rms_m": 0.002219323803694441,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8917123113269085,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4417123113269085,
+      "lateral_error_m": -0.11828557807460215,
+      "vertical_position_m": -0.005908858683945295,
+      "edge_angle_deg": -0.00444661846542498,
+      "width_m": 0.6945012968003804,
+      "height_m": 0.7704584565936352,
+      "depth_extent_m": 0.5126844865214552,
+      "plane_normal": [
+        0.03373204252294059,
+        -0.8402675025713442,
+        -0.5411216807980869
+      ],
+      "plane_rms_m": 0.004184015726677543,
+      "inlier_count": 3973,
+      "candidate_count": 4962,
+      "confidence": 0.8553794152438539,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135497.1644168,
+      "age_s": 0.13836932182312012,
+      "input_age_s": 0.003998279571533203,
+      "processing_duration_s": 0.13444480700127315,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 3,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652541907728829,
+          -0.019869464373371507,
+          0.8918364344951644
+        ],
+        [
+          0.2286950718968204,
+          0.007746469414172976,
+          0.8919996482485896
+        ]
+      ],
+      "table_height_m": 0.7704725141760231,
+      "edge_rms_m": 0.003082610710531731,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.891918041371877,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.441918041371877,
+      "lateral_error_m": -0.11827955943803124,
+      "vertical_position_m": -0.006061497479599266,
+      "edge_angle_deg": 0.013475710056014379,
+      "width_m": 0.6944985569441539,
+      "height_m": 0.7704725141760231,
+      "depth_extent_m": 0.5088543385067589,
+      "plane_normal": [
+        0.033571992941499366,
+        -0.840419824936859,
+        -0.5408950352360754
+      ],
+      "plane_rms_m": 0.00416804091182048,
+      "inlier_count": 3978,
+      "candidate_count": 4953,
+      "confidence": 0.8254199705422618,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135497.3692179,
+      "age_s": 0.14821720123291016,
+      "input_age_s": 0.0032165050506591797,
+      "processing_duration_s": 0.14507804400636815,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 4,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.4652545625002308,
+          -0.019897616685658794,
+          0.8917883559962791
+        ],
+        [
+          0.22868759589480164,
+          0.007954308732819871,
+          0.8916459258136042
+        ]
+      ],
+      "table_height_m": 0.7705082188337946,
+      "edge_rms_m": 0.002235282719454191,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8917171409049417,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.4417171409049417,
+      "lateral_error_m": -0.11828348330271457,
+      "vertical_position_m": -0.005971653976419461,
+      "edge_angle_deg": -0.011759839244858149,
+      "width_m": 0.6945008777775805,
+      "height_m": 0.7705082188337946,
+      "depth_extent_m": 0.512580546387111,
+      "plane_normal": [
+        0.033618041754390045,
+        -0.8403737148880424,
+        -0.5409638126472707
+      ],
+      "plane_rms_m": 0.004114372185873748,
+      "inlier_count": 3965,
+      "candidate_count": 4952,
+      "confidence": 0.8559351498451233,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135497.5989091,
+      "age_s": 0.1423628330230713,
+      "input_age_s": 0.0028319358825683594,
+      "processing_duration_s": 0.13959892001003027,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 5,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.46525676133968996,
+          -0.019809832354220222,
+          0.8917754920244005
+        ],
+        [
+          0.2286936611746012,
+          0.0077691522028966575,
+          0.8917730710580373
+        ]
+      ],
+      "table_height_m": 0.7705173768398323,
+      "edge_rms_m": 0.00224074758345388,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8917742815412188,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.44177428154121884,
+      "lateral_error_m": -0.11828155008254439,
+      "vertical_position_m": -0.006020340075661782,
+      "edge_angle_deg": -0.00019988626054204402,
+      "width_m": 0.6944982284375001,
+      "height_m": 0.7705173768398323,
+      "depth_extent_m": 0.511012365614414,
+      "plane_normal": [
+        0.0334072439185358,
+        -0.8406502288217336,
+        -0.5405470829037323
+      ],
+      "plane_rms_m": 0.004124998383426341,
+      "inlier_count": 3973,
+      "candidate_count": 4962,
+      "confidence": 0.8555738604442927,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    },
+    {
+      "stamp_s": 1792135497.8058383,
+      "age_s": 0.14608168601989746,
+      "input_age_s": 0.0024776458740234375,
+      "processing_duration_s": 0.14371640198805835,
+      "frame_id": "camera_color_optical_frame",
+      "detected": true,
+      "stable": false,
+      "stable_frame_count": 6,
+      "surface_kind": "table_edge",
+      "edge_endpoints_optical_m": [
+        [
+          -0.46524856570512785,
+          -0.02007120199594664,
+          0.8918610368359293
+        ],
+        [
+          0.22868911426225452,
+          0.007928452285032259,
+          0.8917606104517072
+        ]
+      ],
+      "table_height_m": 0.7705398445114853,
+      "edge_rms_m": 0.0026591609293027826,
+      "edge_basis": "tabletop_front_boundary",
+      "camera_height_m": 1.26,
+      "camera_roll_rad": -0.03011453253432204,
+      "camera_pitch_rad": 0.5837829655386328,
+      "front_distance_m": 0.8918108236438183,
+      "desired_standoff_m": 0.45,
+      "maximum_depth_m": 1.3107590102987294,
+      "standoff_error_m": 0.44181082364381824,
+      "lateral_error_m": -0.11827972572143666,
+      "vertical_position_m": -0.006071374855457191,
+      "edge_angle_deg": -0.008291822297051431,
+      "width_m": 0.6945023357799643,
+      "height_m": 0.7705398445114853,
+      "depth_extent_m": 0.5126844865214552,
+      "plane_normal": [
+        0.03382891171082484,
+        -0.8403491636706628,
+        -0.5409888056609663
+      ],
+      "plane_rms_m": 0.00407415740458049,
+      "inlier_count": 3960,
+      "candidate_count": 4958,
+      "confidence": 0.8417428490011148,
+      "reason": "collecting_stability",
+      "control_ready": false,
+      "control_blocker": "camera_extrinsic_and_physical_validation"
+    }
+  ]
+}

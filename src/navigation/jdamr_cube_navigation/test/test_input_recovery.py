@@ -440,6 +440,7 @@ class _World:
         node.validate_reverse_path = _PathValidator(self)
         node.parking_parameters = _ParameterClient(self, 'controller_server')
         node.create_client = self.create_client
+        node.destroy_client = Mock(return_value=True)
         node.create_subscription = self.create_subscription
         node.destroy_subscription = self.destroy_subscription
         node._escape_publisher = lambda: SimpleNamespace(publish=self.publish_direct)
@@ -2490,15 +2491,14 @@ def test_staging_turns_once_in_odom_when_the_heading_is_far_off(monkeypatch, tmp
         ((stage['x'], stage['y'], stage['yaw'] + math.radians(150.0)), {}),
         ((stage['x'], stage['y'], stage['yaw']), {}),
         ((stage['x'], stage['y'], stage['yaw']), {})])
-    node._search_rotation_once = Mock(side_effect=lambda delta, **kw: spins.append(
-        (delta, kw)) or True)
+    node._rotate_in_place = Mock(side_effect=lambda delta: spins.append(delta) or delta)
+    node._search_rotation_once = Mock()
     node._verify_parking_stop = Mock(return_value=True)
     node._execute_reverse_path = Mock(return_value=True)
     assert node._go_home_reverse(HOME, True) is True
     assert len(spins) == 1
-    delta, options = spins[0]
-    assert delta == pytest.approx(math.radians(-150.0))
-    assert options == {'limit_rad': math.pi, 'event': 'staging_turn', 'measure_in_odom': True}
+    assert spins[0] == pytest.approx(math.radians(-150.0))
+    node._search_rotation_once.assert_not_called()
 
 
 def test_final_approach_defaults_to_rpp_and_graceful_is_opt_in(monkeypatch, tmp_path):
@@ -2685,7 +2685,8 @@ def test_staging_leaves_a_small_residual_to_the_curved_reverse(monkeypatch, tmp_
         ((stage['x'], stage['y'], stage['yaw'] + math.radians(132.8)), {}),
         ((stage['x'], stage['y'], stage['yaw'] - math.radians(3.9)), {}),
         ((stage['x'], stage['y'], stage['yaw'] - math.radians(3.9)), {})])
-    node._search_rotation_once = Mock(side_effect=lambda delta, **kw: spins.append(delta) or True)
+    node._rotate_in_place = Mock(side_effect=lambda delta: spins.append(delta) or delta)
+    node._search_rotation_once = Mock()
     node._verify_parking_stop = Mock(return_value=True)
     node._execute_reverse_path = Mock(return_value=True)
     assert node._go_home_reverse(HOME, True) is True

@@ -33,6 +33,9 @@ from jdamr_cube_navigation.service_destinations import (
     validate_gap_measurement,
     validate_registry, verify_identity,
 )
+from jdamr_cube_navigation.surface_approach import (
+    face_approach_command, filtered_face_heading,
+)
 from nav2_msgs.action import (
     ComputePathThroughPoses, FollowPath, NavigateThroughPoses, NavigateToPose, Spin)
 from nav2_msgs.srv import IsPathValid, Toggle
@@ -44,6 +47,7 @@ from rclpy.parameter import parameter_value_to_python
 from rclpy.signals import SignalHandlerOptions
 from rclpy.utilities import remove_ros_args
 from std_msgs.msg import String
+from std_srvs.srv import Empty
 from tf2_ros import TransformException
 import yaml
 
@@ -1388,8 +1392,10 @@ class ServiceRoute(CorridorRoute):
         The stop is sent early by the smoother's deceleration and the stop latency.
         Precision moves lower their speed with the requested distance and update
         that early-stop point from fresh odometry speed and the observed loop delay.
-        Heading hold feeds odometry yaw back into a bounded angular command while
-        keeping the same velocity-smoother, Collision Monitor and guard path.
+        Heading hold feeds odometry yaw back into a bounded angular command. A live
+        face may supply heading_rad as well as remaining_m; its filtered normal
+        replaces the starting heading and slows translation until alignment settles.
+        Both use the same velocity-smoother, Collision Monitor and guard path.
         It runs only between goals. Returns the signed travel along the start heading
         once the base is at rest, or None without odom.
         """
@@ -1409,7 +1415,8 @@ class ServiceRoute(CorridorRoute):
             return None
         state = {'travelled': 0.0, 'tf_failure': None,
                  'target_failure': None, 'remaining_m': abs(distance_m),
-                 'target_reached': False}
+                 'target_reached': False, 'face_heading': None, 'heading_updated_s': None,
+                 'validate_control': None}
         command = Twist()
 
         def measure():
@@ -1435,18 +1442,46 @@ class ServiceRoute(CorridorRoute):
                     state['remaining_m'] = remaining
                     next_speed = max(PRECISION_STRAIGHT_MIN_SPEED_MPS,
                                      remaining / PRECISION_STRAIGHT_TARGET_S)
-                    command.linear.x = min(command.linear.x, next_speed)
+                    if 'heading_rad' in update:
+                        heading = update['heading_rad']
+                        if (isinstance(heading, bool) or not isinstance(heading, (int, float))
+                                or not math.isfinite(heading)):
+                            raise RuntimeError('invalid live approach heading')
+                        now_s = time.monotonic()
+                        elapsed_s = (0.0 if state['heading_updated_s'] is None
+                                     else max(0.0, now_s - state['heading_updated_s']))
+                        state['face_heading'] = filtered_face_heading(
+                            state['face_heading'], heading, elapsed_s)
+                        state['heading_updated_s'] = now_s
+                        state['validate_control'] = update.get('validate_control')
+                        if (state['validate_control'] is not None
+                                and not callable(state['validate_control'])):
+                            raise RuntimeError('invalid table control validator')
+                    else:
+                        command.linear.x = min(command.linear.x, next_speed)
                 except (KeyError, TypeError, ValueError, RuntimeError) as error:
                     state['target_failure'] = str(error) or type(error).__name__
                     state['resume_speed_mps'] = command.linear.x
                     command.linear.x = command.angular.z = 0.0
             if hold_heading and state['target_failure'] is None:
+                heading = (start[2] if state['face_heading'] is None
+                           else state['face_heading'])
                 error_rad = math.atan2(
-                    math.sin(start[2] - yaw), math.cos(start[2] - yaw))
+                    math.sin(heading - yaw), math.cos(heading - yaw))
                 command.angular.z = max(
                     -PRECISION_HEADING_MAX_RADPS,
                     min(PRECISION_HEADING_MAX_RADPS,
                         PRECISION_HEADING_KP * error_rad))
+                if state['face_heading'] is not None:
+                    try:
+                        if state['validate_control'] is not None:
+                            state['validate_control']((x_m, y_m, yaw), heading)
+                        linear, angular = face_approach_command(state['remaining_m'], error_rad)
+                        command.linear.x = linear
+                        command.angular.z = angular
+                    except (ValueError, RuntimeError) as error:
+                        state['target_failure'] = str(error)
+                        command.linear.x = command.angular.z = 0.0
             return state['travelled']
 
         speed_mps = STRAIGHT_ESCAPE_SPEED_MPS
@@ -2054,6 +2089,34 @@ class ServiceRoute(CorridorRoute):
             if not self.finish_navigation():
                 raise RuntimeError('search rotation cancellation unconfirmed')
 
+    def _refresh_amcl_at_rest(self):
+        """Request a fresh scan update at rest without replacing the robot pose."""
+        motion = getattr(self, 'latest_motion', None)
+        if (self.stop_requested or motion is None
+                or time.monotonic() - motion[0] > 0.5
+                or abs(motion[1]) >= 0.01 or abs(motion[2]) >= 0.01
+                or self._guard_failure(False) or not self._operator_link_ready()):
+            return False
+        client = None
+        try:
+            requested_s = time.monotonic()
+            client = self.create_client(Empty, '/request_nomotion_update')
+            if not client.wait_for_service(timeout_sec=0.2):
+                return False
+            if self._wait(client.call_async(Empty.Request()), 1.0) is None:
+                return False
+            while time.monotonic() - requested_s < 1.5 and not self.stop_requested:
+                if (getattr(self, 'amcl_seen', None) or 0.0) > requested_s:
+                    self.emit('stationary_localization_refreshed', pose_reset=False)
+                    return True
+                spin_node(self, timeout_sec=0.05)
+        except (AttributeError, RuntimeError):
+            return False
+        finally:
+            if client is not None:
+                self.destroy_client(client)
+        return False
+
     def capture_stationary_pose(self, timeout_s=10.0):
         """Capture fresh TF while odometry and consecutive poses remain still."""
         gate = ParkingHold(self.parking_contract)
@@ -2062,6 +2125,7 @@ class ServiceRoute(CorridorRoute):
         revision = self.parking_motion_revision
         deadline_s = time.monotonic() + timeout_s
         last_guard_failure = None
+        refresh_attempted = False
         while time.monotonic() < deadline_s and not self.stop_requested:
             spin_node(self, timeout_sec=0.05)
             if self.parking_odom is None or self.amcl_covariance is None:
@@ -2070,6 +2134,9 @@ class ServiceRoute(CorridorRoute):
             if guard_failure:
                 last_guard_failure = guard_failure
                 target = None
+                if (not refresh_attempted and 'AMCL pose stale' in guard_failure):
+                    refresh_attempted = True
+                    self._refresh_amcl_at_rest()
                 continue
             received_s, stamp, linear_mps, angular_radps = self.parking_odom
             stamp_key = (stamp.sec, stamp.nanosec)
@@ -2442,7 +2509,7 @@ class ServiceRoute(CorridorRoute):
         127 s) and the final heading turn followed AMCL, which near the dock was
         off by about 15 deg, so the robot swung the long way and back. The
         position leg now replans only on an invalid, expired or new path; the
-        heading is set by odom Spins whose direction is fixed at rest. A position
+        heading uses damped odom turns whose direction is fixed at rest. A position
         offset is left to the curved pre-dock reverse (_dock_straight). Returns the
         last stationary pose, or None on failure.
         """
@@ -2459,9 +2526,10 @@ class ServiceRoute(CorridorRoute):
                          else STAGING_CORRECTION_MIN_RAD)
             if abs(delta_rad) <= limit_rad:
                 return actual
-            if not self._search_rotation_once(
-                    delta_rad, limit_rad=math.pi, event='staging_turn',
-                    measure_in_odom=True):
+            turned = self._rotate_in_place(delta_rad)
+            self.emit('staging_turn_observed', requested_yaw_rad=delta_rad,
+                      observed_yaw_rad=turned, observation_frame='odom', controller='damped')
+            if turned is None:
                 return None
         actual, _ = self.capture_stationary_pose()
         return actual
@@ -2736,13 +2804,20 @@ class ServiceRoute(CorridorRoute):
                 if not self._trim_dock_heading(dock):
                     return False
                 if not self._verify_parking_stop(
-                    len(self.waypoints) - 1, dock, None,
-                    contract={**home, 'reference_frame': 'odom'}):
+                        len(self.waypoints) - 1, dock, None,
+                        contract={**home, 'reference_frame': 'odom'}):
                     return False
                 odom_confirmation = dict(self.confirmation or {})
                 map_dock = dict(zip(('x', 'y', 'yaw'), target))
                 confirmed = self._verify_parking_stop(
                     len(self.waypoints) - 1, map_dock, None, contract=home)
+                if (not confirmed and (self.confirmation or {}).get('reason') in {
+                        'position_out_of_tolerance', 'yaw_out_of_tolerance'}
+                        and self._refresh_amcl_at_rest()):
+                    # Reconsider a quiet filter with a new scan before leaving a
+                    # stopped dock; the registered goal and tolerances stay fixed.
+                    confirmed = self._verify_parking_stop(
+                        len(self.waypoints) - 1, map_dock, None, contract=home)
                 self.emit('dock_pose_frame_confirmation',
                           odom_confirmation=odom_confirmation,
                           map_confirmation=self.confirmation, confirmed=confirmed)
