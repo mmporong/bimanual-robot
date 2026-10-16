@@ -598,17 +598,19 @@ def test_go_spools_table_edge_by_default_and_front_only_when_requested(env, monk
         seen.append(json.loads(next(s for s in pi.stdins if s))['argv'])
     assert seen[0][seen[0].index('--surface-mode') + 1] == 'table_edge'
     assert '--final-gap-m' not in seen[0]
-    assert '--via-id' not in seen[0]
+    assert seen[0][seen[0].index('--via-id') + 1] == d.VIA_ID
     assert seen[1][seen[1].index('--surface-mode') + 1] == 'front'
     assert seen[1][seen[1].index('--via-id') + 1] == d.VIA_ID
 
 
-def test_table_edge_via_is_spooled_only_when_explicitly_requested(env, monkeypatch):
+@pytest.mark.parametrize('with_via', [False, True])
+def test_table_edge_via_is_spooled_by_default_and_when_requested(
+        env, monkeypatch, with_via):
     monkeypatch.setattr(d.time, 'strftime', lambda _fmt: '20261013_100010')
     pi = ExecutorPi()
     monkeypatch.setattr(d, 'pi', pi)
     monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
-    d.run_cycle(go_args(surface_mode='table_edge', with_via=True),
+    d.run_cycle(go_args(surface_mode='table_edge', with_via=with_via),
                 d.load_state(), 'table_02')
     argv = json.loads(next(s for s in pi.stdins if s))['argv']
     assert argv[argv.index('--via-id') + 1] == d.VIA_ID
@@ -616,10 +618,11 @@ def test_table_edge_via_is_spooled_only_when_explicitly_requested(env, monkeypat
 
 
 @pytest.mark.parametrize('extra,route_name', [
-    ({}, 'table_02_direct_route.yaml'),
+    ({}, 'table_02_route.yaml'),
     ({'surface_mode': 'table_edge', 'with_via': True}, 'table_02_route.yaml'),
     ({'surface_mode': 'front'}, 'table_02_route.yaml'),
     ({'surface_mode': 'front', 'skip_via': True}, 'table_02_direct_route.yaml'),
+    ({'surface_mode': 'table_edge', 'skip_via': True}, 'table_02_direct_route.yaml'),
     ({'route': '/operator/current_table_route.yaml'}, '/operator/current_table_route.yaml'),
 ])
 def test_spooled_route_start_matches_the_selected_via_mode(
@@ -661,7 +664,7 @@ def test_departure_log_reports_the_spooled_stops(env, monkeypatch, capsys):
     monkeypatch.setattr(d, 'pi', pi)
     monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
     d.run_cycle(go_args(), d.load_state(), 'table_02')
-    assert 'SUBMITTED table_02 -> dock:' in capsys.readouterr().out
+    assert 'SUBMITTED water_station -> table_02 -> dock:' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize('extra', [

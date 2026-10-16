@@ -25,7 +25,8 @@ from jdamr_cube_navigation.parking import (
     MAXIMUM_FRONT_GAP_M, MINIMUM_FRONT_GAP_M, pose_errors,
 )
 from jdamr_cube_navigation.restaurant_service import (
-    OPERATOR_LINK_TIMEOUT_S, SCAN_MEMORY_KEYFRAMES, ServiceRoute, TRANSIT_VARIANTS)
+    LIVE_APPROACH_MAX_M, OPERATOR_LINK_TIMEOUT_S, SCAN_MEMORY_KEYFRAMES,
+    ServiceRoute, TRANSIT_VARIANTS)
 from jdamr_cube_navigation.service_destinations import load_registry, verify_identity
 from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
 from nav2_msgs.action import Spin
@@ -960,6 +961,7 @@ class BoxServiceRoute(ServiceRoute):
             raise RuntimeError(
                 'execution requires explicit nominal-camera candidate trial')
         self.candidate_trial = candidate_trial is True
+        self._continuous_table_stop = None
         self.box_geometry = geometry
         surface_mode = getattr(self, 'surface_mode', 'front')
         if surface_mode not in SURFACE_MODES:
@@ -1131,7 +1133,15 @@ class BoxServiceRoute(ServiceRoute):
         while True:
             final_depth_measurement = False
             confirmation_basis = 'pre_approach_surface'
-            if surface_mode == 'table_edge':
+            continuous_stop = getattr(self, '_continuous_table_stop', None)
+            if surface_mode == 'table_edge' and continuous_stop is not None:
+                target.update(continuous_stop['target'])
+                confirmation_basis = 'frozen_table_edge_odom_stop'
+                self.emit('table_continuous_stop_confirmed',
+                          tracking_basis=continuous_stop['basis'],
+                          last_observation_stamp_s=continuous_stop['observation_stamp_s'],
+                          final_depth_measurement=False)
+            elif surface_mode == 'table_edge':
                 try:
                     target = self.observe_target(
                         camera_mount, front_extent_m, self._final_gap_m(),
@@ -1307,70 +1317,131 @@ class BoxServiceRoute(ServiceRoute):
         return self._parking_final_approach(target, front_extent_m)
 
     def _table_fine_approach(self, target, front_extent_m):
-        """Reobserve at the existing 5 cm approach point before the final short leg."""
+        """Trim once, then consume moving depth in one continuous approach."""
         camera_mount, region_xy, region_radius_m = self._table_observation_context
+        self._continuous_table_stop = None
 
         def reobserve():
             return self.observe_target(
                 camera_mount, front_extent_m, self._final_gap_m(),
                 region_xy, region_radius_m)
 
-        actual, _ = self.capture_stationary_pose()
-        outward = target['outward_normal_map_xy']
+        return self._zero_turn_final_approach(
+            target, front_extent_m, reobserve=reobserve, continuous_table=True)
+
+    def _table_approach_update(self, target, front_extent_m, to_odom):
+        """Use moving depth at its odom timestamp, then carry the face to stop."""
+        camera_mount, region_xy, region_radius_m = self._table_observation_context
+        anchor = to_odom(0.0, 0.0, 0.0)
+        cosine, sine = math.cos(anchor[2]), math.sin(anchor[2])
+
+        def to_map(point):
+            dx, dy = point[0] - anchor[0], point[1] - anchor[1]
+            return cosine * dx + sine * dy, -sine * dx + cosine * dy
+
         face = target['face_center_map_xy_m']
-        face_heading = math.atan2(-outward[1], -outward[0])
-        residual = math.atan2(math.sin(face_heading - actual[2]),
-                              math.cos(face_heading - actual[2]))
-        nearest_gap_m = (sum((actual[i] - face[i]) * outward[i] for i in (0, 1))
-                         - front_lead_m(front_extent_m, self.box_front_half_width_m, residual))
-        if nearest_gap_m > FINAL_PLAN_GAP_M + FINAL_STRAIGHT_TOLERANCE_M:
-            self.emit('table_visible_alignment_stage', target_front_gap_m=FINAL_PLAN_GAP_M,
-                      estimated_nearest_front_gap_m=nearest_gap_m)
-            reached, stage_to_odom = self._zero_turn_final_approach(
-                target, front_extent_m, gap_m=FINAL_PLAN_GAP_M, reobserve=reobserve)
-            if not reached:
-                return False, None
-            try:
-                target.update(reobserve())
-            except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
-                if stage_to_odom is None or not self._fresh_table_edge_occlusion(error):
-                    self._fail_final('table_alignment_observation_lost', detail=str(error))
-                    return False, None
-                # The trim may have refreshed the target before the stage moved.
-                face = target['face_center_map_xy_m']
-                outward = target['outward_normal_map_xy']
-                face_x, face_y, _ = stage_to_odom(face[0], face[1], 0.0)
-                tip_x, tip_y, _ = stage_to_odom(
-                    face[0] + outward[0], face[1] + outward[1], 0.0)
-                frozen_target = {
-                    **target,
-                    'face_center_map_xy_m': (face_x, face_y),
-                    'outward_normal_map_xy': (tip_x - face_x, tip_y - face_y),
-                }
-                self.emit('table_alignment_edge_occluded',
-                          fresh_frames=error.fresh_frames,
-                          confirmation_basis='frozen_table_edge_odom_stop')
-                if (self.stop_requested or not self._operator_link_ready()
-                        or not self._navigation_ready(require_fresh_amcl=False)):
-                    self._fail_final('final_trim_interrupted')
-                    return False, None
-                return self._zero_turn_final_approach(
-                    frozen_target, front_extent_m, allow_trim=False,
-                    frozen_to_odom=stage_to_odom)
-        if (self.stop_requested or not self._operator_link_ready()
-                or not self._navigation_ready(require_fresh_amcl=False)):
-            self._fail_final('final_trim_interrupted')
-            return False, None
-        reached, to_odom = self._zero_turn_final_approach(
-            target, front_extent_m, reobserve=reobserve)
-        self.last_box_face = {
-            'face_center_map_xy_m': list(target['face_center_map_xy_m']),
-            'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
-        return reached, to_odom
+        normal = target['outward_normal_map_xy']
+        frozen_face = to_odom(*face, 0.0)[:2]
+        tip = to_odom(face[0] + normal[0], face[1] + normal[1], 0.0)
+        initial = getattr(self, 'box_status', {}) or {}
+        state = {'face': frozen_face,
+                 'normal': (tip[0] - frozen_face[0], tip[1] - frozen_face[1]),
+                 'stamp': initial.get('stamp_s'), 'input_stamp': initial.get('stamp_s'),
+                 'basis': 'initial_stopped_face', 'start': self._odom_pose(),
+                 'last_valid_s': time.monotonic(), 'occluded_frames': 0,
+                 'occlusion_latched': False}
+        quorum = getattr(self, 'observer_stable_frames', None) or 8
+
+        def update(actual):
+            observation = self.box_status
+            received = getattr(self, 'box_status_received_s', None)
+            if (not isinstance(observation, dict) or received is None
+                    or time.monotonic() - received > OBSERVER_SILENT_S):
+                raise RuntimeError('table approach observer silent')
+            stamp = observation.get('stamp_s')
+            now_s = self.get_clock().now().nanoseconds * 1e-9
+            if (isinstance(stamp, bool) or not isinstance(stamp, (float, int))
+                    or not math.isfinite(stamp) or not 0.0 <= now_s - stamp <= 0.5):
+                raise RuntimeError('table approach depth stale or future-dated')
+            if observation.get('reason') in OBSERVER_LATENCY_REASONS:
+                raise RuntimeError('table approach observer latency')
+            if stamp != state['input_stamp']:
+                if state['input_stamp'] is not None and stamp < state['input_stamp']:
+                    raise RuntimeError('table approach depth clock regressed')
+                state['input_stamp'] = stamp
+                if state['occlusion_latched']:
+                    pass
+                elif (observation.get('detected') is True
+                        and observation.get('stable') is True
+                        and observation.get('surface_kind') == 'table_edge'):
+                    if (observation.get('frame_id') != 'camera_color_optical_frame'
+                            or observation.get('control_ready') is not False):
+                        raise RuntimeError('invalid moving table observation frame or mode')
+                    try:
+                        transform = self.parking_tf.lookup_transform(
+                            'odom', self.parking_contract['robot_base_frame'],
+                            rclpy.time.Time(seconds=stamp)).transform
+                    except Exception as error:
+                        raise RuntimeError('table approach stamped odom TF unavailable') from error
+                    rotation = transform.rotation
+                    yaw = math.atan2(
+                        2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                        1.0 - 2.0 * (rotation.y ** 2 + rotation.z ** 2))
+                    measured = compute_table_edge_docking_target(
+                        observation, camera_mount,
+                        {'x_m': transform.translation.x, 'y_m': transform.translation.y,
+                         'yaw_rad': yaw}, requested_gap_m=self._final_gap_m(),
+                        front_extent_m=front_extent_m, now_s=now_s)
+                    face = measured['face_center_map_xy_m']
+                    normal = measured['outward_normal_map_xy']
+                    if math.dist(to_map(face), region_xy) > region_radius_m:
+                        raise RuntimeError('moving table face outside selected region')
+                    if sum(normal[i] * state['normal'][i] for i in (0, 1)) <= 0.0:
+                        raise RuntimeError('moving table normal reversed')
+                    state.update(face=face, normal=normal, stamp=stamp,
+                                 last_valid_s=time.monotonic(), occluded_frames=0,
+                                 basis='moving_depth_at_stamped_odom')
+                    self.emit('table_approach_face_updated', observation_stamp_s=stamp,
+                              reference_frame='odom', face_center_xy_m=list(face),
+                              outward_normal_xy=list(normal))
+                elif observation.get('reason') == 'no_table_edge_candidate':
+                    state['occluded_frames'] += 1
+                    if state['occluded_frames'] >= quorum:
+                        state['basis'] = 'healthy_edge_occlusion_frozen_odom'
+                        state['occlusion_latched'] = True
+                elif time.monotonic() - state['last_valid_s'] > OBSERVER_SILENT_S:
+                    raise RuntimeError('table approach stable face unavailable')
+            heading = math.atan2(-state['normal'][1], -state['normal'][0])
+            residual = math.atan2(math.sin(heading - actual[2]),
+                                  math.cos(heading - actual[2]))
+            if abs(residual) > FINAL_TRIM_MAX_RAD:
+                raise RuntimeError('moving table face heading outside approach range')
+            gap = (sum((actual[i] - state['face'][i]) * state['normal'][i]
+                       for i in (0, 1))
+                   - front_lead_m(front_extent_m, self.box_front_half_width_m, residual))
+            remaining = (gap - self._final_gap_m()) / math.cos(residual)
+            travelled = math.hypot(actual[0] - state['start'][0],
+                                   actual[1] - state['start'][1])
+            if travelled + max(0.0, remaining) > LIVE_APPROACH_MAX_M:
+                raise RuntimeError('live table approach exceeds bounded travel')
+            face_map = to_map(state['face'])
+            normal_map = (cosine * state['normal'][0] + sine * state['normal'][1],
+                          -sine * state['normal'][0] + cosine * state['normal'][1])
+            offset = front_extent_m + self._final_gap_m()
+            self._continuous_table_stop = {
+                'target': {**target, 'face_center_map_xy_m': face_map,
+                           'outward_normal_map_xy': normal_map,
+                           'yaw_rad': math.atan2(-normal_map[1], -normal_map[0]),
+                           'x_m': face_map[0] + normal_map[0] * offset,
+                           'y_m': face_map[1] + normal_map[1] * offset},
+                'basis': state['basis'], 'observation_stamp_s': state['stamp']}
+            return {'remaining_m': remaining, 'basis': state['basis']}
+
+        return update
 
     def _zero_turn_final_approach(self, target, front_extent_m, *, gap_m=None,
                                   reobserve=None, realign_attempt=0, allow_trim=True,
-                                  frozen_to_odom=None):
+                                  frozen_to_odom=None, continuous_table=False):
         """
         Turn out the residual to the re-observed face in place, then close the gap straight.
 
@@ -1460,7 +1531,7 @@ class BoxServiceRoute(ServiceRoute):
                     return self._zero_turn_final_approach(
                         target, front_extent_m, gap_m=gap_m, reobserve=reobserve,
                         realign_attempt=realign_attempt + 1, allow_trim=allow_trim,
-                        frozen_to_odom=frozen_to_odom)
+                        frozen_to_odom=frozen_to_odom, continuous_table=continuous_table)
                 if abs(observed_residual) > min(
                         self.parking_contract['yaw_tolerance_rad'], FINAL_HEADING_TRIM_RAD):
                     self._fail_final('table_alignment_not_converged',
@@ -1482,7 +1553,7 @@ class BoxServiceRoute(ServiceRoute):
         lead_m = front_lead_m(front_extent_m, getattr(self, 'box_front_half_width_m', 0.0), after)
         requested_gap_m = self._final_gap_m() if gap_m is None else gap_m
         travel_m = (distance_m - lead_m - requested_gap_m) / math.cos(after)
-        if not math.isfinite(travel_m) or not 0.0 < travel_m <= 0.6:
+        if not math.isfinite(travel_m) or not 0.0 < travel_m <= LIVE_APPROACH_MAX_M:
             self._fail_final('final_approach_unavailable', travel_m=self._json_scalar(travel_m))
             return False, None
         if reobserve is not None and (
@@ -1503,12 +1574,24 @@ class BoxServiceRoute(ServiceRoute):
         self.emit('final_approach_straight', travel_m=travel_m,
                   heading_basis='trimmed' if allow_trim else 'frozen_odom',
                   controller_id='zero_turn', target_front_gap_m=requested_gap_m)
-        if getattr(self, 'surface_mode', 'front') == 'table_edge' and self._final_gap_m() <= 0.01:
+        if continuous_table:
+            update = self._table_approach_update(target, front_extent_m, to_odom)
+            self.emit('table_continuous_approach_started', travel_m=travel_m,
+                      target_front_gap_m=requested_gap_m)
+            travelled_m = self._drive_zero_turn(
+                travel_m, precision=True, hold_heading=True, target_update=update)
+            stopped = getattr(self, '_continuous_table_stop', None)
+            if stopped is not None:
+                target.update(stopped['target'])
+            reached = travelled_m is not None and stopped is not None
+        elif getattr(self, 'surface_mode', 'front') == 'table_edge' and self._final_gap_m() <= 0.01:
+            self._continuous_table_stop = None
             travelled_m = self._drive_zero_turn(travel_m, precision=True, hold_heading=True)
         else:
             travelled_m = self._drive_zero_turn(travel_m)
-        reached = (travelled_m is not None
-                   and travelled_m >= travel_m - FINAL_STRAIGHT_TOLERANCE_M)
+        if not continuous_table:
+            reached = (travelled_m is not None
+                       and travelled_m >= travel_m - FINAL_STRAIGHT_TOLERANCE_M)
         if not reached:
             self.emit('final_approach_short', travel_m=travel_m,
                       travelled_m=None if travelled_m is None else round(travelled_m, 4))

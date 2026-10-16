@@ -2323,36 +2323,20 @@ def test_fine_trim_residual_is_judged_by_final_heading_contract(remaining_deg, r
     assert node._drive_zero_turn.call_count == int(reached_expected)
 
 
-@pytest.mark.parametrize('start_x, stages', [(0.50, [0.05, None]), (0.90, [None])])
-def test_table_fine_approach_reobserves_at_visible_stage_without_retreat(start_x, stages):
+@pytest.mark.parametrize('start_x', [0.50, 0.90])
+def test_table_fine_approach_uses_one_continuous_move_without_five_cm_stop(start_x):
     node = object.__new__(BoxServiceRoute)
-    node.stop_requested = False
-    node._operator_link_ready = Mock(return_value=True)
-    node._navigation_ready = Mock(return_value=True)
-    node.surface_mode = 'table_edge'
-    node.final_gap_override_m = 0.01
-    node.box_front_half_width_m = 0.225
     node._table_observation_context = ({}, (1.0, 0.0), 0.6)
-    node.capture_stationary_pose = Mock(return_value=((start_x, 0.0, 0.0), {}))
-    fresh = _table_edge_final_target(1.01)
-    node.observe_target = Mock(return_value=fresh)
-    calls = []
-
-    def approach(target, extent, **kwargs):
-        calls.append((dict(target), extent, kwargs))
-        return True, 'odom'
-
-    node._zero_turn_final_approach = Mock(side_effect=approach)
-    node.emit = Mock()
+    node._final_gap_m = Mock(return_value=0.01)
+    node.observe_target = Mock()
+    node._zero_turn_final_approach = Mock(return_value=(True, 'odom'))
     target = _table_edge_final_target(1.0)
     assert node._table_fine_approach(target, 0.065) == (True, 'odom')
-    assert [item[2].get('gap_m') for item in calls] == stages
-    assert node.observe_target.call_count == len(stages) - 1
-    if len(stages) > 1:
-        assert calls[-1][0]['face_center_map_xy_m'] == (1.01, 0.0)
-        assert callable(calls[0][2]['reobserve'])
-    assert callable(calls[-1][2]['reobserve'])
-    assert 'allow_trim' not in calls[-1][2]
+    node._zero_turn_final_approach.assert_called_once()
+    call = node._zero_turn_final_approach.call_args
+    assert call.kwargs['continuous_table'] is True
+    assert 'gap_m' not in call.kwargs
+    node.observe_target.assert_not_called()
 
 
 def test_default_parking_routes_one_centimetre_table_to_precision_approach():
@@ -2440,22 +2424,6 @@ def test_occluded_table_escape_keeps_frozen_odom_face_after_amcl_shift():
     assert node.last_box_face['reference_frame'] == 'odom'
 
 
-def test_table_fine_approach_never_closes_final_leg_after_stage_observation_loss():
-    node = object.__new__(BoxServiceRoute)
-    node.stop_requested = False
-    node._operator_link_ready = Mock(return_value=True)
-    node._navigation_ready = Mock(return_value=True)
-    node.surface_mode = 'table_edge'
-    node.final_gap_override_m = 0.01
-    node.box_front_half_width_m = 0.225
-    node._table_observation_context = ({}, (1.0, 0.0), 0.6)
-    node.capture_stationary_pose = Mock(return_value=((0.5, 0.0, 0.0), {}))
-    node.observe_target = Mock(side_effect=RuntimeError('depth unavailable'))
-    node._zero_turn_final_approach = Mock(return_value=(True, 'odom'))
-    node.emit = Mock()
-    assert node._table_fine_approach(_table_edge_final_target(1.0), 0.065) == (False, None)
-    node._zero_turn_final_approach.assert_called_once()
-    assert node.emit.call_args.kwargs['reason'] == 'table_alignment_observation_lost'
 
 
 def test_zero_turn_remeasures_face_after_rotation_before_computing_final_distance():
@@ -2511,28 +2479,6 @@ def test_zero_turn_never_advances_using_pre_turn_face_when_new_observation_fails
     assert node.emit.call_args.kwargs['reason'] == 'table_post_trim_observation_lost'
 
 
-def test_table_fine_approach_does_not_dispatch_final_leg_when_link_lost_during_observation():
-    node = object.__new__(BoxServiceRoute)
-    node.stop_requested = False
-    node._operator_link_ready = Mock(return_value=True)
-    node._navigation_ready = Mock(return_value=True)
-    node.surface_mode = 'table_edge'
-    node.final_gap_override_m = 0.01
-    node.box_front_half_width_m = 0.225
-    node._table_observation_context = ({}, (1.0, 0.0), 0.6)
-    node.capture_stationary_pose = Mock(return_value=((0.5, 0.0, 0.0), {}))
-    target = _table_edge_final_target(1.0)
-
-    def observe(*_args):
-        node._operator_link_ready.return_value = False
-        return target
-
-    node.observe_target = Mock(side_effect=observe)
-    node._zero_turn_final_approach = Mock(return_value=(True, 'odom'))
-    node.emit = Mock()
-    assert node._table_fine_approach(target, 0.065) == (False, None)
-    node._zero_turn_final_approach.assert_called_once()
-    assert node.emit.call_args.kwargs['reason'] == 'final_trim_interrupted'
 
 
 def test_near_table_alignment_never_navigates_to_a_behind_goal(mission):
@@ -2571,28 +2517,87 @@ def test_recovered_depth_history_does_not_block_fresh_table_occlusion():
     assert not node._fresh_table_edge_occlusion(error)
 
 
-def test_table_stage_occlusion_closes_remaining_gap_in_original_odom():
+
+
+def _moving_table_route(monkeypatch):
     node = object.__new__(BoxServiceRoute)
-    node.stop_requested = False
-    node._operator_link_ready = Mock(return_value=True)
-    node._navigation_ready = Mock(return_value=True)
-    node.surface_mode = 'table_edge'
-    node.final_gap_override_m = 0.01
+    clock = [10.0]
+    mount = {'camera_mount': {
+        'status': 'derived', 'parent_frame': 'base_link', 'child_frame': 'camera_link',
+        'transform': {'x_m': -0.275, 'y_m': 0.0, 'z_m': 1.0,
+                      'roll_rad': 0.0, 'pitch_rad': 0.0, 'yaw_rad': 0.0}}}
+    node._table_observation_context = (mount, (0.5, 0.0), 0.6)
+    node.parking_contract = {'robot_base_frame': 'base_link'}
     node.box_front_half_width_m = 0.225
-    node._table_observation_context = ({}, (1.0, 0.0), 0.6)
-    node.capture_stationary_pose = Mock(return_value=((0.5, 0.0, 0.0), {}))
-    node.observe_target = Mock(side_effect=box_service.BoxObservationUnavailable(
-        'stable detected table_edge surface is required', retryable=True,
-        fresh_frames=24, required_fresh_frames=8,
-        fresh_rejection_reasons={'no_table_edge_candidate'},
-        latency_reasons={'box observation is stale or future-dated'}))
-    to_odom = lambda x, y, yaw: (x + 2.0, y - 1.0, yaw)
-    node._zero_turn_final_approach = Mock(side_effect=[(True, to_odom), (True, to_odom)])
+    node.observer_stable_frames = 2
+    node._final_gap_m = Mock(return_value=0.01)
+    node._odom_pose = Mock(return_value=(0.0, 0.0, 0.0))
     node.emit = Mock()
-    target = _table_edge_final_target(1.0)
-    assert node._table_fine_approach(target, 0.065) == (True, to_odom)
-    call = node._zero_turn_final_approach.call_args
-    assert call.args[0]['face_center_map_xy_m'] == pytest.approx((3.0, -1.0))
-    assert call.args[0]['outward_normal_map_xy'] == pytest.approx((-1.0, 0.0))
-    assert call.kwargs == {'allow_trim': False, 'frozen_to_odom': to_odom}
-    assert target['face_center_map_xy_m'] == (1.0, 0.0)
+    node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(
+        nanoseconds=int(clock[0] * 1e9)))
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+    node.box_status = {'stamp_s': 9.99}
+    node.box_status_received_s = clock[0]
+    lookup = Mock(return_value=SimpleNamespace(transform=SimpleNamespace(
+        translation=SimpleNamespace(x=0.1, y=0.0),
+        rotation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))))
+    node.parking_tf = SimpleNamespace(lookup_transform=lookup)
+    update = node._table_approach_update(
+        _table_edge_final_target(0.5), 0.065, lambda x, y, yaw: (x, y, yaw))
+    clock[0] = 10.2
+    node.box_status = {
+        'stamp_s': 10.1, 'frame_id': 'camera_color_optical_frame',
+        'control_ready': False, 'detected': True, 'stable': True,
+        'surface_kind': 'table_edge', 'confidence': 0.9, 'reason': 'stable_detection',
+        'table_height_m': 0.75, 'edge_rms_m': 0.001,
+        'plane_normal': [0.0, -1.0, 0.0],
+        'edge_endpoints_optical_m': [[-0.4, 0.25, 0.705], [0.4, 0.25, 0.705]]}
+    node.box_status_received_s = clock[0]
+    return node, clock, update, lookup
+
+
+def test_moving_table_distance_uses_stamped_pose_and_revises_far_face(monkeypatch):
+    node, _clock, update, lookup = _moving_table_route(monkeypatch)
+    result = update((0.2, 0.0, 0.0))
+    # Frame edge x=.43 plus stamped odom x=.1 is world x=.53, not current x=.63.
+    assert result['remaining_m'] == pytest.approx(0.255)
+    assert lookup.call_args.args[2].nanoseconds == 10_100_000_000
+    assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
+    update((0.21, 0.0, 0.0))
+    assert lookup.call_count == 1
+
+
+def test_moving_table_healthy_occlusion_keeps_same_odom_face(monkeypatch):
+    node, clock, update, lookup = _moving_table_route(monkeypatch)
+    valid = deepcopy(node.box_status)
+    update((0.2, 0.0, 0.0))
+    for stamp in (10.3, 10.4):
+        clock[0] = stamp
+        node.box_status = {'stamp_s': stamp, 'reason': 'no_table_edge_candidate',
+                           'detected': False, 'stable': False}
+        node.box_status_received_s = stamp
+        result = update((0.35, 0.0, 0.0))
+    assert result['remaining_m'] == pytest.approx(0.105)
+    assert result['basis'] == 'healthy_edge_occlusion_frozen_odom'
+    assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
+    clock[0] = 10.5
+    node.box_status = {**valid, 'stamp_s': clock[0],
+                       'edge_endpoints_optical_m': [[-0.4, 0.25, 0.805], [0.4, 0.25, 0.805]]}
+    node.box_status_received_s = clock[0]
+    assert update((0.35, 0.0, 0.0))['remaining_m'] == pytest.approx(0.105)
+    assert lookup.call_count == 1
+
+
+@pytest.mark.parametrize('failure', ['stale', 'latency', 'tf', 'range'])
+def test_moving_table_rejects_unhealthy_inputs_and_unbounded_extension(monkeypatch, failure):
+    node, clock, update, lookup = _moving_table_route(monkeypatch)
+    if failure == 'stale':
+        clock[0] = 11.0
+    elif failure == 'latency':
+        node.box_status['reason'] = 'camera_info_missing'
+    elif failure == 'tf':
+        lookup.side_effect = RuntimeError('TF not buffered')
+    else:
+        node.box_status['edge_endpoints_optical_m'] = [[-0.4, 0.25, 1.0], [0.4, 0.25, 1.0]]
+    with pytest.raises(RuntimeError):
+        update((0.2, 0.0, 0.0))

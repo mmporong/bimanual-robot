@@ -1,0 +1,171 @@
+schema_version: 1
+frame_id: map
+source_scan: $HOME/jdamr_data/map_20260930_manual/aligned/runs/table_dock_cycle_20261016_111038/scan.json
+source_pose_map:
+- 0.13
+- 0.14
+- 0.08726646259971647
+scan_count: 40
+persistent_grid:
+  resolution_m: 0.05
+  minimum_distinct_scans: 24
+  cell_count: 179
+interpretation: 박스 앞면과 같은 방향의 상판을 가정해 지속 다리·기존 지도 구조 사이를 채운 추정 점유 영역. 정면 접근쪽으로 추가
+  여유를 넣지 않음
+limits:
+- single stationary dock viewpoint
+- LiDAR sees first returns, not tabletop outline
+- legs do not prove tabletop ends
+- table2 is partly occluded/shared with other station neighborhoods
+- polygons are finite candidates, not deployment approval
+zones:
+- id: water_station
+  enabled: true
+  confidence: medium
+  polygon:
+  - - 0.0
+    - -0.6
+  - - -0.75
+    - -0.6
+  - - -0.75
+    - -2.15
+  - - -0.7
+    - -2.2
+  - - -0.1
+    - -2.3
+  - - -0.05
+    - -2.3
+  - - 0.0
+    - -2.2
+  leg_evidence:
+  - center_map_xy_m:
+    - -0.168
+    - -0.702
+    local_uv_m:
+    - -0.228
+    - 0.568
+    support_scans_range:
+    - 24
+    - 39
+  - center_map_xy_m:
+    - -0.101
+    - -2.126
+    local_uv_m:
+    - -0.161
+    - -0.856
+    support_scans_range:
+    - 28
+    - 28
+  black_cell_count: 34
+  boundary_basis: 급수대 앞·뒤 다리 및 기존 지도 구조를 포함하는 영역의 검은 셀(pixel=0) 바깥선 연결. 회색 경계와 추가
+    여유 없음
+  basis_before_black_boundary: persistent scan clusters at v≈-0.86,+0.57, padded 0.10m;
+    mapped obstacle support near both sides
+  interior_fill: 같은 책상의 다리 사이는 상판이 있다고 보고 채움(사용자 지시). 실측 상판 외곽 아님
+  black_cell_search_bounds_m:
+  - -0.8
+  - 0.06
+  - -2.3
+  - -0.6
+- operator_layout: 왼쪽 테이블이 도크 옆까지 이어지며 도크는 후진으로 테이블에 가깝게 붙음
+  operator_dock_relation: 차체 전체가 상판 바깥에서 붙음(사용자 확인). 도크 상판 아래 진입으로 해석하지 않음
+  geometry_conflict:
+    blocked_cell_centers_inside_dock_footprint: 21
+    footprint_overlap_area_m2: 0.0568545
+    max_rear_overlap_m: 0.136087
+    interpretation: 동일 폭 연장 추정과 고정 도크의 실제 배치가 불일치. 테이블 외곽 또는 지도 정합 재확인 필요
+  id: dock_table
+  enabled: false
+  confidence: geometry_conflict_not_for_deployment
+  polygon:
+  - - -0.75
+    - -0.6
+  - - 0
+    - -0.6
+  - - -0.05
+    - 0.75
+  - - -0.1
+    - 0.75
+  - - -0.7
+    - 0.7
+  black_cell_count: 4
+  black_cell_search_bounds_m:
+  - -0.8
+  - 0.06
+  - -0.6
+  - 0.8
+  disabled_reason: '차체 전체가 상판 바깥이라는 사용자 배치와 충돌: 고정 도크 footprint에 확장 셀 21개 겹침. 경계 미확정
+    상태에서는 적용하지 않음'
+- id: table_01
+  enabled: true
+  confidence: medium
+  polygon:
+  - - 2.35
+    - -0.7
+  - - 2.25
+    - -0.65
+  - - 2.2
+    - -0.65
+  - - 1.55
+    - -0.7
+  - - 1.55
+    - -0.9
+  - - 1.6
+    - -2.25
+  - - 2.25
+    - -2.3
+  - - 2.3
+    - -2.3
+  - - 2.35
+    - -1.3
+  leg_evidence:
+  - center_map_xy_m:
+    - 1.672
+    - -0.733
+    local_uv_m:
+    - -0.234
+    - -1.084
+    support_scans_range:
+    - 33
+    - 40
+  - center_map_xy_m:
+    - 1.673
+    - -2.221
+    local_uv_m:
+    - -0.235
+    - 0.404
+    support_scans_range:
+    - 35
+    - 35
+  - center_map_xy_m:
+    - 2.056
+    - -1.835
+    local_uv_m:
+    - -0.618
+    - 0.018
+    support_scans_range:
+    - 25
+    - 40
+  black_cell_count: 41
+  boundary_basis: 기존 다리 후보 영역 안의 검은 원본 지도 셀(pixel=0) 바깥선의 convex hull. 회색 셀과 추가 padding은
+    경계 근거에서 제외
+  basis_before_black_boundary: persistent scan clusters at v≈-1.08,+0.40 and rear
+    cluster u≈-0.62; extended to mapped occupied cells
+  interior_fill: 같은 책상의 다리 사이는 상판이 있다고 보고 채움(사용자 지시). 실측 상판 외곽 아님
+- id: table_02
+  enabled: false
+  confidence: low_non_deployable_without_review
+  polygon:
+  - - 2.189
+    - -3.441
+  - - 2.189
+    - -2.591
+  - - -0.511
+    - -2.591
+  - - -0.511
+    - -3.441
+  basis: mapped occupied groups plausibly bracket both sides; dock scan has no station-unique
+    persistent behind-face pair
+  leg_evidence: []
+  disabled_reason: 도크 시야에서 고유 다리 쌍 미분리. 급수대·1번 경로 수정에 사용하지 않음
+deployment_status: partial_candidate_dock_table_disabled

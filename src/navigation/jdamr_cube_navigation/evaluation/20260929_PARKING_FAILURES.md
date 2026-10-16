@@ -1378,3 +1378,37 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - 정지 깊이·라이다·보정 계산 원본은 이전 실행 아래 `stationary_depth_20261016_103123/`에, 최신 command·원시 event·결과·종료 화면·정리 상태는 같은 데이터 루트의 이번 `parking_.../`에 있다. 데이터는 Git에 넣지 않았다.
 
 **화면·프로세스 정리:** 열과 표시 부하를 줄이기 위해 기존 `display-stop`으로 RViz와 PC/Pi 표시 중계·표시 노드를 종료했다. 주차 후 추가 연산을 줄이도록 `jdamr-box-observer.service`를 중지하며, 다음 `--camera-always-on` 실행에는 이 관측기를 먼저 기동해야 한다. 사용자 요청 화면을 위해 PC `robot-dashboard.service`·`robot-dashboard-link.service`, Pi `jdamr-ammr-dashboard.service`·`jdamr-box-rgbd.service`는 유지한다. 정리는 PC `systemctl --user stop robot-dashboard robot-dashboard-link`, Pi `sudo systemctl stop jdamr-ammr-dashboard jdamr-box-rgbd`를 함께 사용한다. 기존 상주 `jdamr-box-executor.service`는 다음 명령의 재탐색 지연을 줄이도록 idle로 유지하며 종료 명령은 `sudo systemctl stop jdamr-box-executor`다. 새 임시 기록기·터널·속도 발행 프로세스는 남기지 않았다.
+
+
+## 22. 전체 테이블 흐름의 경유 누락·잘못된 도크 방향과 점유 영역 수정
+
+### 22.1 실행과 사용자 보고
+
+실행은 `$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261016_111358_03154e5e/`에 보존했다. 도크 등록·정지 스캔은 같은 runs 아래 `table_dock_cycle_20261016_111038/`다.
+
+- 사용자는 도크 출발, 급수대·테이블 정밀 주차, 같은 도크 복귀의 전체 흐름을 요청했다. Codex가 급수대 없는 경로를 제출했고 도크를 전진 진입으로 등록했다. 사용자가 확인한 올바른 복귀 방향은 후진이다. 실행 선택·등록 오류이며 사용자의 잘못으로 귀속하지 않는다.
+- 사용자는 1번 테이블로 가며 급수대의 상판과 거의 충돌했고, 1번 주차 간격은 약 3–5 cm였으며, 복귀 중 도크로 전진해 충돌했다고 보고했다. 기존 낮은 박스와 평행한 빈 공간이 아니라 그 위에 상판이 있는 배치다. 다리 사이도 점유 영역으로 채우라는 후속 지시를 받았다.
+- 로그의 테이블 내부 최종 추정은 우 10.259 mm·좌 9.032 mm였지만 새 깊이 실측이 아닌 `frozen_table_edge_odom_stop` 결과다. 사용자 보고와 맞지 않아 실물 1 cm 주차 성공으로 판정하지 않는다.
+- 기존 접근은 약 0.464 m 계획 후 중간 5 cm 부근에 정지하고 12초 동안 관측을 기다렸으며, 마지막 약 31 mm 전진 뒤에도 12초를 기다렸다. 이 중간 정지·재관측 대기가 끊기는 접근의 확인된 원인이다. 실물 거리 차이의 전체 원인은 아직 확정하지 않았다.
+- 잘못 등록한 전진 복귀의 staging은 약 `(-0.568, 0.075) m`로 도크 뒤쪽이었다. 사용자는 충돌 후 로봇을 옮겼으며 잠깐 다시 이동한 뒤 중지했다고 보고했다. 정확한 충돌·들어올림 시각은 계측하지 못했으므로 정지 지연의 특정 코드 결함으로 단정하지 않는다.
+- 취소 후 run은 종료 코드 1로 끝났고 fresh odometry의 선속도·각속도 0과 목표 취소를 확인했다. `operator_report.json`, `post_stop_executor_state.json`, `result.json`, 원시 이벤트를 보존했다. 현재 위치추정은 사용자의 재배치로 무효화했으며 도크 좌표로 덮어쓰지 않았다.
+
+### 22.2 수정과 소프트웨어 검증
+
+- 기본 출발은 급수대를 포함한다. `--skip-via`를 명시한 경우만 생략한다.
+- 고정 도크 `(0.1289111014, 0.1389656609, 0.0912706384 rad)`는 유지하고 `parking_direction=reverse`를 PC·Pi 등록부에 반영했다. 후진 staging은 도크 앞쪽 약 `(0.826, 0.203) m`다. 이 변경 후 실차 복귀는 수행하지 않았다.
+- 테이블 최종 접근은 기존 정지 각도 보정 뒤 단일 직진으로 바꿨다. 이동 중 새 유효 면을 해당 관측 시각의 odom TF로 옮겨 남은 거리를 갱신한다. 건강한 근접 가림 quorum 뒤에는 마지막 면을 동결하고 추가 관측으로 목표를 다시 늘리지 않는다. 이동 중 각도 탐색은 하지 않는다.
+- 기존 속도 명령·충돌 감지·링크·스캔·odometry 유효성·정지 확인 경로를 사용한다. 가드·시간 종료는 목표 도달로 반환하지 않으며 정지 후 settle 구간에서 목표를 갱신하지 않는다. 중간 5 cm 정지와 종료 후 12초 재관측을 생략하고, 최종 동결 값은 내부 추정으로 기록한다.
+- 대상 box service·restaurant service·keepout·출발 모의 검사 632건 통과, 별도 verifier도 632건 통과했다. callback 실패·가드 중단·정지 후 목표 갱신 금지·가림 뒤 가짜 fresh 면 무시 회귀를 확인했다. 연속 접근 수정본의 실차 주차는 아직 수행하지 않았다.
+
+### 22.3 검은 지도 셀 기반 테이블 킵아웃 후보
+
+현행 소스는 `config/table_keepout_current.yaml`과 `keepout_mask occupied`다. 기존 마스크를 보존한 채 추정 상판 영역을 OR 합성하며 추가 여유는 0 m다. 근거는 도크에서 받은 40개 스캔, 5 cm 격자의 24/40회 이상 지속 셀 179개와 기존 지도 검은 셀이다. LiDAR는 다리를 보므로 상판 외곽 실측으로 취급하지 않는다.
+
+- 급수대와 1번 테이블의 앞·뒤 검은 셀 바깥선을 연결하고 다리 사이를 채웠다. 회색 지도 경계는 외곽 근거에서 제외했다. 2번 테이블은 고유 다리 쌍이 분리되지 않아 비활성으로 유지한다.
+- 사용자가 왼쪽 테이블은 위쪽 도크 옆까지 이어진다고 확인해 급수대 영역을 지도 Y 약 0.75 m까지 연장했다. 급수대 기존 경계의 검은 원본 셀은 34개, 도크 확장부는 4개, 1번 영역은 41개다. 최종 설정은 기존 급수대를 활성으로 유지하고 확장부 `dock_table`은 `enabled: false`로 분리했다. 도크 좌표·추가 여유는 바꾸지 않았다.
+- 비활성 확장 시각화 후보의 합성 마스크 SHA-256은 `b85ffbb62a140408b6e3eaaa53206e837a128ff2d46166e0e6e3dba1e74f4550`이다. `$HOME/.cache/jdamr/table_legs_20261016/keepout_tables_dock_extension.{pgm,yaml,json}`, `keepout_dock_extension_ko.png`, `dock_extension_geometry.json`에 로컬 산출물을 보존했다.
+- 고정 도크의 현재 Nav2 footprint 안에 확장 마스크 차단 셀 중심 21개가 들어간다. 독립 검증의 뒤쪽 최대 겹침은 약 13.61 cm, 교차 면적은 0.05685 m²다. 사용자는 차체 전체가 상판 바깥에서 붙는다고 확인했으므로 동일 폭 연장 추정과 실제 배치는 불일치한다. 도크 위치를 이동하거나 가짜 빈 통로를 뚫어 검사를 통과시키지 않았다. 해당 마스크는 Pi에 적용하지 않았다.
+- 확장 전 후보는 별도 verifier가 경로 연결·도크/관측/최종 위치와 실제 footprint sweep의 차단 셀 0을 확인했다. 이 승인을 확장 후 도크 겹침 후보에 재사용하지 않는다. 최종 적용 때는 PC·Pi 마스크와 등록부 및 모든 route의 SHA를 함께 대조해야 한다.
+
+로봇 이동은 중지 상태를 유지한다. 도크 주변 기하 정합, 수정 코드의 실차 연속 접근·주차 간격, 급수대 포함 왕복과 후진 복귀는 남은 확인 항목이다. RViz·표시 중계는 꺼 두고, 사용자 화면용 PC `robot-dashboard`·`robot-dashboard-link`와 Pi `jdamr-ammr-dashboard` 및 다음 요청용 idle `jdamr-box-executor`를 유지한다. 종료 명령은 PC `systemctl --user stop robot-dashboard robot-dashboard-link`, Pi `sudo systemctl stop jdamr-ammr-dashboard jdamr-box-executor`다. 깊이 카메라·관측기는 앞선 사이클 정리로 중지돼 있으며 최신 영상이 실행 중이라고 주장하지 않는다.

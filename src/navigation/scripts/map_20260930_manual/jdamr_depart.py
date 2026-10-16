@@ -742,9 +742,7 @@ def run_cycle(args, state, table_id):
     requested_s = getattr(args, '_request_started_monotonic_s', time.monotonic())
     region = state['regions'][table_id]
     surface_mode = getattr(args, 'surface_mode', 'table_edge')
-    include_via = (not args.dock_only and (
-        (surface_mode == 'front' and not args.skip_via)
-        or (surface_mode == 'table_edge' and getattr(args, 'with_via', False))))
+    include_via = not args.dock_only and not args.skip_via
     via = state['regions'].get(VIA_ID)
     if include_via and via is None:
         fail(f'{VIA_ID} region is required by the selected via mode')
@@ -1035,7 +1033,7 @@ def cmd_go(args):
     if with_via and surface_mode != 'table_edge':
         fail('--with-via is only valid with --surface-mode table_edge')
     tables = list(getattr(args, 'table_ids', None) or [args.table_id])
-    if len(tables) > 1 and (args.skip_via or with_via or args.resume_at_observation
+    if len(tables) > 1 and (args.skip_via or args.resume_at_observation
                             or args.resume_parked_log
                             or args.dock_only or args.route or args.region):
         fail('a sequence starts every cycle at the dock; resume, route and region options '
@@ -1320,14 +1318,14 @@ def main():
     go.add_argument('--dock-wait-s', type=float, default=DOCK_WAIT_S,
                     help='wait at the dock between cycles of a sequence (charging stop; default none)')
     go.add_argument('--route',
-                    help='route file (default: <table_id>_direct_route.yaml without a via; '
-                         '<table_id>_route.yaml after a via)')
+                    help='route file (default: <table_id>_route.yaml after water station; '
+                         '<table_id>_direct_route.yaml with --skip-via)')
     go.add_argument('--region', nargs=3, type=float, metavar=('X', 'Y', 'R'))
     go.add_argument('--via-route', help='water_station route (default: <P2>/water_station_route.yaml)')
     go.add_argument('--skip-via', action='store_true',
-                    help='front mode: skip the legacy water stop and go to the table')
+                    help='skip the water-station stop and go straight to the selected table')
     go.add_argument('--with-via', action='store_true',
-                    help='with table_edge, include the registered water-station tabletop stop')
+                    help='explicitly include the water-station stop (already the default)')
     go.add_argument('--dock-only', action='store_true', help='return to the dock only (re-dock)')
     go.add_argument('--surface-mode', choices=('front', 'table_edge'), default='table_edge',
                     help='parking surface (default table_edge; use front for legacy box parking)')

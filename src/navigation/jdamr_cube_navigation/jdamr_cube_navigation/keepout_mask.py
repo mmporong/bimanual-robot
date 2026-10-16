@@ -401,6 +401,47 @@ def build_mask(
     return report
 
 
+def overlay_occupied_surfaces(map_yaml: Path, base_mask: Path,
+                              zones_yaml: Path, output_prefix: Path) -> dict:
+    """Add occupied surface footprints without an extra navigation margin."""
+    source = _map_metadata(map_yaml.resolve())
+    validate_mask(base_mask.resolve(), map_yaml.resolve())
+    existing = _map_metadata(base_mask.resolve())
+    config = yaml.safe_load(zones_yaml.read_text(encoding='utf-8'))
+    if not isinstance(config, dict) or config.get('schema_version') != 1:
+        raise ValueError('occupied surface schema_version must be 1')
+    if config.get('frame_id') != 'map':
+        raise ValueError('occupied surfaces require map frame')
+    polygons = _enabled_polygons(config)
+    if not all(math.isfinite(value) for _, polygon in polygons
+               for point in polygon for value in point):
+        raise ValueError('occupied surface polygons must be finite')
+    pixels = bytearray(existing['pixels'])
+    resolution = source['resolution']
+    for row in range(source['height']):
+        y = source['origin'][1] + (source['height'] - row - 0.5) * resolution
+        for column in range(source['width']):
+            x = source['origin'][0] + (column + 0.5) * resolution
+            if any(_point_in_polygon(x, y, polygon) for _, polygon in polygons):
+                pixels[row * source['width'] + column] = KEEPOUT_PIXEL
+    output_prefix.parent.mkdir(parents=True, exist_ok=True)
+    image = output_prefix.with_suffix('.pgm')
+    metadata = output_prefix.with_suffix('.yaml')
+    if image.resolve() == existing['image'] or metadata.resolve() == base_mask.resolve():
+        raise ValueError('occupied surface output must preserve the base mask')
+    _write_pgm(image, source['width'], source['height'], bytes(pixels))
+    metadata.write_text(yaml.safe_dump({
+        'image': image.name, 'mode': 'trinary', 'resolution': resolution,
+        'origin': source['origin'], 'negate': 0,
+        'occupied_thresh': 0.65, 'free_thresh': 0.196}, sort_keys=False))
+    report = validate_mask(metadata, map_yaml)
+    report.update(zones=[name for name, _ in polygons], added_margin_m=0.0,
+                  base_mask_yaml=str(base_mask), zones_yaml=str(zones_yaml))
+    output_prefix.with_suffix('.json').write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    return report
+
+
 def main() -> None:
     """Run the keepout mask build or validation command."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -409,12 +450,20 @@ def main() -> None:
     build.add_argument('--zones', required=True, type=Path)
     build.add_argument('--output-prefix', required=True, type=Path)
     build.add_argument('--force', action='store_true')
+    occupied = subparsers.add_parser('occupied', help='overlay occupied surface footprints')
+    occupied.add_argument('--map', required=True, type=Path)
+    occupied.add_argument('--base-mask', required=True, type=Path)
+    occupied.add_argument('--zones', required=True, type=Path)
+    occupied.add_argument('--output-prefix', required=True, type=Path)
     validate = subparsers.add_parser('validate', help='validate mask alignment')
     validate.add_argument('--mask', required=True, type=Path)
     validate.add_argument('--map', required=True, type=Path)
     args = parser.parse_args()
     if args.command == 'build':
         result = build_mask(args.zones, args.output_prefix, args.force)
+    elif args.command == 'occupied':
+        result = overlay_occupied_surfaces(
+            args.map, args.base_mask, args.zones, args.output_prefix)
     else:
         result = validate_mask(args.mask, args.map)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

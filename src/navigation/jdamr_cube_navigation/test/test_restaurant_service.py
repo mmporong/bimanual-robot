@@ -2664,6 +2664,51 @@ def test_precision_zero_turn_fails_without_fresh_stopped_odometry(monkeypatch):
     assert stopped[-1]['reason'] == 'odometry did not confirm stop'
 
 
+@pytest.mark.parametrize('failure', [None, 'update', 'guard'])
+def test_live_precision_approach_updates_distance_without_intermediate_stop(
+        monkeypatch, failure):
+    node = route()
+    clock, position, requested = [0.0], [0.0], [0.0]
+    commands = []
+
+    def publish(message):
+        requested[0] = message.linear.x
+        commands.append((message.linear.x, message.angular.z))
+
+    def spin(*_args, **_kwargs):
+        clock[0] += 0.02
+        position[0] += requested[0] * 0.02
+        node.latest_motion = (clock[0], requested[0], 0.0)
+
+    def update(actual):
+        if failure == 'update' and actual[0] > 0.01:
+            raise RuntimeError('stale depth')
+        # A later frame during settle must not move an already reached goal.
+        return {'remaining_m': 0.10 if commands and commands[-1][0] == 0.0
+                else 0.04 - actual[0]}
+
+    node.latest_motion = (-1.0, 0.0, 0.0)
+    if failure == 'guard':
+        node._guard_failure = lambda *_: 'obstacle' if position[0] > 0.01 else None
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=position[0], y=0.0),
+            rotation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    travelled = node._drive_zero_turn(
+        0.022, precision=True, hold_heading=True, target_update=update)
+    if failure:
+        assert travelled is None
+        assert position[0] < 0.02
+    else:
+        assert travelled == pytest.approx(0.04, abs=0.003)
+        assert position[0] > 0.035
+    first_zero = next(i for i, command in enumerate(commands) if command[0] == 0.0)
+    assert all(command == (0.0, 0.0) for command in commands[first_zero:])
+
+
 @pytest.mark.parametrize('drift_rad, correction_sign', [
     (0.01, -1.0),
     (-0.01, 1.0),

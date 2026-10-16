@@ -123,6 +123,7 @@ PATH_BLOCKED_FORWARD_MAX_M = 0.35
 STRAIGHT_ESCAPE_SPEED_MPS = 0.05
 PRECISION_STRAIGHT_MIN_SPEED_MPS = 0.01
 PRECISION_STRAIGHT_TARGET_S = 4.0
+LIVE_APPROACH_MAX_M = 0.6
 # A 1/s proportional correction removes a one-degree drift without snapping the
 # chassis. 0.02 rad/s is below the 0.08 rad/s in-place trim and, on the configured
 # 0.51 m wheel separation, keeps both wheels moving forward at the 0.01 m/s
@@ -1360,7 +1361,7 @@ class ServiceRoute(CorridorRoute):
             deadline_s, 'trim_rotation_stopped')
 
     def _drive_zero_turn(self, distance_m, watch=None, precision=False,
-                         hold_heading=False):
+                         hold_heading=False, target_update=None):
         """
         Command (+-STRAIGHT_ESCAPE_SPEED_MPS, 0) until odom shows distance_m.
 
@@ -1372,6 +1373,8 @@ class ServiceRoute(CorridorRoute):
         It runs only between goals. Returns the signed travel along the start heading
         once the base is at rest, or None without odom.
         """
+        if target_update is not None and not (precision and hold_heading and distance_m > 0.0):
+            raise ValueError('live approach requires forward precision heading hold')
         base_frame = self.parking_contract['robot_base_frame']
 
         def odom_pose():
@@ -1384,7 +1387,9 @@ class ServiceRoute(CorridorRoute):
             start = odom_pose()
         except TransformException:
             return None
-        state = {'travelled': 0.0, 'tf_failure': None}
+        state = {'travelled': 0.0, 'tf_failure': None,
+                 'target_failure': None, 'remaining_m': abs(distance_m),
+                 'target_reached': False}
         command = Twist()
 
         def measure():
@@ -1398,7 +1403,23 @@ class ServiceRoute(CorridorRoute):
                 return state['travelled']
             state['travelled'] = ((x_m - start[0]) * math.cos(start[2])
                                   + (y_m - start[1]) * math.sin(start[2]))
-            if hold_heading:
+            if (target_update is not None and state['target_failure'] is None
+                    and not state['target_reached']):
+                try:
+                    update = target_update((x_m, y_m, yaw))
+                    remaining = update['remaining_m']
+                    if (isinstance(remaining, bool)
+                            or not isinstance(remaining, (int, float))
+                            or not math.isfinite(remaining)):
+                        raise RuntimeError('invalid live approach distance')
+                    state['remaining_m'] = remaining
+                    next_speed = max(PRECISION_STRAIGHT_MIN_SPEED_MPS,
+                                     remaining / PRECISION_STRAIGHT_TARGET_S)
+                    command.linear.x = min(command.linear.x, next_speed)
+                except (KeyError, TypeError, ValueError, RuntimeError) as error:
+                    state['target_failure'] = str(error) or type(error).__name__
+                    command.linear.x = command.angular.z = 0.0
+            if hold_heading and state['target_failure'] is None:
                 error_rad = math.atan2(
                     math.sin(start[2] - yaw), math.cos(start[2] - yaw))
                 command.angular.z = max(
@@ -1432,8 +1453,12 @@ class ServiceRoute(CorridorRoute):
                     + live_speed_mps * reaction_s)
 
         def reached_stop_point(travelled):
-            if state['tf_failure'] is not None:
+            if state['tf_failure'] is not None or state['target_failure'] is not None:
                 return False
+            if target_update is not None:
+                reached = state['remaining_m'] <= stopping_distance_m()
+                state['target_reached'] = reached
+                return reached
             if not precision:
                 early_m = min(
                     STRAIGHT_ESCAPE_SPEED_MPS ** 2 / (2.0 * STRAIGHT_DECEL_MPS2)
@@ -1444,22 +1469,34 @@ class ServiceRoute(CorridorRoute):
             return abs(travelled) >= abs(distance_m) - early_m
 
         def motion_watch():
-            if state['tf_failure'] is not None:
-                return state['tf_failure']
+            failure = state['tf_failure'] or state['target_failure']
+            if failure is not None:
+                return failure
             return watch() if watch else None
 
-        deadline_s = (time.monotonic() + abs(distance_m) / speed_mps
-                      + STRAIGHT_ESCAPE_EXTRA_S)
+        if target_update is not None:
+            # Remaining-distance taper and fresh depth corrections share one move.
+            deadline_s = (time.monotonic()
+                          + LIVE_APPROACH_MAX_M / PRECISION_STRAIGHT_MIN_SPEED_MPS
+                          + STRAIGHT_ESCAPE_EXTRA_S)
+        else:
+            deadline_s = (time.monotonic() + abs(distance_m) / speed_mps
+                          + STRAIGHT_ESCAPE_EXTRA_S)
         travelled_m = self._direct_motion(
             command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
-            watch=motion_watch if hold_heading else watch, confirm_stopped=precision)
+            watch=motion_watch if hold_heading or target_update is not None else watch,
+            confirm_stopped=precision)
         if precision:
             self.emit('precision_straight_finished',
                       requested_distance_m=distance_m,
                       travelled_m=travelled_m, speed_mps=speed_mps,
                       loop_s=timing['loop_s'],
-                      odom_tf_failed=state['tf_failure'] is not None)
-        return None if state['tf_failure'] is not None else travelled_m
+                      odom_tf_failed=state['tf_failure'] is not None,
+                      target_failure=state['target_failure'])
+        failed = (state['tf_failure'] or state['target_failure']
+                  or (target_update is not None
+                      and (self.stop_requested or not state['target_reached'])))
+        return None if failed else travelled_m
 
     def _departure_ready(self):
         """Check, before every goal, the battery reserve and the operator link."""
