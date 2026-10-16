@@ -1425,3 +1425,29 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - 새 마스크 SHA는 `8278dcef38b06d469b53f32b1c6ab2c5a14b27f23523f27bcb83aa11ab4a8526`이다. 기존 비자유 픽셀 삭제 0, 추가 여유 0 m, 원본 지도 격자와 동일하다. 실제 Nav2 footprint의 home↔0.7 m staging 1 cm 간격 71 pose, 급수대·테이블 관측/최종/탈출과 경유·직행 정적 sweep는 독립 `static_corridor_clear` 검증을 통과했다. 정적 검증을 실제 Nav2 계획이나 동적 장애물 통과로 확대하지 않는다.
 - PC·Pi·저장소 번들의 keepout·도크 등록부·5 route를 맞추고 모든 `expected_mask_sha256`을 새 값으로 변경했다. 원래 unknown 마스크는 `keepout_base_unknown.{pgm,yaml}`로 보존해 다음 갱신이 이전 상판 영역을 누적해서 남기지 않게 했다. Pi 14경로 해시와 마스크 재로딩 후 transient-local 발행 마스크의 기대 occupancy 바이트 일치를 확인했다. 관련 운영 도구·정적 자산 검사 22건과 diff 검사가 통과했다.
 - 원본·정지 관측·초기화·도크 등록 로그·파생 평면·동기화 receipt·새 프리뷰는 `$HOME/jdamr_data/map_20260930_manual/aligned/runs/dock_table_fit_20261016_121145/`에 있다. Pi 복원본은 `$HOME/.local/state/jdamr/dock-table-assets/dock_table_fit_20261016_121145/`다. 새 임시 상주 프로세스는 남기지 않았으며 기존 사용자 대시보드·베이스·Nav2·idle 실행기를 유지했다. 이번에는 이동 명령·실차 왕복·원격 push를 수행하지 않았다.
+
+### 22.5 이동 중 안정화·깊이 지연 종료 수정과 사용자 정지
+
+**첫 재시도:** `$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261016_122520_a246070b/`. 급수대 접근의 마지막 상태는 면 검출 `true`, 안정화 `false`, 이유 `collecting_stability`였다. 새 승인 면이 1.5초 동안 없으면 이를 관측 소실로 처리하는 분기에 들어가 `table approach stable face unavailable`로 멈췄다. 요청 직진량 206.48 mm 중 odom 이동량은 105.93 mm였다. 영상 수신 소실이나 배터리 문제로 확정하지 않는다.
+
+- 정렬 후 잔차가 +0.76994°→-0.58959°→+0.46178°로 바뀌었다. 마지막 -0.590° 명령의 실제 odom 회전은 -1.395°였다. 작은 보정에도 기존 0.08 rad/s를 적용하던 정지 후 회전량과 반복 재관측이 불필요한 좌우 왕복을 만든 근거다.
+- 회전 뒤 `observe_target()`이 동일한 범위·장착·관측 모드를 다시 설정하면서 안정 이력을 초기화했다. 재관측 호출마다 같은 설정을 쓰는 분기에는 `reuse_configuration=True`를 적용했다. 입력 복구가 필요한 분기의 설정은 유지했다.
+- `1de8d2a`에서 건강한 `collecting_stability`는 마지막 승인 면을 운반하고 불안정 후보를 새 목표로 채택하지 않도록 했다. 작은 회전 감속은 연속 테이블 접근에만 적용했다. 기존 깊이·TF·영역·법선·이동량·정지·링크 검사는 유지했다. box/restaurant 검사 473건과 별도 검증을 통과했다. Pi 복원본은 `$HOME/.local/state/jdamr/continuous-table/20261016_124001/`, PC receipt는 `$HOME/.local/state/bimanual-robot/moving_table_recovery_deployment.json`이다.
+
+**두 번째 재시도:** `$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261016_124036_3d364831/`. 완료한 급수대 관측 지점부터 기존 실행기의 재개 옵션으로 이어갔다.
+
+- 급수대 회전 후 잔차는 +0.10382°, 1번 테이블은 -0.11639°로 각 지점에서 추가 좌우 왕복 없이 접근했다. 한 실행의 관찰이며 모든 배치에서 왕복이 사라졌다는 검증은 아니다.
+- 급수대 접근은 12:41:19에 완료 판정, 대기·후진 이탈은 12:41:30에 완료됐다. 내부 최종 간격은 평균 9.740 mm, 양 모서리 10.335/9.144 mm였다. `frozen_table_edge_odom_stop`, `internal_estimate_only=true`, `final_depth_measurement=false`를 유지하며 외부 1 cm 실측으로 쓰지 않는다.
+- 1번 테이블에서는 514.90 mm 계획에 odom 472.51 mm 전진 후 12:42:17에 `table approach depth stale or future-dated`가 발생했다. 깊이 영상 촬영 시각부터 제어 시점까지 0–0.5초 조건을 벗어난 분기다. 정확한 실패 프레임 나이와 연속 실패 개수는 원시 이벤트에 없으므로 “USB 문제”, “파이 과부하”, “한 프레임만 지연” 중 어느 것도 확정 원인으로 기록하지 않는다.
+- 사용자 후속 보고는 1번 테이블과 약 6–7 cm다. 좌우별 측정이 아니며 목표 1 cm는 미완료다. `operator_measurement_and_pause.json`에 보존했다. 원시 `cycle_events.jsonl`과 실행기 결과를 PC에도 복사했다.
+
+**입력 지연 복구 수정 (`dfb2c29`):** `_drive_zero_turn()`은 명시한 세 이유(`observer silent`, `depth stale or future-dated`, `observer latency`)에서 0속도 발행과 odom 정지를 확인한 뒤 `table_approach_waiting_for_input`을 기록한다. 같은 시작 odom·목표 갱신 closure·남은 거리 상태를 유지하며 기다리고, 새 유효 입력과 기존 가드가 정상일 때만 같은 직진을 재개한다. 대기 시간은 해당 직진의 이동 예산에서만 제외하고 상위 태스크 예산·실측 차체·신선도 기준은 바꾸지 않았다. TF·기하·정지 미확인·분류되지 않은 오류를 이 재개 분기에 넣지 않았다.
+
+- 식사 중 사용자 정지는 복구보다 우선한다. 링크가 대기 중 끊기면 heartbeat가 돌아와도 같은 시도에서 자동 재개하지 않는다. stale 입력→가드 회복→같은 목표 완료, 사용자 정지, 링크 손실 뒤 회복의 세 plant 회귀와 기존 precision 회귀를 확인했다. 표적 6건, restaurant 전체 313건, 별도 verifier 검증과 diff 검사 통과다.
+- Pi 소스·설치 총 6경로를 이전 SHA 확인 후 백업·대조했다. 실제 바뀐 모듈은 restaurant service이며 SHA는 `6e39e5c449163104ec1405cf68d80513964c47010ff017640ed3b31629417471`이다. 실행기 active·새 소스 import를 확인했다. Pi 복원본 `$HOME/.local/state/jdamr/continuous-table/20261016_125125/`, PC receipt `$HOME/.local/state/bimanual-robot/depth_pause_recovery_deployment.json`에 근거를 보존했다. 이 반영은 이동을 요청하지 않았다.
+
+**정지 영상 진단:** 현 위치에서 카메라·관측기만 켜고 같은 table 모드·장착·거리 창으로 20초 측정했다. 93개 status의 수신 시 원본 영상 나이는 중앙값 9.37 ms·p95 257.01 ms·최대 312.93 ms였고 0.5초 초과는 0건이었다. 다만 93개 모두 `no_table_edge_candidate`여서 유효 면이 검출되는 주행 중 연산 부하를 재현한 검사는 아니다. 앞선 지연을 재현하지 못했으며 CPU·USB·통신 중 원인은 미확정이다. 새 실행에서 이 근접 위치의 경계를 곧바로 재검출할 수 있다고 보장하지 않는다. 필요 시 기존 후진 시야 확보 경로로 재관측해야 하며 식사 중에는 이를 실행하지 않았다. 원시값·요약·정리 결과는 이번 run의 `stationary_timing.json`, `stationary_timing_summary.json`, `stationary_timing_cleanup.txt`에 있다.
+
+**중지 상태와 남은 일:** 기존 stop을 보낸 뒤 fresh odometry의 선속도·각속도 0, spool의 request/running 0개를 확인했다. 운영 상태에는 급수대 주차·대기·이탈과 1번 테이블 이동·정렬을 완료로, 남은 1번 최종 접근·이탈·후진 도크 복귀를 대기로 보존했다. 상위 작업은 `paused_by_operator`이며 다음 사용자 이동 요청 전에는 재개하지 않는다. 모든 실패에서 이동을 무조건 반복하는 공통 루프를 구현했다고 주장하지 않는다. 앞선 AGENTS 운영 규칙의 상위 작업 보존과 이번 세 종류의 입력 복구 구현은 구분한다.
+
+카메라·관측기는 진단 후 inactive/PID 0으로 정리했다. RViz·표시 중계는 계속 꺼 두고 기존 사용자 대시보드·베이스·Nav2·idle 실행기를 유지한다. 대시보드 종료는 PC `systemctl --user stop robot-dashboard robot-dashboard-link`와 Pi `sudo systemctl stop jdamr-ammr-dashboard`를 함께 사용한다. 다음 요청 대기용 실행기 종료 명령은 Pi `sudo systemctl stop jdamr-box-executor`다. 새 임시 프로세스는 남기지 않았고 이동 명령·원격 push는 수행하지 않았다. 수정본의 실차 입력 지연 회복, 최종 1 cm 간격과 후진 도크 복귀는 미검증이다.
