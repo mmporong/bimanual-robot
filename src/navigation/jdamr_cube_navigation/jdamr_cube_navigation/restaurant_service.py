@@ -34,7 +34,8 @@ from jdamr_cube_navigation.service_destinations import (
     validate_registry, verify_identity,
 )
 from jdamr_cube_navigation.surface_approach import (
-    face_approach_command, FACE_APPROACH_TIME_S, filtered_face_heading,
+    FACE_ALIGNMENT_GAP_M, face_approach_command, FACE_APPROACH_TIME_S, FACE_HEADING_TOLERANCE_RAD,
+    filtered_face_heading,
 )
 from nav2_msgs.action import (
     ComputePathThroughPoses, FollowPath, NavigateThroughPoses, NavigateToPose, Spin)
@@ -1424,7 +1425,8 @@ class ServiceRoute(CorridorRoute):
         state = {'travelled': 0.0, 'tf_failure': None,
                  'target_failure': None, 'remaining_m': abs(distance_m),
                  'target_reached': False, 'face_heading': None, 'heading_updated_s': None,
-                 'validate_control': None}
+                 'validate_control': None, 'allow_near_alignment': False,
+                 'alignment_in_progress': False, 'observed_heading': None}
         command = Twist()
 
         def measure():
@@ -1448,6 +1450,10 @@ class ServiceRoute(CorridorRoute):
                             or not math.isfinite(remaining)):
                         raise RuntimeError('invalid live approach distance')
                     state['remaining_m'] = remaining
+                    allow_near = update.get('allow_near_alignment', False)
+                    if not isinstance(allow_near, bool):
+                        raise RuntimeError('invalid near alignment mode')
+                    state['allow_near_alignment'] = allow_near
                     next_speed = max(PRECISION_STRAIGHT_MIN_SPEED_MPS,
                                      remaining / approach_time_s)
                     if 'heading_rad' in update:
@@ -1460,6 +1466,7 @@ class ServiceRoute(CorridorRoute):
                                      else max(0.0, now_s - state['heading_updated_s']))
                         state['face_heading'] = filtered_face_heading(
                             state['face_heading'], heading, elapsed_s)
+                        state['observed_heading'] = heading
                         state['heading_updated_s'] = now_s
                         state['validate_control'] = update.get('validate_control')
                         if (state['validate_control'] is not None
@@ -1476,6 +1483,12 @@ class ServiceRoute(CorridorRoute):
                            else state['face_heading'])
                 error_rad = math.atan2(
                     math.sin(heading - yaw), math.cos(heading - yaw))
+                raw_error_rad = (error_rad if state['observed_heading'] is None else math.atan2(
+                    math.sin(state['observed_heading'] - yaw),
+                    math.cos(state['observed_heading'] - yaw)))
+                state['alignment_in_progress'] = (
+                    state['allow_near_alignment']
+                    and max(abs(error_rad), abs(raw_error_rad)) > FACE_HEADING_TOLERANCE_RAD)
                 command.angular.z = max(
                     -PRECISION_HEADING_MAX_RADPS,
                     min(PRECISION_HEADING_MAX_RADPS,
@@ -1485,9 +1498,16 @@ class ServiceRoute(CorridorRoute):
                         if state['validate_control'] is not None:
                             state['validate_control']((x_m, y_m, yaw), heading)
                         linear, angular = face_approach_command(
-                            state['remaining_m'], error_rad, approach_time_s=approach_time_s)
+                            state['remaining_m'], error_rad, approach_time_s=approach_time_s,
+                            allow_near_alignment=state['allow_near_alignment'])
                         command.linear.x = direction * linear
                         command.angular.z = angular
+                        if (state['allow_near_alignment']
+                                and state['remaining_m'] <= FACE_ALIGNMENT_GAP_M - .01):
+                            if state['alignment_in_progress']:
+                                command.linear.x = 0.
+                            if command.angular.z * raw_error_rad <= 0.:
+                                command.angular.z = 0.
                     except (ValueError, RuntimeError) as error:
                         state['target_failure'] = str(error)
                         command.linear.x = command.angular.z = 0.0
@@ -1521,6 +1541,8 @@ class ServiceRoute(CorridorRoute):
             if state['tf_failure'] is not None or state['target_failure'] is not None:
                 return False
             if target_update is not None:
+                if state['alignment_in_progress']:
+                    return False
                 reached = state['remaining_m'] <= stopping_distance_m()
                 state['target_reached'] = reached
                 return reached

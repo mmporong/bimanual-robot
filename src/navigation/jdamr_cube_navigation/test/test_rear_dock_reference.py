@@ -77,7 +77,7 @@ def test_departure_teaches_once_and_clearance_cannot_replace_reference(monkeypat
     assert node._depart_dock_straight(.2)
     assert node._depart_dock_straight(.7)
     assert node._rear_dock_reference == saved
-    node._rear_box_observation.assert_called_once()
+    assert node._rear_box_observation.call_count == 2
     assert parent.call_count == 3
 
 
@@ -108,6 +108,21 @@ def test_reference_uses_scan_stamped_pose_instead_of_later_stopped_exit(monkeypa
     node._rear_dock_reference = reference
     measured = node._rear_reference_pose(observed_at((.4, -.25, .2)))
     assert tuple(measured[k] for k in ('x_m', 'y_m', 'yaw_rad')) == pytest.approx((.4, -.25, .2))
+
+
+def test_clipped_exit_view_preserves_fresh_same_run_dock_observation(monkeypatch):
+    node = node_with_reference()
+    del node._rear_dock_reference
+    node.config = {'dock_departure_distance_m': .7}
+    node._dock_departure = {'start': (0., 0., 0.), 'end': (.7, 0., 0.)}
+    clipped = observed_at((.7, 0., 0.))
+    clipped['observation_roi_clipped'] = True
+    node._rear_box_observation = Mock(side_effect=[observed_at((0., 0., 0.)), clipped])
+    monkeypatch.setattr(ServiceRoute, '_depart_dock_straight', Mock(return_value=True))
+    assert node._depart_dock_straight(.7)
+    assert node._rear_dock_reference['observation_phase'] == 'before_straight_departure'
+    assert node._rear_dock_reference['pose_map'] == pytest.approx(
+        {'x_m': 0., 'y_m': 0., 'yaw_rad': 0.})
 
 
 def test_small_central_fragment_is_not_taught_as_a_dock_landmark(monkeypatch):

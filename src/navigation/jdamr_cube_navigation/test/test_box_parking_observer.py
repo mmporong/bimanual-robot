@@ -301,6 +301,18 @@ def _parameters(**values):
     return [SimpleNamespace(name=name, value=value) for name, value in values.items()]
 
 
+def test_unchanged_observer_parameters_preserve_accumulated_stability():
+    node = _surface_parameter_node()
+    values = {'surface_mode': 'table_edge', 'camera_height_m': 1.26,
+              'camera_pitch_rad': .9, 'camera_roll_rad': -.03, 'maximum_depth_m': 1.2}
+    assert node._on_parameters(_parameters(**values)).successful
+    node.resets.clear()
+    assert node._on_parameters(_parameters(**values)).successful
+    assert not node.resets
+    assert node._on_parameters(_parameters(camera_pitch_rad=.91)).successful
+    assert node.resets == [None]
+
+
 def test_table_mode_requires_height_and_updates_geometry_as_one_configuration():
     """No old frame survives the atomic surface and calibration switch."""
     node = _surface_parameter_node()

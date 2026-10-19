@@ -23,7 +23,7 @@ def filtered_face_heading(previous, observed, elapsed_s):
 
 
 def face_approach_command(remaining_m, error_rad, target_gap_m=0.01, *,
-                          approach_time_s=FACE_APPROACH_TIME_S):
+                          approach_time_s=FACE_APPROACH_TIME_S, allow_near_alignment=False):
     """Reduce heading error before entering the existing final precision band."""
     if not all(math.isfinite(v) for v in (
             remaining_m, error_rad, target_gap_m, approach_time_s)) or approach_time_s <= 0.0:
@@ -35,6 +35,8 @@ def face_approach_command(remaining_m, error_rad, target_gap_m=0.01, *,
     if abs(error_rad) > FACE_HEADING_TOLERANCE_RAD:
         clearance = remaining_m - max(0.0, FACE_ALIGNMENT_GAP_M - target_gap_m)
         if clearance <= 0.0:
+            if allow_near_alignment:
+                return 0.0, angular
             raise ValueError('table alignment requires more clearance')
         # [unit-mismatch: paradigmatic] angle [rad] / rate [rad/s] gives time [s].
         # Remaining alignment distance [m] / time [s] bounds linear speed [m/s].
@@ -45,7 +47,7 @@ def face_approach_command(remaining_m, error_rad, target_gap_m=0.01, *,
 
 def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
                             target_gap_m=0.01, *, command_heading_rad=None,
-                            approach_time_s=FACE_APPROACH_TIME_S):
+                            approach_time_s=FACE_APPROACH_TIME_S, allow_near_alignment=False):
     """Preview the same command law up to the existing final precision band.
 
     This ideal odometry rollout is for static corridor validation, not evidence
@@ -76,7 +78,18 @@ def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
         if gap <= max(FACE_ALIGNMENT_GAP_M, target_gap_m) + 0.0005:
             if (target_gap_m <= FACE_ALIGNMENT_GAP_M and
                     max(abs(error), abs(command_error)) > FACE_HEADING_TOLERANCE_RAD):
-                raise ValueError('table alignment requires more clearance')
+                # Turning toward the normal retracts the leading front corner
+                # only below the rectangular support maximum atan(width/extent).
+                if not allow_near_alignment or abs(error) >= math.atan2(
+                        half_width_m, front_extent_m):
+                    raise ValueError('table alignment requires more clearance')
+                angular = max(-.02, min(.02, command_error))
+                if angular * error <= 0.:
+                    angular = 0.
+                pose = (*pose[:2], pose[2] + angular * .05)
+                poses.append(pose)
+                command_heading = filtered_face_heading(command_heading, heading, .05)
+                continue
             return poses
         remaining = (gap - target_gap_m) / math.cos(error)
         if math.dist(start[:2], pose[:2]) + remaining > 0.6 + 1e-9:

@@ -3140,7 +3140,7 @@ def test_live_table_corridor_uses_frozen_map_conversion_and_runtime_footprint(mo
                      'keepout': {'yaml_path': '/mask.yaml'}}
     node.box_front_half_width_m = 0.225
     node._final_gap_m = Mock(return_value=0.01)
-    node._reverse_footprint = Mock(return_value=[(-0.28, -0.275), (0.07, 0.275)])
+    node._footprint_outline = Mock(return_value=[(-0.28, -0.275), (0.07, 0.275)])
     monkeypatch.setattr(box_service, 'face_approach_waypoints', Mock(return_value=[
         (0.0, 0.0, 0.1), (0.1, 0.01, 0.0)]))
     check = Mock(return_value=clear)
@@ -3155,7 +3155,7 @@ def test_live_table_corridor_uses_frozen_map_conversion_and_runtime_footprint(mo
             validate((0.0, 0.0, 0.1), (0.5, 0.0), (-1.0, 0.0), 0.08)
     assert box_service.face_approach_waypoints.call_args.kwargs['command_heading_rad'] == 0.08
     assert check.call_args.args[0] == [(10.0, -1.0, 0.4), (10.1, -0.99, 0.3)]
-    assert factory.call_args.args[2] == node._reverse_footprint.return_value
+    assert factory.call_args.args[2] == node._footprint_outline.return_value
 
 
 def test_near_fine_table_reuses_face_and_skips_separate_alignment_goal(mission):

@@ -671,7 +671,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 'box observation consumption requires explicit candidate trial')
         call_started_s = time.monotonic()
         self._ensure_depth_info()
-        robot_pose, _ = self.capture_stationary_pose()
+        robot_pose, _ = self.capture_stationary_pose(intermediate=True)
         self._observation_pose_diagnostic(robot_pose, camera_mount, region_xy)
         self._observer_camera_mount = camera_mount
         if (not reuse_configuration and not self._set_depth_window(region_radius_m)
@@ -791,6 +791,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         now_s=now_s)
                     target.update({
                         'front_extent_m': front_extent_m,
+                        'observed_face_span_m': observation.get('width_m'),
                         'observation_robot_pose_map': list(robot_pose),
                         'front_extent_provenance': self._json_evidence(
                             getattr(self, 'front_extent_provenance', None)),
@@ -1616,23 +1617,33 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
 
     def _table_approach_validator(self, front_extent_m, to_map_pose):
         """Check the nominal steering corridor with the verified static footprint."""
-        footprint = self._reverse_footprint()
+        footprint = self._footprint_outline()
         map_yaml = Path(self.registry['map']['yaml_path'])
         keepout_yaml = Path(self.registry['keepout']['yaml_path'])
         check = CachedStaticCorridorValidator(map_yaml, keepout_yaml, footprint)
 
-        def validate(actual, face, normal, command_heading_rad):
+        def validate(actual, face, normal, command_heading_rad, span_m=None):
             try:
                 preview = face_approach_waypoints(
                     actual, face, normal, front_extent_m, self.box_front_half_width_m,
-                    self._final_gap_m(), command_heading_rad=command_heading_rad)
+                    self._final_gap_m(), command_heading_rad=command_heading_rad,
+                    allow_near_alignment=True)
             except ValueError as error:
                 raise RuntimeError(str(error)) from error
             if len(preview) == 1:
                 # The observed-face precision band already closes beyond the
                 # costmap plan endpoint. Its relative gap checks remain in force.
                 return
-            if not check([to_map_pose(pose) for pose in preview]):
+            mapped = [to_map_pose(pose) for pose in preview]
+            kwargs = {}
+            if span_m is not None:
+                center = to_map_pose((*face, 0.))
+                tip = to_map_pose((face[0] + normal[0], face[1] + normal[1], 0.))
+                kwargs['target_surface'] = {
+                    'point_xy_m': center[:2],
+                    'normal_xy': (tip[0] - center[0], tip[1] - center[1]),
+                    'half_span_m': span_m / 2.}
+            if not check(mapped, **kwargs):
                 raise RuntimeError('table approach static corridor blocked')
 
         return validate
@@ -1662,7 +1673,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                  'last_valid_s': time.monotonic(), 'occluded_frames': 0,
                  'occlusion_latched': False, 'precision_band_latched': False,
                  'validated_input': None, 'validated_pose': None,
-                 'validated_heading': None}
+                 'validated_heading': None,
+                 'span_m': target.get('observed_face_span_m')}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
         def validate_control(actual, filtered_heading):
@@ -1673,7 +1685,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     or state['validated_pose'] is None
                     or math.dist(actual[:2], state['validated_pose'][:2]) >= 0.025
                     or heading_change >= FINAL_TRIM_TOLERANCE_RAD):
-                validate(actual, state['face'], state['normal'], filtered_heading)
+                validate(actual, state['face'], state['normal'], filtered_heading, state['span_m'])
                 state.update(validated_input=state['input_stamp'], validated_pose=actual,
                              validated_heading=filtered_heading)
 
@@ -1744,6 +1756,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     if sum(normal[i] * state['normal'][i] for i in (0, 1)) <= 0.0:
                         raise RuntimeError('moving table normal reversed')
                     state.update(face=face, normal=normal, stamp=stamp,
+                                 span_m=observation.get('width_m'),
                                  last_valid_s=time.monotonic(), occluded_frames=0,
                                  basis='moving_depth_at_stamped_odom')
                     self.emit('table_approach_face_updated', observation_stamp_s=stamp,
@@ -1794,6 +1807,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                            'y_m': face_map[1] + normal_map[1] * offset},
                 'basis': state['basis'], 'observation_stamp_s': state['stamp']}
             return {'remaining_m': remaining, 'heading_rad': heading, 'basis': state['basis'],
+                    'allow_near_alignment': (gap > 0. and abs(residual) < math.atan2(
+                        self.box_front_half_width_m, front_extent_m)),
                     'validate_control': validate_control}
 
         return update
@@ -1810,7 +1825,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         residual is measured against the face normal and turned out by odom, and the
         table fine approach holds the trimmed odom heading with feedback.
         """
-        actual, _ = self.capture_stationary_pose()
+        if allow_trim:
+            actual, _ = self.capture_stationary_pose()
+        else:
+            actual, _ = self.capture_stationary_pose(intermediate=True)
         face = target['face_center_map_xy_m']
         outward = target['outward_normal_map_xy']
         to_odom = None

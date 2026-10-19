@@ -35,6 +35,24 @@ def test_close_aligned_face_keeps_existing_precision_band():
             (0.4, 0.0, 0.1), (0.5, 0.0), (-1.0, 0.0), 0.065, 0.225)
 
 
+def test_close_table_alignment_turns_toward_face_without_backing_out():
+    error = .014061414934757988
+    nearest = .033676181083231255
+    face = (.065 * math.cos(error) + .225 * math.sin(error) + nearest, 0.)
+    poses = face_approach_waypoints(
+        (0., 0., error), face, (-1., 0.), .065, .225,
+        allow_near_alignment=True)
+    assert len(poses) > 1
+    assert all(pose[:2] == (0., 0.) for pose in poses)
+    assert abs(poses[-1][2]) <= math.radians(.3)
+    gaps = [face[0] - .065 * math.cos(p[2]) - .225 * abs(math.sin(p[2])) for p in poses]
+    assert min(gaps) >= nearest - 1e-9
+    assert all(a <= b + 1e-9 for a, b in zip(gaps, gaps[1:]))
+    linear, angular = face_approach_command(.02368, -error, allow_near_alignment=True)
+    assert linear == 0.
+    assert angular < 0.
+
+
 @pytest.mark.parametrize('angle', [-.23, 0., .23])
 def test_rear_coarse_preview_stops_at_intermediate_gap(angle):
     normal = math.cos(angle), math.sin(angle)

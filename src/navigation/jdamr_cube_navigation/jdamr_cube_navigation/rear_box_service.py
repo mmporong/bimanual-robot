@@ -126,6 +126,15 @@ class RearBoxParkingMixin:
         if outbound and getattr(self, '_dock_departure', None) is None:
             self._rear_dock_reference = None
         teach = outbound and getattr(self, '_rear_dock_reference', None) is None
+        before_exit = None
+        if teach:
+            geometry = self.home_rear_geometry
+            extent = geometry['frame_length']['value'] - geometry['front_to_wheel_axis']['value']
+            half_width = geometry['frame_width']['value'] / 2.
+            try:
+                before_exit = self._rear_box_observation(geometry, extent, half_width)
+            except (ValueError, RuntimeError):
+                pass
         if not super()._depart_dock_straight(distance_m):
             return False
         if teach:
@@ -136,6 +145,9 @@ class RearBoxParkingMixin:
                 # The parent already confirmed stopped odometry at the exit.
                 # Use its latest fresh stamped scan without another dwell.
                 observation = self._rear_box_observation(geometry, extent, half_width)
+                phase = 'after_straight_departure'
+                if observation['observation_roi_clipped'] and before_exit is not None:
+                    observation, phase = before_exit, 'before_straight_departure'
                 if observation['observation_roi_clipped']:
                     raise RuntimeError('rear dock face is clipped by observation ROI')
                 if (observation['support_count'] < 2 * MINIMUM_SUPPORT
@@ -156,6 +168,7 @@ class RearBoxParkingMixin:
                     'observation': observation, 'pose_map': pose,
                     'start_pose_map': list(departure['start']),
                     'exit_pose_map': list(departure['end']),
+                    'observation_phase': phase,
                 }
                 self.emit('rear_dock_reference_recorded', reference=self._rear_dock_reference,
                           source='same_run_straight_departure', internal_estimate_only=True)

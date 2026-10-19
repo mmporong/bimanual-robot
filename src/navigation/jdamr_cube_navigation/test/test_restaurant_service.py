@@ -3007,13 +3007,14 @@ def test_live_control_validates_filtered_heading_and_uses_shared_speed_law(monke
     assert commands[1] == pytest.approx(restaurant_service.face_approach_command(0.3, expected))
 
 
-@pytest.mark.parametrize('heading,gap_m,offset_deg', [
-    (0.0, 0.15, 12.0), (0.0, 0.45, -12.0),
-    (math.pi - 0.03, 0.15, 8.0), (-math.pi + 0.03, 0.45, -8.0),
+@pytest.mark.parametrize('heading,gap_m,offset_deg,allow_near', [
+    (0.0, 0.15, 12.0, False), (0.0, 0.45, -12.0, False),
+    (math.pi - 0.03, 0.15, 8.0, False), (-math.pi + 0.03, 0.45, -8.0, False),
+    (0.0, .033676181083231255, .80565973, True), (0.0, .014, -.80565973, True),
 ])
 @pytest.mark.parametrize('direction', [-1.0, 1.0])
 def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
-        monkeypatch, heading, gap_m, offset_deg, direction):
+        monkeypatch, heading, gap_m, offset_deg, allow_near, direction):
     node = route()
     clock, commands, velocity = [0.0], [], [0.0, 0.0]
     pose = [0.0, 0.0, heading + math.radians(offset_deg)]
@@ -3043,7 +3044,7 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
         lead = front * math.cos(residual) + half_width * abs(math.sin(residual))
         nearest = sum((actual[i] - face[i]) * normal[i] for i in (0, 1)) - lead
         return {'remaining_m': (nearest - 0.01) / math.cos(residual),
-                'heading_rad': heading}
+                'heading_rad': heading, 'allow_near_alignment': allow_near}
 
     node.escape_velocity = SimpleNamespace(publish=publish)
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
@@ -3066,12 +3067,43 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
     assert all(0.007 <= gap <= 0.013 for gap in gaps)
     assert abs(error) <= math.radians(0.3)
     moving = [command for command in commands if command != (0.0, 0.0)]
-    assert moving and all(direction * linear > 0.0 for linear, _angular in moving)
+    assert moving and any(direction * linear > 0.0 for linear, _angular in moving)
+    assert all(direction * linear >= 0.0 if allow_near else direction * linear > 0.0
+               for linear, _angular in moving)
     assert max(abs(linear) for linear, _angular in moving) <= 0.05
     angular = [w for _v, w in moving if w]
     assert all(w * offset_deg < 0.0 for w in angular)
     first_zero = commands.index((0.0, 0.0))
     assert all(command == (0.0, 0.0) for command in commands[first_zero:])
+
+
+def test_near_face_flip_holds_motion_until_heading_filter_agrees(monkeypatch):
+    node = route()
+    clock = [0.]
+    transform = SimpleNamespace(transform=SimpleNamespace(
+        translation=SimpleNamespace(x=0., y=0.),
+        rotation=SimpleNamespace(x=0., y=0., z=0., w=1.)))
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: transform)
+    update = Mock(side_effect=[
+        {'remaining_m': .005, 'heading_rad': .01, 'allow_near_alignment': True},
+        {'remaining_m': .005, 'heading_rad': -.01, 'allow_near_alignment': True},
+    ])
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+
+    def motion(command, done, measure, *_args, **_kwargs):
+        measure()
+        assert command.linear.x == 0.
+        assert command.angular.z > 0.
+        assert not done(0.)
+        clock[0] += .02
+        measure()
+        assert command.linear.x == command.angular.z == 0.
+        assert not done(0.)
+        return 0.
+
+    node._direct_motion = motion
+    assert node._drive_zero_turn(.005, precision=True, hold_heading=True,
+                                 target_update=update) is None
 
 
 def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch):

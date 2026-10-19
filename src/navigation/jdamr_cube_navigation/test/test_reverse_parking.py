@@ -1,5 +1,6 @@
 """Tests for pure reverse-parking path and controller helpers."""
 
+import json
 import math
 from copy import deepcopy  # noqa: I100
 from pathlib import Path
@@ -8,6 +9,7 @@ from jdamr_cube_navigation.reverse_parking import (  # noqa: I101
     CachedStaticCorridorValidator, RPP_PLUGIN, reverse_controller_overrides,
     reverse_curve_waypoints, reverse_waypoints, static_corridor_clear,
 )
+from jdamr_cube_navigation.surface_approach import face_approach_waypoints
 
 import pytest
 
@@ -48,6 +50,57 @@ def _write_grid(
         'free_thresh': 0.196,
     }), encoding='utf-8')
     return metadata
+
+
+@pytest.mark.parametrize('case,expected', [
+    ('target_alias', True), ('source_obstacle', False), ('other_keepout', False),
+    ('outside_span', False), ('crosses_face', False), ('unknown_keepout', False),
+])
+def test_observed_table_only_resolves_its_own_keepout_grid_alias(tmp_path, case, expected):
+    width, height = 20, 20
+    source_pixels, mask_pixels = [254] * 400, [254] * 400
+    for row in range(7, 13):
+        mask_pixels[row * width + 9] = 0
+    if case == 'source_obstacle':
+        source_pixels[10 * width + 9] = 0
+    elif case == 'other_keepout':
+        mask_pixels[10 * width + 6] = 0
+    elif case == 'unknown_keepout':
+        mask_pixels[10 * width + 9] = 100
+    source = _write_grid(tmp_path, 'source', source_pixels, width=width,
+                         height=height, resolution=.05, origin=(-.5, -.5, 0.))
+    mask = _write_grid(tmp_path, 'mask', mask_pixels, width=width,
+                       height=height, resolution=.05, origin=(-.5, -.5, 0.))
+    footprint = ((.05, .05), (-.05, .05), (-.05, -.05), (.05, -.05))
+    path = [(-.25, 0., 0.), (-.02 if case == 'crosses_face' else -.08, 0., 0.)]
+    surface = {'point_xy_m': (0., 0.), 'normal_xy': (-1., 0.),
+               'half_span_m': .02 if case == 'outside_span' else .3}
+    assert not static_corridor_clear(source, mask, path, footprint)
+    check = CachedStaticCorridorValidator(source, mask, footprint)
+    assert check(path, target_surface=surface) is expected
+
+
+@pytest.mark.parametrize('case_index', [0, 1])
+def test_recorded_water_near_turn_and_reapproach_clear_target_alias(tmp_path, case_index):
+    fixture = json.loads((Path(__file__).parent / 'fixtures'
+                          / 'water_parking_failure_20261019.json').read_text())
+    grid, case = fixture['map_fixture'], fixture['cases'][case_index]
+    width, height = grid['width'], grid['height']
+    source_pixels, mask_pixels = [254] * (width * height), [254] * (width * height)
+    for row in range(height):
+        for column in range(width):
+            if grid['origin'][0] + column * grid['resolution'] < 0.:
+                mask_pixels[row * width + column] = 0
+    kwargs = {key: grid[key] for key in ('width', 'height', 'resolution', 'origin')}
+    source = _write_grid(tmp_path, 'source', source_pixels, **kwargs)
+    mask = _write_grid(tmp_path, 'mask', mask_pixels, **kwargs)
+    poses = face_approach_waypoints(case['pose'], case['face'], case['normal'], .065, .225,
+                                    allow_near_alignment=True)
+    check = CachedStaticCorridorValidator(source, mask, fixture['footprint'])
+    assert not check(poses)
+    surface = {'point_xy_m': case['face'], 'normal_xy': case['normal'],
+               'half_span_m': case['span_m'] / 2.}
+    assert check(poses, target_surface=surface)
 
 
 @pytest.mark.parametrize('yaw', [0.0, math.pi / 2.0, math.pi])

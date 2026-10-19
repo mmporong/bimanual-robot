@@ -681,6 +681,87 @@ def _corridor_blockage(
     return None
 
 
+def _exact_corridor_pieces(poses, footprint):
+    footprints = [_world_footprint(pose, footprint) for pose in poses]
+    radius_m = max(math.hypot(x, y) for x, y in footprint)
+    pieces = [(polygon, 0.) for polygon in footprints]
+    for index, (start, end) in enumerate(zip(poses, poses[1:])):
+        turn_rad = abs(_shortest_angle(end[2] - start[2]))
+        pieces.append((_convex_hull(footprints[index] + footprints[index + 1]),
+                       radius_m * (1. - math.cos(turn_rad / 2.))))
+    return pieces
+
+
+def _cell_overlap_polygon(polygon, bounds, padding):
+    """Clip a swept piece to a cell expanded by its conservative rotation pad."""
+    left, bottom, right, top = bounds
+    result = list(polygon)
+    for axis, sign, limit in ((0, -1., -left + padding), (0, 1., right + padding),
+                              (1, -1., -bottom + padding), (1, 1., top + padding)):
+        if not result:
+            break
+        clipped = []
+        previous = result[-1]
+        previous_value = sign * previous[axis]
+        for current in result:
+            value = sign * current[axis]
+            if (value <= limit) != (previous_value <= limit):
+                fraction = (limit - previous_value) / (value - previous_value)
+                clipped.append(tuple(previous[i] + fraction * (current[i] - previous[i])
+                                     for i in (0, 1)))
+            if value <= limit:
+                clipped.append(current)
+            previous, previous_value = current, value
+        result = clipped
+    return result
+
+
+def _observed_surface_corridor_clear(source, keepout, poses, footprint, surface):
+    """Resolve only black target-mask cells protruding outside a measured plane."""
+    face = tuple(_finite_number(v, 'surface point') for v in surface['point_xy_m'])
+    normal = tuple(_finite_number(v, 'surface normal') for v in surface['normal_xy'])
+    half_span_m = _finite_number(surface['half_span_m'], 'surface half span')
+    if (len(face) != 2 or len(normal) != 2 or half_span_m <= 0.
+            or not math.isclose(math.hypot(*normal), 1., abs_tol=1e-6)):
+        raise ValueError('invalid observed surface')
+    tangent = -normal[1], normal[0]
+    length_m = 0.
+    for start, end in zip(poses, poses[1:]):
+        step = end[0] - start[0], end[1] - start[1]
+        length_m += math.hypot(*step)
+        if sum(step[i] * normal[i] for i in (0, 1)) > 1e-9:
+            return False
+    if length_m > .6 + 1e-9:
+        return False
+    pieces = _exact_corridor_pieces(poses, footprint)
+    if any(min(sum((point[i] - face[i]) * normal[i] for i in (0, 1))
+               for point in polygon) <= padding for polygon, padding in pieces):
+        return False
+    ignored = set()
+    while True:
+        blocked = _corridor_blockage(source, keepout, pieces, ignored,
+                                     skip_clearly_free_cells=True)
+        if blocked is None:
+            return True
+        if (blocked.get('grid') != 'keepout' or keepout['negate'] != 0
+                or blocked.get('pixel') != 0):
+            return False
+        outward_m, lateral_m = [], []
+        for polygon, padding in pieces:
+            overlap = _cell_overlap_polygon(polygon, blocked['cell_bounds'], padding)
+            outward_m.extend(
+                sum((p[i] - face[i]) * normal[i] for i in (0, 1)) + padding for p in overlap)
+            lateral_m.extend(
+                abs(sum((p[i] - face[i]) * tangent[i] for i in (0, 1))) + padding for p in overlap)
+        # This is a grid-resolution allowance, not a new physical parking gap.
+        half_cell_tangent_m = .5 * source['resolution'] * (abs(tangent[0]) + abs(tangent[1]))
+        if (not outward_m or max(outward_m) <= 0.
+                or max(outward_m) > 2. * source['resolution']
+                or max(lateral_m) > half_span_m + half_cell_tangent_m):
+            return False
+        ignored.add((blocked['column'], blocked['map_row']))
+
+
 class CachedStaticCorridorValidator:
     """Reuse one verified map pair and footprint for conservative path checks.
 
@@ -747,7 +828,7 @@ class CachedStaticCorridorValidator:
             math.hypot(x_value, y_value)
             for x_value, y_value in self._footprint)
 
-    def __call__(self, poses: Sequence[Sequence[float]]) -> bool:
+    def __call__(self, poses: Sequence[Sequence[float]], *, target_surface=None) -> bool:
         """Return whether the conservative hull of ``poses`` is clearly free."""
         try:
             checked_poses = tuple(_pose(pose, 'pose') for pose in poses)
@@ -775,10 +856,14 @@ class CachedStaticCorridorValidator:
             maximum_sagitta = max(
                 maximum_sagitta,
                 self._footprint_radius * (1.0 - math.cos(yaw_change / 2.0)))
-        return _corridor_blockage(
+        clear = _corridor_blockage(
             self._source, self._keepout,
             [(swept_hull, maximum_sagitta)],
             skip_clearly_free_cells=True) is None
+        if clear or target_surface is None:
+            return clear
+        return _observed_surface_corridor_clear(
+            self._source, self._keepout, checked_poses, self._footprint, target_surface)
 
 
 def static_corridor_clear(
