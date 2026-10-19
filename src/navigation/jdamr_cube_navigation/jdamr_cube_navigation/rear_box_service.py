@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import time
 
+from geometry_msgs.msg import Twist
 from jdamr_cube_navigation.box_lidar_witness import (
     MAX_CANDIDATE_PLANE_DISTANCE_M, MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD,
 )
@@ -12,15 +13,25 @@ from jdamr_cube_navigation.parking import (
     MAXIMUM_FRONT_GAP_M, MINIMUM_FRONT_GAP_M,
 )
 from jdamr_cube_navigation.rear_box_docking import (
-    estimate_rear_box_face, RearBoxFaceTracker,
+    estimate_rear_box_face, rear_corridor_clearance, RearBoxFaceTracker,
 )
-from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
+from jdamr_cube_navigation.rear_collision_profile import rear_collision_profile
+from jdamr_cube_navigation.restaurant_service import (
+    LIVE_APPROACH_MAX_M, STRAIGHT_ESCAPE_TOLERANCE_M,
+)
+from jdamr_cube_navigation.reverse_parking import (
+    CachedStaticCorridorValidator, MAX_REVERSE_DISTANCE_M, reverse_waypoints,
+)
 from jdamr_cube_navigation.surface_approach import (
-    face_approach_waypoints, FACE_HEADING_FILTER_S, filtered_face_heading,
+    FACE_APPROACH_TIME_S, face_approach_waypoints, FACE_HEADING_FILTER_S, filtered_face_heading,
 )
 from nav_msgs.msg import Path as RosPath
 import rclpy
 from tf2_ros import TransformException
+
+
+REAR_COARSE_HANDOFF_M = 0.5
+REAR_COARSE_SEGMENT_M = 0.5
 
 
 def _angle(value):
@@ -67,7 +78,7 @@ def _stationary_face(observations, extent, half_width):
 class RearBoxParkingMixin:
     """Observe a rear box without starting the depth camera or a transit task."""
 
-    def _rear_box_observation(self, geometry, extent, half_width):
+    def _rear_box_scan(self):
         scan = self.last_scan
         received = self.samples.get('scan')
         if scan is None or received is None or time.monotonic() - received > 0.5:
@@ -78,15 +89,29 @@ class RearBoxParkingMixin:
             raise RuntimeError('rear box scan stale or future-dated')
         if scan.header.frame_id != 'laser_link':
             raise RuntimeError('rear box scan frame mismatch')
+        return scan, stamp
+
+    @staticmethod
+    def _rear_scan_values(scan):
+        return {
+            'ranges': list(scan.ranges), 'angle_min': scan.angle_min,
+            'angle_increment': scan.angle_increment,
+            'range_min': scan.range_min, 'range_max': scan.range_max,
+        }
+
+    def _rear_box_observation(self, geometry, extent, half_width):
+        scan, stamp = self._rear_box_scan()
         cached = getattr(self, '_rear_box_detection_cache', None)
         if (cached is not None and cached[0] == stamp
                 and cached[1] == (id(geometry), extent, half_width)):
             return cached[2]
-        observation = estimate_rear_box_face({
-            'ranges': list(scan.ranges), 'angle_min': scan.angle_min,
-            'angle_increment': scan.angle_increment,
-            'range_min': scan.range_min, 'range_max': scan.range_max,
-        }, geometry=geometry, rear_extent_m=extent, rear_half_width_m=half_width)
+        try:
+            observation = estimate_rear_box_face(
+                self._rear_scan_values(scan), geometry=geometry,
+                rear_extent_m=extent, rear_half_width_m=half_width)
+        except ValueError as error:
+            self.emit('rear_box_face_unavailable', reason=str(error))
+            raise RuntimeError('rear box face unavailable') from error
         try:
             transform = self.parking_tf.lookup_transform(
                 'odom', self.parking_contract['robot_base_frame'],
@@ -106,16 +131,143 @@ class RearBoxParkingMixin:
         self._rear_box_detection_cache = (stamp, (id(geometry), extent, half_width), result)
         return result
 
+    def _rear_corridor_observation(self, geometry, extent, half_width):
+        scan, stamp = self._rear_box_scan()
+        try:
+            observed = rear_corridor_clearance(
+                self._rear_scan_values(scan), geometry=geometry,
+                rear_extent_m=extent, rear_half_width_m=half_width)
+        except ValueError as error:
+            raise RuntimeError('rear box corridor unavailable') from error
+        return {**observed, 'stamp_s': stamp}
+
+    def _rear_coarse_step(self, geometry, extent, half_width, distance_m,
+                          command_watch=None):
+        start = self._odom_pose()
+        target = (start[0] - distance_m * math.cos(start[2]),
+                  start[1] - distance_m * math.sin(start[2]), start[2])
+        anchor = self._frozen_in_odom(RosPath())[1](0., 0., 0.)
+        cosine, sine = math.cos(anchor[2]), math.sin(anchor[2])
+        check = CachedStaticCorridorValidator(
+            Path(self.registry['map']['yaml_path']),
+            Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
+
+        def validate(actual):
+            if math.dist(actual[:2], target[:2]) <= 0.05:
+                poses = [actual, target]
+            else:
+                poses = reverse_waypoints(actual, target, max_distance_m=LIVE_APPROACH_MAX_M)
+            mapped = []
+            for x, y, yaw in poses:
+                dx, dy = x - anchor[0], y - anchor[1]
+                mapped.append((cosine * dx + sine * dy,
+                               -sine * dx + cosine * dy, yaw - anchor[2]))
+            if not check(mapped):
+                raise RuntimeError('rear box coarse static corridor blocked')
+
+        validate(start)
+        validated_pose = [start]
+
+        def watch():
+            try:
+                observed = self._rear_corridor_observation(geometry, extent, half_width)
+                if observed['gap_m'] <= REAR_COARSE_HANDOFF_M:
+                    return 'rear box coarse handoff ready'
+                actual = self._odom_pose()
+                if (math.dist(actual[:2], validated_pose[0][:2]) >= 0.025
+                        or abs(_angle(actual[2] - validated_pose[0][2])) >= math.radians(.3)):
+                    validate(actual)
+                    validated_pose[0] = actual
+            except (RuntimeError, ValueError, TransformException) as error:
+                return str(error)
+            return None
+
+        kwargs = {} if command_watch is None else {'command_watch': command_watch}
+        travelled = self._drive_zero_turn(
+            -distance_m, watch=watch, hold_heading=True, **kwargs)
+        failure = getattr(self, '_last_direct_motion_failure', None)
+        if failure == 'rear box coarse handoff ready':
+            return True
+        if travelled is None or failure or self.stop_requested:
+            self.emit('rear_box_coarse_paused', reason=failure or 'coarse motion incomplete')
+            return False
+        return travelled < 0.0
+
+    def _approach_rear_corridor(self, geometry, extent, half_width, command_watch=None):
+        """Range while reversing on the known dock axis; latch a face only nearby."""
+        start = self._odom_pose()
+        outline = self._footprint_outline()
+        corridor_half_width = max(half_width, *(abs(point[1]) for point in outline))
+        while not self.stop_requested and time.monotonic() < self.run_deadline_s:
+            try:
+                observed = self._rear_corridor_observation(
+                    geometry, extent, corridor_half_width)
+            except RuntimeError as error:
+                if not self._rear_wait_for_input(str(error), command_watch):
+                    return False
+                continue
+            if observed['gap_m'] <= REAR_COARSE_HANDOFF_M:
+                self.emit('rear_box_fine_handoff', gap_m=observed['gap_m'])
+                return True
+            travelled = math.dist(start[:2], self._odom_pose()[:2])
+            budget = MAX_REVERSE_DISTANCE_M - travelled
+            if budget <= 0.0:
+                raise RuntimeError('rear box coarse approach exceeds bounded travel')
+            distance = min(REAR_COARSE_SEGMENT_M, budget,
+                           observed['gap_m'] - REAR_COARSE_HANDOFF_M
+                           + STRAIGHT_ESCAPE_TOLERANCE_M)
+            self.emit('rear_box_coarse_approach_started', gap_m=observed['gap_m'],
+                      distance_m=distance, face_latched=False)
+            if not self._rear_coarse_step(
+                    geometry, extent, corridor_half_width, distance, command_watch):
+                reason = getattr(self, '_last_direct_motion_failure', None)
+                if not reason or not self._rear_wait_for_input(reason, command_watch):
+                    return False
+        return False
+
+    def _rear_wait_for_input(self, reason, command_watch=None):
+        recoverable = {
+            'rear box scan unavailable', 'rear box scan stale or future-dated',
+            'rear box corridor unavailable', 'rear docking swept footprint occupied',
+        }
+        if reason not in recoverable and not self._input_gap_recoverable(reason):
+            return False
+        self.emit('rear_box_waiting_for_input', reason=reason, phase='coarse')
+        expected = Twist()
+        expected.linear.x = -0.05
+        while not self.stop_requested and time.monotonic() < self.run_deadline_s:
+            spin_node(self, timeout_sec=0.05)
+            if not self._operator_link_ready():
+                return False
+            if self._guard_failure(False):
+                continue
+            try:
+                self._rear_box_scan()
+            except RuntimeError:
+                continue
+            if command_watch is not None and command_watch(expected):
+                continue
+            self.emit('rear_box_input_recovered', phase='coarse', target_preserved=True)
+            return True
+        return False
+
     def _observe_rear_box(self, geometry, extent, half_width):
         tracker = RearBoxFaceTracker(required_frames=8)
         observations = []
         last_stamp = None
-        failure = 'rear box unavailable'
+        failure = 'rear box unstable'
         deadline = min(self.run_deadline_s, time.monotonic() + 5.0)
         while not self.stop_requested and time.monotonic() < deadline:
             spin_node(self, timeout_sec=0.02)
             if not self._operator_link_ready():
                 raise RuntimeError('operator_link_lost')
+            motion = getattr(self, 'latest_motion', None)
+            if (motion is None or not 0.0 <= time.monotonic() - motion[0] <= 0.5
+                    or abs(motion[1]) >= 0.01 or abs(motion[2]) >= 0.02):
+                tracker.update(None)
+                observations.clear()
+                failure = 'rear box waiting for stopped odometry'
+                continue
             try:
                 observation = self._rear_box_observation(geometry, extent, half_width)
                 if observation['stamp_s'] == last_stamp:
@@ -125,6 +277,7 @@ class RearBoxParkingMixin:
                 observations = observations[-8:]
                 if tracker.update(observation):
                     return _stationary_face(observations, extent, half_width)
+                failure = 'rear box unstable'
                 if tracker.frame_count == 1:
                     observations = observations[-1:]
             except (ValueError, RuntimeError) as error:
@@ -132,6 +285,21 @@ class RearBoxParkingMixin:
                 observations.clear()
                 failure = str(error)
         raise RuntimeError(f'rear box observation unavailable: {failure}')
+
+    def _observe_rear_box_recovering(self, geometry, extent, half_width):
+        """Keep a temporary perception gap inside the current return task."""
+        while not self.stop_requested and time.monotonic() < self.run_deadline_s:
+            if not self._operator_link_ready():
+                raise RuntimeError('operator_link_lost')
+            try:
+                return self._observe_rear_box(geometry, extent, half_width)
+            except RuntimeError as error:
+                if not str(error).startswith('rear box observation unavailable:'):
+                    raise
+                self.emit('rear_box_waiting_for_observation', reason=str(error),
+                          remaining_s=max(0., self.run_deadline_s - time.monotonic()))
+        raise RuntimeError('operator_stop' if self.stop_requested
+                           else 'rear box observation deadline exceeded')
 
     def _rear_box_update(self, initial, geometry, extent, half_width, target_gap,
                          reference=None):
@@ -231,14 +399,26 @@ class RearBoxParkingMixin:
         self.verify_live_maps()
         if not self.wait_until_ready(timeout=10.0):
             return False
-        self.capture_stationary_pose()
-        initial = self._observe_rear_box(geometry, extent, half_width)
-        self.emit('rear_box_observed', observation=initial, target_gap_m=target_gap)
         if not execute:
+            self.capture_stationary_pose()
+            initial = self._observe_rear_box(geometry, extent, half_width)
+            self.emit('rear_box_observed', observation=initial, target_gap_m=target_gap)
             return True
         if not self._reverse_smoother_ready() or not self._parking_parameters_ready(reverse=True):
             return False
         self._confirm_collision_monitor_on()
+        with rear_collision_profile(self) as command_watch:
+            if not self._approach_rear_corridor(
+                    geometry, extent, half_width, command_watch):
+                return False
+            initial = self._observe_rear_box_recovering(geometry, extent, half_width)
+            self.emit('rear_box_observed', observation=initial, target_gap_m=target_gap)
+            return self._park_rear_face(
+                initial, geometry, route_path, extent, half_width, target_gap, command_watch)
+
+    def _park_rear_face(self, initial, geometry, route_path, extent, half_width,
+                        target_gap, command_watch):
+        """Keep the fine target fixed after the moving range-only handoff."""
 
         def make_straight_clearance(observation):
             # At contact range a turn sweeps a rear corner toward the box. Reuse
@@ -251,7 +431,7 @@ class RearBoxParkingMixin:
             self._dock_departure = None
             if not self._depart_dock_straight(0.2):
                 return None
-            reobserved = self._observe_rear_box(geometry, extent, half_width)
+            reobserved = self._observe_rear_box_recovering(geometry, extent, half_width)
             _same_target(initial, reobserved)
             return reobserved
 
@@ -262,15 +442,16 @@ class RearBoxParkingMixin:
             remaining = update(self._odom_pose())['remaining_m']
             if remaining <= 0.0:
                 return True
+            kwargs = {} if command_watch is None else {'command_watch': command_watch}
             return self._drive_zero_turn(
                 -remaining, precision=True, hold_heading=True,
-                target_update=update) is not None
+                target_update=update, approach_time_s=FACE_APPROACH_TIME_S, **kwargs) is not None
 
         approach_start = make_straight_clearance(initial)
         if approach_start is None or not approach(approach_start):
             return False
 
-        final = self._observe_rear_box(geometry, extent, half_width)
+        final = self._observe_rear_box_recovering(geometry, extent, half_width)
         _same_target(initial, final)
 
         def confirmation(observation):
@@ -289,7 +470,7 @@ class RearBoxParkingMixin:
                       target_gap_m=target_gap, target_preserved=True)
             retry_start = make_straight_clearance(final)
             if retry_start is not None and approach(retry_start):
-                retried = self._observe_rear_box(geometry, extent, half_width)
+                retried = self._observe_rear_box_recovering(geometry, extent, half_width)
                 _same_target(initial, retried)
                 final = retried
                 confirmed, gap, far_gap, error = confirmation(final)

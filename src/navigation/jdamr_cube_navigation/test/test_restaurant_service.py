@@ -327,7 +327,7 @@ def test_operator_stop_during_departure_confirmation_never_starts_transit(
         raise_on_stop, dock_departure_static_corridor):
     node = dock_departure_route()
 
-    def capture():
+    def capture(**_kwargs):
         if node.capture_stationary_pose.call_count > 1:
             node.stop_requested = True
             if raise_on_stop:
@@ -3892,3 +3892,78 @@ def test_live_depth_gap_waits_stopped_and_resumes_same_target(monkeypatch, inter
         assert travelled == pytest.approx(.04, abs=.003)
         assert any(e['event'] == 'table_approach_input_recovered' for e in events)
         assert any(t >= 2.1 and v > 0. for t, v, _w in commands)
+
+
+@pytest.mark.parametrize('failure', [
+    'rear box face unavailable', 'rear box target changed',
+    'rear docking swept footprint occupied'])
+@pytest.mark.parametrize('recovers', [True, False])
+def test_rear_input_gap_keeps_same_motion_and_respects_task_deadline(
+        monkeypatch, failure, recovers):
+    node = route()
+    clock, position, velocity = [10.0], [0.0], [0.0]
+    commands = []
+    node.run_deadline_s = 14.0
+    node._operator_link_ready = lambda: True
+    node.latest_motion = (clock[0], 0.0, 0.0)
+    def publish(message):
+        velocity[0] = message.linear.x
+        commands.append((clock[0], message.linear.x))
+    def spin(*_a, **_k):
+        clock[0] += .02
+        position[0] += velocity[0] * .02
+        node.latest_motion = (clock[0], velocity[0], 0.0)
+    def update(actual):
+        if actual[0] > .01 and (not recovers or clock[0] < 11.5):
+            raise RuntimeError(failure)
+        return {'remaining_m': .04 - actual[0]}
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=position[0], y=0.),
+            rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    result = node._drive_zero_turn(.04, precision=True, hold_heading=True, target_update=update)
+    waiting = next(e for e in _events(node) if e['event'] == 'rear_box_waiting_for_input')
+    assert waiting['target_preserved']
+    assert all(v == 0. for t, v in commands if waiting['monotonic_s'] <= t < 11.5)
+    assert clock[0] < 14.6
+    if recovers:
+        assert result == pytest.approx(.04, abs=.003)
+        assert any(e['event'] == 'rear_box_input_recovered' for e in _events(node))
+    else:
+        assert result is None
+        assert position[0] < .02
+        assert not any(e['event'] == 'rear_box_input_recovered' for e in _events(node))
+
+
+@pytest.mark.parametrize('intermediate', [True, False])
+def test_intermediate_stationary_capture_uses_short_hold_without_relaxing_inputs(
+        monkeypatch, intermediate):
+    node = route()
+    clock = [10.0]
+    node._guard_failure = lambda *_a, **_k: None
+    node.parking_motion_revision = 0
+    node.parking_command = (10., 0., 0.)
+    node.parking_odom = None
+    node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(
+        nanoseconds=int(clock[0]*1e9)))
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(header=SimpleNamespace(stamp=SimpleNamespace(
+            sec=int(clock[0]), nanosec=int(clock[0] % 1 * 1e9))),
+            transform=SimpleNamespace(translation=SimpleNamespace(x=0., y=0.),
+                                     rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    def spin(*_a, **_k):
+        clock[0] += .05
+        stamp = SimpleNamespace(sec=int(clock[0]), nanosec=int(clock[0] % 1 * 1e9))
+        node.parking_odom = (clock[0], stamp, 0., 0.)
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    actual, evidence = node.capture_stationary_pose(intermediate=intermediate)
+    assert actual == (0., 0., 0.)
+    assert evidence['confirmed']
+    assert evidence['command_observed']
+    assert 0.08 <= clock[0]-10.0 < (.3 if intermediate else 1.3)
+    if not intermediate:
+        assert clock[0]-10.0 >= node.parking_contract['hold_s']

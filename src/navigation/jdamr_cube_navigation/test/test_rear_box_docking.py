@@ -9,6 +9,7 @@ from pathlib import Path
 from jdamr_cube_navigation.rear_box_docking import (
     estimate_rear_box_face,
     PROVENANCE,
+    rear_corridor_clearance,
     RearBoxFaceTracker,
 )
 import numpy as np
@@ -58,6 +59,12 @@ def estimate(scan, diagnostics=None):
         rear_half_width_m=REAR_HALF_WIDTH_M, diagnostics=diagnostics)
 
 
+def clearance(scan):
+    return rear_corridor_clearance(
+        scan, geometry=GEOMETRY, rear_extent_m=REAR_EXTENT_M,
+        rear_half_width_m=REAR_HALF_WIDTH_M)
+
+
 def recorded_scans():
     document = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
     assert document['provenance']['source_sha256'] == (
@@ -78,6 +85,74 @@ def recorded_scans():
             'ranges': ranges,
         })
     return scans
+
+
+def test_rear_corridor_clearance_reports_nearest_raw_return():
+    result = clearance(scan_from_base_points([
+        (-0.80, -0.10), (-0.80, 0.10),
+    ]))
+
+    assert result == {
+        'gap_m': pytest.approx(0.525, abs=0.002),
+        'support_count': 2,
+        'nearest_base_xy_m': pytest.approx((-0.80, 0.10), abs=0.002),
+    }
+
+
+def test_rear_corridor_clearance_prefers_close_obstacle_over_far_wall():
+    far_wall = [(-1.20, lateral)
+                for lateral in np.linspace(-0.20, 0.20, 31)]
+    result = clearance(scan_from_base_points(
+        far_wall + [(-0.47, 0.04)]))
+
+    assert result['gap_m'] == pytest.approx(0.195, abs=0.002)
+    assert result['nearest_base_xy_m'] == pytest.approx(
+        (-0.47, 0.04), abs=0.002)
+
+
+def test_rear_corridor_clearance_excludes_returns_outside_swept_width():
+    result = clearance(scan_from_base_points([
+        (-0.45, REAR_HALF_WIDTH_M + 0.02),
+        (-0.75, 0.0),
+    ]))
+
+    assert result['gap_m'] == pytest.approx(0.475, abs=0.002)
+    assert result['support_count'] == 1
+
+
+def test_rear_corridor_clearance_accepts_a_single_return():
+    result = clearance(scan_from_base_points([(-0.55, 0.08)]))
+
+    assert result['gap_m'] == pytest.approx(0.275, abs=0.002)
+    assert result['support_count'] == 1
+
+
+def test_rear_corridor_clearance_preserves_negative_body_intrusion():
+    result = rear_corridor_clearance(
+        scan_from_base_points([(-0.30, 0.03)]), geometry=GEOMETRY,
+        rear_extent_m=0.35, rear_half_width_m=REAR_HALF_WIDTH_M)
+
+    assert result['gap_m'] == pytest.approx(-0.05, abs=0.002)
+    assert result['nearest_base_xy_m'] == pytest.approx(
+        (-0.30, 0.03), abs=0.002)
+
+
+def test_rear_corridor_clearance_rejects_empty_rear_roi():
+    with pytest.raises(ValueError, match='rear corridor has no valid points'):
+        clearance(scan_from_base_points([
+            (0.60, 0.0),
+            (-0.60, REAR_HALF_WIDTH_M + 0.05),
+        ]))
+
+
+def test_rear_corridor_clearance_does_not_change_face_estimation():
+    scan = recorded_scans()[0]
+    before = estimate(scan)
+
+    result = clearance(scan)
+
+    assert result['support_count'] >= before['support_count']
+    assert estimate(scan) == before
 
 
 def test_recorded_box_is_visible_in_all_twelve_frames_and_stable():
@@ -191,14 +266,30 @@ def test_tracker_treats_endpoint_direction_as_undirected():
     assert tracker.update(result) is True
 
 
-def test_tracker_resets_on_relative_line_change():
+def test_tracker_slides_on_relative_line_change_without_accepting_it():
     result = estimate(recorded_scans()[0])
     tracker = RearBoxFaceTracker(required_frames=3)
     assert tracker.update(result) is False
     assert tracker.update(result) is False
     moved = dict(result, line_offset_m=result['line_offset_m'] - 0.04)
     assert tracker.update(moved) is False
-    assert tracker.frame_count == 1
+    assert tracker.frame_count == 2
+
+
+def test_tracker_recovers_after_single_outlier_with_sliding_window():
+    result = estimate(recorded_scans()[0])
+    outlier = dict(result, line_offset_m=result['line_offset_m'] - 0.04)
+    tracker = RearBoxFaceTracker(required_frames=3)
+
+    assert tracker.update(result) is False
+    assert tracker.update(result) is False
+    assert tracker.update(outlier) is False
+    assert tracker.frame_count == 2
+    assert tracker.update(result) is False
+    assert tracker.frame_count == 2
+    assert tracker.update(result) is False
+    assert tracker.frame_count == 2
+    assert tracker.update(result) is True
 
 
 def test_tracker_clears_history_when_observation_is_missing():

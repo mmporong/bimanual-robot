@@ -1111,3 +1111,17 @@ def test_manual_recovery_does_not_require_display_or_recording(env, monkeypatch,
     assert 'cmd_init' in calls and 'cmd_session_start' in calls
     assert ('display_restore' in calls) is display_active
     assert ('cmd_display_stop' in calls) is display_active
+
+
+@pytest.mark.parametrize('events,expected', [
+    ([{'event': 'precision_straight_finished', 'target_failure': 'rear box target changed'},
+      {'event': 'operator_call', 'reason': 'cycle failed'},
+      {'event': 'executor_failed', 'reason': 'executor_exit_nonzero', 'code': 1}],
+     'rear box target changed'),
+    ([{'event': 'failed', 'reason': 'rear box observation deadline exceeded'}],
+     'rear box observation deadline exceeded'),
+    ([{'event': 'straight_drive_stopped', 'reason': 'rear box coarse handoff ready'}], None),
+    ([{'event': 'precision_straight_finished', 'target_failure': None}], None),
+])
+def test_executor_failure_retains_the_action_cause(events, expected):
+    assert d.execution_failure_cause(events) == expected

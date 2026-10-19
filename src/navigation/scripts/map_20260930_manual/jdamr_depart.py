@@ -716,6 +716,20 @@ def show_event(event, *, notify=True):
         alert_operator(event)
 
 
+def execution_failure_cause(events):
+    """Keep the action failure instead of replacing it with the process exit code."""
+    for event in reversed(events):
+        if event.get('event') == 'failed' and event.get('reason'):
+            return str(event['reason'])
+        if (event.get('event') == 'precision_straight_finished'
+                and event.get('target_failure')):
+            return str(event['target_failure'])
+        if (event.get('event') in ('straight_drive_stopped', 'rear_box_coarse_paused')
+                and event.get('reason') not in (None, 'rear box coarse handoff ready')):
+            return str(event['reason'])
+    return None
+
+
 def alert_operator(event):
     """Bell, desktop notification and an optional extra channel for an operator_call.
 
@@ -1097,7 +1111,8 @@ def go_one(args, table_id):
     names = [e.get('event') for e in events]
     executor_failure = next((e for e in events if e.get('event') == 'executor_failed'), None)
     if executor_failure is not None:
-        fail(f'executor failed: {executor_failure["reason"]} '
+        reason = execution_failure_cause(events) or executor_failure['reason']
+        fail(f'execution stopped: {reason} '
              f'(code={executor_failure["code"]}); see the run log')
     if getattr(args, 'rear_box_only', False):
         parked = [e for e in events if e.get('event') == 'rear_box_parking_finished']

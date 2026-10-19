@@ -101,7 +101,7 @@ ros2 launch jdamr_cube_cartographer cartographer_real.launch.py
 양팔 시뮬 모델 `hold_flow_description`의 차체 중심 원점과 105 mm 차이가 있다.
 주행의 검증된 TF를 임의로 양팔 시뮬 모델로 바꾸거나 두 모델을 같은 프레임으로 동시에 띄우지 않는다.
 카메라 렌즈는 상판 720 mm + 상대 높이 540 mm = 바닥 기준 1260 mm다.
-새 높이에서 1 cm 주차 실측 성공은 아직 확인하지 않았다.
+1 cm 주차 성공은 사용자가 확인했다. 이후 제어 수정본의 실차 결과와 반복 정밀도는 별도로 확인한다.
 
 ## 개발과 검증
 

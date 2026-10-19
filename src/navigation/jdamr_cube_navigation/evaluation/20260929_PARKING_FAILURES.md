@@ -1669,7 +1669,7 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 
 **원인 구분:** 정지 상태의 global/local costmap clear와 새 scan 33개 뒤에도 HOME 직전 두 표본은 false였다. 갱신 뒤 HOME 외곽과 겹친 lethal 셀 중심은 x≈−0.125 m, y≈0.125/0.175/0.225/0.275 m이며 네 셀 모두 원본 지도·keepout은 free다. 후면 스캔은 차체 기준 x≈−0.855 m의 횡방향 면을 검출했다. 관측 박스 면과 과거 map HOME pose의 차체 영역이 겹치는 조건이므로 충돌 판정을 끄거나 오래된 지도 잔상으로 단정하지 않는다. 단독 후면 라이다 기능이 전체 HOME 복귀에 연결되지 않아, 박스 앞에서 멈춰야 하는 최종 목표를 과거 지도 좌표까지의 경로로 검사한 것이 운영 구성의 문제다.
 
-**복귀 결과:** 기존 단독 모드 `table_01_20261019_094849_435c91f5`로 도크 박스 앞까지 이동한 뒤 정지했다. 내부 추정 nearest 10.850 mm/farthest 15.158 mm, yaw 0.5485°로 기존 양쪽 목표 ±3 mm 확인은 false다. 도크 귀환 위치 도달과 1 cm 정밀 판정을 구분한다. 동일 전체 실행의 table_01은 내부 8.96/8.92 mm였으나 사용자는 실제 3–5 cm를 보고했다. 마지막 면 관측에서 정지까지 약 19초의 odometry 추적이 있어, 이 실행을 전면 1 cm 성공으로 기록하지 않는다. 카메라 보정·경계 위치·실제 이동 대 odometry 중 어느 원인인지는 이 자료만으로 확정하지 않는다.
+**복귀 결과:** 기존 단독 모드 `table_01_20261019_094849_435c91f5`로 도크 박스 앞까지 이동한 뒤 정지했다. 이 당시 실행의 최종 양쪽 목표 ±3 mm 확인은 false였다. 이후 사용자가 확인한 1 cm 성공과 구분하는 과거 실패 기록이다. 도크 귀환 위치 도달과 1 cm 정밀 판정을 구분한다. 동일 전체 실행의 table_01은 내부 8.96/8.92 mm였으나 사용자는 실제 3–5 cm를 보고했다. 마지막 면 관측에서 정지까지 약 19초의 odometry 추적이 있어, 이 실행을 전면 1 cm 성공으로 기록하지 않는다. 카메라 보정·경계 위치·실제 이동 대 odometry 중 어느 원인인지는 이 자료만으로 확정하지 않는다.
 
 **수정:** HOME의 명시적 `rear_parking_reference: lidar_box` 설정에서만 기존 staging→후면 LiDAR 추종→양쪽 gap 확인을 한 실행으로 연결한다. 지도 HOME 좌표/방향은 유지하며 staging offset은 0.6 m, 후면 목표는 전면 목표와 분리한 0.01 m다. 라이다가 관측하는 최근접 횡방향 면을 등록 도크 접근 위치에서 안정화하고 최초 평면을 유지한다. 개별 물체 ID를 인식하는 기능은 아니다. final 관측 미달은 최대 한 번만 같은 표적을 보정하고, 정지·통신·센서 실패는 재시도하지 않는다. 실제 외곽·정적 지도/keepout 검사·fresh scan·Collision Monitor는 유지한다. 이전 map 모드의 live 검사도 유지하고, 거부 단계/이유/indices/시도 횟수와 대기 중 중단 이유를 기록한다.
 
@@ -1687,3 +1687,18 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 후속 `table_01_20261019_104016_588becba`는 직선 이탈과 급수대·1번 테이블·각 후진 이탈을 수행했다. 도크 staging 후 최근접 rear ROI 면은 gap1.363m/angle−18.2°여서0.6m 접근 한계로 미이동 종료했다. 도크 박스인 줄 알고 한계를 늘리지 않는다. AMCL 근처 stationary scan 최적 정합은 inlier21.8%, 전역 후보와 불일치해 실제 위치 확인이 필요하다. 새 위치를 임의로 가정하거나 HOME/AMCL를 바꾸지 않았다. 원본은 기존runs와 PC `$HOME/.local/state/bimanual-robot/dock_return_20261019/staging_recovery_1044/`에 있다. 사용자 후면 접촉 허용은 기록하되 전방 충돌·오래된 센서 운행 허가로 확대하지 않는다.
 
 사용자는 후진하면 도크이고 박스가 후면 중앙에 있다고 확인했다. 최신 정지 scan8장의 후면 면 추정은1.445–1.452m, yaw약−13.3°에서−13.7°로 일관됐다. 지도 staging과0.6m 정밀접근 사이 중간 접근이 연결되지 않았으며 이 센서 면을 고유 식별한 상태는 아니다. 임시 map 중간 목표 `104912_cdf96bac`는 작은 전진 정렬 뒤 lateral0.0300249m로 거부됐고, `105104_fc5b070e`는 이미 staging에 있는 조건에서 새 최종 명령이 없어 후진 발행 전에 거부됐다. 중간·최종 확인 계약을 분리하는 로컬 실험은 회귀 실패로 원복했고 Pi에는 배포하지 않았다. 유효한 도크 이탈 패치만 유지하며 원복 뒤12건·production lint PASS다. 마지막 odom은v0/w0, executor active/요청 없음이며 도크 복귀 성공으로 기록하지 않는다. 최신 scan은 PC `$HOME/.local/state/bimanual-robot/dock_return_20261019/rear_scan_latest.json`에 있다.
+
+
+### 22.17 원거리 도크 연결·일시 입력 실패·예측 감속과 경계 대기 수정
+
+**현재 결과 정정:** 사용자가 1 cm 정밀주차 성공을 확인했다. 과거의 미달 간격을 현행 결과로 쓰지 않는다. 아래는 그 성공 이후 준비 단계에서 분석·수정한 실패이며, 새 수정본의 실차 성공이나 반복성을 증명하는 기록은 아니다.
+
+**관측과 원인:** `104016_588becba`의 1.363 m 면을 최종 0.6 m 제어에 넘겨 이동 전에 종료했다. 사용자는 도크 박스가 후방 중앙이고 실제 간격이 1 m 이상이라고 확인했다. 따라서 당시 면을 다른 물체로 단정하지 않는다. 임시 연결본 `110756_5b302044`는 약 0.178 m 후진한 뒤 raw 표적 일치 실패로 종료했고, `111146_be520c46`는 5초 내 원거리 안정 8프레임을 모으지 못해 종료했다. 최종 정밀도 계약을 원거리 이동에 적용한 결합과 일시 입력 실패의 상위 실행 종료가 원인이다.
+
+수동 후진은 odom 약 0.674 m 후 정지했다. Pi journal에서 11:15:42.522–11:16:06.283의 FootprintApproach 개입을 확인했으며 중간 StopZone/Slowdown 전환은 없었다. 당시 scan/bag가 없어 해당 점이 차체 반사인지 외부 장애물인지는 확정하지 않는다. 기존 면 제어의 remaining/4초 법칙은 마지막 20 cm부터 감속했고, 중간 stationary hold 1초도 경계마다 중복됐다.
+
+**수정:** 원거리는 후방 통로의 유효 최근접점을 단일 점까지 보존해 관측하면서 같은 축으로 접근하고, 0.5 m 이내에서만 안정된 면을 확정한다. 0.5 m 구간·총 2 m 이동 범위, 짧은 구간을 포함한 정적 지도/keepout sweep는 유지한다. 안정 관측은 sliding window로 갱신하며 일시 scan/면 입력 실패는 같은 태스크·기존 deadline 안에서 정지 후 남은 구간을 재개한다. 후면 접근에만 StopZone과 속도·제동거리 기반 실시간 swept footprint 감시를 적용하고 일반 FootprintApproach를 복원한다. 복원 실패는 비상정지와 원래 오류로 전파한다. 면 제어 감속 시간은 0.2초, 중간 정지 hold는 기존 0.08초를 사용한다. 최종 확인과 서비스 체류는 별도다. CLI는 nonzero를 숨기지 않고 실제 동작 원인을 출력한다.
+
+**검증·범위:** 최종 관련 8개 스위트 931건(13.93초), 생산 모듈 6개 lint·구문 검사와 diff 확인을 통과했다. 출발 helper lint는 기존 17건 그대로이며 신규 오류는 없다. 독립 검토는 추가 대상 157건과 scan 오류 복구 연결 10건을 통과해 PASS했다. 저장 정지 scan의 새 통로 거리는 접근 전 약 1.476–1.478 m, 후진 뒤 약 1.296–1.298 m로 관측 가능했다. 이번 준비 단계는 비이동이며, 전면 근접 가림의 odom 추적 오차·새 수정본 전체 왕복 시간과 반복 정밀도는 이 소프트웨어 검증으로 해결됐다고 주장하지 않는다. 원본과 배포 receipt는 PC `$HOME/.local/state/bimanual-robot/dock_return_20261019/`에 보존한다.
+
+**비이동 배포:** Pi source/install 6쌍 SHA·compile·import가 일치했다. 복원본은 `$HOME/.local/state/jdamr/dock-continuity/20261019_115147/`, PC receipt는 `$HOME/.local/state/bimanual-robot/dock_return_20261019/dock_continuity_deployment.json`이다. idle executor PID231465·Nav2 PID51198·base PID50055와 사용자 대시보드는 다음 요청을 위해 유지하며 fresh scan/odom·속도 0·pending/running 0·StopZone/FootprintApproach 활성 상태를 확인했다. 임시 확인 노드는 종료했다. 유지 서비스 종료는 §22.14 명령과 같다. HOME/AMCL는 변경하지 않았다.

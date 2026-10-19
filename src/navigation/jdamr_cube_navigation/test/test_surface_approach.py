@@ -35,6 +35,24 @@ def test_close_aligned_face_keeps_existing_precision_band():
             (0.4, 0.0, 0.1), (0.5, 0.0), (-1.0, 0.0), 0.065, 0.225)
 
 
+@pytest.mark.parametrize('angle', [-.23, 0., .23])
+def test_rear_coarse_preview_stops_at_intermediate_gap(angle):
+    normal = math.cos(angle), math.sin(angle)
+    offset = -1.45 - .275 * normal[0] - .225 * abs(normal[1])
+    face = offset / normal[0], 0.
+    target_gap = 1.45 - .5 * math.cos(angle)
+    poses = face_approach_waypoints(
+        (0., 0., math.pi), face, normal, .275, .225, target_gap,
+        command_heading_rad=angle + math.pi)
+    final = poses[-1]
+    error = math.atan2(math.sin(angle + math.pi - final[2]),
+                       math.cos(angle + math.pi - final[2]))
+    gap = (sum((final[i] - face[i]) * normal[i] for i in (0, 1))
+           - .275 * math.cos(error) - .225 * abs(math.sin(error)))
+    assert target_gap - .001 <= gap <= target_gap + .0005
+    assert math.dist(poses[0][:2], final[:2]) <= .6
+
+
 @pytest.mark.parametrize('remaining,error', [(math.nan, 0.0), (0.1, math.inf)])
 def test_command_rejects_nonfinite_inputs(remaining, error):
     with pytest.raises(ValueError):

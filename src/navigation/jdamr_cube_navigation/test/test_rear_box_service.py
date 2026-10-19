@@ -1,6 +1,8 @@
 """Rear-box control integration without a camera or hardware motion."""
 
+from contextlib import nullcontext
 import math
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -16,6 +18,18 @@ GEOMETRY = {
 }
 
 
+@pytest.fixture(autouse=True)
+def isolate_collision_profile(monkeypatch):
+    monkeypatch.setattr(module, 'rear_collision_profile', lambda _node: nullcontext(None))
+
+
+def route_node():
+    node = object.__new__(BoxServiceRoute)
+    node.stop_requested = False
+    node._approach_rear_corridor = Mock(return_value=True)
+    return node
+
+
 def face(gap=0.01, angle=0.0, stamp=5.0):
     return {'gap_m': gap, 'normal_yaw_error_rad': angle, 'stamp_s': stamp,
             'face_center_base_xy_m': (-0.275-gap, 0.),
@@ -26,7 +40,7 @@ def face(gap=0.01, angle=0.0, stamp=5.0):
 
 @pytest.mark.parametrize('moved', [None, -0.2])
 def test_near_skewed_box_uses_straight_clearance_then_rear_feedback(monkeypatch, moved):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node._final_gap_m = Mock(return_value=.01)
     node.verify_live_maps = Mock()
     node.wait_until_ready = Mock(return_value=True)
@@ -51,14 +65,14 @@ def test_near_skewed_box_uses_straight_clearance_then_rear_feedback(monkeypatch,
     assert node.park_rear_box(GEOMETRY, 'route', execute=True, timeout_s=90) is (moved is not None)
     node._depart_dock_straight.assert_called_once_with(.2)
     node._drive_zero_turn.assert_called_once_with(
-        -.2, precision=True, hold_heading=True, target_update=update)
+        -.2, precision=True, hold_heading=True, target_update=update, approach_time_s=.2)
     node._camera.assert_not_called()
-    node.capture_stationary_pose.assert_called_once()
+    node.capture_stationary_pose.assert_not_called()
     assert node._observe_rear_box.call_count == (2 if moved is None else 3)
 
 
 def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monkeypatch):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node._final_gap_m = Mock(return_value=.05)
     node.verify_live_maps = Mock()
     node.wait_until_ready = Mock(return_value=True)
@@ -104,7 +118,7 @@ def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monk
 
 
 def test_terminal_miss_does_not_retry_after_operator_link_loss():
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node._final_gap_m = Mock(return_value=.01)
     node.verify_live_maps = Mock()
     node.wait_until_ready = Mock(return_value=True)
@@ -117,7 +131,7 @@ def test_terminal_miss_does_not_retry_after_operator_link_loss():
     node._reverse_smoother_ready = Mock(return_value=True)
     node._parking_parameters_ready = Mock(return_value=True)
     node._confirm_collision_monitor_on = Mock()
-    node._operator_link_ready = Mock(return_value=False)
+    node._operator_link_ready = Mock(side_effect=[True, True, False])
     node._depart_dock_straight = Mock(return_value=True)
     update = Mock(return_value={'remaining_m': .19})
     node._rear_box_update = Mock(return_value=update)
@@ -133,9 +147,85 @@ def test_terminal_miss_does_not_retry_after_operator_link_loss():
     assert node.confirmation['reason'] == 'rear_box_gap_out_of_tolerance'
 
 
+def test_far_corridor_moves_before_any_precision_face_is_required():
+    node = route_node()
+    del node._approach_rear_corridor
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    node._rear_corridor_observation = Mock(side_effect=[
+        {'gap_m': 1.45}, {'gap_m': .95}, {'gap_m': .5}])
+    node._rear_coarse_step = Mock(return_value=True)
+    node._rear_box_observation = Mock(side_effect=AssertionError('fine face not required yet'))
+    node.run_deadline_s = time.monotonic() + 10.
+    node.emit = Mock()
+    assert node._approach_rear_corridor(GEOMETRY, .275, .225)
+    assert [call.args[3] for call in node._rear_coarse_step.call_args_list] == (
+        pytest.approx([.5, .46]))
+    assert all(call.args[2] == pytest.approx(.275)
+               for call in node._rear_coarse_step.call_args_list)
+    node._rear_box_observation.assert_not_called()
+
+
+@pytest.mark.parametrize('clear', [True, False])
+def test_coarse_reverse_validates_static_path_before_command(monkeypatch, clear):
+    node = route_node()
+    node.registry = {'map': {'yaml_path': '/map.yaml'},
+                     'keepout': {'yaml_path': '/mask.yaml'}}
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._frozen_in_odom = Mock(return_value=(None, lambda x, y, yaw: (x, y, yaw)))
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    node._drive_zero_turn = Mock(return_value=-.49)
+    node.emit = Mock()
+    check = Mock(return_value=clear)
+    monkeypatch.setattr(module, 'CachedStaticCorridorValidator', Mock(return_value=check))
+    if not clear:
+        with pytest.raises(RuntimeError, match='static corridor blocked'):
+            node._rear_coarse_step(GEOMETRY, .275, .275, .5)
+        node._drive_zero_turn.assert_not_called()
+        return
+    assert node._rear_coarse_step(GEOMETRY, .275, .275, .5)
+    path = check.call_args.args[0]
+    assert path[0] == pytest.approx((0., 0., 0.))
+    assert path[-1] == pytest.approx((-.5, 0., 0.))
+    assert node._drive_zero_turn.call_args.args[0] == -.5
+
+
+def test_coarse_range_reaches_handoff_without_a_plane(monkeypatch):
+    node = route_node()
+    node.registry = {'map': {'yaml_path': '/map.yaml'},
+                     'keepout': {'yaml_path': '/mask.yaml'}}
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._frozen_in_odom = Mock(return_value=(None, lambda x, y, yaw: (x, y, yaw)))
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    node._rear_corridor_observation = Mock(return_value={'gap_m': .49})
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'CachedStaticCorridorValidator',
+                        Mock(return_value=Mock(return_value=True)))
+    def drive(_distance, **kwargs):
+        reason = kwargs['watch']()
+        assert reason == 'rear box coarse handoff ready'
+        node._last_direct_motion_failure = reason
+        return None
+    node._drive_zero_turn = Mock(side_effect=drive)
+    assert node._rear_coarse_step(GEOMETRY, .275, .275, .5)
+
+
+def test_temporary_face_loss_waits_in_same_task_then_recovers():
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    observed = face(.4)
+    node._observe_rear_box = Mock(side_effect=[
+        RuntimeError('rear box observation unavailable: rear box unstable'), observed])
+    node.emit = Mock()
+    assert node._observe_rear_box_recovering(GEOMETRY, .275, .225) is observed
+    assert node._observe_rear_box.call_count == 2
+    assert node.emit.call_args.args[0] == 'rear_box_waiting_for_observation'
+
+
 @pytest.mark.parametrize('target_gap', [True, 0., .009, .101, math.inf])
 def test_explicit_rear_target_gap_reuses_parking_contract_bounds(target_gap):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node._final_gap_m = Mock(return_value=.01)
     with pytest.raises(ValueError, match=r'\[0.01, 0.10\]'):
         node.park_rear_box(
@@ -145,7 +235,7 @@ def test_explicit_rear_target_gap_reuses_parking_contract_bounds(target_gap):
 
 
 def test_reverse_preview_rotates_heading_without_rotating_actual_footprint(monkeypatch):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node.registry = {'map': {'yaml_path': '/map.yaml'},
                      'keepout': {'yaml_path': '/mask.yaml'}}
     node._odom_pose = Mock(return_value=(0., 0., 0.))
@@ -173,7 +263,7 @@ def test_reverse_preview_rotates_heading_without_rotating_actual_footprint(monke
 
 @pytest.mark.parametrize('age,frame', [(1., 'laser_link'), (0., 'wrong_frame')])
 def test_bad_scan_stops_before_fitting_or_any_motion(monkeypatch, age, frame):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node.last_scan = SimpleNamespace(header=SimpleNamespace(
         stamp=SimpleNamespace(sec=5, nanosec=0), frame_id=frame))
     node.samples = {'scan': 5.0}
@@ -188,7 +278,7 @@ def test_bad_scan_stops_before_fitting_or_any_motion(monkeypatch, age, frame):
 
 @pytest.mark.parametrize('change', ['position', 'normal', 'clock'])
 def test_live_scan_cannot_switch_target_or_regress_time(monkeypatch, change):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node.registry = {'map': {'yaml_path': '/map.yaml'},
                      'keepout': {'yaml_path': '/mask.yaml'}}
     node._odom_pose = Mock(return_value=(0., 0., 0.))
@@ -210,7 +300,7 @@ def test_live_scan_cannot_switch_target_or_regress_time(monkeypatch, change):
 
 @pytest.mark.parametrize('change', ['position', 'normal'])
 def test_small_cumulative_changes_cannot_move_the_latched_target(monkeypatch, change):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node.registry = {'map': {'yaml_path': '/map.yaml'},
                      'keepout': {'yaml_path': '/mask.yaml'}}
     node._odom_pose = Mock(return_value=(0., 0., 0.))
@@ -240,7 +330,7 @@ def test_final_confirmation_rejects_a_different_box_at_the_right_gap():
 
 
 def test_one_noisy_close_range_scan_does_not_interrupt_an_aligned_approach(monkeypatch):
-    node = object.__new__(BoxServiceRoute)
+    node = route_node()
     node.registry = {'map': {'yaml_path': '/map.yaml'},
                      'keepout': {'yaml_path': '/mask.yaml'}}
     node._odom_pose = Mock(return_value=(0., 0., 0.))

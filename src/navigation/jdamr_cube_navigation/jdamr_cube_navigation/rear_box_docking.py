@@ -182,6 +182,32 @@ def _nearest_rear_layer(points):
     return ordered[:int(splits[0]) + 1], int(len(splits) + 1)
 
 
+def rear_corridor_clearance(
+        scan, *, geometry, rear_extent_m, rear_half_width_m):
+    """Return the nearest raw LiDAR clearance in the straight rear corridor.
+
+    This deliberately does not fit or identify a docking face.  Every valid
+    return behind the base and within its rearward swept width participates,
+    including a single point or a point already inside the body footprint.
+    """
+    rear_extent_m = _positive(rear_extent_m, 'rear_extent_m')
+    rear_half_width_m = _positive(rear_half_width_m, 'rear_half_width_m')
+    points = _scan_points_base(scan, geometry)
+    corridor = points[
+        (points[:, 0] < 0.0)
+        & (np.abs(points[:, 1]) <= rear_half_width_m)
+    ]
+    if len(corridor) == 0:
+        raise ValueError('rear corridor has no valid points')
+
+    nearest = corridor[int(np.argmax(corridor[:, 0]))]
+    return {
+        'gap_m': float(-nearest[0] - rear_extent_m),
+        'support_count': int(len(corridor)),
+        'nearest_base_xy_m': tuple(float(value) for value in nearest),
+    }
+
+
 def estimate_rear_box_face(
         scan, *, geometry, rear_extent_m, rear_half_width_m,
         diagnostics=None):
@@ -300,9 +326,7 @@ class RearBoxFaceTracker:
             and float(np.max(tangent_angles)) <= self.maximum_angle_spread_rad
         )
         if not stable:
-            latest = self._history[-1]
-            self._history.clear()
-            self._history.append(latest)
+            self._history.popleft()
         return stable
 
     @property

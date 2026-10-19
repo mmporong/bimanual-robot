@@ -1111,7 +1111,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if (not isinstance(start, dict) or not isinstance(limit_m, (float, int))
                     or not math.isfinite(limit_m) or not 0.0 < limit_m <= 0.3):
                 raise ValueError('observation route requires a bounded start pose')
-            actual, _ = self.capture_stationary_pose()
+            actual, _ = self.capture_stationary_pose(intermediate=True)
         reference = route['waypoints'][-1] if resume_at_observation else start
         if math.dist(actual[:2], (reference['x'], reference['y'])) > limit_m:
             if resume_at_observation:
@@ -1944,7 +1944,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.emit('failed', phase='box_escape', reason='box_escape_unavailable')
             return False
         reference_frame = face.get('reference_frame', 'map')
-        actual_map, _ = self.capture_stationary_pose()
+        actual_map, _ = self.capture_stationary_pose(intermediate=True)
         if reference_frame == 'odom':
             center = face.get('face_center_xy_m')
             outward = face.get('outward_normal_xy')
@@ -2024,7 +2024,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             raise
         finally:
             self.config, self.waypoints = saved
-        after, _ = self.capture_stationary_pose()
+        after, _ = self.capture_stationary_pose(intermediate=True)
         position_error_m, yaw_error_rad = pose_errors(target, after)
         # The reverse ran in odom, so its clearance is judged there too: AMCL
         # read 0.5146 m after an odom-straight escape Nav2 completed (2026-09-30).
