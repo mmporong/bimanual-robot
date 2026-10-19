@@ -1843,6 +1843,26 @@ class ServiceRoute(CorridorRoute):
         self.config = {**saved_config, 'waypoints': self.waypoints}
         try:
             if not departure['motion_complete']:
+                home = self.registry.get('home') or {}
+                if (home.get('rear_parking_reference') == 'lidar_box'
+                        and not departure.get('rear_release_complete', False)):
+                    found = self._scan_in_base()
+                    if found is None:
+                        self.emit('dock_departure_release_failed', reason='no fresh scan')
+                        return False
+                    if self._footprint_intrusion(found=found) in ('front', 'both'):
+                        self.emit('dock_departure_release_failed',
+                                  reason='front footprint occupied')
+                        return False
+                    # A close rear face can hold StopZone during the speed ramp.
+                    # The existing escape watches fresh scans ahead while paused,
+                    # restores the monitor, then follows the original frozen goal.
+                    if self._rear_swing_need(found=found) > 0.0:
+                        if not self._escape_forward(found, pause_monitor=True):
+                            self.emit('dock_departure_release_failed',
+                                      reason='guarded_forward_escape_failed')
+                            return False
+                    departure['rear_release_complete'] = True
                 reached = self._execute_reverse_once(
                     frozen, goal_checker_id='dock_position_checker', final=False,
                     controller_id='Parking', motion='dock_departure')

@@ -1678,3 +1678,12 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **독립 확인·비이동 배포:** 독립 verifier 관련 931건·compile·diff·HOME x/y/yaw 보존 확인을 통과했다. 테스트 import 정렬 신규 오류 1건은 수정했으며 패키지 전체의 기존 lint 31건은 별도다. Pi source/install 4모듈 SHA·import·registry 검증 뒤 idle executor PID217586으로 반영했다. 수집형 unit은 stop 뒤 사라져 일반 start 실패를 기존 생성기로 복구했다. base50055/Nav2 51198/dashboard4251 유지, RGB-D/observer inactive/PID0, pending/running0·fresh odom0이다. Pi 복원본은 `$HOME/.local/state/jdamr/dock-return/20261019_100047/`, PC receipt는 `$HOME/.local/state/bimanual-robot/dock_return_20261019/deployment_receipt.json`이다. 새 임시 상주 프로세스는 없다. 유지 서비스 종료는 위 §22.14와 같은 명령을 사용한다.
 
 **전면 오차 조사 보완:** 마지막 면 이후 odom 약439.95 mm를 갱신 없이 이동했다. `no_table_edge_candidate` 8프레임은 거리와 무관하게 occlusion을 latch하고 후속 면을 무시하며, 나중 precision-band basis가 앞선 조기 동결 사실을 가린다. 물리 부족량을 모두 odom 축척으로 설명하면 약4.8–9.3% 과대계상에 해당하지만 실거리/odom 비율을 측정한 값은 아니다. 카메라/edge 편향도 배제되지 않았고 앞끝 기준34cm의 모델 불일치는 발견하지 않았다. 전면 정확도를 해결했다고 주장하거나 임의 bias를 적용하지 않는다.
+
+
+### 22.16 근접 후면 박스에서 출발 실패와 도크 복귀의 표적·위치추정 불일치
+
+첫 출발 `table_01_20261019_103426_4f6bd107`는 home_exit Parking FollowPath에서 105(진행 실패), FootprintApproach→StopZone, odom 변화 없음으로 종료됐다. 뒤 박스에서 멀어져야 하는 시작 이탈에 기존 감시형 forward escape를 연결했다. fresh 앞밴드·이동 중 scan 감시·finally CM 복구·기존 전체 static corridor와 같은 endpoint를 유지한다. 12건/production lint/diff/독립 검수 PASS 뒤 Pi source/install SHA bb10bfe340bf5bdd6b271236f69b6af9fdc126f2a995908ce0860b68c8cfc6ae, 복원본 `$HOME/.local/state/jdamr/dock-release/20261019_104008/`로 반영했다.
+
+후속 `table_01_20261019_104016_588becba`는 직선 이탈과 급수대·1번 테이블·각 후진 이탈을 수행했다. 도크 staging 후 최근접 rear ROI 면은 gap1.363m/angle−18.2°여서0.6m 접근 한계로 미이동 종료했다. 도크 박스인 줄 알고 한계를 늘리지 않는다. AMCL 근처 stationary scan 최적 정합은 inlier21.8%, 전역 후보와 불일치해 실제 위치 확인이 필요하다. 새 위치를 임의로 가정하거나 HOME/AMCL를 바꾸지 않았다. 원본은 기존runs와 PC `$HOME/.local/state/bimanual-robot/dock_return_20261019/staging_recovery_1044/`에 있다. 사용자 후면 접촉 허용은 기록하되 전방 충돌·오래된 센서 운행 허가로 확대하지 않는다.
+
+사용자는 후진하면 도크이고 박스가 후면 중앙에 있다고 확인했다. 최신 정지 scan8장의 후면 면 추정은1.445–1.452m, yaw약−13.3°에서−13.7°로 일관됐다. 지도 staging과0.6m 정밀접근 사이 중간 접근이 연결되지 않았으며 이 센서 면을 고유 식별한 상태는 아니다. 임시 map 중간 목표 `104912_cdf96bac`는 작은 전진 정렬 뒤 lateral0.0300249m로 거부됐고, `105104_fc5b070e`는 이미 staging에 있는 조건에서 새 최종 명령이 없어 후진 발행 전에 거부됐다. 중간·최종 확인 계약을 분리하는 로컬 실험은 회귀 실패로 원복했고 Pi에는 배포하지 않았다. 유효한 도크 이탈 패치만 유지하며 원복 뒤12건·production lint PASS다. 마지막 odom은v0/w0, executor active/요청 없음이며 도크 복귀 성공으로 기록하지 않는다. 최신 scan은 PC `$HOME/.local/state/bimanual-robot/dock_return_20261019/rear_scan_latest.json`에 있다.

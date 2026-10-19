@@ -195,6 +195,32 @@ def test_dock_departure_uses_live_monitor_instead_of_global_snapshot_rejection(
     node._execute_reverse_once.assert_called_once()
 
 
+@pytest.mark.parametrize('case', ['release', 'no_rear_object', 'no_scan',
+                                  'front_blocked', 'escape_failed'])
+def test_rear_box_departure_reuses_guarded_escape_before_original_path(
+        case, dock_departure_static_corridor):
+    node = dock_departure_route()
+    node.registry['home'] = {'rear_parking_reference': 'lidar_box'}
+    found = object()
+    node._scan_in_base = Mock(return_value=None if case == 'no_scan' else found)
+    node._footprint_intrusion = Mock(return_value='front' if case == 'front_blocked' else None)
+    node._rear_swing_need = Mock(return_value=0. if case == 'no_rear_object' else .18)
+    node._escape_forward = Mock(return_value=case != 'escape_failed')
+    assert node.execute(final_parking=False) is (case in ('release', 'no_rear_object'))
+    if case == 'release':
+        node._escape_forward.assert_called_once_with(found, pause_monitor=True)
+        node._execute_reverse_once.assert_called_once()
+        path = node._execute_reverse_once.call_args.args[0]
+        start, end = path.poses[0].pose.position, path.poses[-1].pose.position
+        assert math.hypot(end.x-start.x, end.y-start.y) == pytest.approx(.7)
+    elif case == 'no_rear_object':
+        node._escape_forward.assert_not_called()
+        node._execute_reverse_once.assert_called_once()
+    else:
+        node._execute_reverse_once.assert_not_called()
+        node._execute_through_once.assert_not_called()
+
+
 def test_dock_entry_heading_uses_damped_stopped_trim():
     node = dock_departure_route()
     node._odom_pose = Mock(side_effect=[(0.25, 0.0, -0.1786), (0.25, 0.0, 0.005)])

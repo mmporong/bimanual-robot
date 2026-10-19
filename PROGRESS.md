@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-10-19 | 근접 후면 박스에서 출발 이탈 복구와 복귀 위치추정 불일치
+
+- 출발 `table_01_20261019_103426_4f6bd107`에서 기존 Parking FollowPath의 home_exit가 105(진행 실패)로 끝났고 실제 odom 이동은 없었다. 로그는 FootprintApproach→StopZone이며 전방 라이다 약1.46 m, 후면 박스 최소 약0.29 m였다. 사용자는 후면 도킹의 접촉을 허용했다. 이 허용을 전방 충돌·오래된 센서 주행 허가나 목표 0 cm 변경으로 확대하지 않는다.
+- lidar_box 도크의 시작 이탈에만 기존 감시형 `_escape_forward(found, pause_monitor=True)`를 연결했다. 전체 정적 경로 검사는 유지하고, 앞쪽 footprint 침입·새 scan 부재·이탈 실패는 진행하지 않는다. 짧은 직선 이탈 동안 기존 fresh-scan band_watch를 사용하고 finally에서 Collision Monitor를 복구한 뒤, 처음 고정한 0.7 m endpoint의 나머지를 따른다. 추가 0.7 m를 더하지 않고 입력 복구 시 이탈을 중복하지 않는다.
+- 관련 12건·production lint·diff 확인과 독립 verifier PASS 뒤 Pi source/install SHA bb10bfe340bf5bdd6b271236f69b6af9fdc126f2a995908ce0860b68c8cfc6ae로 반영했다. 복원본은 `$HOME/.local/state/jdamr/dock-release/20261019_104008/`, PC receipt는 `$HOME/.local/state/bimanual-robot/dock_return_20261019/dock_release_deployment.json`이다.
+- 재개 `table_01_20261019_104016_588becba`는 감시형 직선 이탈·home_exit 완료 뒤 급수대·1번 테이블 접근·후진 이탈을 수행했다. 전면 내부 추정은 실제 1 cm와 구분하며 깊이 지연 pause/resume도 남는다. 도크 staging 뒤 후면 인식은 간격1.363 m·방향오차약−18.2°인 면을 선택해 기존0.6 m 이동 범위를 넘었고, 그 면으로 움직이지 않았다. 이를 도크 박스라고 확정하거나 이동 한계를 늘리지 않았다.
+- 정지 scan을 기존 캡처·정합 도구로 대조했다. AMCL `(0.6152,0.1958,9.87°)` 근처 최적 후보의 inlier는21.8%, 전역 최적 후보는 `(-0.945,0.305,22°)`로 불일치다. 이 후보를 실제 위치로 확정하거나 AMCL/HOME를 덮어쓰지 않았다. 실제 위치를 사용자에게 확인 요청했고 급수대·테이블 재방문 없이 남은 복귀만 이어갈 예정이다. 원본과 정합은 `$HOME/.local/state/bimanual-robot/dock_return_20261019/staging_recovery_1044/`에 있다.
+- 사용자는 후진 방향이 도크이며 박스가 후면 중앙에 있다고 확인했다. 후속 정지 scan 8장의 최근접 후면 면 추정은 1.445–1.452 m, yaw 약−13.3°에서−13.7°, 지지폭 약0.44–0.45 m였다. 이는 센서 면 추정이며 박스 고유 식별이나 정확한 지도 위치의 증거는 아니다. 현재 지도상의 staging과 실제 후면 면 사이가 최종 접근 범위0.6 m보다 커, 중간 접근 연결이 남아 있다.
+- 임시 map 중간 목표 두 번은 각각 `reverse_staging_out_of_tolerance`와 `parking odometry or final command missing`으로 후진 발행 전에 끝났다. 첫 시도에는 작은 전진 정렬이 있었다. 중간 목표에 final HOME 검증을 사용하는 결합 문제를 확인했으나 staging capture 실험 변경은 회귀 실패로 보류·원복했고 Pi에는 배포하지 않았다. 기존 이탈 수정은 원복 뒤에도 관련12건·production lint를 통과했다. 로봇은 정지, 상주 실행기 idle, HOME/AMCL 유지이며 도크 복귀·1cm 주차 성공은 아니다. 최신 정지 원본은 `$HOME/.local/state/bimanual-robot/dock_return_20261019/rear_scan_latest.json`이다.
+
 ## 2026-10-19 | 도크 복귀 경로 거부와 후면 라이다 정밀주차 연결
 
 - 전체 실행 `table_01_20261019_093818_f936fa34`는 급수대·1번 테이블 접근과 후진 이탈 뒤 도크 복귀 전 Nav2 `IsPathValid=false` 3회로 종료됐다. 급수대 내부 모서리 추정은 9.05/9.53 mm, 1번 테이블은 8.96/8.92 mm다. 사용자는 1번 테이블 실제 간격을 3–5 cm로 보고했으므로 이 실행을 1 cm 정밀주차 성공으로 기록하지 않는다. 전면 근접 가림 뒤 odometry 추적과 실물 거리의 불일치는 원인 확인 중이다.
