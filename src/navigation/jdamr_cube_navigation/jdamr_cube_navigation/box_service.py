@@ -913,6 +913,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     rejection_reason = observation.get('reason')
                     if isinstance(rejection_reason, str):
                         fresh_rejection_reasons.add(rejection_reason)
+                    if (getattr(self, 'surface_mode', 'front') == 'table_edge'
+                            and getattr(self, '_known_table_heading_rad', None) is not None
+                            and isinstance(runtime_stable_frames, int)
+                            and runtime_stable_frames > 0
+                            and fresh_since_latency >= runtime_stable_frames
+                            and fresh_rejection_reasons == {'no_table_edge_candidate'}):
+                        # A full fresh quorum with no candidate is scene evidence,
+                        # not a reason to sit through the remaining timeout.
+                        break
         latency_limited = emit_evidence(last_failure, last_failure_retryable)
         raise BoxObservationUnavailable(
             last_failure, retryable=last_failure_retryable and not latency_limited,
@@ -924,23 +933,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
     def _reposition_search(self):
         """Try one planned nearby view after a collision or timeout Spin result."""
         if getattr(self, 'surface_mode', 'front') == 'table_edge':
-            if (self.stop_requested or not self._navigation_ready(require_fresh_amcl=False)
-                    or not self._parking_parameters_ready(reverse=True)
-                    or not self._reverse_smoother_ready()):
-                return False
-            actual, _ = self.capture_stationary_pose()
-            goal = (actual[0] - 0.2 * math.cos(actual[2]),
-                    actual[1] - 0.2 * math.sin(actual[2]), actual[2])
-            path = self._make_reverse_path(actual, goal, path_contract=ESCAPE_PATH_CONTRACT)
-            if not self._reverse_path_valid(path):
-                return False
-            frozen, _ = self._frozen_in_odom(path)
-            self.emit('box_search_reposition', motion='reverse_same_heading',
-                      candidate=dict(zip(('x', 'y', 'yaw'), goal)))
-            return self._execute_reverse_path(
-                path, path_contract=ESCAPE_PATH_CONTRACT, send_path=frozen,
-                goal_checker_id='alignment_goal_checker', final=False,
-                retry_goal=dict(zip(('x', 'y', 'yaw'), goal)))
+            # A missing mapped table is not evidence that the base is too close.
+            # Finish the mapped observation approach; never back away to search.
+            return self._advance_to_table_view(require_motion=True)
         if (self.stop_requested or not self._navigation_ready(require_fresh_amcl=False)
                 or getattr(self, 'last_search_error_code', None) not in (
                     Spin.Result.COLLISION_AHEAD, Spin.Result.TIMEOUT)):
@@ -965,11 +960,85 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return self.execute(final_parking=False, alignment=True, face=True)
         return False
 
+    def _advance_to_table_view(self, *, require_motion=False):
+        """Close a transit waypoint's tolerance before waiting for a table face."""
+        mount, region, _radius = self._table_observation_context
+        offset_m = mount.get('camera_mount', {}).get('table_observation', {}).get(
+            'base_offset_m')
+        heading_rad = getattr(self, '_known_table_heading_rad', None)
+        if offset_m is None or heading_rad is None:
+            return not require_motion
+        if (isinstance(offset_m, bool) or not isinstance(offset_m, (int, float))
+                or not math.isfinite(offset_m) or not .2 <= offset_m <= ESCAPE_CLEARANCE_M
+                or isinstance(heading_rad, bool) or not math.isfinite(heading_rad)):
+            raise ValueError('invalid mapped table observation geometry')
+        if (self.stop_requested or not self._operator_link_ready()
+                or not self._navigation_ready(require_fresh_amcl=False)):
+            return False
+        actual, _ = self.capture_stationary_pose(intermediate=True)
+        observation = getattr(self, 'box_status', None)
+        if (not require_motion and isinstance(observation, dict)
+                and observation.get('detected') is True
+                and observation.get('stable') is True
+                and observation.get('surface_kind') == 'table_edge'):
+            try:
+                target = compute_table_edge_docking_target(
+                    observation, mount, dict(zip(('x_m', 'y_m', 'yaw_rad'), actual)),
+                    requested_gap_m=self._final_gap_m(),
+                    front_extent_m=self.box_geometry['front_to_wheel_axis']['value'],
+                    now_s=self.get_clock().now().nanoseconds * 1e-9)
+                if math.dist(target['face_center_map_xy_m'], region) <= _radius:
+                    # A visible face already permits the sensor-controlled handoff.
+                    return True
+            except (ValueError, KeyError, TypeError):
+                pass
+        forward = (math.cos(heading_rad), math.sin(heading_rad))
+        clearance_m = sum((region[i] - actual[i]) * forward[i] for i in (0, 1))
+        remaining_m = clearance_m - offset_m
+        if remaining_m <= .01:
+            return not require_motion
+        residual_rad = math.atan2(math.sin(heading_rad - actual[2]),
+                                  math.cos(heading_rad - actual[2]))
+        # Heading recovery uses the existing bounded Spin; it cannot reverse.
+        if abs(residual_rad) > FINAL_TRIM_MAX_RAD:
+            return not require_motion
+        distance_m = remaining_m / math.cos(residual_rad)
+        if distance_m > LIVE_APPROACH_MAX_M:
+            raise RuntimeError('mapped table observation exceeds bounded approach')
+        end = (actual[0] + distance_m * math.cos(actual[2]),
+               actual[1] + distance_m * math.sin(actual[2]), actual[2])
+        lateral_m = abs((region[0] - end[0]) * -forward[1]
+                        + (region[1] - end[1]) * forward[0])
+        if lateral_m > _radius:
+            return not require_motion
+        check = CachedStaticCorridorValidator(
+            Path(self.registry['map']['yaml_path']),
+            Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
+        if not check([actual, end]):
+            self.emit('table_view_approach_blocked', reason='static_corridor_blocked')
+            return False
+        self.emit('table_view_approach_started', motion='forward_same_heading',
+                  distance_m=distance_m, mapped_base_offset_m=offset_m,
+                  start_pose_map=list(actual), target_pose_map=list(end),
+                  final_parking_confirmed=False)
+        travelled_m = self._drive_zero_turn(
+            distance_m, precision=True, hold_heading=True)
+        reached = (travelled_m is not None and travelled_m >= distance_m - .01
+                   and not self.stop_requested and self._operator_link_ready()
+                   and getattr(self, '_last_direct_motion_failure', None) is None)
+        self.emit('table_view_approach_finished', reached=reached,
+                  travelled_m=travelled_m, final_parking_confirmed=False)
+        return reached
+
     def _observe_with_search(self, camera_mount, front_extent_m, gap_m,
                              region_xy, region_radius_m, *, phase,
                              search_enabled, search_budget):
         """Retry a recoverable initial observation after bounded Nav2 rotations."""
         latency_reobserved = False
+        if (phase == 'face_alignment'
+                and getattr(self, 'surface_mode', 'front') == 'table_edge'
+                and not self._advance_to_table_view()):
+            raise RuntimeError('mapped table observation approach unavailable')
         while True:
             try:
                 return self.observe_target(

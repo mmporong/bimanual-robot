@@ -1115,10 +1115,13 @@ def test_table_edge_target_succeeds_without_lidar_face(monkeypatch):
     assert observed[-1].kwargs['lidar_face_fusion'] is False
 
 
-def test_table_edge_observer_reports_fresh_close_occlusion_frames(monkeypatch):
+@pytest.mark.parametrize('known_heading', [False, True])
+def test_table_edge_observer_reports_fresh_close_occlusion_frames(monkeypatch, known_heading):
     node = _observer_node(monkeypatch, scan=False)
     node.surface_mode = 'table_edge'
     node.observer_stable_frames = 8
+    if known_heading:
+        node._known_table_heading_rad = 0.
     node.box_status.update(
         detected=False, stable=False, surface_kind=None,
         reason='no_table_edge_candidate')
@@ -1150,6 +1153,7 @@ def test_table_edge_observer_reports_fresh_close_occlusion_frames(monkeypatch):
     assert error.required_fresh_frames == 8
     assert error.fresh_rejection_reasons == {'no_table_edge_candidate'}
     assert not error.latency_reasons
+    assert node.stop_requested is not known_heading
 
 
 @pytest.mark.parametrize(
@@ -3194,19 +3198,105 @@ def test_known_table_search_never_scans_away_from_center(degrees, expected):
         assert budget.next_rotation(math.radians(degrees)) is None
 
 
-def test_known_table_view_recovery_uses_reverse_not_a_forward_goal_behind(mission):
+def test_known_table_view_recovery_never_dispatches_a_reverse(mission):
     mission.surface_mode = 'table_edge'
-    mission._reverse_smoother_ready = Mock(return_value=True)
-    mission._make_reverse_path = Mock(return_value='map_path')
-    mission._reverse_path_valid = Mock(return_value=True)
-    mission._frozen_in_odom = Mock(return_value=('odom_path', None))
-    mission._execute_reverse_path = Mock(return_value=True)
+    mission._advance_to_table_view = Mock(return_value=True)
+    mission._execute_reverse_path = Mock()
     assert mission._reposition_search()
-    args = mission._make_reverse_path.call_args.args
-    assert args[1] == pytest.approx((-0.2, 0.0, 0.0))
+    mission._advance_to_table_view.assert_called_once_with(require_motion=True)
+    mission._execute_reverse_path.assert_not_called()
     mission.execute.assert_not_called()
     mission.plan_pose.assert_not_called()
-    assert mission._execute_reverse_path.call_args.kwargs['send_path'] == 'odom_path'
+
+
+def _table_view_node(monkeypatch, pose, *, clear=True):
+    node = object.__new__(BoxServiceRoute)
+    node.surface_mode = 'table_edge'
+    node._known_table_heading_rad = 0.
+    node._table_observation_context = (
+        {'camera_mount': {'table_observation': {'base_offset_m': .37}}},
+        (1.438, -1.817), .4)
+    node.registry = {'map': {'yaml_path': 'map'}, 'keepout': {'yaml_path': 'mask'}}
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node.capture_stationary_pose = Mock(return_value=(pose, {}))
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, -.275),
+                                               (.07, .275), (-.28, .275)])
+    node._drive_zero_turn = Mock(side_effect=lambda distance, **_k: distance)
+    node.emit = Mock()
+    check = Mock(return_value=clear)
+    monkeypatch.setattr(box_service, 'CachedStaticCorridorValidator', Mock(return_value=check))
+    return node, check
+
+
+def test_recorded_table_views_advance_to_map_view_instead_of_reversing(monkeypatch):
+    path = ROOT / 'jdamr_cube_navigation/test/fixtures/table_view_failure_20261019.json'
+    fixture = json.loads(path.read_text())
+    for pose in fixture['poses_map']:
+        node, check = _table_view_node(monkeypatch, pose)
+        assert node._advance_to_table_view()
+        length = node._drive_zero_turn.call_args.args[0]
+        assert 0 < length <= box_service.LIVE_APPROACH_MAX_M
+        start, end = check.call_args.args[0]
+        assert start == pose
+        assert end[0] == pytest.approx(fixture['region_xy_m'][0] - .37)
+        assert end[2] == pose[2]
+        assert node._drive_zero_turn.call_args.kwargs == {
+            'precision': True, 'hold_heading': True}
+
+
+@pytest.mark.parametrize('case', ['already_there', 'too_near', 'facing_away',
+                                  'blocked', 'stop', 'link_lost', 'input_lost',
+                                  'motion_failed', 'short_motion', 'off_axis'])
+def test_table_view_approach_does_not_invent_motion_or_success(monkeypatch, case):
+    pose = (1., -1.817, 0.)
+    if case == 'already_there':
+        pose = (1.068, -1.817, 0.)
+    elif case == 'too_near':
+        pose = (1.3, -1.817, 0.)
+    elif case == 'facing_away':
+        pose = (1., -1.817, math.pi)
+    elif case == 'off_axis':
+        pose = (1., 0., 0.)
+    node, check = _table_view_node(monkeypatch, pose, clear=case != 'blocked')
+    node.stop_requested = case == 'stop'
+    node._operator_link_ready.return_value = case != 'link_lost'
+    node._navigation_ready.return_value = case != 'input_lost'
+    if case in {'motion_failed', 'short_motion'}:
+        node._drive_zero_turn.side_effect = None
+        node._drive_zero_turn.return_value = None if case == 'motion_failed' else .001
+    assert not node._advance_to_table_view(require_motion=True)
+    if case not in {'motion_failed', 'short_motion'}:
+        node._drive_zero_turn.assert_not_called()
+
+
+def test_mapped_table_view_is_reached_before_the_first_observation(monkeypatch):
+    node, _check = _table_view_node(monkeypatch, (1., -1.817, 0.))
+    order = []
+    node._advance_to_table_view = Mock(side_effect=lambda **_k: order.append('forward') or True)
+    node.observe_target = Mock(side_effect=lambda *_a: order.append('observe') or {'fresh': True})
+    assert node._observe_with_search(
+        {}, .065, .45, (1.438, -1.817), .4, phase='face_alignment',
+        search_enabled=True, search_budget=box_service.BoxSearchBudget(target_directed=True))
+    assert order == ['forward', 'observe']
+
+
+@pytest.mark.parametrize('case', ['visible', 'stale', 'other_table'])
+def test_visible_selected_table_does_not_add_a_map_only_approach(monkeypatch, case):
+    node, check = _table_view_node(monkeypatch, (1., -1.817, 0.))
+    node.box_status = {'detected': True, 'stable': True, 'surface_kind': 'table_edge'}
+    node.box_geometry = {'front_to_wheel_axis': {'value': .065}}
+    node._final_gap_m = Mock(return_value=.01)
+    node.get_clock = lambda: SimpleNamespace(now=lambda: Time(nanoseconds=10 ** 10))
+    compute = Mock(return_value={
+        'face_center_map_xy_m': (1.438, -1.817) if case != 'other_table' else (3., 2.)})
+    if case == 'stale':
+        compute.side_effect = ValueError('box observation is stale or future-dated')
+    monkeypatch.setattr(box_service, 'compute_table_edge_docking_target', compute)
+    assert node._advance_to_table_view()
+    assert node._drive_zero_turn.called is (case != 'visible')
+    assert check.called is (case != 'visible')
 
 
 def test_moving_table_healthy_occlusion_keeps_same_odom_face(monkeypatch):

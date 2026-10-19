@@ -549,6 +549,85 @@ def refine_pose(scan_path, click):
             'click_offset_deg': float(math.degrees(wrap(seed[2] - pose[2])))}
 
 
+def dock_map_identity():
+    meta = yaml.safe_load(MAP_YAML.read_text())
+    return [sha256(MAP_YAML), sha256(MAP_YAML.parent / meta['image'])]
+
+
+def refine_at_registered_dock(scan_path, click, reference):
+    """Match a stated dock placement to its anchored scan, never to a rolling seed."""
+    if click.get('source') != 'registered_dock' or not isinstance(reference, dict):
+        return None
+    import numpy as np
+    try:
+        for key in ('home_pose', 'pose_map'):
+            values = reference[key]
+            if (not isinstance(values, (tuple, list)) or len(values) != 3
+                    or not all(isinstance(v, (float, int)) and not isinstance(v, bool)
+                               and math.isfinite(v) for v in values)):
+                return None
+        if (reference['map_identity'] != dock_map_identity()
+                or math.dist(reference['home_pose'][:2], (click['x_m'], click['y_m'])) > .001
+                or abs(wrap(reference['home_pose'][2] - click['yaw_rad'])) > .001):
+            return None
+        current, *_c, laser, _data = scan_match.laser_points(str(scan_path))
+        anchored, *_a, old_laser, _old = scan_match.laser_points(reference['scan_path'])
+        if (min(len(current), len(anchored)) < 80
+                or math.dist(laser[:2], old_laser[:2]) > .001
+                or abs(wrap(laser[2] - old_laser[2])) > .001
+                or not np.isfinite(current).all() or not np.isfinite(anchored).all()):
+            return None
+
+        def transformed(pose):
+            c, s = math.cos(pose[2]), math.sin(pose[2])
+            return current @ np.array([[c, s], [-s, c]]) + pose[:2]
+
+        def score(_points, x_m, y_m, yaw_rad):
+            moved = transformed((x_m, y_m, yaw_rad))
+            distances = np.sqrt(np.min(np.sum(
+                (moved[:, None, :] - anchored[None, :, :]) ** 2, axis=2), axis=1))
+            return float(np.mean(np.sort(distances)[:int(.65 * len(distances))])), distances
+
+        best, relative = scan_match.search(
+            score, current, (0., 0., 0.), xy_half=.15, yaw_half=math.radians(10))
+        if (math.hypot(*relative[:2]) >= .145 or abs(relative[2]) >= math.radians(9.5)
+                or best > .02):
+            return None
+        _, distances = score(current, *relative)
+        inliers = distances < .05
+        reverse_distances = np.sqrt(np.min(np.sum(
+            (anchored[:, None, :] - transformed(relative)[None, :, :]) ** 2, axis=2), axis=1))
+        sectors = np.floor((np.arctan2(current[inliers, 1], current[inliers, 0])
+                            + math.pi) / (math.pi / 2)).astype(int) % 4
+        supported_sectors = sum(np.count_nonzero(sectors == i) >= 8 for i in range(4))
+        if (float(inliers.mean()) < .70 or float((reverse_distances < .05).mean()) < .70
+                or supported_sectors < 3):
+            return None
+        # A corridor wall or rotationally symmetric landmark cannot anchor a pose.
+        for axis, delta in ((0, .06), (1, .06), (2, math.radians(3))):
+            for sign in (-1, 1):
+                trial = list(relative)
+                trial[axis] += sign * delta
+                if score(current, *trial)[0] <= best + .003:
+                    return None
+        origin = reference['pose_map']
+        c, s = math.cos(origin[2]), math.sin(origin[2])
+        pose = [origin[0] + c * relative[0] - s * relative[1],
+                origin[1] + s * relative[0] + c * relative[1],
+                wrap(origin[2] + relative[2])]
+        if (math.dist(pose[:2], (click['x_m'], click['y_m'])) > .2
+                or abs(wrap(pose[2] - click['yaw_rad'])) > math.radians(15)):
+            return None
+        return {'pose': pose, 'mean_dist_m': best, 'inlier_5cm': float(inliers.mean()),
+                'global_agrees': False, 'basis': 'anchored_dock_scan',
+                'reference': reference, 'relative_pose': list(relative),
+                'click': [click['x_m'], click['y_m'], click['yaw_rad']],
+                'click_offset_m': math.dist(pose[:2], (click['x_m'], click['y_m'])),
+                'click_offset_deg': math.degrees(wrap(pose[2] - click['yaw_rad']))}
+    except (OSError, ValueError, KeyError, TypeError, StopIteration):
+        return None
+
+
 # The cycle runs on the Pi; a PC that loses ssh keeps polling this long before it
 # gives up following (the robot is not stopped by that).
 LINK_LOST_GIVE_UP_S = 600.0
@@ -619,9 +698,14 @@ def cmd_init(args):
     log(f'click ({click["x_m"]:.3f}, {click["y_m"]:.3f}, '
         f'{math.degrees(click["yaw_rad"]):.1f} deg), age {age:.0f} s')
     capture_scan(run_dir / 'scan.json')
-    refined = refine_pose(run_dir / 'scan.json', click)
+    refined = refine_at_registered_dock(
+        run_dir / 'scan.json', click, state.get('dock_scan_reference'))
+    dock_reference_used = refined is not None
+    if refined is None:
+        refined = refine_pose(run_dir / 'scan.json', click)
     pose = refined['pose']
-    log(f'scan match ({pose[0]:.3f}, {pose[1]:.3f}, {math.degrees(pose[2]):.1f} deg) '
+    basis = 'anchored dock scan' if dock_reference_used else 'map scan'
+    log(f'{basis} match ({pose[0]:.3f}, {pose[1]:.3f}, {math.degrees(pose[2]):.1f} deg) '
         f'inlier {refined["inlier_5cm"]:.2f}, click offset {refined["click_offset_m"]:.2f} m / '
         f'{refined["click_offset_deg"]:.1f} deg, global agrees {refined["global_agrees"]}')
     # --local-only: the operator stated the placement (e.g. pulled straight back and
@@ -633,13 +717,18 @@ def cmd_init(args):
         if not args.local_only or override < MATCH_OVERRIDE_FLOOR:
             fail(f'--min-inlier needs --local-only and >= {MATCH_OVERRIDE_FLOOR}')
         min_inlier = override
-    refined['min_inlier_used'] = min_inlier
+    refined['min_inlier_used'] = .70 if dock_reference_used else min_inlier
+    refined['threshold_basis'] = 'anchored_dock_scan' if dock_reference_used else 'map_scan'
     (run_dir / 'refine.json').write_text(json.dumps(refined, indent=1))
-    if refined['inlier_5cm'] < min_inlier or not (refined['global_agrees'] or args.local_only):
+    if not dock_reference_used and (
+            refined['inlier_5cm'] < min_inlier
+            or not (refined['global_agrees'] or args.local_only)):
         fail('scan does not match the map near the click; check placement or click again')
     initial = {'frame_id': 'map', 'x_m': pose[0], 'y_m': pose[1], 'yaw_rad': pose[2],
                **INIT_COVARIANCE,
-               'provenance': {'purpose': 'localization_seed_from_scan_match',
+               'provenance': {'purpose': ('localization_seed_from_anchored_dock_scan'
+                                          if dock_reference_used else
+                                          'localization_seed_from_scan_match'),
                               'click': refined['click'], 'refine': 'refine.json',
                               'covariance_basis': 'seed spread (5 cm, 5 deg), not measured'}}
     (run_dir / 'initial_pose.yaml').write_text(yaml.safe_dump(initial, sort_keys=False))
@@ -702,7 +791,13 @@ def cmd_init(args):
     (run_dir / 'regions.json').write_text(json.dumps(regions, indent=1))
     state.update({'init_run': str(run_dir), 'pose': pose, 'amcl': amcl, 'home': home,
                   'regions': regions, 'init_time': time.time(), 'localized': True,
-                  'init_local_only': bool(args.local_only)})
+                  'init_local_only': bool(args.local_only),
+                  'init_pose_source': refined['threshold_basis']})
+    if click['source'] == 'registered_dock' and not dock_reference_used:
+        state['dock_scan_reference'] = {
+            'scan_path': str(run_dir / 'scan.json'), 'pose_map': list(pose),
+            'home_pose': [home['x_m'], home['y_m'], home['yaw_rad']],
+            'map_identity': dock_map_identity()}
     save_state(state)
     log('init complete: robot localized at the scan-matched placement, '
         'navigation active, no motion sent')

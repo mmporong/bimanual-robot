@@ -4,6 +4,7 @@ PC-only like the tool itself (it reads the map data at import):
     python3 -m pytest -q scripts/map_20260930_manual/test_jdamr_depart_flow.py
 """
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -1136,3 +1137,88 @@ def test_manual_recovery_does_not_require_display_or_recording(env, monkeypatch,
 ])
 def test_executor_failure_retains_the_action_cause(events, expected):
     assert d.execution_failure_cause(events) == expected
+
+
+def _dock_scan_pair(monkeypatch, *, delta=(.03, -.02, .04), shape='room'):
+    import numpy as np
+    rng = np.random.default_rng(17)
+    angles = np.linspace(-math.pi, math.pi, 120, endpoint=False)
+    radii = rng.uniform(.5, 4., len(angles))
+    if shape == 'circle':
+        radii[:] = 2.
+    anchored = np.column_stack((radii * np.cos(angles), radii * np.sin(angles)))
+    if shape == 'line':
+        anchored = np.column_stack((np.linspace(-2., 2., 120), np.ones(120)))
+    c, s = math.cos(delta[2]), math.sin(delta[2])
+    current = (anchored - delta[:2]) @ np.array([[c, -s], [s, c]])
+    if shape == 'clutter':
+        current = rng.uniform(-5., 5., (120, 2))
+    if shape == 'sparse':
+        current = current[:40]
+
+    def laser_points(path):
+        points = current if path == 'current' else anchored
+        return points, None, None, None, (0., 0., math.pi), {}
+
+    monkeypatch.setattr(d.scan_match, 'laser_points', laser_points)
+    monkeypatch.setattr(d, 'dock_map_identity', lambda: ['yaml', 'image'])
+    home = [.12, .165, .134]
+    click = dict(zip(('x_m', 'y_m', 'yaw_rad'), home), source='registered_dock')
+    reference = {'scan_path': 'reference', 'pose_map': home, 'home_pose': home,
+                 'map_identity': ['yaml', 'image']}
+    return click, reference
+
+
+def test_registered_dock_reference_retains_its_map_anchor(monkeypatch):
+    delta = (.03, -.02, .04)
+    click, reference = _dock_scan_pair(monkeypatch, delta=delta)
+    result = d.refine_at_registered_dock('current', click, reference)
+    assert result is not None
+    assert result['basis'] == 'anchored_dock_scan'
+    assert result['global_agrees'] is False
+    assert result['relative_pose'] == pytest.approx(delta, abs=.006)
+    c, s = math.cos(.134), math.sin(.134)
+    assert result['pose'] == pytest.approx(
+        [.12 + c * delta[0] - s * delta[1], .165 + s * delta[0] + c * delta[1],
+         .134 + delta[2]], abs=.006)
+    assert reference['pose_map'] == [.12, .165, .134]
+
+
+@pytest.mark.parametrize('case', ['click', 'previous_seed', 'new_map', 'new_home',
+                                  'translation', 'rotation', 'circle', 'line',
+                                  'sparse', 'clutter'])
+def test_dock_reference_does_not_accept_a_different_or_ambiguous_placement(monkeypatch, case):
+    delta = (.3, 0., 0.) if case == 'translation' else (
+        (0., 0., .3) if case == 'rotation' else (.03, -.02, .04))
+    click, reference = _dock_scan_pair(monkeypatch, delta=delta, shape=case)
+    if case == 'click':
+        click['source'] = 'rviz_click'
+    elif case == 'previous_seed':
+        click['source'] = 'previous_init_scan_match'
+    elif case == 'new_map':
+        reference['map_identity'] = ['different', 'image']
+    elif case == 'new_home':
+        reference['home_pose'] = [3., 2., .134]
+    assert d.refine_at_registered_dock('current', click, reference) is None
+
+
+@pytest.mark.parametrize('activation', ['failed', 'amcl_disagrees'])
+def test_dock_reference_still_requires_activation_and_amcl_agreement(
+        env, monkeypatch, activation):
+    monkeypatch.setattr(d, 'pi', Pi())
+    monkeypatch.setattr(d, 'pull_registry', lambda: {'home': {
+        'x_m': .12, 'y_m': .165, 'yaw_rad': .134}})
+    monkeypatch.setattr(d, 'capture_scan', lambda _path: None)
+    monkeypatch.setattr(d, 'sh', lambda *_a, **_k: None)
+    monkeypatch.setattr(d, 'refine_pose', lambda *_a: pytest.fail('unexpected map fallback'))
+    monkeypatch.setattr(d, 'refine_at_registered_dock', lambda *_a: {
+        'pose': [.12, .165, .134], 'inlier_5cm': .9, 'global_agrees': False,
+        'click_offset_m': 0., 'click_offset_deg': 0., 'click': [.12, .165, .134]})
+    events = [] if activation == 'failed' else [{
+        'event': 'navigation_activated_without_motion', 'stationary_pose': [.5, .165, .134]}]
+    monkeypatch.setattr(d, 'read_events', lambda _path: events)
+    args = SimpleNamespace(seed_from_state=False, click=False, local_only=False, keep_home=True)
+    with pytest.raises(SystemExit) as caught:
+        d.cmd_init(args)
+    assert caught.value.code == 1
+    assert d.load_state()['localized'] is False
