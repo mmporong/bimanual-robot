@@ -3074,6 +3074,45 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
     assert all(command == (0.0, 0.0) for command in commands[first_zero:])
 
 
+def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch):
+    node = route()
+    clock, position = [0.0], [0.0]
+    requested, velocity = [0.0], [0.0]
+    target_m = 0.4
+    # Stress a plant that coasts more slowly than the configured command smoother.
+    # This is a synthetic regression condition, not measured chassis calibration.
+    simulated_deceleration_mps2 = 0.08
+
+    def publish(message):
+        requested[0] = message.linear.x
+
+    def spin(*_args, **_kwargs):
+        clock[0] += 0.02
+        acceleration_mps2 = (0.35 if requested[0] >= velocity[0]
+                             else simulated_deceleration_mps2)
+        change_mps = acceleration_mps2 * 0.02
+        velocity[0] += max(-change_mps, min(change_mps, requested[0] - velocity[0]))
+        position[0] += velocity[0] * 0.02
+        node.latest_motion = (clock[0], velocity[0], 0.0)
+
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+                                      SimpleNamespace(transform=SimpleNamespace(
+                                          translation=SimpleNamespace(
+                                              x=position[0], y=0.0),
+                                          rotation=SimpleNamespace(
+                                              x=0.0, y=0.0, z=0.0, w=1.0))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+
+    def update(actual):
+        return {'remaining_m': target_m - actual[0], 'heading_rad': 0.0}
+
+    assert node._drive_zero_turn(
+        target_m, precision=True, hold_heading=True, target_update=update) is not None
+    assert target_m - 0.003 <= position[0] <= target_m + 0.003
+
+
 @pytest.mark.parametrize('drift_rad, correction_sign', [
     (0.01, -1.0),
     (-0.01, 1.0),

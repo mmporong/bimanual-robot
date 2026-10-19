@@ -7,7 +7,7 @@ FACE_HEADING_TOLERANCE_RAD = math.radians(0.3)
 FACE_HEADING_DEADBAND_RAD = math.radians(0.1)
 FACE_ALIGNMENT_GAP_M = 0.05
 FACE_HEADING_FILTER_S = 0.35
-FACE_APPROACH_TIME_S = 0.2
+FACE_APPROACH_TIME_S = 0.5
 
 
 def filtered_face_heading(previous, observed, elapsed_s):

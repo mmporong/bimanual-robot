@@ -261,7 +261,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             with self._localization_bound(True):
                 planned = self._plan_with_input_recovery(
                     stage_pose, single=True,
-                    end_tolerance_m=MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'])
+                    end_tolerance_m=TRANSIT_PLAN_END_TOLERANCE_M)
                 self.emit('reverse_staging_planned', attempt=planned,
                           rear_parking_reference='lidar_box')
                 if not planned['ok']:
@@ -1257,6 +1257,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     return False
         fine_table = surface_mode == 'table_edge' and self._final_gap_m() <= 0.01
         corrections = 0
+        reverse_correction_error_m = None
         realignment_reapproached = False
         previous_gap_m = None
         frozen_target_odom = None
@@ -1392,13 +1393,36 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     if confirmation_basis == 'frozen_table_edge_odom_stop' else
                     {'face_center_map_xy_m': list(face),
                      'outward_normal_map_xy': list(outward)})
+            # A small aligned overshoot needs a short retreat, not a failed visit
+            # and a return home. Keep the same observed plane and task deadline.
+            if (fine_table and self.incomplete_gap_stop
+                    and yaw_error <= allowed_yaw_error_rad
+                    and nearest_gap_m < target_gap_m - gap_tolerance_m
+                    and max(corner_gaps) - nearest_gap_m <= 2.0 * gap_tolerance_m):
+                error_m = target_gap_m - sum(corner_gaps) / len(corner_gaps)
+                if (reverse_correction_error_m is not None
+                        and reverse_correction_error_m - error_m < TABLE_FINE_MIN_PROGRESS_M):
+                    self.emit('failed', phase='final_approach', reason='final_gap_no_progress')
+                    return False
+                if corrections >= TABLE_FINE_MAX_CORRECTIONS:
+                    self.emit('failed', phase='final_approach',
+                              reason='final_gap_correction_limit')
+                    return False
+                reverse_correction_error_m = error_m
+                corrections += 1
+                self.incomplete_gap_stop = False
+                if not self._retreat_table_gap(
+                        error_m / math.cos(yaw_error), parked, corrections):
+                    return False
+                continue
             # A skewed stop cannot advance when one corner is already close.
             # Back out using the observed face, then align to a fresh observation
             # within this visit and its original budget, rather than ending it.
             if (fine_table and not realignment_reapproached
                     and all(math.isfinite(gap) and gap > 0.0 for gap in corner_gaps)
                     and nearest_gap_m <= target_gap_m + gap_tolerance_m
-                    and max(corner_gaps) > target_gap_m + gap_tolerance_m):
+                    and (max(corner_gaps) > target_gap_m + gap_tolerance_m
+                         or max(corner_gaps) - nearest_gap_m > 2.0 * gap_tolerance_m)):
                 if (self.stop_requested or not self._operator_link_ready()
                         or not self._navigation_ready(require_fresh_amcl=False)):
                     return False
@@ -1465,6 +1489,28 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and error.required_fresh_frames >= 1
                 and error.fresh_frames >= error.required_fresh_frames
                 and error.fresh_rejection_reasons == {'no_table_edge_candidate'})
+
+    def _retreat_table_gap(self, distance_m, start_map, correction):
+        """Restore an aligned gap with the existing guarded straight controller."""
+        if (not math.isfinite(distance_m) or not 0.0 < distance_m <= self._final_gap_m()
+                or self.stop_requested or not self._operator_link_ready()
+                or not self._navigation_ready(require_fresh_amcl=False)):
+            return False
+        end = (start_map[0] - distance_m * math.cos(start_map[2]),
+               start_map[1] - distance_m * math.sin(start_map[2]), start_map[2])
+        check = CachedStaticCorridorValidator(
+            Path(self.registry['map']['yaml_path']),
+            Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
+        if not check([start_map, end]):
+            self.emit('failed', phase='final_approach', reason='table_gap_retreat_static_blocked')
+            return False
+        self.emit('table_gap_reverse_correction', correction=correction,
+                  distance_m=distance_m, target_front_gap_m=self._final_gap_m(),
+                  original_deadline_preserved=True)
+        travelled = self._drive_zero_turn(-distance_m, precision=True, hold_heading=True)
+        return (travelled is not None and not self.stop_requested
+                and self._operator_link_ready()
+                and getattr(self, '_last_direct_motion_failure', None) is None)
 
     def _final_gap_m(self):
         """Front gap the final approach closes to: --final-gap-m, else the contract."""

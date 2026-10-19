@@ -68,6 +68,12 @@ def test_command_preserves_parking_speed_and_requires_early_alignment():
     assert face_approach_command(0.3, 0.0) == (0.05, 0.0)
 
 
+def test_command_tapers_only_inside_the_final_approach_band():
+    assert face_approach_command(0.026, 0.0) == (0.05, 0.0)
+    assert face_approach_command(0.020, 0.0) == pytest.approx((0.04, 0.0))
+    assert face_approach_command(0.005, 0.0) == (0.01, 0.0)
+
+
 def test_heading_filter_crosses_pi_along_shortest_arc():
     filtered = filtered_face_heading(math.pi - 0.01, -math.pi + 0.01, 0.35)
     assert filtered == pytest.approx(math.pi - 0.01 + (1.0 - math.exp(-1.0)) * 0.02)

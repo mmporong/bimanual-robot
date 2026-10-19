@@ -130,6 +130,35 @@ def test_configured_rear_home_stages_then_parks_against_live_box(monkeypatch, pa
         assert arrived[-1].kwargs['confirmation']['external_accuracy_verified'] is False
 
 
+@pytest.mark.parametrize('end_error_m,expected', [
+    (math.sqrt(.05 ** 2 * 2), True), (.149, True), (.151, False),
+])
+def test_rear_home_transit_endpoint_is_not_judged_as_final_parking(
+        monkeypatch, end_error_m, expected):
+    node, home = _rear_home_node(monkeypatch)
+    node.parking_contract = {'xy_tolerance_m': .01}
+    node._navigation_ready = Mock(return_value=True)
+    node._pose = lambda *_: PoseStamped()
+    node._wait = lambda value, *_: value
+    node.plan_pose = ServiceRoute.plan_pose.__get__(node)
+    node._plan_with_input_recovery = ServiceRoute._plan_with_input_recovery.__get__(node)
+    stage_x = home['x_m'] + home['approach_offset_m'] * math.cos(home['yaw_rad'])
+    stage_y = home['y_m'] + home['approach_offset_m'] * math.sin(home['yaw_rad'])
+    result = ComputePathThroughPoses.Result()
+    finish = PoseStamped()
+    finish.pose.position.x, finish.pose.position.y = stage_x - end_error_m, stage_y
+    result.path.poses = [PoseStamped(), finish]
+    wrapped = SimpleNamespace(status=GoalStatus.STATUS_SUCCEEDED, result=result)
+    node.compute = Mock()
+    node.compute.send_goal_async.return_value = SimpleNamespace(
+        accepted=True, get_result_async=lambda: wrapped)
+    assert node._go_home_reverse(home, True) is expected
+    assert node.park_rear_box.call_count == int(expected)
+    if expected:
+        assert node.park_rear_box.call_args.kwargs['target_gap_m'] == .01
+    assert node.registry['home'] == home
+
+
 @pytest.mark.parametrize('case', ['plan_only', 'blocked_stage', 'failed_stage',
                                   'operator_stop', 'link_lost', 'sensor_lost', 'timeout'])
 def test_rear_home_does_not_dispatch_docking_before_valid_staging(monkeypatch, case):
@@ -2386,9 +2415,120 @@ def test_one_centimetre_table_correction_never_advances_after_overshoot(mission)
     mission.final_gap_override_m = 0.01
     mission.capture_stationary_pose.side_effect = [
         ((0, 0, 0), {}), ((0.933, 0, 0), {})]
+    mission._retreat_table_gap = Mock(return_value=False)
     assert not invoke(mission)
     mission._straight_final_approach.assert_called_once()
+    mission._retreat_table_gap.assert_called_once()
     assert mission.emit.call_args.args == ('box_gap_not_confirmed',)
+
+
+@pytest.mark.parametrize('case', ['success', 'stopped', 'no_progress'])
+def test_aligned_overshoot_retreats_in_the_same_visit_without_returning_home(mission, case):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    near = ((.932, 0, 0), {})
+    final = near if case == 'no_progress' else ((.925, 0, 0), {})
+    mission.capture_stationary_pose.side_effect = [((0, 0, 0), {}), near, final]
+    deadlines = []
+
+    def retreat(distance_m, start_map, correction):
+        deadlines.append(mission.run_deadline_s)
+        assert distance_m == pytest.approx(.007)
+        assert start_map == near[0] and correction == 1
+        return case != 'stopped'
+
+    mission._retreat_table_gap = Mock(side_effect=retreat)
+    mission.go_home = Mock(side_effect=AssertionError('a small gap error is not a home task'))
+    assert invoke(mission) is (case == 'success')
+    mission._straight_final_approach.assert_called_once()
+    mission._retreat_table_gap.assert_called_once()
+    assert len(deadlines) == 1 and deadlines[0] is not None
+    if case == 'success':
+        assert mission.emit.call_args.args == ('box_approach_finished',)
+    elif case == 'no_progress':
+        assert mission.emit.call_args.kwargs['reason'] == 'final_gap_no_progress'
+
+
+@pytest.mark.parametrize('case', [
+    'clear', 'blocked', 'user_stop', 'link_lost', 'drive_failed',
+    'during_user_stop', 'during_link_loss', 'during_sensor_loss', 'during_timeout',
+])
+def test_small_gap_retreat_checks_full_static_outline_and_keeps_motion_guards(monkeypatch, case):
+    node = object.__new__(BoxServiceRoute)
+    node.registry = {'map': {'yaml_path': '/map.yaml'}, 'keepout': {'yaml_path': '/mask.yaml'}}
+    node._final_gap_m = lambda: .01
+    node.stop_requested = case == 'user_stop'
+    link = [case != 'link_lost']
+    node._operator_link_ready = lambda: link[0]
+    node._navigation_ready = lambda **_: True
+    outline = [(-.275, -.225), (.065, -.225), (.065, .225), (-.275, .225)]
+    node._footprint_outline = lambda: outline
+    check = Mock(return_value=case != 'blocked')
+    factory = Mock(return_value=check)
+    monkeypatch.setattr(box_service, 'CachedStaticCorridorValidator', factory)
+
+    def drive(*_args, **_kwargs):
+        if case == 'during_user_stop':
+            node.stop_requested = True
+        elif case == 'during_link_loss':
+            link[0] = False
+        elif case in ('during_sensor_loss', 'during_timeout'):
+            node._last_direct_motion_failure = case
+        return None if case == 'drive_failed' else -.002 if case.startswith('during_') else -.007
+
+    node._drive_zero_turn = Mock(side_effect=drive)
+    node.emit = Mock()
+    start = (.3, .4, math.pi / 2)
+    assert node._retreat_table_gap(.007, start, 1) is (case == 'clear')
+    if case in ('user_stop', 'link_lost'):
+        factory.assert_not_called()
+    else:
+        assert factory.call_args.args[2] == outline
+        assert check.call_args.args[0][0] == start
+        assert check.call_args.args[0][1] == pytest.approx((.3, .393, math.pi / 2))
+    if case in ('clear', 'drive_failed') or case.startswith('during_'):
+        node._drive_zero_turn.assert_called_once_with(-.007, precision=True, hold_heading=True)
+    else:
+        node._drive_zero_turn.assert_not_called()
+
+
+def test_near_skewed_gap_reobserves_instead_of_ending_the_visit(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    yaw = math.radians(.8)
+    skewed = (1.0 - .006 - .065 * math.cos(yaw), 0.0, yaw)
+    mission.capture_stationary_pose.side_effect = [
+        ((0, 0, 0), {}), (skewed, {}), ((.925, 0, 0), {})]
+    mission._leave_parked_pose = Mock(return_value=True)
+    mission._retreat_table_gap = Mock()
+    assert invoke(mission)
+    mission._leave_parked_pose.assert_called_once()
+    mission._retreat_table_gap.assert_not_called()
+    assert mission._straight_final_approach.call_count == 2
+    assert mission.emit.call_args.args == ('box_approach_finished',)
+
+
+def test_small_retreat_preserves_the_occluded_table_plane(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    near, final = (.932, 0, 0), (.925, 0, 0)
+    mission.capture_stationary_pose.side_effect = [((0, 0, 0), {}), (near, {}), (final, {})]
+    mission._odom_pose = Mock(side_effect=[near, final])
+    target = deepcopy(mission.observe_target.return_value)
+
+    def approach(*_args):
+        mission._continuous_table_stop = {
+            'target': target, 'basis': 'aligned_face_frozen_for_precision_band',
+            'observation_stamp_s': 100.0}
+        return True, lambda x, y, yaw: (x, y, yaw)
+
+    mission._straight_final_approach.side_effect = approach
+    mission._retreat_table_gap = Mock(return_value=True)
+    assert invoke(mission)
+    mission._retreat_table_gap.assert_called_once()
+    assert mission._straight_final_approach.call_count == 1
+    assert mission.emit.call_args.args == ('box_approach_finished',)
+    assert mission.emit.call_args.kwargs['confirmation_basis'] == 'frozen_table_edge_odom_stop'
 
 
 @pytest.mark.parametrize('case', ['success', 'escape_failed', 'face_lost', 'still_skewed'])

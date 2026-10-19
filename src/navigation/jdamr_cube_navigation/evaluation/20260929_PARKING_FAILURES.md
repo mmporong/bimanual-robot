@@ -1702,3 +1702,16 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **검증·범위:** 최종 관련 8개 스위트 931건(13.93초), 생산 모듈 6개 lint·구문 검사와 diff 확인을 통과했다. 출발 helper lint는 기존 17건 그대로이며 신규 오류는 없다. 독립 검토는 추가 대상 157건과 scan 오류 복구 연결 10건을 통과해 PASS했다. 저장 정지 scan의 새 통로 거리는 접근 전 약 1.476–1.478 m, 후진 뒤 약 1.296–1.298 m로 관측 가능했다. 이번 준비 단계는 비이동이며, 전면 근접 가림의 odom 추적 오차·새 수정본 전체 왕복 시간과 반복 정밀도는 이 소프트웨어 검증으로 해결됐다고 주장하지 않는다. 원본과 배포 receipt는 PC `$HOME/.local/state/bimanual-robot/dock_return_20261019/`에 보존한다.
 
 **비이동 배포:** Pi source/install 6쌍 SHA·compile·import가 일치했다. 복원본은 `$HOME/.local/state/jdamr/dock-continuity/20261019_115147/`, PC receipt는 `$HOME/.local/state/bimanual-robot/dock_return_20261019/dock_continuity_deployment.json`이다. idle executor PID231465·Nav2 PID51198·base PID50055와 사용자 대시보드는 다음 요청을 위해 유지하며 fresh scan/odom·속도 0·pending/running 0·StopZone/FootprintApproach 활성 상태를 확인했다. 임시 확인 노드는 종료했다. 유지 서비스 종료는 §22.14 명령과 같다. HOME/AMCL는 변경하지 않았다.
+
+
+### 22.18 급수대 정지 오차에서 불필요한 자동 복귀·도크 중간점 최종 기준 적용
+
+**관측:** `table_01_20261019_122616_83b101eb`는 도크 0.7 m 직선 이탈과 급수대 접근을 수행했다. 깊이 stale 두 번은 같은 목표로 회복했고 `precision_straight_finished.target_failure=null`이다. 최종 양쪽 내부 간격 3.407/3.019 mm로 10 mm 목표 ±3 mm 확인은 미달이었다. 이 작은 overshoot를 후진 보정하지 않고 `incomplete_parking_return_started`로 전환했다. 후진 이탈 뒤 `reverse_staging_planned`는 NavFn 성공/오류0이지만 endpoint 70.7107 mm > 50 mm로 거부됐고, `home_staging_not_planned`와 exit1로 종료됐다. 1번 테이블과 도크 복귀는 수행하지 못했다.
+
+**수정:** lidar_box의 중간 staging에는 기존 transit endpoint 0.15 m 기준을 사용하고 실제 이동·방향 정렬 뒤 후면 제어로 잇는다. 최종 도크 목표/양쪽 ±3 mm 및 일반 map 도크의 계약은 유지한다. 전면 정렬이 맞고 양쪽 양수 간격이 목표보다 조금 좁으면 동일 면·동일 deadline·기존 보정 횟수 안에서 수 mm 후진으로 맞춘다. 정적 지도/keepout sweep와 기존 명령·센서·정지 감시는 유지한다. 기울어 양쪽을 동시에 허용대역으로 옮길 수 없으면 기존 1회 이탈·재관측을 사용한다.
+
+**제동 근거와 한계:** 0.2초 taper가 마지막 10 mm에 집중된 점과 정지 후 약 7 mm 초과는 확인했으나 이 로그에는 실제 제동 계수 측정이 없다. 0.08 m/s² 합성 slow-coast 조건에서 기존 6.09 mm 초과를 재현했으며 이는 차체 캘리브레이션 수치가 아니다. 0.5초 taper로 마지막 25 mm에서만 감속해 같은 회귀를 ±3 mm 안으로 맞췄다. 나머지 이동 속도·정렬 상한은 유지한다.
+
+**검증:** 관련 8개 스위트 950건(15.23초), 변경 생산 모듈 2개 lint·구문·diff 확인 통과다. 실제 계획 함수의 endpoint 경계, 같은 visit의 짧은 후진·frozen 면 유지, skew 재관측, 막힘/정지/링크/무진전, slow-coast를 포함한다. 원본 run 로그는 PC/Pi `$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261019_122616_83b101eb/cycle_events.jsonl`이다. 사용자가 도크 재배치를 예고한 뒤 이동하지 않았으며 HOME/AMCL를 갱신하지 않았다. 이 수정의 실차 완주는 아직 수행하지 않았다.
+
+**독립 검수·비이동 배포:** 주행 도중 partial travelled와 함께 stop/link/sensor/timeout이 반환되는 경로의 성공 오분류를 수정하고 4종 회귀·검수 PASS를 확인했다. Pi 소스/설치 2쌍 SHA·import 일치와 idle executor PID235200·기존 Nav2/base active, fresh scan/odom·속도0·pending0·CM 두 구역 활성 상태를 확인했다. 복원본은 `$HOME/.local/state/jdamr/parking-sequence-repair/20261019_124055/`, PC receipt는 `$HOME/.local/state/bimanual-robot/dock_return_20261019/parking_sequence_repair_deployment.json`이다. 기존 사용자용 서비스는 유지하며 종료는 §22.14 명령과 같다. 임시 확인 노드는 종료했다. 도크 재배치 완료를 받기 전 HOME/AMCL는 바꾸지 않았으며 새 주행은 제출하지 않았다.

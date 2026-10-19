@@ -65,7 +65,8 @@ def test_near_skewed_box_uses_straight_clearance_then_rear_feedback(monkeypatch,
     assert node.park_rear_box(GEOMETRY, 'route', execute=True, timeout_s=90) is (moved is not None)
     node._depart_dock_straight.assert_called_once_with(.2)
     node._drive_zero_turn.assert_called_once_with(
-        -.2, precision=True, hold_heading=True, target_update=update, approach_time_s=.2)
+        -.2, precision=True, hold_heading=True, target_update=update,
+        approach_time_s=module.FACE_APPROACH_TIME_S)
     node._camera.assert_not_called()
     node.capture_stationary_pose.assert_not_called()
     assert node._observe_rear_box.call_count == (2 if moved is None else 3)
