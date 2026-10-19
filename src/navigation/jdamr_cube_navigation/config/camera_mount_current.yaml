@@ -1,13 +1,13 @@
 camera_mount:
-  status: derived
+  status: derived_orientation_pending_physical_parking_validation
   parent_frame: base_link
   child_frame: camera_link
   transform:
     x_m: -0.275
     y_m: 0.0
     z_m: 1.26
-    roll_rad: -0.03011453253432204
-    pitch_rad: 0.5837829655386328
+    roll_rad: -0.01946375975958315
+    pitch_rad: 0.639563761794311
     yaw_rad: -0.0007507445375463481
   provenance:
     derived_at: '2026-10-16'
@@ -39,19 +39,40 @@ camera_mount:
       measured_at: '2026-09-15'
       valid_for: 현재 차체 앞끝과 전륜축
       source: jdamr_cube_description/config/new_base_geometry.yaml
-    orientation_status: 수평 책상 상판의 깊이 평면 법선에서 계산한 roll/pitch 후보. 외부 각도 실측 아님
-    orientation_source: 수평 상판 평면 법선 4개 관측의 단위벡터 평균. yaw는 이전 추정 유지
+    orientation_status: 사용자 40도 조정 후 수평 책상 상판의 깊이 평면 법선으로 추정. 외부 각도 실측 아님
+    orientation_source: 2026-10-19 정지 깊이 관측 19장의 roll/pitch 중앙값. 높이·앞뒤 위치·yaw는 유지
+    operator_pitch_change:
+      value: 40
+      unit: deg
+      measured_at: '2026-10-19'
+      valid_for: 높이 1.26m·앞끝에서 렌즈까지 수평 0.34m인 현행 장착
+      source: operator_report
+      measurement_method: 사용자 조정 완료 보고. 각도 측정 도구는 확인되지 않음
+      previous_operator_pitch_deg: 25
+    current_table_plane_orientation:
+      derived_at: '2026-10-19'
+      unit: rad
+      valid_for: 사용자 하향 40도 조정 이후 장착. 높이 1.26m·앞끝에서 렌즈까지 수평 0.34m
+      source: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/camera40_20261019/status_samples.json
+      method: 수평 상판 가정. 프레임별 roll=atan2(-n.x,-n.y), pitch=asin(-n.z)의 중앙값
+      sample_count: 19
+      roll_rad: -0.01946375975958315
+      pitch_rad: 0.639563761794311
+      pitch_span_deg: [36.615978942097264, 36.66393912335857]
+      plane_rms_m_median: 0.004959171853062891
+      yaw_observability: 수평 평면만으로 yaw는 식별할 수 없어 이전 값을 유지
+      status: candidate_not_external_angle_measurement
     parking_range_bias_compensation:
       applied: false
       superseded_value_m: -0.0076183596449993125
-      reason: 장착 높이 변경으로 이전 근거리 보정의 적용 범위가 달라짐
+      reason: 이전 높이 변경과 현재 각도 변경으로 이전 근거리 보정의 적용 범위가 달라짐
     supersedes_active_mount: camera_mount_table_candidate_20261013.yaml
-    physical_parking_accuracy: NOT_VALIDATED_AFTER_TABLE_PLANE_ORIENTATION_UPDATE
+    physical_parking_accuracy: NOT_VALIDATED_AFTER_20261019_40DEG_ANGLE_CHANGE
     invalidate_when: 상판 높이, 렌즈 위치 또는 각도 변경
     table_plane_orientation:
       derived_at: '2026-10-16'
-      valid_for: 높이 1.26m·앞끝에서 렌즈까지 수평 0.34m인 현행 장착, 수평 책상 상판 가정
-      status: candidate_not_external_angle_measurement
+      valid_for: 2026-10-16 당시 장착. 2026-10-19 각도 변경으로 현재 자세에는 적용하지 않음
+      status: superseded_by_operator_pitch_change_20261019
       method: 평균 optical normal n을 정규화한 뒤 roll=atan2(-n.x,-n.y), pitch=asin(-n.z).
         yaw는 평면으로 식별되지 않아 유지
       unit: rad
@@ -90,7 +111,8 @@ camera_mount:
         - -0.5495615426292061
         plane_rms_m: 0.0050721144189802645
   table_edge_calibration:
-    enabled: true
+    enabled: false
+    disabled_reason: 카메라 각도 변경으로 이전 면·거리 보정의 적용 범위가 달라짐
     status: derived
     yaw_offset_rad: -0.037999564732025065
     plane_offset_bias_m: 0.027985701059102468
