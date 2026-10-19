@@ -16,6 +16,7 @@ from jdamr_cube_navigation import box_service
 from jdamr_cube_navigation.box_service import BoxServiceRoute, parse_args
 from jdamr_cube_navigation.corridor_route import CorridorRoute
 from jdamr_cube_navigation.docking_stop_profile import apply_docking_stop_profile
+from jdamr_cube_navigation.restaurant_service import ServiceRoute
 from nav2_msgs.action import ComputePathThroughPoses
 from nav_msgs.msg import Path as RosPath
 import pytest
@@ -74,6 +75,90 @@ def invoke(node, execute=True, *, search=False):
                       'wheel_outer_width': {'value': 0.540}},
         'table_01', (1, 0), 0.6, execute=execute,
         candidate_trial=execute, search=search)
+
+
+def _rear_home_node(monkeypatch, *, planned=True, parked=True):
+    node = object.__new__(BoxServiceRoute)
+    home = {'id': 'home_dock', 'x_m': .12, 'y_m': .165, 'yaw_rad': .134,
+            'parking_direction': 'reverse', 'approach_offset_m': .6,
+            'rear_parking_reference': 'lidar_box', 'target_rear_gap_m': .01}
+    node.registry = {'frame_id': 'map', 'home': deepcopy(home)}
+    node._localization_bound = lambda _intermediate: contextlib.nullcontext()
+    node._plan_with_input_recovery = Mock(return_value={'ok': planned})
+    node._reach_staging = Mock(return_value=(.72, .24, .134))
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node.run_deadline_s = time.monotonic() + 180
+    node.home_rear_geometry = {'chassis': 'measured'}
+    node.home_rear_route_path = Path('/existing/route.yaml')
+    node.confirmation = {'confirmed': True, 'reference': 'old_staging'}
+
+    def park(*_args, **kwargs):
+        assert node.confirmation is None
+        node.confirmation = {'confirmed': parked, 'reference': 'live_rear_lidar_face',
+                             'nearest_gap_m': kwargs['target_gap_m'],
+                             'external_accuracy_verified': False}
+        return parked
+
+    node.park_rear_box = Mock(side_effect=park)
+    node._reverse_path_valid = Mock(side_effect=AssertionError(
+        'a box can occupy the old coordinate endpoint'))
+    node.emit = Mock()
+    return node, home
+
+
+@pytest.mark.parametrize('parked', [True, False])
+def test_configured_rear_home_stages_then_parks_against_live_box(monkeypatch, parked):
+    node, home = _rear_home_node(monkeypatch, parked=parked)
+    original = deepcopy(node.registry['home'])
+    assert node._go_home_reverse(home, True) is parked
+    target = node._plan_with_input_recovery.call_args.args[0]
+    assert target['x_m'] == pytest.approx(.12 + .6 * math.cos(.134))
+    assert target['y_m'] == pytest.approx(.165 + .6 * math.sin(.134))
+    node._reach_staging.assert_called_once()
+    node.park_rear_box.assert_called_once()
+    assert node.park_rear_box.call_args.kwargs['target_gap_m'] == .01
+    assert 0 < node.park_rear_box.call_args.kwargs['timeout_s'] <= 180
+    assert node.registry['home'] == original
+    assert node.pose_id == 'home_dock'
+    node._reverse_path_valid.assert_not_called()
+    arrived = [c for c in node.emit.call_args_list if c.args[0] == 'home_arrived']
+    assert bool(arrived) is parked
+    if parked:
+        assert arrived[-1].kwargs['confirmation']['reference'] == 'live_rear_lidar_face'
+        assert arrived[-1].kwargs['confirmation']['external_accuracy_verified'] is False
+
+
+@pytest.mark.parametrize('case', ['plan_only', 'blocked_stage', 'failed_stage',
+                                  'operator_stop', 'link_lost', 'sensor_lost', 'timeout'])
+def test_rear_home_does_not_dispatch_docking_before_valid_staging(monkeypatch, case):
+    node, home = _rear_home_node(monkeypatch, planned=case != 'blocked_stage')
+    if case == 'failed_stage':
+        node._reach_staging.return_value = None
+    elif case == 'operator_stop':
+        node.stop_requested = True
+    elif case == 'link_lost':
+        node._operator_link_ready.return_value = False
+    elif case == 'sensor_lost':
+        node._guard_failure.return_value = 'scan_stale'
+    elif case == 'timeout':
+        node.run_deadline_s = time.monotonic() - 1
+    assert node._go_home_reverse(home, case != 'plan_only') is (case == 'plan_only')
+    node.park_rear_box.assert_not_called()
+    if case in ('plan_only', 'blocked_stage'):
+        node._reach_staging.assert_not_called()
+    assert not any(c.args[0] == 'home_arrived' for c in node.emit.call_args_list)
+
+
+def test_legacy_coordinate_home_does_not_select_a_nearby_lidar_box(monkeypatch):
+    node, home = _rear_home_node(monkeypatch)
+    del home['rear_parking_reference']
+    legacy = Mock(return_value=True)
+    monkeypatch.setattr(ServiceRoute, '_go_home_reverse', legacy)
+    assert node._go_home_reverse(home, True)
+    legacy.assert_called_once_with(home, True, _map_reapproach=False)
+    node.park_rear_box.assert_not_called()
 
 
 def test_plan_only_does_not_observe_or_move(mission):

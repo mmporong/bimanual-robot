@@ -8,6 +8,9 @@ from jdamr_cube_navigation.box_lidar_witness import (
     MAX_CANDIDATE_PLANE_DISTANCE_M, MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD,
 )
 from jdamr_cube_navigation.corridor_route import load_route, spin_node
+from jdamr_cube_navigation.parking import (
+    MAXIMUM_FRONT_GAP_M, MINIMUM_FRONT_GAP_M,
+)
 from jdamr_cube_navigation.rear_box_docking import (
     estimate_rear_box_face, RearBoxFaceTracker,
 )
@@ -130,10 +133,12 @@ class RearBoxParkingMixin:
                 failure = str(error)
         raise RuntimeError(f'rear box observation unavailable: {failure}')
 
-    def _rear_box_update(self, initial, geometry, extent, half_width, target_gap):
+    def _rear_box_update(self, initial, geometry, extent, half_width, target_gap,
+                         reference=None):
         state = dict(initial)
-        reference = {'face_odom': tuple(initial['face_odom']),
-                     'normal_odom': tuple(initial['normal_odom'])}
+        reference = initial if reference is None else reference
+        reference = {'face_odom': tuple(reference['face_odom']),
+                     'normal_odom': tuple(reference['normal_odom'])}
         start = self._odom_pose()
         validated = {'stamp': None, 'pose': None, 'heading': None}
         anchor = self._frozen_in_odom(RosPath())[1](0., 0., 0.)
@@ -199,7 +204,8 @@ class RearBoxParkingMixin:
 
         return update
 
-    def park_rear_box(self, geometry, route_path, *, execute, timeout_s):
+    def park_rear_box(self, geometry, route_path, *, execute, timeout_s,
+                      target_gap_m=None):
         """Align to a live rear box and stop at the requested one-centimetre gap."""
         for key in ('frame_length', 'front_to_wheel_axis', 'frame_width'):
             item = geometry[key]
@@ -211,9 +217,17 @@ class RearBoxParkingMixin:
         half_width = geometry['frame_width']['value'] / 2.0
         if not all(math.isfinite(v) and v > 0 for v in (extent, half_width)):
             raise ValueError('invalid rear box chassis geometry')
-        target_gap = self._final_gap_m()
+        target_gap = self._final_gap_m() if target_gap_m is None else target_gap_m
+        if (isinstance(target_gap, bool)
+                or not isinstance(target_gap, (int, float))
+                or not math.isfinite(target_gap)
+                or not MINIMUM_FRONT_GAP_M <= target_gap <= MAXIMUM_FRONT_GAP_M):
+            raise ValueError('target_front_gap_m must be in [0.01, 0.10] m')
         self.run_deadline_s = time.monotonic() + timeout_s
         self.table_id, self.pose_id = 'home_dock', 'rear_box'
+        # A staging confirmation from the preceding home leg must not be reused as
+        # evidence for this independent live-LiDAR terminal confirmation.
+        self.confirmation = None
         self.verify_live_maps()
         if not self.wait_until_ready(timeout=10.0):
             return False
@@ -225,32 +239,70 @@ class RearBoxParkingMixin:
         if not self._reverse_smoother_ready() or not self._parking_parameters_ready(reverse=True):
             return False
         self._confirm_collision_monitor_on()
-        # At contact range a turn sweeps a rear corner toward the box. Reuse the
-        # validated straight dock departure before attempting heading correction.
-        if (initial['gap_m'] < 0.05
-                and abs(initial['normal_yaw_error_rad']) > math.radians(0.3)):
+
+        def make_straight_clearance(observation):
+            # At contact range a turn sweeps a rear corner toward the box. Reuse
+            # the validated straight dock departure before correcting heading.
+            if not (observation['gap_m'] < 0.05 and abs(
+                    observation['normal_yaw_error_rad']) > math.radians(0.3)):
+                return observation
             self.config = load_route(route_path)
             self.waypoints = self.config['waypoints']
             self._dock_departure = None
             if not self._depart_dock_straight(0.2):
-                return False
+                return None
             reobserved = self._observe_rear_box(geometry, extent, half_width)
             _same_target(initial, reobserved)
-            initial = reobserved
-        update = self._rear_box_update(initial, geometry, extent, half_width, target_gap)
-        remaining = update(self._odom_pose())['remaining_m']
-        if remaining > 0.0:
-            moved = self._drive_zero_turn(
-                -remaining, precision=True, hold_heading=True, target_update=update)
-            if moved is None:
-                return False
+            return reobserved
+
+        def approach(observation):
+            update = self._rear_box_update(
+                observation, geometry, extent, half_width, target_gap,
+                reference=initial)
+            remaining = update(self._odom_pose())['remaining_m']
+            if remaining <= 0.0:
+                return True
+            return self._drive_zero_turn(
+                -remaining, precision=True, hold_heading=True,
+                target_update=update) is not None
+
+        approach_start = make_straight_clearance(initial)
+        if approach_start is None or not approach(approach_start):
+            return False
+
         final = self._observe_rear_box(geometry, extent, half_width)
         _same_target(initial, final)
-        error = final['normal_yaw_error_rad']
-        gap = final['gap_m']
-        far_gap = gap + 2.0 * half_width * abs(math.sin(error))
-        confirmed = (target_gap - 0.003 <= gap <= target_gap + 0.003
-                     and target_gap - 0.003 <= far_gap <= target_gap + 0.003)
+
+        def confirmation(observation):
+            error = observation['normal_yaw_error_rad']
+            gap = observation['gap_m']
+            far_gap = gap + 2.0 * half_width * abs(math.sin(error))
+            confirmed = (target_gap - 0.003 <= gap <= target_gap + 0.003
+                         and target_gap - 0.003 <= far_gap <= target_gap + 0.003)
+            return confirmed, gap, far_gap, error
+
+        confirmed, gap, far_gap, error = confirmation(final)
+        if (not confirmed and not getattr(self, 'stop_requested', False)
+                and self._operator_link_ready()):
+            self.emit('rear_box_terminal_retry_started', nearest_gap_m=gap,
+                      farthest_gap_m=far_gap, angle_rad=error,
+                      target_gap_m=target_gap, target_preserved=True)
+            retry_start = make_straight_clearance(final)
+            if retry_start is not None and approach(retry_start):
+                retried = self._observe_rear_box(geometry, extent, half_width)
+                _same_target(initial, retried)
+                final = retried
+                confirmed, gap, far_gap, error = confirmation(final)
+        self.confirmation = {
+            'confirmed': confirmed,
+            'reason': ('confirmed' if confirmed
+                       else 'rear_box_gap_out_of_tolerance'),
+            'reference': 'live_rear_lidar_face',
+            'nearest_gap_m': gap,
+            'farthest_gap_m': far_gap,
+            'internal_estimate_only': True,
+            'external_accuracy_verified': False,
+        }
         self.emit('rear_box_parking_finished', confirmed=confirmed,
                   nearest_gap_m=gap, farthest_gap_m=far_gap, angle_rad=error,
                   target_gap_m=target_gap, basis='live_rear_lidar_face',

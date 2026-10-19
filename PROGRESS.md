@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-10-19 | 도크 복귀 경로 거부와 후면 라이다 정밀주차 연결
+
+- 전체 실행 `table_01_20261019_093818_f936fa34`는 급수대·1번 테이블 접근과 후진 이탈 뒤 도크 복귀 전 Nav2 `IsPathValid=false` 3회로 종료됐다. 급수대 내부 모서리 추정은 9.05/9.53 mm, 1번 테이블은 8.96/8.92 mm다. 사용자는 1번 테이블 실제 간격을 3–5 cm로 보고했으므로 이 실행을 1 cm 정밀주차 성공으로 기록하지 않는다. 전면 근접 가림 뒤 odometry 추적과 실물 거리의 불일치는 원인 확인 중이다.
+- 도크 앞 70 cm 지점은 live 판정이 거부됐고, 60 cm부터 기존 HOME까지의 초기 표본은 통과했다. HOME 좌표를 보존한 임시 60 cm 접근점으로 `table_01_20261019_094411_9445486d`를 실행했다. 1차 후진 후 odom 확인은 통과했으나 지도 오차 약 164 mm로 재접근했고, 이후 최종 직선 경로가 다시 거부됐다. 정지 상태에서 global/local costmap을 한 번 갱신한 뒤에도 도크 끝 두 표본은 계속 거부되어 단순 잔상으로 단정하지 않았다.
+- 비용지도 스냅샷에서 HOME 차체 영역과 겹치는 lethal 셀 네 개는 원본 지도·keepout에서는 free였다. 후면 라이다 횡방향 면과 위치가 맞으며, 고정 HOME pose까지 들어가려는 경로와 도크 뒤 박스의 상대 간격 제어가 분리된 문제가 확인됐다. 기존 단독 후면 박스 주차로 복귀한 `table_01_20261019_094849_435c91f5`는 정지 후 내부 10.85/15.16 mm로 양쪽 목표 ±3 mm를 통과하지 못했다. 현재 정지 상태를 유지한다.
+- 명시적으로 `rear_parking_reference: lidar_box`인 도크에만 기존 staging 이동→후면 라이다 상대 주차를 연결했다. HOME 좌표·방향은 유지하고 접근 offset은 통과했던 0.6 m, 후면 목표 간격은 별도 `target_rear_gap_m: 0.01`로 설정한다. 다른 도크의 기존 지도 기반 경로 검사, 실제 차체 외곽·static map/keepout sweep·Collision Monitor·센서 신선도·정지·링크 단절 처리는 유지한다. 사용자가 요청한 전면 간격이 후면 목표를 바꾸지 않는다.
+- 후면 정지 관측이 목표를 벗어나면 같은 최초 평면을 유지해 최대 한 번 보정한다. 근접 상태에서 각도 오차가 0.3°를 넘을 때만 기존 20 cm 직선 이탈 후 재접근한다. 센서 오류·표적 변경·사용자 정지·연결 단절은 추가 재시도하지 않으며 허용 간격을 완화하지 않는다. 기존 좌표 모드의 live 거부는 phase·reason·indices·시도 횟수와 중단 원인을 기록하고, staging 성공 확인값을 최종 도킹 실패에 재사용하지 않는다.
+- 작성 패스 검증은 `test_box_service.py`·`test_service_destinations.py` 272건, `test_restaurant_service.py`·`test_input_recovery.py` 513건, 후면·외곽 관련 3스위트 99건(합 884건) 통과다. 초기 테스트의 ament 경로 누락은 로컬 ROS workspace 설정을 source해 해결했다. 수정본의 실제 왕복·1 cm 실측은 아직 수행하지 않았다. 실행 원본은 PC/Pi의 기존 runs, 비용지도 원본은 `$HOME/.local/state/bimanual-robot/dock_return_20261019/`에 보존한다.
+- 독립 verifier는 관련 931건·4모듈 compile·diff·HOME 좌표 대조를 통과했다. 새 테스트 import 순서 오류 1건을 검수에서 수정했으며 기존 테스트 lint 31건과 구분한다. Pi 4모듈의 source/install SHA 일치·import·등록부 검증 후 idle executor PID217586을 기존 생성기로 다시 띄웠다. 수집형 unit이 정지 때 삭제돼 일반 start가 실패한 뒤 기존 `start_executor()`로 복구한 이력을 보존한다. base PID50055·Nav2 PID51198·dashboard PID4251은 유지했다. PC/Pi 등록부·state의 HOME 설정은 동일하며 pending/running0, fresh odom 선속도/각속도0이다. 복원본은 Pi `$HOME/.local/state/jdamr/dock-return/20261019_100047/`, PC receipt는 `$HOME/.local/state/bimanual-robot/dock_return_20261019/deployment_receipt.json`이다. RGB-D/관측기는 inactive/PID0이고 새 상주 진단 프로세스는 없다. 대시보드·base·Nav2·idle executor는 다음 사용자 조작을 위해 유지하며 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-ammr-dashboard jdamr-restaurant-navigation jdamr-base`, PC `systemctl --user stop robot-dashboard robot-dashboard-link`다.
+- 전면 오차 추가 조사에서 마지막 depth face 이후 19.014초·odom 439.95 mm를 새 면 없이 추적한 사실을 확인했다. 먼 거리에서도 경계 미검출 8프레임이면 occlusion을 영구 latch하고 후속 새 면을 무시하는 구조가 있다. 실제 이동과 odom의 축척·yaw 또는 초기 면의 카메라 보정 편향 중 무엇이 3–5 cm를 만들었는지는 확정하지 않았으며, 임의 거리 bias를 넣지 않았다. 이번 패치는 Nav2 복귀 연결·후면 보정 범위이고 전면 오차는 해결 전이다.
+
 ## 2026-10-16 | 일반 출발의 중복 파라미터 조회 제거와 카메라 대기 계측 분리
 
 - 불필요한 회전·정차 지연의 원인과 포트폴리오 개선 목표를 확인했다. 마지막 전체 왕복 `table_01_20261016_162425_234ffa1b`는 고정 테이블 탐색·연속 접근 수정 `c28245f` 이전 실행이다. 이미 고친 30° 탐색 왕복·면 안정성 초기화·도크 재접근 문제를 최신 코드의 미수정 결함으로 다시 단정하지 않는다. 수정 후 전체 왕복의 회전량·정차시간·임무시간 개선량은 아직 측정하지 않았다.

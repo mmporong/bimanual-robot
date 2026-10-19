@@ -46,6 +46,30 @@ def test_home_rejects_invalid_parking_direction(registry):
         destinations.set_home_pose(registry, pose)
 
 
+@pytest.mark.parametrize('direction,reference,gap,valid', [
+    ('reverse', 'lidar_box', .01, True),
+    ('reverse', 'map', None, True),
+    ('forward', 'lidar_box', .01, False),
+    ('reverse', 'nearest_object', .01, False),
+    ('reverse', 'lidar_box', None, False),
+    ('reverse', 'lidar_box', True, False),
+    ('reverse', 'lidar_box', float('nan'), False),
+    ('reverse', 'lidar_box', 0., False),
+    ('reverse', 'lidar_box', .2, False),
+])
+def test_rear_lidar_home_reference_is_explicit_and_has_a_valid_gap(
+        registry, direction, reference, gap, valid):
+    pose = destinations.taught_pose('home_dock', (0., 0., 0.), {})
+    pose.update(parking_direction=direction, rear_parking_reference=reference,
+                target_rear_gap_m=gap)
+    if not valid:
+        with pytest.raises(ValueError):
+            destinations.set_home_pose(registry, pose)
+        return
+    updated = destinations.set_home_pose(registry, pose)
+    assert destinations.home_pose(updated)['rear_parking_reference'] == reference
+
+
 @pytest.fixture
 def map_files(tmp_path):
     """Create real map and keepout YAML/image assets."""

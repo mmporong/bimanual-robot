@@ -15,7 +15,7 @@ home:
   x_m: 0.12002282933008113
   y_m: 0.16495971131874898
   yaw_rad: 0.13404527824949672
-  approach_offset_m: 0.7
+  approach_offset_m: 0.6
   target_front_gap_m: null
   teaching:
     source: map_to_base_link_tf
@@ -47,4 +47,6 @@ home:
       scope: taught placement; no closed-loop rear range measurement
       source_run: dock_table_fit_20261016_121145
   parking_direction: reverse
+  rear_parking_reference: lidar_box
+  target_rear_gap_m: 0.01
 tables: []

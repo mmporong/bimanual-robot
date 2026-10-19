@@ -781,7 +781,7 @@ def test_home_cli_does_not_need_table_and_never_moves_by_default():
 def test_reverse_home_stages_before_following_and_stops_on_failure(failure):
     node = reverse_route()
     events = []
-    node._reverse_path_valid = lambda path: failure != 'path'
+    node._reverse_path_valid = lambda path, **_kwargs: failure != 'path'
 
     def plan(pose, single):
         events.append(('plan', pose['x_m'], single))

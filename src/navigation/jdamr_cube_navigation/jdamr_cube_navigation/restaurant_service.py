@@ -2368,7 +2368,7 @@ class ServiceRoute(CorridorRoute):
         return (math.isclose(values[0][0], -limit, abs_tol=1e-9)
                 and 0.0 < values[1][0] <= max(limit, SERVICE_TRANSIT_MAX_MPS))
 
-    def _reverse_path_valid(self, path, validate_from_m=0.0):
+    def _reverse_path_valid(self, path, validate_from_m=0.0, phase=None):
         """
         Validate the whole path, or its tail after validate_from_m of travel.
 
@@ -2394,33 +2394,61 @@ class ServiceRoute(CorridorRoute):
             checked.poses = path.poses[offset:]
             excluded = {'excluded_indices': [0, offset - 1],
                         'excluded_front_band_m': cumulative[offset]}
+        phase_fields = {} if phase is None else {'phase': phase}
         if not static_corridor_clear(
                 Path(self.registry['map']['yaml_path']),
                 Path(self.registry['keepout']['yaml_path']), points,
                 self._reverse_footprint()):
             self.emit('reverse_path_checked', valid=False,
-                      reason='static_obstacle_unknown_keepout_or_map_boundary', **excluded)
+                      reason='static_obstacle_unknown_keepout_or_map_boundary',
+                      **phase_fields, **excluded)
             return False
         if not self.validate_reverse_path.wait_for_service(timeout_sec=2.0):
             raise RuntimeError('reverse path collision validation unavailable')
         request = IsPathValid.Request()
         request.path = checked
+
+        def wait_abort_reason():
+            if self.stop_requested:
+                return 'operator_stop'
+            if not self._operator_link_ready():
+                return 'operator_link_lost'
+            return self._guard_failure(False)
+
         for attempt in range(REVERSE_PATH_CHECK_ATTEMPTS):
-            result = self._wait(self.validate_reverse_path.call_async(request), 3.0)
+            try:
+                result = self._wait(self.validate_reverse_path.call_async(request), 3.0)
+            except RuntimeError:
+                reason = wait_abort_reason()
+                if reason:
+                    self.emit('path_blocked_wait_aborted', reason=reason,
+                              attempt=attempt + 1, **phase_fields, **excluded)
+                    return False
+                raise
             # Report indices of the original path, not of the validated tail.
+            invalid_indices = [index + offset for index in result.invalid_pose_indices]
+            rejection = {} if result.is_valid and not invalid_indices else {
+                'reason': 'nav2_live_costmap_rejected'}
             self.emit('reverse_path_checked', valid=result.is_valid,
-                      invalid_pose_indices=[index + offset
-                                            for index in result.invalid_pose_indices],
-                      attempt=attempt + 1, **excluded)
-            if result.is_valid and not result.invalid_pose_indices:
+                      invalid_pose_indices=invalid_indices,
+                      attempt=attempt + 1, **rejection, **phase_fields, **excluded)
+            if result.is_valid and not invalid_indices:
                 return True
             if attempt + 1 == REVERSE_PATH_CHECK_ATTEMPTS:
+                self.emit('path_blocked_give_up',
+                          reason='nav2_live_costmap_rejected',
+                          invalid_pose_indices=invalid_indices,
+                          attempts=REVERSE_PATH_CHECK_ATTEMPTS,
+                          **phase_fields, **excluded)
                 return False
-            self.emit('reverse_path_waiting_for_update', attempt=attempt + 1)
+            self.emit('reverse_path_waiting_for_update', attempt=attempt + 1,
+                      **phase_fields, **excluded)
             until_s = time.monotonic() + REVERSE_PATH_UPDATE_S
             while time.monotonic() < until_s:
-                if (self.stop_requested or not self._operator_link_ready()
-                        or self._guard_failure(False)):
+                reason = wait_abort_reason()
+                if reason:
+                    self.emit('path_blocked_wait_aborted', reason=reason,
+                              attempt=attempt + 1, **phase_fields, **excluded)
                     return False
                 spin_node(self, timeout_sec=0.05)
         return False
@@ -2580,7 +2608,7 @@ class ServiceRoute(CorridorRoute):
                       'parking_direction': 'forward'}
         nominal_path = self._make_reverse_path(
             (stage['x'], stage['y'], stage['yaw']), target, **path_kwargs)
-        if not self._reverse_path_valid(nominal_path):
+        if not self._reverse_path_valid(nominal_path, phase='nominal_precheck'):
             return False
         try:
             # Precision staging is an intermediate leg; the docking below is not.
@@ -2637,6 +2665,9 @@ class ServiceRoute(CorridorRoute):
         # the path. Reject misalignment before any reverse action is sent.
         self.verify_live_maps()
         actual, _evidence = self.capture_stationary_pose()
+        # The staging confirmation describes the intermediate pose.  Do not
+        # attach it to a later dock-path failure as if the dock were confirmed.
+        self.confirmation = None
         if precision_home:
             success = self._dock_straight(actual, target, pre_dock, home)
             recovery = self._dock_map_recovery
@@ -2758,7 +2789,10 @@ class ServiceRoute(CorridorRoute):
             self.emit('reverse_staging_out_of_tolerance', reason=str(error),
                       actual_pose=list(actual))
             return False
-        if not all(self._reverse_path_valid(path) for path in legs):
+        if (pre_dock is not None
+                and not self._reverse_path_valid(legs[0], phase='dock_curve')):
+            return False
+        if not self._reverse_path_valid(legs[-1], phase='dock_final_straight'):
             return False
         frozen, to_odom = self._frozen_in_odom(legs[0])
         dock = dict(zip(('x', 'y', 'yaw'), to_odom(*target)))

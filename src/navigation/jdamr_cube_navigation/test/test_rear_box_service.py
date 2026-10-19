@@ -38,6 +38,7 @@ def test_near_skewed_box_uses_straight_clearance_then_rear_feedback(monkeypatch,
     node._reverse_smoother_ready = Mock(return_value=True)
     node._parking_parameters_ready = Mock(return_value=True)
     node._confirm_collision_monitor_on = Mock()
+    node._operator_link_ready = Mock(return_value=True)
     node._depart_dock_straight = Mock(return_value=True)
     update = Mock(return_value={'remaining_m': .2})
     node._rear_box_update = Mock(return_value=update)
@@ -54,6 +55,93 @@ def test_near_skewed_box_uses_straight_clearance_then_rear_feedback(monkeypatch,
     node._camera.assert_not_called()
     node.capture_stationary_pose.assert_called_once()
     assert node._observe_rear_box.call_count == (2 if moved is None else 3)
+
+
+def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monkeypatch):
+    node = object.__new__(BoxServiceRoute)
+    node._final_gap_m = Mock(return_value=.05)
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node.capture_stationary_pose = Mock(return_value=((0., 0., 0.), {}))
+    initial = face(.58, 0., stamp=1.)
+    missed = face(.01085, math.radians(.548), stamp=2.)
+    cleared = face(.21, math.radians(.1), stamp=3.)
+    confirmed = face(.01, 0., stamp=4.)
+    for item in (initial, missed, cleared, confirmed):
+        item['face_odom'], item['normal_odom'] = (-.855, 0.), (1., 0.)
+    node._observe_rear_box = Mock(side_effect=[initial, missed, cleared, confirmed])
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    node._operator_link_ready = Mock(return_value=True)
+    node._depart_dock_straight = Mock(return_value=True)
+    updates = [Mock(return_value={'remaining_m': .57}),
+               Mock(return_value={'remaining_m': .20})]
+    node._rear_box_update = Mock(side_effect=updates)
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._drive_zero_turn = Mock(side_effect=[-.57, -.20])
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'load_route', lambda _p: {'waypoints': [
+        {'id': 'home_exit'}, {'id': 'observation'}]})
+
+    assert node.park_rear_box(
+        GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01)
+    node._final_gap_m.assert_not_called()
+    node._depart_dock_straight.assert_called_once_with(.2)
+    assert node._drive_zero_turn.call_count == 2
+    assert node._rear_box_update.call_args_list[1].kwargs['reference'] is initial
+    assert node.confirmation == {
+        'confirmed': True, 'reason': 'confirmed',
+        'reference': 'live_rear_lidar_face',
+        'nearest_gap_m': pytest.approx(.01),
+        'farthest_gap_m': pytest.approx(.01),
+        'internal_estimate_only': True,
+        'external_accuracy_verified': False,
+    }
+    retry = [call for call in node.emit.call_args_list
+             if call.args and call.args[0] == 'rear_box_terminal_retry_started']
+    assert len(retry) == 1
+
+
+def test_terminal_miss_does_not_retry_after_operator_link_loss():
+    node = object.__new__(BoxServiceRoute)
+    node._final_gap_m = Mock(return_value=.01)
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node.capture_stationary_pose = Mock(return_value=((0., 0., 0.), {}))
+    initial = face(.2, 0., stamp=1.)
+    missed = face(.01085, math.radians(.548), stamp=2.)
+    for item in (initial, missed):
+        item['face_odom'], item['normal_odom'] = (-.475, 0.), (1., 0.)
+    node._observe_rear_box = Mock(side_effect=[initial, missed])
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    node._operator_link_ready = Mock(return_value=False)
+    node._depart_dock_straight = Mock(return_value=True)
+    update = Mock(return_value={'remaining_m': .19})
+    node._rear_box_update = Mock(return_value=update)
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._drive_zero_turn = Mock(return_value=-.19)
+    node.emit = Mock()
+
+    assert not node.park_rear_box(
+        GEOMETRY, 'route', execute=True, timeout_s=90)
+    node._depart_dock_straight.assert_not_called()
+    node._rear_box_update.assert_called_once()
+    assert node._observe_rear_box.call_count == 2
+    assert node.confirmation['reason'] == 'rear_box_gap_out_of_tolerance'
+
+
+@pytest.mark.parametrize('target_gap', [True, 0., .009, .101, math.inf])
+def test_explicit_rear_target_gap_reuses_parking_contract_bounds(target_gap):
+    node = object.__new__(BoxServiceRoute)
+    node._final_gap_m = Mock(return_value=.01)
+    with pytest.raises(ValueError, match=r'\[0.01, 0.10\]'):
+        node.park_rear_box(
+            GEOMETRY, 'route', execute=False, timeout_s=90,
+            target_gap_m=target_gap)
+    node._final_gap_m.assert_not_called()
 
 
 def test_reverse_preview_rotates_heading_without_rotating_actual_footprint(monkeypatch):

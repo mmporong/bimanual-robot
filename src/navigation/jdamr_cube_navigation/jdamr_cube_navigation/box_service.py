@@ -29,7 +29,7 @@ from jdamr_cube_navigation.restaurant_service import (
     LIVE_APPROACH_MAX_M, OPERATOR_LINK_TIMEOUT_S, SCAN_MEMORY_KEYFRAMES,
     ServiceRoute, TRANSIT_VARIANTS)
 from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
-from jdamr_cube_navigation.service_destinations import load_registry, verify_identity
+from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
 from jdamr_cube_navigation.surface_approach import face_approach_waypoints
 from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
 from nav2_msgs.action import Spin
@@ -244,6 +244,59 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         super().__init__(*args, **kwargs)
         self.precision_parameters = AsyncParameterClient(
             self, 'collision_monitor')
+
+    def _go_home_reverse(self, pose, execute, _map_reapproach=False):
+        """Use the registered staging pose, then the configured rear reference."""
+        if pose.get('rear_parking_reference', 'map') != 'lidar_box':
+            return super()._go_home_reverse(
+                pose, execute, _map_reapproach=_map_reapproach)
+        config = route_config(self.registry, pose)
+        stage = config['waypoints'][0]
+        self.config, self.waypoints = config, config['waypoints']
+        stage_pose = {**pose, 'id': stage['id'], 'x_m': stage['x'], 'y_m': stage['y'],
+                      'parking_direction': 'forward'}
+        try:
+            # A box may occupy the old map-coordinate endpoint. Plan to the
+            # staging pose; the final leg observes and stops before that box.
+            with self._localization_bound(True):
+                planned = self._plan_with_input_recovery(
+                    stage_pose, single=True,
+                    end_tolerance_m=MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'])
+                self.emit('reverse_staging_planned', attempt=planned,
+                          rear_parking_reference='lidar_box')
+                if not planned['ok']:
+                    self.emit('failed', phase='home_staging', reason='home_staging_not_planned')
+                    return False
+                if not execute:
+                    self.emit('home_planned_only', parking_direction='reverse',
+                              rear_parking_reference='lidar_box',
+                              final_path_validation='LIVE_REAR_LIDAR_AT_STAGING')
+                    return True
+                if self._reach_staging(stage) is None:
+                    return False
+            self.pose_id = pose['id']
+            self.confirmation = None
+            remaining_s = self.run_deadline_s - time.monotonic()
+            reason = ('operator_stop' if self.stop_requested else
+                      'operator_link_lost' if not self._operator_link_ready() else
+                      self._guard_failure(False))
+            if reason or remaining_s <= 0.0:
+                self.emit('failed', phase='home_rear_box',
+                          reason=reason or 'home_return_timeout')
+                return False
+            success = self.park_rear_box(
+                self.home_rear_geometry, self.home_rear_route_path,
+                execute=True, timeout_s=remaining_s,
+                target_gap_m=pose['target_rear_gap_m'])
+            self.pose_id = pose['id']
+            self.emit('home_arrived' if success else 'failed',
+                      phase='home_rear_box', parking_direction='reverse',
+                      rear_parking_reference='lidar_box', confirmation=self.confirmation,
+                      reason=None if success else 'rear_box_parking_not_confirmed')
+            return success
+        finally:
+            self.config, self.waypoints = config, config['waypoints']
+            self.pose_id = pose['id']
 
     def _observer_stable_frame_quorum(self):
         """Read the observer's active stable-frame quorum once for this observation."""
@@ -2222,6 +2275,8 @@ def run_attempt(args, active=None):
                 if active.get('stop_requested', False):
                     node.request_operator_stop()
                     return 1
+            node.home_rear_geometry = geometry
+            node.home_rear_route_path = args.approach_route
             if args.graceful_final:
                 node.final_approach_controller = 'GracefulParking'
                 node.dock_leg_controller = 'GracefulReverse'

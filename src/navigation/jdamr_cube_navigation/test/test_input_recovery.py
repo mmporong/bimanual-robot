@@ -1655,7 +1655,10 @@ def test_reverse_snapshot_rechecks_while_stopped_without_dispatch(monkeypatch, t
 
     def valid(_path):
         calls.append(world.now)
-        return IsPathValid.Response(is_valid=(case == 'transient' and len(calls) > 1))
+        accepted = case == 'transient' and len(calls) > 1
+        return IsPathValid.Response(
+            is_valid=accepted,
+            invalid_pose_indices=[] if accepted or case != 'persistent' else [2])
 
     world.is_path_valid = valid
     if case == 'operator_stop':
@@ -1663,9 +1666,55 @@ def test_reverse_snapshot_rechecks_while_stopped_without_dispatch(monkeypatch, t
     path = node._make_reverse_path(
         (stage['x'], stage['y'], stage['yaw']),
         (HOME['x_m'], HOME['y_m'], HOME['yaw_rad']))
-    assert node._reverse_path_valid(path) is (case == 'transient')
+    assert node._reverse_path_valid(path, phase='dock_curve') is (case == 'transient')
     assert len(calls) == {'transient': 2, 'persistent': 3, 'operator_stop': 1}[case]
+    checked = _events(node, 'reverse_path_checked')
+    assert all(event['phase'] == 'dock_curve' for event in checked)
+    assert all(event.get('reason') == 'nav2_live_costmap_rejected'
+               for event in checked if not event['valid'])
+    give_up = _events(node, 'path_blocked_give_up')
+    if case == 'persistent':
+        assert len(give_up) == 1
+        assert give_up[0]['phase'] == 'dock_curve'
+        assert give_up[0]['reason'] == 'nav2_live_costmap_rejected'
+        assert give_up[0]['invalid_pose_indices'] == [2]
+        assert give_up[0]['attempts'] == 3
+    else:
+        assert give_up == []
+    if case == 'operator_stop':
+        aborted = _events(node, 'path_blocked_wait_aborted')
+        assert len(aborted) == 1 and aborted[0]['reason'] == 'operator_stop'
     assert world.motions == [] and world.direct_commands == []
+
+
+@pytest.mark.parametrize('case,reason', [
+    ('operator_stop', 'operator_stop'),
+    ('operator_link_lost', 'operator_link_lost'),
+    ('guard', 'scan stale: age=2.600s limit=2.500s'),
+])
+def test_reverse_snapshot_abort_preserves_actual_reason(
+        monkeypatch, tmp_path, case, reason):
+    node, world, stage = _home_stub_node(monkeypatch, tmp_path, BOX_CONTRACT, CONTRACT)
+    node._reverse_path_valid = ServiceRoute._reverse_path_valid.__get__(node)
+    world.is_path_valid = lambda _path: IsPathValid.Response(is_valid=False)
+    began_s = world.now
+    if case == 'operator_stop':
+        world.at(began_s + 0.2, lambda: setattr(node, 'stop_requested', True))
+    elif case == 'operator_link_lost':
+        node._operator_link_ready = lambda: world.now < began_s + 0.2
+    else:
+        original_guard = node._guard_failure
+        node._guard_failure = lambda fresh=False: (
+            reason if world.now >= began_s + 0.2 else original_guard(fresh))
+    path = node._make_reverse_path(
+        (stage['x'], stage['y'], stage['yaw']),
+        (HOME['x_m'], HOME['y_m'], HOME['yaw_rad']))
+    assert not node._reverse_path_valid(path, phase='dock_final_straight')
+    aborted = _events(node, 'path_blocked_wait_aborted')
+    assert len(aborted) == 1
+    assert aborted[0]['phase'] == 'dock_final_straight'
+    assert aborted[0]['reason'] == reason
+    assert len(world.validations) == 1 and world.motions == []
 
 
 def test_t25b_escape_retry_already_at_goal_is_reported(monkeypatch, tmp_path):
@@ -1879,6 +1928,25 @@ def test_t27c_staging_offset_is_taken_out_before_the_straight_entry(monkeypatch,
     frozen = [e for e in _events(node) if e.get('event') == 'dock_leg_frozen_in_odom'][-1]
     assert frozen['staging_lateral_offset_m'] == pytest.approx(0.06)
     assert frozen['pre_dock_pose'][:2] == pytest.approx(pre_dock)
+    checked_phases = [item.kwargs.get('phase')
+                      for item in node._reverse_path_valid.call_args_list]
+    assert checked_phases == [
+        'nominal_precheck', 'dock_curve', 'dock_final_straight']
+
+
+def test_dock_path_failure_does_not_reuse_staging_confirmation(monkeypatch, tmp_path):
+    node, _world, _stage = _home_stub_node(
+        monkeypatch, tmp_path, BOX_CONTRACT, CONTRACT)
+
+    def confirm_staging(*_args, **_kwargs):
+        node.confirmation = {'confirmed': True, 'phase': 'staging'}
+        return True
+
+    node._verify_parking_stop = Mock(side_effect=confirm_staging)
+    node._dock_straight = Mock(return_value=False)
+    assert node._go_home_reverse(HOME, True) is False
+    failed = _events(node, 'failed')[-1]
+    assert failed['confirmation'] is None
 
 
 def test_t26_standard_home_keeps_head_call_arguments(monkeypatch, tmp_path):
@@ -1895,8 +1963,10 @@ def test_t26_standard_home_keeps_head_call_arguments(monkeypatch, tmp_path):
     assert node.execute.call_args_list == [call()]
     assert all(len(item.args) == 2 and not item.kwargs
                for item in node._make_reverse_path.call_args_list)
-    assert all(len(item.args) == 1 and not item.kwargs
-               for item in node._reverse_path_valid.call_args_list)
+    checked = node._reverse_path_valid.call_args_list
+    assert len(checked[0].args) == 1
+    assert checked[0].kwargs == {'phase': 'nominal_precheck'}
+    assert all(len(item.args) == 1 and not item.kwargs for item in checked[1:])
     assert len(node._execute_reverse_path.call_args_list) == 1
     docked = node._execute_reverse_path.call_args
     assert len(docked.args) == 1 and not docked.kwargs
