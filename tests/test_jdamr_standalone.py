@@ -62,9 +62,15 @@ class StandaloneRuntimeTest(unittest.TestCase):
             helper.write_routes(tuple(home[k] for k in ('x_m', 'y_m', 'yaw_rad')))
             route = yaml.safe_load((aligned / 'table_01_route.yaml').read_text())
             pre, observation = route['waypoints']
+            mount = yaml.safe_load((ROOT / 'src/navigation/jdamr_cube_navigation/config/'
+                                    'camera_mount_current.yaml').read_text())['camera_mount']
+            observation_offset_m = mount['table_observation']['base_offset_m']
+            face_x_m, face_y_m = helper.DESTINATIONS['table_01']['face_xy']
             self.assertEqual((observation['x'], observation['y'], observation['yaw']),
-                             (0.858, -1.817, 0.0))
-            self.assertEqual(pre['x'], observation['x'])
+                             (round(face_x_m - observation_offset_m, 3), face_y_m, 0.0))
+            # The aisle turn stays at its original clearance; only the final view closes in.
+            self.assertEqual(pre['x'], round(face_x_m - helper.OBSERVE_M, 3))
+            self.assertGreater(observation['x'], pre['x'])
             for step in range(21):
                 point = tuple(pre[k] + (observation[k] - pre[k]) * step / 20
                               for k in ('x', 'y'))
