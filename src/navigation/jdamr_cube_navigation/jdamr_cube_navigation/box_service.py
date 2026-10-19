@@ -124,9 +124,8 @@ ESCAPE_PATH_CONTRACT = {
     'xy_tolerance_m': MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'],
     'yaw_tolerance_rad': math.radians(MAXIMUM_CONTRACT_VALUES['yaw_tolerance_deg']),
 }
-# Held stop at the water station and the table before leaving (operator,
-# 2026-10-01: 5 s -> 2 s).
-STOP_DWELL_S = 2.0
+# A completed parking confirmation hands off immediately unless a hold is requested.
+STOP_DWELL_S = 0.0
 SURFACE_MODES = ('front', 'table_edge')
 
 
@@ -331,16 +330,21 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         """
         if not getattr(self, 'camera_on_demand', False):
             return True
+        if on and getattr(self, '_camera_commanded_on', False):
+            return True
         action = 'start' if on else 'stop'
         if on:
             self._camera_requested_s = time.monotonic()
         try:
-            result = subprocess.run(['sudo', '-n', 'systemctl', action, *CAMERA_UNITS],
+            result = subprocess.run(['sudo', '-n', 'systemctl', '--no-block',
+                                     action, *CAMERA_UNITS],
                                     capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired) as error:
             self.emit('box_camera', action=action, ok=False, reason=str(error))
             return False
         ok = result.returncode == 0
+        if ok:
+            self._camera_commanded_on = on
         self.emit('box_camera', action=action, ok=ok,
                   reason=None if ok else result.stderr.strip()[-200:])
         return ok
@@ -721,7 +725,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     latency_reasons.add('input_gap')
                     fresh_since_latency = 0
                     fresh_rejection_reasons.clear()
-                    robot_pose, _ = self.capture_stationary_pose()
+                    robot_pose, _ = self.capture_stationary_pose(intermediate=True)
                     self._observation_pose_diagnostic(robot_pose, camera_mount, region_xy)
                     self._observer_camera_mount = camera_mount
                     if (not self._set_depth_window(region_radius_m)
@@ -1126,7 +1130,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         with self._localization_bound(True):
             if not self.wait_until_ready(timeout=10.0):
                 raise RuntimeError('localization or sensor data unavailable')
-            actual, _ = self.capture_stationary_pose()
+            actual, _ = self.capture_stationary_pose(intermediate=True)
         end = route['waypoints'][-1]
         return math.dist(actual[:2], (end['x'], end['y'])) <= limit_m
 
@@ -1141,6 +1145,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 'execution requires explicit nominal-camera candidate trial')
         self.candidate_trial = candidate_trial is True
         self.incomplete_gap_stop = False
+        self._confirmed_box_stop = None
         self._continuous_table_stop = None
         self.box_geometry = geometry
         surface_mode = getattr(self, 'surface_mode', 'front')
@@ -1469,6 +1474,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                       final_depth_measurement=final_depth_measurement)
             if gap_confirmed:
                 self.run_deadline_s = None
+                self._confirmed_box_stop = {
+                    'motion_revision': getattr(self, 'parking_motion_revision', None),
+                    'selected_pose': dict(self.selected_pose),
+                    'gap_confirmation_basis': gap_confirmation_basis,
+                }
                 return True
             self.incomplete_gap_stop = (
                 fine_table and all(math.isfinite(gap) and gap > 0.0 for gap in corner_gaps))
@@ -1961,14 +1971,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                                      residual_deg=round(math.degrees(residual), 2),
                                      turned_deg=round(math.degrees(turned), 2))
                     return False, None
-            actual, _ = self.capture_stationary_pose()
+            actual, _ = self.capture_stationary_pose(intermediate=True)
         if reobserve is not None and trimmed:
             try:
                 target.update(reobserve())
             except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
                 self._fail_final('table_post_trim_observation_lost', detail=str(error))
                 return False, None
-            actual, _ = self.capture_stationary_pose()
+            actual, _ = self.capture_stationary_pose(intermediate=True)
             face = target['face_center_map_xy_m']
             outward = target['outward_normal_map_xy']
             face_heading = math.atan2(-outward[1], -outward[0])
@@ -2272,11 +2282,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         stationary hold confirmed before and after; the escape uses the face that
         run observed, not a new observation (the face is inside the depth minimum).
         """
-        (x, y, _yaw), _ = self.capture_stationary_pose()
+        (x, y, _yaw), _ = self.capture_stationary_pose(intermediate=True)
         self.emit('resume_parked_started', dwell_s=dwell_s,
                   face_center_map_xy_m=face['face_center_map_xy_m'])
-        time.sleep(dwell_s)
-        (x_after, y_after, _yaw_after), _ = self.capture_stationary_pose()
+        x_after, y_after = x, y
+        if dwell_s > 0.0:
+            if not self._hold_still(dwell_s):
+                return False
+            (x_after, y_after, _yaw_after), _ = self.capture_stationary_pose(intermediate=True)
         moved_m = math.dist((x, y), (x_after, y_after))
         if moved_m > 0.02:
             self.emit('failed', phase='resume_parked_dwell', moved_m=moved_m)
@@ -2290,9 +2303,27 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.emit('resume_parked_finished')
         return True
 
+    def _wait_optional_box_dwell(self, dwell_s):
+        """Reuse this visit's final stop when no additional service hold is requested."""
+        if dwell_s > 0.0:
+            return self.wait_parked(dwell_s)
+        evidence = getattr(self, '_confirmed_box_stop', None)
+        revision = getattr(self, 'parking_motion_revision', None)
+        if (not isinstance(evidence, dict) or not isinstance(revision, int)
+                or evidence['motion_revision'] != revision
+                or evidence['selected_pose'] != self.selected_pose
+                or self.stop_requested or not self._operator_link_ready()
+                or not self._navigation_ready(require_fresh_amcl=False)):
+            self.emit('parked_handoff_unavailable', reason='final_stop_not_current')
+            return False
+        self.emit('parked_dwell_complete', dwell_s=0.0,
+                  reused_final_stop=True,
+                  gap_confirmation_basis=evidence['gap_confirmation_basis'])
+        return True
+
     def dwell_and_leave(self, dwell_s):
         """Hold at a verified intermediate stop, then back straight away from its face."""
-        if not self.wait_parked(dwell_s):
+        if not self._wait_optional_box_dwell(dwell_s):
             self.emit('failed', phase='via_dwell')
             return False
         if not self._leave_parked_pose():
@@ -2302,7 +2333,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
 
     def dwell_and_return_home(self, dwell_s, timeout_s):
         """Hold at the verified final target, then return to the dock."""
-        if not self.wait_parked(dwell_s):
+        if not self._wait_optional_box_dwell(dwell_s):
             self.emit('failed', phase='table_dwell')
             return False
         # The escape uses the face observed on the way in; the dock needs no camera.
@@ -2389,8 +2420,8 @@ def parse_args(argv=None):
             math.isfinite(args.final_gap_m)
             and MINIMUM_FRONT_GAP_M <= args.final_gap_m <= MAXIMUM_FRONT_GAP_M):
         parser.error('--final-gap-m must be in [0.01, 0.10] m')
-    if not (math.isfinite(args.dwell_s) and 0.0 < args.dwell_s <= 120.0):
-        parser.error('--dwell-s must be in (0, 120] s')
+    if not (math.isfinite(args.dwell_s) and 0.0 <= args.dwell_s <= 120.0):
+        parser.error('--dwell-s must be in [0, 120] s')
     if (not math.isfinite(args.operator_link_timeout_s)
             or args.operator_link_timeout_s <= 0.0):
         parser.error('--operator-link-timeout-s must be finite and positive')

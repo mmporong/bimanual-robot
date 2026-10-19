@@ -850,8 +850,9 @@ def test_final_gap_and_dwell_options_are_bounded():
     args = parse_args([*base, '--final-gap-m', '0.02', '--dwell-s', '30'])
     assert (args.final_gap_m, args.dwell_s) == (0.02, 30.0)
     assert parse_args([*base, '--final-gap-m', '0.01']).final_gap_m == 0.01
+    assert parse_args([*base, '--dwell-s', '0']).dwell_s == 0.0
     for extra in (['--final-gap-m', '0'], ['--final-gap-m', '0.005'], ['--final-gap-m', '0.2'],
-                  ['--final-gap-m', 'nan'], ['--dwell-s', '0'], ['--dwell-s', '500']):
+                  ['--final-gap-m', 'nan'], ['--dwell-s', '-1'], ['--dwell-s', '500']):
         with pytest.raises(SystemExit):
             parse_args([*base, *extra])
 
@@ -1637,7 +1638,7 @@ def test_failed_visit_returns_only_after_confirmed_incomplete_stop(
     # A cycle that stopped short calls the operator once; a finished one does not.
     failed.call_operator.assert_called_once_with()
     succeeded.call_operator.assert_not_called()
-    succeeded.dwell_and_return_home.assert_called_once_with(2.0, 500.0)
+    succeeded.dwell_and_return_home.assert_called_once_with(0.0, 500.0)
     assert succeeded.visit_observed_box.call_args.kwargs['task_timeout_s'] == 240.0
     assert succeeded.kwargs['home_contract']['xy_tolerance_m'] == 0.05
 
@@ -1765,9 +1766,9 @@ def test_t36_water_station_then_table_then_dock(monkeypatch, tmp_path):
     code, calls = _via_main(monkeypatch, tmp_path)
     assert code == 0
     assert calls == [('visit', 'water.yaml', 'water_station', [-0.14, -1.53], True),
-                     ('dwell_and_leave', 2.0),
+                     ('dwell_and_leave', 0.0),
                      ('visit', 'route.yaml', 'table_01', [1.5, -1.49], True),
-                     ('dwell_and_return_home', 2.0, 500.0)]
+                     ('dwell_and_return_home', 0.0, 500.0)]
 
 
 def test_low_battery_after_the_water_stop_docks_and_calls_the_operator(monkeypatch, tmp_path):
@@ -1775,7 +1776,7 @@ def test_low_battery_after_the_water_stop_docks_and_calls_the_operator(monkeypat
     code, calls = _via_main(monkeypatch, tmp_path, battery_low=True)
     assert code == 1
     assert calls == [('visit', 'water.yaml', 'water_station', [-0.14, -1.53], True),
-                     ('dwell_and_leave', 2.0), ('go_home',), ('call_operator',)]
+                     ('dwell_and_leave', 0.0), ('go_home',), ('call_operator',)]
 
 
 @pytest.mark.parametrize('via_ok,leave_ok,expected', [
@@ -1933,8 +1934,8 @@ def test_t43_resume_at_via_observation_applies_to_the_water_stop_only(monkeypatc
                                 *VIA_ARGS[4:], '--resume-at-observation'])
     assert code == 0
     assert calls == [('at_observation', 'route.yaml'),
-                     ('visit', 'water.yaml', 'water_station', True), ('dwell_and_leave', 2.0),
-                     ('visit', 'route.yaml', 'table_02', False), ('dwell_and_return_home', 2.0)]
+                     ('visit', 'water.yaml', 'water_station', True), ('dwell_and_leave', 0.0),
+                     ('visit', 'route.yaml', 'table_02', False), ('dwell_and_return_home', 0.0)]
 
 
 def test_resume_at_the_table_observation_skips_the_done_water_stop(monkeypatch, tmp_path):
@@ -1945,7 +1946,7 @@ def test_resume_at_the_table_observation_skips_the_done_water_stop(monkeypatch, 
                                at_table_observation=True)
     assert code == 0
     assert calls == [('at_observation', 'route.yaml'),
-                     ('visit', 'route.yaml', 'table_02', True), ('dwell_and_return_home', 2.0)]
+                     ('visit', 'route.yaml', 'table_02', True), ('dwell_and_return_home', 0.0)]
 
 
 @pytest.mark.parametrize('pose, expected', [((0.80, -1.86, 0.2), True),
@@ -1968,14 +1969,14 @@ def test_t43_parked_water_stop_resumes_with_logged_face_then_table(monkeypatch, 
                                [*VIA_ARGS[:2], '--via-route', str(tmp_path / 'water.yaml'),
                                 *VIA_ARGS[4:], '--resume-parked-from-log', 'LOG'])
     assert code == 0
-    assert calls == [('resume_parked', [0.02, -1.2], 2.0),
-                     ('visit', 'route.yaml', 'table_02', False), ('dwell_and_return_home', 2.0)]
+    assert calls == [('resume_parked', [0.02, -1.2], 0.0),
+                     ('visit', 'route.yaml', 'table_02', False), ('dwell_and_return_home', 0.0)]
 
 
 def test_t43_parked_table_resumes_with_logged_face_then_docks(monkeypatch, tmp_path):
     code, calls = _resume_main(monkeypatch, tmp_path, ['--resume-parked-from-log', 'LOG'])
     assert code == 0
-    assert calls == [('resume_parked', [0.02, -1.2], 2.0), ('go_home',)]
+    assert calls == [('resume_parked', [0.02, -1.2], 0.0), ('go_home',)]
 
 
 def test_t43_last_logged_face_requires_an_observed_face(tmp_path):
@@ -1998,10 +1999,12 @@ def test_t43_resume_parked_holds_still_then_escapes(monkeypatch, moved, left, ex
     route.capture_stationary_pose = Mock(side_effect=[((0.1, -1.2, math.pi), {}),
                                                       ((0.1 + moved, -1.2, math.pi), {})])
     route._leave_parked_pose = Mock(return_value=left)
+    route._hold_still = Mock(return_value=True)
     route.emit = Mock()
     face = {'face_center_map_xy_m': [0.0, -1.2], 'outward_normal_map_xy': [1.0, 0.0]}
     assert route.resume_parked(face, 5.0) is expected
     assert route._leave_parked_pose.call_count == (0 if moved else 1)
+    route._hold_still.assert_called_once_with(5.0)
     if moved == 0.0:
         assert route.last_box_face == face
 
@@ -2310,8 +2313,8 @@ def test_box_camera_starts_and_stops_through_systemd_only_on_demand(monkeypatch)
         command) or SimpleNamespace(returncode=0, stderr=''))
     node = _camera_node()
     assert node._camera(True) and node._camera(False)
-    assert calls == [['sudo', '-n', 'systemctl', 'start', *box_service.CAMERA_UNITS],
-                     ['sudo', '-n', 'systemctl', 'stop', *box_service.CAMERA_UNITS]]
+    assert calls == [['sudo', '-n', 'systemctl', '--no-block', 'start', *box_service.CAMERA_UNITS],
+                     ['sudo', '-n', 'systemctl', '--no-block', 'stop', *box_service.CAMERA_UNITS]]
     assert [fields['action'] for event, fields in node.events if event == 'box_camera'] == [
         'start', 'stop']
     node.camera_on_demand = False                    # --camera-always-on
@@ -2325,6 +2328,22 @@ def test_box_camera_failure_is_reported(monkeypatch):
         returncode=1, stderr='Unit not found'))
     assert node._camera(True) is False
     assert node.events[-1][1]['reason'] == 'Unit not found'
+
+
+def test_camera_is_not_restarted_between_water_and_table(monkeypatch):
+    calls = []
+    monkeypatch.setattr(box_service.subprocess, 'run', lambda command, **_kw: calls.append(
+        command) or SimpleNamespace(returncode=0, stderr=''))
+    node = _camera_node()
+    assert node._camera(True)
+    requested_s = node._camera_requested_s
+    assert node._camera(True)
+    assert node._camera_requested_s == requested_s
+    assert len(calls) == 1
+    assert '--no-block' in calls[0]
+    assert node._camera(False)
+    assert node._camera(True)
+    assert len(calls) == 3
 
 
 def test_box_camera_ready_needs_an_observer_status_after_the_start(monkeypatch):
@@ -2944,7 +2963,7 @@ def test_trim_crossing_reobserves_before_any_counter_rotation(direction, continu
     node.box_front_half_width_m = 0.225
     yaw = [0.0]
     events = []
-    node.capture_stationary_pose = lambda: ((0.0, 0.0, yaw[0]), {})
+    node.capture_stationary_pose = lambda **_kwargs: ((0.0, 0.0, yaw[0]), {})
     node._pose = Mock(return_value=PoseStamped())
     node._frozen_in_odom = Mock(return_value=(None, lambda x, y, angle: (x, y, angle)))
     node._table_approach_update = Mock(return_value=lambda _pose: {'remaining_m': 0.1})
@@ -3371,3 +3390,59 @@ def test_post_trim_reobservation_keeps_configuration_and_requires_fresh_face(mon
     node._configure_observer.assert_not_called()
     node.capture_stationary_pose.assert_called_once()
     assert box_service.compute_table_edge_docking_target.call_args.kwargs['now_s'] == pytest.approx(10.2)
+
+
+@pytest.mark.parametrize('return_home', [False, True])
+def test_zero_dwell_hands_a_confirmed_visit_to_the_next_motion(mission, return_home):
+    mission.parking_motion_revision = 7
+    assert invoke(mission)
+    assert mission._confirmed_box_stop['motion_revision'] == 7
+    mission.wait_parked = Mock(side_effect=AssertionError('duplicate parking confirmation'))
+    mission._leave_parked_pose = Mock(return_value=True)
+    mission._camera = Mock(return_value=True)
+    mission.go_home = Mock(return_value=True)
+    if return_home:
+        assert mission.dwell_and_return_home(0.0, 120.0)
+        mission.go_home.assert_called_once_with(execute=True, timeout_s=120.0)
+    else:
+        assert mission.dwell_and_leave(0.0)
+        mission._leave_parked_pose.assert_called_once()
+    mission.wait_parked.assert_not_called()
+    events = [c for c in mission.emit.call_args_list if c.args == ('parked_dwell_complete',)]
+    assert events[-1].kwargs['dwell_s'] == 0.0
+    assert events[-1].kwargs['reused_final_stop'] is True
+
+
+@pytest.mark.parametrize('case', ['unconfirmed', 'motion', 'different_pose',
+                                  'operator_stop', 'link_lost', 'stale_input'])
+def test_zero_dwell_does_not_turn_a_failed_or_interrupted_visit_into_motion(mission, case):
+    mission.parking_motion_revision = 7
+    assert invoke(mission)
+    mission._leave_parked_pose = Mock(return_value=True)
+    if case == 'unconfirmed':
+        mission._confirmed_box_stop = None
+    elif case == 'motion':
+        mission.parking_motion_revision += 1
+    elif case == 'different_pose':
+        mission.selected_pose = {**mission.selected_pose, 'x_m': 2.0}
+    elif case == 'operator_stop':
+        mission.stop_requested = True
+    elif case == 'link_lost':
+        mission._operator_link_ready.return_value = False
+    else:
+        mission._navigation_ready.return_value = False
+    assert not mission.dwell_and_leave(0.0)
+    mission._leave_parked_pose.assert_not_called()
+
+
+def test_zero_dwell_resume_has_one_short_capture_and_no_sleep():
+    node = object.__new__(BoxServiceRoute)
+    node.capture_stationary_pose = Mock(return_value=((.1, -1.2, math.pi), {}))
+    node._hold_still = Mock(side_effect=AssertionError('unrequested dwell'))
+    node._leave_parked_pose = Mock(return_value=True)
+    node.emit = Mock()
+    face = {'face_center_map_xy_m': [0., -1.2], 'outward_normal_map_xy': [1., 0.]}
+    assert node.resume_parked(face, 0.0)
+    node.capture_stationary_pose.assert_called_once_with(intermediate=True)
+    node._hold_still.assert_not_called()
+    node._leave_parked_pose.assert_called_once()

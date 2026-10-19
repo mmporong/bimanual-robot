@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """JD-AMR box service departure runbook as one PC-side command (new map, 2026-09-30).
 
-A call runs: dock -> water_station (face approach, 2 s, escape) -> called table
-(face approach, 2 s, escape) -> reverse docking. The operator's "출발 table_0N" stands in
+A call runs: dock -> water_station (face approach, escape) -> called table
+(face approach, escape) -> reverse docking. The operator's "출발 table_0N" stands in
 for a web call.
 
 The robot only moves in `go`, which starts the existing `box_service` executor on the Pi.
@@ -1154,8 +1154,8 @@ def cmd_go(args):
     if gap is not None and not (math.isfinite(gap) and 0.01 <= gap <= 0.10):
         fail('--final-gap-m must be in [0.01, 0.10] m')
     dwell = getattr(args, 'dwell_s', None)
-    if dwell is not None and not (math.isfinite(dwell) and 0.0 < dwell <= 120.0):
-        fail('--dwell-s must be in (0, 120] s')
+    if dwell is not None and not (math.isfinite(dwell) and 0.0 <= dwell <= 120.0):
+        fail('--dwell-s must be in [0, 120] s')
     surface_mode = getattr(args, 'surface_mode', 'table_edge')
     with_via = getattr(args, 'with_via', False)
     if with_via and args.skip_via:
@@ -1484,7 +1484,7 @@ def main():
                     help='front gap override (both surface modes use the box parking '
                          'contract target by default)')
     go.add_argument('--dwell-s', type=float,
-                    help='held stop at each box (default 2 s; longer to measure the gap)')
+                    help='optional service hold at each box (default 0 s; longer to measure)')
     go.add_argument('--record-diagnostics', action='store_true',
                     help='record the onboard bag, UDP drops and Pi load for this run')
     go.add_argument('--resume-at-observation', action='store_true',

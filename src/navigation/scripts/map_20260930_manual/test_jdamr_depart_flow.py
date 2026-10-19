@@ -595,7 +595,8 @@ def test_go_passes_the_zero_turn_final_switch_only_when_asked(env, monkeypatch):
 
 def test_go_passes_the_final_gap_and_dwell_only_when_asked(env, monkeypatch):
     seen = []
-    for second, extra in enumerate(({}, {'final_gap_m': 0.02, 'dwell_s': 30.0})):
+    for second, extra in enumerate(({}, {'final_gap_m': 0.02, 'dwell_s': 30.0},
+                                    {'dwell_s': 0.0})):
         monkeypatch.setattr(d.time, 'strftime', lambda _fmt, s=second: f'20261006_10000{s}')
         pi = ExecutorPi()
         monkeypatch.setattr(d, 'pi', pi)
@@ -606,6 +607,7 @@ def test_go_passes_the_final_gap_and_dwell_only_when_asked(env, monkeypatch):
     argv = seen[1]
     assert argv[argv.index('--final-gap-m') + 1] == '0.02'
     assert argv[argv.index('--dwell-s') + 1] == '30.0'
+    assert seen[2][seen[2].index('--dwell-s') + 1] == '0.0'
 
 
 def test_go_spools_table_edge_by_default_and_front_only_when_requested(env, monkeypatch):
@@ -713,7 +715,7 @@ def test_go_rejects_conflicting_or_front_with_via_before_pi_work(env, monkeypatc
 
 
 @pytest.mark.parametrize('extra', [{'final_gap_m': 0.005}, {'final_gap_m': 0.2},
-                                   {'dwell_s': 0.0}, {'dwell_s': 500.0}])
+                                   {'dwell_s': -1.0}, {'dwell_s': 500.0}])
 def test_go_refuses_out_of_range_gap_or_dwell_before_anything_starts(env, monkeypatch, extra):
     pi = Pi()
     monkeypatch.setattr(d, 'pi', pi)
