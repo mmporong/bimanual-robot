@@ -12,10 +12,11 @@ waypoints:
   x: 0.858
   y: -1.27
 - id: table_01_observation
-  x: 0.858
+  x: 1.068
   y: -1.817
   yaw: -0.0
 purpose: table_01 box observation approach; not a final parking goal
 target_basis: destinations.json LiDAR box corner fit from the dock (aligned/box_scan_150112.json)
   after the operator moved the boxes; face width 0.31 m assumed from table_02
 start_basis: water_station escape pose (face + 0.565 m along its normal)
+camera_observation_base_offset_m: 0.37

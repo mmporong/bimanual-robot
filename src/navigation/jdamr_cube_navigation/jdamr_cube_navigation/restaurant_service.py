@@ -376,7 +376,7 @@ class ServiceRoute(CorridorRoute):
         self.box_status = None
         self.box_status_received_s = None
         self.create_subscription(
-            String, '/box_parking/perception_status', self._box_callback, 10)
+            String, '/box_parking/perception_status', self._box_callback, 1)
         for key, topic in (('map', '/map'), ('keepout', '/keepout_filter_mask')):
             self.create_subscription(
                 OccupancyGrid, topic,

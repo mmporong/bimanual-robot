@@ -680,6 +680,17 @@ def test_generated_table_routes_keep_distinct_dock_and_via_starts(env, monkeypat
             assert dock[field] == via[field]
 
 
+def test_observation_waypoint_uses_mount_profile_without_changing_aisle_point(
+        tmp_path, monkeypatch):
+    mount = tmp_path / 'camera.yaml'
+    mount.write_text(yaml.safe_dump({
+        'camera_mount': {'table_observation': {'base_offset_m': .37}}}))
+    monkeypatch.setattr(d, 'CAMERA_MOUNT_CONFIG', mount)
+    points = d.approach_waypoints('table_01')
+    assert points[-1]['x'] == round(d.along_normal('table_01', .37)[0], 3)
+    assert points[0]['x'] == round(d.along_normal('table_01', d.OBSERVE_M)[0], 3)
+
+
 def test_departure_log_reports_the_spooled_stops(env, monkeypatch, capsys):
     pi = ExecutorPi()
     monkeypatch.setattr(d, 'pi', pi)

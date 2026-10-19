@@ -2593,7 +2593,7 @@ def test_skewed_near_corner_reapproaches_once_without_ending_the_visit(mission, 
     order, deadlines = [], []
     target = deepcopy(mission.observe_target.return_value)
 
-    def observe(*_args):
+    def observe(*_args, **_kwargs):
         order.append('observe')
         if case == 'face_lost' and 'escape' in order:
             raise RuntimeError('depth unavailable')
@@ -2745,6 +2745,56 @@ def test_near_skewed_table_backs_out_once_before_continuous_reapproach(escape):
     assert node._zero_turn_final_approach.call_count == (2 if escape else 1)
     assert node.observe_target.call_count == int(escape)
     assert node.run_deadline_s == 123.0
+
+
+def test_millimetre_corner_miss_closes_straight_without_full_escape(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    gaps = (.010557480365786562, .013277306556505254)
+    yaw = math.asin((gaps[1] - gaps[0]) / .54)
+    x = 1.0 - sum(gaps) / 2 - .065 * math.cos(yaw)
+    mission.capture_stationary_pose.side_effect = [
+        ((0, 0, 0), {}), ((x, 0, yaw), {}), ((.925, 0, 0), {})]
+    mission._leave_parked_pose = Mock(side_effect=AssertionError('unnecessary full escape'))
+    assert invoke(mission)
+    mission._leave_parked_pose.assert_not_called()
+    assert mission._straight_final_approach.call_count == 2
+
+
+def test_near_feasible_corner_spread_uses_centred_straight_gap():
+    node = object.__new__(BoxServiceRoute)
+    node.box_front_half_width_m = .225
+    node.parking_contract = {'yaw_tolerance_rad': math.radians(1)}
+    node._final_gap_m = Mock(return_value=.01)
+    node._zero_turn_final_approach = Mock(return_value=(True, 'odom'))
+    node.emit = Mock()
+    gaps = (.010557480365786562, .013277306556505254)
+    yaw = math.asin((gaps[1] - gaps[0]) / .45)
+    target = _table_edge_final_target(1.0)
+    target['observation_robot_pose_map'] = [
+        1.0 - sum(gaps) / 2 - .065 * math.cos(yaw), 0., yaw]
+    assert node._table_fine_approach(target, .065) == (True, 'odom')
+    options = node._zero_turn_final_approach.call_args.kwargs
+    assert options['continuous_table'] is False
+    assert options['allow_trim'] is False
+    assert options['gap_m'] == pytest.approx(.01 - (gaps[1] - gaps[0]) / 2)
+
+
+def test_alignment_reobserve_retreat_keeps_current_camera_view():
+    node = object.__new__(BoxServiceRoute)
+    mount = {'camera_mount': {'table_observation': {'base_offset_m': .37}}}
+    node._table_observation_context = (mount, (1., 0.), .4)
+    node._final_gap_m = Mock(return_value=.01)
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node._last_direct_motion_failure = 'table alignment requires more clearance'
+    node._zero_turn_final_approach = Mock(side_effect=[(False, None), (True, 'odom')])
+    node._leave_parked_pose = Mock(return_value=True)
+    node.observe_target = Mock(return_value=_table_edge_final_target(1.0))
+    node.emit = Mock()
+    assert node._table_fine_approach(_table_edge_final_target(1.0), .065)[0]
+    node._leave_parked_pose.assert_called_once_with(clearance_m=.37)
 
 
 def test_fine_table_starts_with_heading_error_without_a_stationary_trim():
@@ -2984,6 +3034,7 @@ def test_recovered_depth_history_does_not_block_fresh_table_occlusion():
 
 def _moving_table_route(monkeypatch):
     node = object.__new__(BoxServiceRoute)
+    monkeypatch.setattr(box_service, 'spin_node', Mock())
     clock = [10.0]
     mount = {'camera_mount': {
         'status': 'derived', 'parent_frame': 'base_link', 'child_frame': 'camera_link',
@@ -3030,6 +3081,48 @@ def test_moving_table_distance_uses_stamped_pose_and_revises_far_face(monkeypatc
     assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
     update((0.21, 0.0, 0.0))
     assert lookup.call_count == 1
+
+
+def test_moving_table_consumes_queued_fresh_depth_before_stopping(monkeypatch):
+    node, _clock, update, lookup = _moving_table_route(monkeypatch)
+    fresh = deepcopy(node.box_status)
+    node.box_status = {**fresh, 'stamp_s': 9.6}
+
+    def deliver_pending(_node, timeout_sec):
+        assert timeout_sec == 0.0
+        node.box_status = fresh
+
+    monkeypatch.setattr(box_service, 'spin_node', deliver_pending)
+    assert update((0.2, 0.0, 0.0))['remaining_m'] == pytest.approx(0.255)
+    assert lookup.call_args.args[2].nanoseconds == 10_100_000_000
+
+
+def test_accepted_table_face_bridges_processing_with_fresh_depth_frame(monkeypatch):
+    node, clock, update, lookup = _moving_table_route(monkeypatch)
+    update((0.2, 0.0, 0.0))
+    clock[0] = 10.65
+    node.depth_camera_info = SimpleNamespace(header=SimpleNamespace(
+        frame_id='camera_color_optical_frame',
+        stamp=SimpleNamespace(sec=10, nanosec=640_000_000)))
+    node.depth_camera_info_received_s = 10.64
+    assert update((0.25, 0.0, 0.0))['remaining_m'] == pytest.approx(0.205)
+    assert lookup.call_count == 1
+    clock[0] = 11.2
+    with pytest.raises(RuntimeError, match='depth stale'):
+        update((0.26, 0.0, 0.0))
+
+
+@pytest.mark.parametrize('frame, stamp', [
+    ('camera_color_optical_frame', 12), ('wrong_optical_frame', 10)])
+def test_table_processing_bridge_rejects_wrong_or_future_depth_frame(monkeypatch, frame, stamp):
+    node, clock, update, _lookup = _moving_table_route(monkeypatch)
+    update((0.2, 0.0, 0.0))
+    clock[0] = 10.65
+    node.depth_camera_info = SimpleNamespace(header=SimpleNamespace(
+        frame_id=frame, stamp=SimpleNamespace(sec=stamp, nanosec=640_000_000)))
+    node.depth_camera_info_received_s = 10.64
+    with pytest.raises(RuntimeError, match='depth stale'):
+        update((0.25, 0.0, 0.0))
 
 
 @pytest.mark.parametrize('yaw', [-0.15, 0.15])

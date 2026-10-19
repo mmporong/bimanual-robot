@@ -107,6 +107,8 @@ TABLES = ('table_01', 'table_02')
 # Table_01 joins its observation point along the aisle instead of returning
 # toward the opposing water table's old box-based pre-point.
 PRE_M, OBSERVE_M, ESCAPE_M = 1.00, 0.58, 0.565
+CAMERA_MOUNT_CONFIG = (
+    TOOLS.parents[1] / 'jdamr_cube_navigation/config/camera_mount_current.yaml')
 HOME_EXIT_M = 0.70
 
 
@@ -117,12 +119,23 @@ def along_normal(dest_id, distance_m):
             spec['face_xy'][1] + distance_m * math.sin(yaw), yaw)
 
 
+def table_observation_offset_m():
+    if not CAMERA_MOUNT_CONFIG.exists():
+        return OBSERVE_M
+    mount = yaml.safe_load(CAMERA_MOUNT_CONFIG.read_text())['camera_mount']
+    value = mount.get('table_observation', {}).get('base_offset_m', OBSERVE_M)
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or not .2 <= value <= OBSERVE_M):
+        raise ValueError('invalid camera table observation offset')
+    return value
+
+
 def approach_waypoints(dest_id):
     pre_x, pre_y, normal = along_normal(dest_id, PRE_M)
-    obs_x, obs_y, _ = along_normal(dest_id, OBSERVE_M)
+    obs_x, obs_y, _ = along_normal(dest_id, table_observation_offset_m())
     facing = math.atan2(-math.sin(normal), -math.cos(normal))
     if dest_id == 'table_01':
-        pre_x = obs_x
+        pre_x = along_normal(dest_id, OBSERVE_M)[0]
         pre_y = along_normal(VIA_ID, ESCAPE_M)[1]
     return [{'id': f'{dest_id}_pre', 'x': round(pre_x, 3), 'y': round(pre_y, 3)},
             {'id': f'{dest_id}_observation', 'x': round(obs_x, 3), 'y': round(obs_y, 3),
@@ -269,6 +282,7 @@ def write_routes(home):
             'purpose': f'{dest_id} box observation approach; not a final parking goal',
             'target_basis': f'destinations.json {DESTINATIONS[dest_id]["source"]}',
             'start_basis': basis,
+            'camera_observation_base_offset_m': table_observation_offset_m(),
         }
         if dest_id == VIA_ID:
             route['dock_departure_distance_m'] = HOME_EXIT_M

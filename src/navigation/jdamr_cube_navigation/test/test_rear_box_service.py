@@ -74,6 +74,10 @@ def test_near_skewed_box_uses_straight_clearance_then_rear_feedback(monkeypatch,
 
 def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monkeypatch):
     node = route_node()
+    command_watch = Mock(return_value=None)
+    monkeypatch.setattr(module, 'rear_collision_profile',
+                        lambda _node: nullcontext(command_watch))
+    node._observe_rear_box_recovering = Mock(wraps=node._observe_rear_box_recovering)
     node._final_gap_m = Mock(return_value=.05)
     node.verify_live_maps = Mock()
     node.wait_until_ready = Mock(return_value=True)
@@ -104,6 +108,11 @@ def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monk
     node._final_gap_m.assert_not_called()
     node._depart_dock_straight.assert_called_once_with(.2)
     assert node._drive_zero_turn.call_count == 2
+    observations = node._observe_rear_box_recovering.call_args_list
+    assert len(observations) == 4
+    assert all(call.args[3] is command_watch for call in observations)
+    assert observations[0].kwargs == {'allow_range_reapproach': True}
+    assert all(not call.kwargs for call in observations[1:])
     assert node._rear_box_update.call_args_list[1].kwargs['reference'] is initial
     assert node.confirmation == {
         'confirmed': True, 'reason': 'confirmed',
@@ -219,9 +228,94 @@ def test_temporary_face_loss_waits_in_same_task_then_recovers():
     node._observe_rear_box = Mock(side_effect=[
         RuntimeError('rear box observation unavailable: rear box unstable'), observed])
     node.emit = Mock()
-    assert node._observe_rear_box_recovering(GEOMETRY, .275, .225) is observed
+    assert node._observe_rear_box_recovering(
+        GEOMETRY, .275, .225, allow_range_reapproach=True) is observed
     assert node._observe_rear_box.call_count == 2
     assert node.emit.call_args.args[0] == 'rear_box_waiting_for_observation'
+
+
+def test_invalid_scan_is_fitted_and_reported_once_per_stamp(monkeypatch):
+    node = route_node()
+    node._rear_box_scan = Mock(return_value=(None, 5.))
+    node._rear_scan_values = Mock(return_value={})
+    node.emit = Mock()
+    fit = Mock(side_effect=ValueError('rear face tangent spread is too narrow'))
+    monkeypatch.setattr(module, 'estimate_rear_box_face', fit)
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match='rear box face unavailable'):
+            node._rear_box_observation(GEOMETRY, .275, .225)
+    assert fit.call_count == 1
+    assert node.emit.call_count == 1
+    node._rear_box_scan.return_value = None, 5.1
+    with pytest.raises(RuntimeError):
+        node._rear_box_observation(GEOMETRY, .275, .225)
+    assert fit.call_count == 2
+
+
+def test_missing_near_face_reobserves_after_bounded_live_range_advance():
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    observed = face(.2)
+    node._observe_rear_box = Mock(side_effect=[RuntimeError(
+        'rear box observation unavailable: rear box face unavailable'), observed])
+    node._rear_corridor_observation = Mock(return_value={'gap_m': .35})
+    node._rear_coarse_step = Mock(return_value=True)
+    node.emit = Mock()
+    assert node._observe_rear_box_recovering(
+        GEOMETRY, .275, .225, allow_range_reapproach=True) is observed
+    call = node._rear_coarse_step.call_args
+    assert call.args[3] == pytest.approx(.15)
+    assert call.kwargs['handoff_m'] == pytest.approx(.2)
+
+
+def test_missing_face_never_advances_past_live_range_reobserve_gap():
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    observed = face(.19)
+    node._observe_rear_box = Mock(side_effect=[RuntimeError(
+        'rear box observation unavailable: rear box face unavailable'), observed])
+    node._rear_corridor_observation = Mock(return_value={'gap_m': .19})
+    node._rear_coarse_step = Mock()
+    node.emit = Mock()
+    assert node._observe_rear_box_recovering(
+        GEOMETRY, .275, .225, allow_range_reapproach=True) is observed
+    node._rear_coarse_step.assert_not_called()
+
+
+def test_operator_stop_during_face_wait_never_starts_range_reapproach():
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    def stopped(*_args):
+        node.stop_requested = True
+        raise RuntimeError('rear box observation unavailable: rear box face unavailable')
+    node._observe_rear_box = Mock(side_effect=stopped)
+    node._rear_corridor_observation = Mock()
+    node._rear_coarse_step = Mock()
+    with pytest.raises(RuntimeError, match='operator_stop'):
+        node._observe_rear_box_recovering(
+            GEOMETRY, .275, .225, allow_range_reapproach=True)
+    node._rear_corridor_observation.assert_not_called()
+    node._rear_coarse_step.assert_not_called()
+
+
+def test_latched_face_confirmation_never_starts_range_only_motion():
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    observed = face(.01)
+    node._observe_rear_box = Mock(side_effect=[RuntimeError(
+        'rear box observation unavailable: rear box face unavailable'), observed])
+    node._rear_corridor_observation = Mock()
+    node._rear_coarse_step = Mock()
+    node.emit = Mock()
+    assert node._observe_rear_box_recovering(GEOMETRY, .275, .225) is observed
+    node._rear_corridor_observation.assert_not_called()
+    node._rear_coarse_step.assert_not_called()
 
 
 @pytest.mark.parametrize('target_gap', [True, 0., .009, .101, math.inf])

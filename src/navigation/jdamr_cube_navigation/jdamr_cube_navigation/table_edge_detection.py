@@ -126,11 +126,13 @@ def _strongest_table_plane(
         count = int(np.count_nonzero(mask))
         if count < config.minimum_inliers:
             continue
+        residual = float(np.sqrt(np.mean(distances[mask] ** 2)))
+        score = count / max(residual, 0.001)
+        if score <= best_score:
+            continue
         candidate = search_points[mask]
         if not _horizontal_plane_is_valid(normal, candidate, config):
             continue
-        residual = float(np.sqrt(np.mean(distances[mask] ** 2)))
-        score = count / max(residual, 0.001)
         if score > best_score:
             best_plane = normal, offset
             best_score = score

@@ -6,9 +6,24 @@ camera_mount:
     x_m: -0.275
     y_m: 0.0
     z_m: 1.26
-    roll_rad: -0.01946375975958315
-    pitch_rad: 0.639563761794311
+    roll_rad: -0.039023134986489794
+    pitch_rad: 0.9171698002732518
     yaw_rad: -0.0007507445375463481
+  table_observation:
+    base_offset_m: 0.37
+    unit: m
+    derived_at: '2026-10-19'
+    valid_for: 현재 카메라 장착과 높이 약0.78m인 책상 상판
+    source: $HOME/jdamr_data/map_20260930_manual/aligned/runs/water_visibility_resume_20261019_155207/water_station_route.yaml
+    method: 수직 시야의 상판 지지영역과 중간 위치 허용오차를 반영한 관측용 기준점 거리
+    camera_height_m: 1.26
+    camera_pitch_rad: 0.9171698002732518
+    tabletop_height_m: 0.7801251639434318
+    focal_y_px: 285.17110237076486
+    center_y_px: 119.5
+    minimum_top_support_rows: 16
+    transit_xy_tolerance_m: 0.15
+    final_gap_unchanged_m: 0.01
   provenance:
     derived_at: '2026-10-16'
     valid_for: 현재 4륜 차체의 상판 뒤쪽 깊이 카메라
@@ -39,37 +54,35 @@ camera_mount:
       measured_at: '2026-09-15'
       valid_for: 현재 차체 앞끝과 전륜축
       source: jdamr_cube_description/config/new_base_geometry.yaml
-    orientation_status: 사용자 40도 조정 후 수평 책상 상판의 깊이 평면 법선으로 추정. 외부 각도 실측 아님
-    orientation_source: 2026-10-19 정지 깊이 관측 19장의 roll/pitch 중앙값. 높이·앞뒤 위치·yaw는 유지
+    orientation_status: 사용자 약45도 재조정 후 수평 책상 상판의 깊이 평면 법선으로 추정. 외부 각도 실측 아님
+    orientation_source: 2026-10-19 재조정 뒤 정지 깊이 관측 20장의 법선 중앙값. 높이·앞뒤 위치·yaw는 유지
     operator_pitch_change:
-      value: 40
+      value: 45
       unit: deg
       measured_at: '2026-10-19'
       valid_for: 높이 1.26m·앞끝에서 렌즈까지 수평 0.34m인 현행 장착
-      source: operator_report
-      measurement_method: 사용자 조정 완료 보고. 각도 측정 도구는 확인되지 않음
-      previous_operator_pitch_deg: 25
+      source: operator_approximate_report_after_reangle
+      measurement_method: 사용자가 약45도이며 학습 당시 뎁스 장착과 같은 각도라고 보고. 각도계 실측 및 학습 당시 장착값과의
+        동일성 검증은 없음
+      previous_operator_pitch_deg: 40
     current_table_plane_orientation:
       derived_at: '2026-10-19'
       unit: rad
-      valid_for: 사용자 하향 40도 조정 이후 장착. 높이 1.26m·앞끝에서 렌즈까지 수평 0.34m
-      source: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/camera40_20261019/status_samples.json
-      method: 수평 상판 가정. 프레임별 roll=atan2(-n.x,-n.y), pitch=asin(-n.z)의 중앙값
-      sample_count: 19
-      roll_rad: -0.01946375975958315
-      pitch_rad: 0.639563761794311
-      pitch_span_deg:
-      - 36.615978942097264
-      - 36.66393912335857
-      plane_rms_m_median: 0.004959171853062891
+      valid_for: 사용자 약45도 재조정 이후 장착. 높이 1.26m·앞끝에서 렌즈까지 수평 0.34m
+      source: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/camera_reangle_20261019_151542/status_samples.json
+      method: 수평 상판 가정. 정지 관측 optical normal 중앙값 정규화 후 roll=atan2(-n.x,-n.y), pitch=asin(-n.z)
+      sample_count: 20
+      roll_rad: -0.039023134986489794
+      pitch_rad: 0.9171698002732518
+      plane_rms_m_median: 0.0025378129080194304
       yaw_observability: 수평 평면만으로 yaw는 식별할 수 없어 이전 값을 유지
-      status: candidate_not_external_angle_measurement
+      status: derived_not_external_angle_measurement
     parking_range_bias_compensation:
       applied: false
       superseded_value_m: -0.0076183596449993125
       reason: 이전 높이 변경과 현재 각도 변경으로 이전 근거리 보정의 적용 범위가 달라짐
     supersedes_active_mount: camera_mount_table_candidate_20261013.yaml
-    physical_parking_accuracy: NOT_VALIDATED_AFTER_20261019_40DEG_ANGLE_CHANGE
+    physical_parking_accuracy: OPERATOR_ACCEPTED_SINGLE_RUN_NOT_REPEATABILITY_VALIDATED
     invalidate_when: 상판 높이, 렌즈 위치 또는 각도 변경
     table_plane_orientation:
       derived_at: '2026-10-16'
@@ -112,42 +125,84 @@ camera_mount:
         - -0.8351787647922502
         - -0.5495615426292061
         plane_rms_m: 0.0050721144189802645
+    camera_factory_parameters:
+      checked_at: '2026-10-19'
+      source: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/camera_gap_mismatch_20261019_152144/factory_intrinsics.json
+      status: factory_intrinsics_and_extrinsics_nan
+      scope: 기본 투영값으로 동작 중. 네이티브 깊이 비교도 외부 거리와 일치하지 않아 RGB 정합 모드를 유지. 공장 보정 정상 복구로
+        기록하지 않음
   table_edge_calibration:
     enabled: true
     status: derived
-    yaw_offset_rad: -0.026530102287126735
-    plane_offset_bias_m: 0.025484519137806125
+    yaw_offset_rad: -0.04392325219698101
+    plane_offset_bias_m: 0.04960505180184195
     reference_transform:
       x_m: -0.275
       y_m: 0.0
       z_m: 1.26
-      roll_rad: -0.01946375975958315
-      pitch_rad: 0.639563761794311
+      roll_rad: -0.039023134986489794
+      pitch_rad: 0.9171698002732518
       yaw_rad: -0.0007507445375463481
     provenance:
       derived_at: '2026-10-19'
-      valid_for: 사용자 하향40도 조정 후 현행 장착·현재 책상·차체 앞쪽 양 모서리 기준
-      source: operator_report_left_6cm_right_5cm_and_stationary_depth
-      evidence: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/front_1cm_20261019_141120_postcheck/status_samples.json
+      valid_for: 약45도 재조정 뒤 현재 장착과 차체 앞쪽 양 모서리 기준
+      source: operator_report_left_7cm_right_5_1cm_and_stationary_depth
+      evidence: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/camera_gap_mismatch_20261019_152144/status_samples.json
+      method: 수평 상판으로 추정한 roll/pitch와 별도로, 실측 양 모서리로 만든 기준면과 정지 깊이 검출면의 법선·signed
+        offset을 대조
       unit:
         yaw_offset_rad: rad
         plane_offset_bias_m: m
-      method: 양 모서리 실측으로 만든 2D 면의 normal·offset과 정지 깊이 관측의 중앙값 대조
       reference_front_extent_m: 0.065
       reference_width_m: 0.45
-      reference_left_gap_m: 0.06
-      reference_right_gap_m: 0.05
+      reference_left_gap_m: 0.07
+      reference_right_gap_m: 0.051
       frame_confirmation: robot_forward_left_right
       measurement_resolution_m: null
       external_reference_count: 1
       fresh_depth_observations: 13
+      fit_sample_count: 7
+      same_pose_holdout_sample_count: 6
       independent_physical_validation_at_derivation: false
-      detector_replay_validation:
-        validated_at: '2026-10-19'
-        source: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/front_1cm_20261019_141120_postcheck/depth.npz
-        method: 근접 측면 검출 변경 뒤 기존 실측 시점의 원본 깊이 프레임을 재생해 보정 유지 여부 확인
-        left_gap_m: 0.060589145095502735
-        right_gap_m: 0.04944842973254978
-        maximum_reference_residual_m: 0.000589145095502735
-        scope: 기존 실측 프레임 재생 결과. 새로운 독립 실차 실측이나 1cm 주차 성공 증거가 아님
+      scope: 현 장착의 주차 검출선 보정. 카메라의 물리 위치·기구 치수를 새로 실측한 값이 아니며 1cm 주차 성공 증거가 아님
       invalidate_when: 카메라 위치/각도·차체 앞끝/폭 또는 깊이 센서 처리 변경
+      same_pose_holdout_maximum_residual_m: 0.00041217274359406364
+      processing_optimization_replay:
+        source: $HOME/jdamr_data/map_20260930_manual/aligned/camera_checks/camera_gap_mismatch_20261019_152144/processing_optimization_replay.json
+        method: 동일 원시 깊이 프레임으로 후보 평가 순서 최적화 전후의 모서리 좌표 비교
+        endpoint_comparison_atol_m: 1.0e-12
+        endpoints_unchanged: true
+        physical_accuracy_revalidated: false
+      reference_views:
+      - role: 정지 실측 위치의 적합 첫 관측
+        raw_normal_xy:
+        - -0.9999985103014167
+        - -0.001726092392406296
+        raw_offset_m: 0.0757731934844763
+        reference_normal_xy: &id001
+        - -0.9991098319862558
+        - 0.04218463735053084
+        reference_offset_m: 0.12538828391427512
+      - role: 같은 위치의 후반 관측. 독립 실측 아님
+        raw_normal_xy:
+        - -0.99999999622407
+        - 8.690143910838247e-05
+        raw_offset_m: 0.07577352626865651
+        reference_normal_xy: *id001
+        reference_offset_m: 0.12538828391427512
+      post_calibration_validation:
+        run_id: front_1cm_20261019_153028_164442
+        source: '사용자 보고: 0.8mm 양쪽 훌륭하다'
+        unit_as_reported: mm
+        left_gap_m: 0.0008
+        right_gap_m: 0.0008
+        target_gap_m: 0.01
+        depth_estimated_corner_gaps_m:
+        - 0.010516414747162282
+        - 0.011090862138266735
+        measurement_resolution_m: null
+        operator_accepted: true
+        repeatability_validated: false
+        exact_10mm_accuracy_verified: false
+        scope: 단일 배치의 사용자 수용 및 좌우 동일 간격 보고. 보고 단위를 바꾸어 해석하지 않음. 정확히 10mm 또는 반복 정확도를
+          증명하지 않음

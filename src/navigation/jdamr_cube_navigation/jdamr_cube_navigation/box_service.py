@@ -379,8 +379,20 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         history.append((time.monotonic(), self.box_status))
 
     def _depth_info_callback(self, message):
-        if getattr(self, 'depth_camera_info', None) is None:
-            self.depth_camera_info = message
+        self.depth_camera_info = message
+        self.depth_camera_info_received_s = time.monotonic()
+
+    def _fresh_depth_frame_after(self, stamp_s, now_s):
+        # Astra publishes CameraInfo with the same stamp as each depth image.
+        info = getattr(self, 'depth_camera_info', None)
+        received = getattr(self, 'depth_camera_info_received_s', None)
+        if (info is None or received is None
+                or not 0.0 <= time.monotonic() - received <= 0.5):
+            return False
+        frame_stamp = info.header.stamp.sec + info.header.stamp.nanosec * 1e-9
+        return (info.header.frame_id == 'camera_color_optical_frame'
+                and math.isfinite(frame_stamp) and frame_stamp >= stamp_s
+                and 0.0 <= now_s - frame_stamp <= 0.5)
 
     def _evidence_emit_failed(self, source, error):
         """Report a diagnostic failure without changing the control flow."""
@@ -391,15 +403,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             pass
 
     def _ensure_depth_info(self):
-        """Subscribe to depth camera_info once; release it after one message."""
+        """Keep the per-image depth stamp available throughout an approach."""
         try:
             subscription = getattr(self, 'depth_info_subscription', None)
-            if getattr(self, 'depth_camera_info', None) is not None:
-                if subscription is not None:
-                    # Released here, outside the subscription's own callback.
-                    self.destroy_subscription(subscription)
-                    self.depth_info_subscription = None
-            elif subscription is None:
+            if subscription is None:
                 self.depth_info_subscription = self.create_subscription(
                     CameraInfo, '/camera/depth/camera_info',
                     self._depth_info_callback, qos_profile_sensor_data)
@@ -1283,7 +1290,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 try:
                     target = self.observe_target(
                         camera_mount, front_extent_m, self._final_gap_m(),
-                        region_xy, region_radius_m)
+                        region_xy, region_radius_m, reuse_configuration=True)
                 except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
                     reason = getattr(error, 'reason', None) or str(error) or type(error).__name__
                     if (not fine_table or straight_to_odom is None
@@ -1423,7 +1430,13 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             # A skewed stop cannot advance when one corner is already close.
             # Back out using the observed face, then align to a fresh observation
             # within this visit and its original budget, rather than ending it.
+            straight_correction = (
+                fine_table and all(math.isfinite(gap) and gap > 0 for gap in corner_gaps)
+                and yaw_error <= allowed_yaw_error_rad
+                and max(corner_gaps) - nearest_gap_m <= 2 * gap_tolerance_m
+                and estimated_gap_m > target_gap_m)
             if (fine_table and not realignment_reapproached
+                    and not straight_correction
                     and all(math.isfinite(gap) and gap > 0.0 for gap in corner_gaps)
                     and nearest_gap_m <= target_gap_m + gap_tolerance_m
                     and (max(corner_gaps) > target_gap_m + gap_tolerance_m
@@ -1436,11 +1449,12 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                           estimated_front_corner_gaps_m=corner_gaps,
                           target_front_gap_m=target_gap_m)
                 self.incomplete_gap_stop = False
-                if not self._leave_parked_pose():
+                if not self._leave_for_table_reobservation():
                     return False
                 try:
                     target = self.observe_target(
-                        camera_mount, front_extent_m, target_gap_m, region_xy, region_radius_m)
+                        camera_mount, front_extent_m, target_gap_m, region_xy, region_radius_m,
+                        reuse_configuration=True)
                 except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
                     self.emit('failed', phase='table_realignment_reobserve', reason=str(error))
                     return False
@@ -1453,7 +1467,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             # Corrections consume fresh stopped observations within the same task
             # budget; a lost face or an overshoot never dispatches another advance.
             if (not fine_table or not all(math.isfinite(gap) for gap in corner_gaps)
-                    or nearest_gap_m <= target_gap_m + gap_tolerance_m):
+                    or (nearest_gap_m <= target_gap_m + gap_tolerance_m
+                        and not straight_correction)):
                 return False
             if (self.stop_requested or not self._operator_link_ready()
                     or not self._navigation_ready(require_fresh_amcl=False)):
@@ -1476,6 +1491,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if confirmation_basis == 'frozen_table_edge_odom_stop':
                 approached, straight_to_odom = self._zero_turn_final_approach(
                     frozen_target_odom, front_extent_m, allow_trim=False,
+                    gap_m=(target_gap_m - (max(corner_gaps) - nearest_gap_m) / 2
+                           if straight_correction else None),
                     frozen_to_odom=straight_to_odom)
             else:
                 approached, straight_to_odom = self._straight_final_approach(
@@ -1541,6 +1558,25 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
     def _table_fine_approach(self, target, front_extent_m):
         """Align to the observed normal while closing the gap in one move."""
         self._continuous_table_stop = None
+        observed = target.get('observation_robot_pose_map')
+        if observed is not None:
+            residual = math.atan2(math.sin(target['yaw_rad'] - observed[2]),
+                                  math.cos(target['yaw_rad'] - observed[2]))
+            span_m = 2 * self.box_front_half_width_m * abs(math.sin(residual))
+            distance_m = sum(
+                (observed[i] - target['face_center_map_xy_m'][i])
+                * target['outward_normal_map_xy'][i] for i in (0, 1))
+            nearest_m = distance_m - front_lead_m(
+                front_extent_m, self.box_front_half_width_m, residual)
+            if (0 < nearest_m <= FINAL_PLAN_GAP_M
+                    and span_m <= 2 * TABLE_FINE_GAP_TOLERANCE_M
+                    and abs(residual) <= min(
+                        self.parking_contract['yaw_tolerance_rad'], FINAL_HEADING_TRIM_RAD)):
+                # Centre the two corner gaps on the unchanged final target.
+                # The leading corner alone would leave the far corner too far out.
+                return self._zero_turn_final_approach(
+                    target, front_extent_m, gap_m=self._final_gap_m() - span_m / 2,
+                    allow_trim=False, continuous_table=False)
         result = self._zero_turn_final_approach(
             target, front_extent_m, allow_trim=False, continuous_table=True)
         if (result[0] or getattr(self, '_last_direct_motion_failure', None)
@@ -1553,7 +1589,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             'face_center_map_xy_m': list(target['face_center_map_xy_m']),
             'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
         self.emit('table_alignment_clearance_reapproach', original_deadline_preserved=True)
-        if not self._leave_parked_pose():
+        if not self._leave_for_table_reobservation():
             return False, None
         mount, region, radius = self._table_observation_context
         try:
@@ -1565,6 +1601,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return False, None
         return self._zero_turn_final_approach(
             target, front_extent_m, allow_trim=False, continuous_table=True)
+
+    def _leave_for_table_reobservation(self):
+        mount, _region, _radius = self._table_observation_context
+        profile = mount.get('camera_mount', {}).get('table_observation', {})
+        clearance_m = profile.get('base_offset_m')
+        if clearance_m is None:
+            return self._leave_parked_pose()
+        return self._leave_parked_pose(clearance_m=clearance_m)
 
     def _table_approach_validator(self, front_extent_m, to_map_pose):
         """Check the nominal steering corridor with the verified static footprint."""
@@ -1637,8 +1681,28 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 raise RuntimeError('table approach observer silent')
             stamp = observation.get('stamp_s')
             now_s = self.get_clock().now().nanoseconds * 1e-9
-            if (isinstance(stamp, bool) or not isinstance(stamp, (float, int))
-                    or not math.isfinite(stamp) or not 0.0 <= now_s - stamp <= 0.5):
+            if (isinstance(stamp, (float, int)) and not isinstance(stamp, bool)
+                    and math.isfinite(stamp) and now_s - stamp > 0.5):
+                # Consume callbacks already waiting behind TF/odometry before
+                # judging the last processed depth message as a sensor outage.
+                deadline_s = time.monotonic() + 0.02
+                for _ in range(32):
+                    if time.monotonic() >= deadline_s:
+                        break
+                    spin_node(self, timeout_sec=0.0)
+                    observation = self.box_status
+                    stamp = observation.get('stamp_s') if isinstance(observation, dict) else None
+                    now_s = self.get_clock().now().nanoseconds * 1e-9
+                    if (isinstance(stamp, (float, int)) and not isinstance(stamp, bool)
+                            and math.isfinite(stamp) and 0.0 <= now_s - stamp <= 0.5):
+                        break
+            valid_stamp = (not isinstance(stamp, bool)
+                           and isinstance(stamp, (float, int)) and math.isfinite(stamp))
+            carried_live_frame = (valid_stamp and stamp == state['input_stamp']
+                                  and now_s - stamp > 0.5
+                                  and self._fresh_depth_frame_after(stamp, now_s))
+            if (not valid_stamp
+                    or not (0.0 <= now_s - stamp <= 0.5 or carried_live_frame)):
                 raise RuntimeError('table approach depth stale or future-dated')
             if observation.get('reason') in OBSERVER_LATENCY_REASONS:
                 raise RuntimeError('table approach observer latency')
@@ -1979,7 +2043,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.config, self.waypoints = saved
         return bool(reached), to_odom
 
-    def _leave_parked_pose(self):
+    def _leave_parked_pose(self, *, clearance_m=ESCAPE_CLEARANCE_M):
         """
         Back straight away from the last box face before any home rotation.
 
@@ -1987,6 +2051,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         there is unprotected. The band inside the current chassis front is not
         validated because a straight reverse never re-enters it.
         """
+        if (isinstance(clearance_m, bool) or not isinstance(clearance_m, (int, float))
+                or not math.isfinite(clearance_m) or not .2 <= clearance_m <= ESCAPE_CLEARANCE_M):
+            raise ValueError('invalid table reobservation clearance')
         face = getattr(self, 'last_box_face', None)
         if face is None:
             return True
@@ -2015,7 +2082,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                       detail='face_reference_invalid')
             return False
         distance_m = sum((actual[i] - center[i]) * outward[i] for i in (0, 1))
-        clear_m = ESCAPE_CLEARANCE_M - ESCAPE_PATH_CONTRACT['xy_tolerance_m']
+        clear_m = clearance_m - ESCAPE_PATH_CONTRACT['xy_tolerance_m']
         if math.isfinite(distance_m) and distance_m >= clear_m:
             # The rotation room is already there, whatever the heading
             # (2026-09-30 table_02: a reverse ended 33 deg off at 0.554 m).
@@ -2033,7 +2100,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                       face_distance_m=self._json_scalar(distance_m),
                       face_heading_cos=self._json_scalar(facing))
             return False
-        length_m = ESCAPE_CLEARANCE_M - distance_m
+        length_m = clearance_m - distance_m
         target_reference = (actual[0] - length_m * math.cos(actual[2]),
                             actual[1] - length_m * math.sin(actual[2]), actual[2])
         if reference_frame == 'odom':

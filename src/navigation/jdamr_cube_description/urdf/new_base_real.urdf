@@ -98,7 +98,7 @@
   </link>
   <joint name="camera_mount_joint" type="fixed">
     <parent link="upper_tabletop_surface_frame"/><child link="camera_link"/>
-    <origin xyz="-0.275 0 0.540" rpy="-0.01946375975958315 0.639563761794311 -0.0007507445375463481"/>
+    <origin xyz="-0.275 0 0.540" rpy="-0.039023134986489794 0.9171698002732518 -0.0007507445375463481"/>
   </joint>
   <!-- camera_link 하위 광학 프레임은 Astra 드라이버가 발행한다. -->
 </robot>
