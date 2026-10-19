@@ -1095,6 +1095,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             raise ValueError('observation route must use map')
         self.table_id = table_id
         self.verify_live_maps()
+        if execute and resume_at_observation:
+            # An observation resume continues the mission's running battery bound.
+            self._mission_started = True
         # A resume starts in the observation stage, where AMCL may still hold the
         # covariance of its last transit update; a fresh start is judged strictly.
         with self._localization_bound(resume_at_observation):
@@ -1274,7 +1277,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                           tracking_basis=continuous_stop['basis'],
                           last_observation_stamp_s=continuous_stop['observation_stamp_s'],
                           final_depth_measurement=False)
-            elif surface_mode == 'table_edge':
+            # A carried face proves the motion stopped, not the final physical gap.
+            # Prefer fresh depth; retain the carried face only for healthy occlusion.
+            if surface_mode == 'table_edge':
                 try:
                     target = self.observe_target(
                         camera_mount, front_extent_m, self._final_gap_m(),

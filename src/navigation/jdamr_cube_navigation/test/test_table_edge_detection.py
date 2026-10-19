@@ -10,6 +10,7 @@ from jdamr_cube_navigation.box_top_detection import (
     DetectionStability,
 )
 from jdamr_cube_navigation.table_edge_detection import (
+    _has_depth_discontinuity_below,
     _horizontal_plane_is_valid,
     _optical_to_level_rotation,
     _visible_front_edge,
@@ -120,16 +121,18 @@ def test_visible_edge_endpoints_remain_on_tilted_fitted_plane(monkeypatch):
         np.linspace(0.45, 1.05, 32),
         np.linspace(-0.25, 0.25, 32),
     ))
+    level_xy = np.repeat(level_xy, 4, axis=0)
+    level_xy[:, 0] += np.tile([.03, .02, .01, 0.0], 32)
     level_z = -(plane_normal[0] * level_xy[:, 0]
                 + plane_normal[1] * level_xy[:, 1]
                 + plane_offset) / plane_normal[2]
     points_level = np.column_stack((level_xy, level_z))
     points_optical = points_level @ rotation
-    columns = np.arange(32)
-    rows = np.full(32, 20)
-    plane_mask = np.ones(32, dtype=bool)
+    columns = np.repeat(np.arange(32), 4)
+    rows = np.tile([14, 16, 18, 20], 32)
+    plane_mask = np.ones(128, dtype=bool)
     depth_mm = np.full((80, 32), 1000, dtype=np.uint16)
-    depth_mm[20, :] = np.rint(points_optical[:, 2] * 1000).astype(np.uint16)
+    depth_mm[20, :] = np.rint(points_optical[3::4, 2] * 1000).astype(np.uint16)
     monkeypatch.setattr(
         'jdamr_cube_navigation.table_edge_detection.'
         '_has_depth_discontinuity_below',
@@ -397,6 +400,47 @@ def test_rejects_image_boundary_instead_of_calling_it_a_table_edge():
     depth, _, _ = _render_table(
         configured, front_x_m=0.05, width_m=2.0, depth_m=2.0)
     assert detect_table_edge(depth, INTRINSICS, configured) is None
+
+
+def test_near_edge_uses_later_measured_point_below_the_apron():
+    configured = replace(config(1.26, 36.64), plane_distance_m=.025)
+    rotation = _optical_to_level_rotation(configured)
+    depth = np.zeros((240, 320), dtype=np.uint16)
+    column, row = 160, 210
+
+    def ray(at_row):
+        return rotation @ np.array([
+            (column - INTRINSICS.center_x_px) / INTRINSICS.focal_x_px,
+            (at_row - INTRINSICS.center_y_px) / INTRINSICS.focal_y_px, 1.0])
+
+    for at_row in (row, row + 2):
+        depth[at_row, column] = round(.36 / ray(at_row)[0] * 1000)
+    depth[230, column] = round((.72 - 1.26) / ray(230)[2] * 1000)
+    assert _has_depth_discontinuity_below(
+        depth, row, column, INTRINSICS, rotation,
+        np.array([0., 0., 1.]), 1.26 - .784, configured)
+
+
+def test_near_table_front_with_vertical_apron_remains_detectable():
+    configured = replace(config(1.26, 36.64), plane_distance_m=.025)
+    depth, front, basis = _render_table(
+        configured, table_height_m=.784, front_x_m=.36, background_depth_m=1.5)
+    rows, columns = np.mgrid[:INTRINSICS.height, :INTRINSICS.width]
+    rays = np.stack(((columns - INTRINSICS.center_x_px) / INTRINSICS.focal_x_px,
+                     (rows - INTRINSICS.center_y_px) / INTRINSICS.focal_y_px,
+                     np.ones_like(rows)), axis=-1)
+    rays = rays @ _optical_to_level_rotation(configured).T
+    scale = .36 / rays[..., 0]
+    heights = 1.26 + scale * rays[..., 2]
+    apron = ((heights >= .724) & (heights <= .784)
+             & (np.abs(scale * rays[..., 1]) <= .4)
+             & (scale > 0) & (scale < depth * .001))
+    depth[apron] = np.rint(scale[apron] * 1000).astype(np.uint16)
+    detection = detect_table_edge(depth, INTRINSICS, configured)
+    assert detection is not None
+    center = np.mean(_to_level(detection, configured)[:, :2], axis=0)
+    inward = np.array([basis[1], -basis[0]])
+    assert abs(float((center - front) @ inward)) < .01
 
 
 def test_rejects_minimum_depth_clipping_as_an_edge():

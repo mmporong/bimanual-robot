@@ -222,6 +222,27 @@ def test_observation_resume_rejects_missing_parking_parameters_before_motion(mis
     mission.observe_target.assert_not_called()
 
 
+def test_observation_resume_keeps_running_cutoff_without_requiring_new_departure_reserve(
+        mission, monkeypatch):
+    route = {'frame_id': 'map', 'map_yaml': 'map', 'keepout_mask_yaml': 'mask',
+             'start_pose': {'x': 0., 'y': 0.}, 'max_route_start_distance_m': .3,
+             'waypoints': [{'id': 'exit'}, {'id': 'observation', 'x': 0., 'y': 0.}]}
+    monkeypatch.setattr(box_service, 'load_route', lambda _: route)
+    mission._mission_started = False
+    mission.minimum_battery_v = 10.5
+    mission.service_contract = {'minimum_start_battery_v': 10.8}
+    mission.battery_voltage = 10.788
+    assert not ServiceRoute._departure_battery_ready(mission)
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540}},
+        'table_01', (1, 0), .6, execute=True, candidate_trial=True,
+        resume_at_observation=True)
+    assert ServiceRoute._departure_battery_ready(mission)
+    mission.battery_voltage = 10.49
+    assert not ServiceRoute._departure_battery_ready(mission)
+
+
 def test_transit_alignment_final_sequence(mission):
     assert invoke(mission)
     # The final approach is the straight odom leg, not a planned execute.
@@ -2385,6 +2406,28 @@ def test_one_centimetre_table_parking_does_not_accept_two_centimetres(mission):
     assert mission._straight_final_approach.call_count == 2
 
 
+def test_continuous_table_stop_rechecks_depth_before_accepting_odom_gap(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    mission.capture_stationary_pose.side_effect = [
+        ((0, 0, 0), {}), ((.902, 0, 0), {}), ((.925, 0, 0), {})]
+    mission._odom_pose = Mock(return_value=(.925, 0, 0))
+    target = deepcopy(mission.observe_target.return_value)
+
+    def approach(*_args):
+        mission._continuous_table_stop = {
+            'target': target, 'basis': 'aligned_face_frozen_for_precision_band',
+            'observation_stamp_s': 100.0}
+        return True, lambda x, y, yaw: (x, y, yaw)
+
+    mission._straight_final_approach.side_effect = approach
+    assert invoke(mission)
+    assert mission._straight_final_approach.call_count == 2
+    assert mission.observe_target.call_count == 4
+    assert mission.emit.call_args.kwargs['confirmation_basis'] == 'fresh_depth_table_edge'
+    assert mission.emit.call_args.kwargs['final_depth_measurement'] is True
+
+
 def test_one_centimetre_table_correction_stops_when_gap_does_not_improve(mission):
     mission.surface_mode = 'table_edge'
     mission.final_gap_override_m = 0.01
@@ -2515,6 +2558,14 @@ def test_small_retreat_preserves_the_occluded_table_plane(mission):
     mission.capture_stationary_pose.side_effect = [((0, 0, 0), {}), (near, {}), (final, {})]
     mission._odom_pose = Mock(side_effect=[near, final])
     target = deepcopy(mission.observe_target.return_value)
+
+    def occluded():
+        return box_service.BoxObservationUnavailable(
+            'stable detected table_edge surface is required', retryable=True,
+            fresh_frames=8, required_fresh_frames=8,
+            fresh_rejection_reasons={'no_table_edge_candidate'})
+
+    mission.observe_target.side_effect = [target, target, occluded(), occluded()]
 
     def approach(*_args):
         mission._continuous_table_stop = {
