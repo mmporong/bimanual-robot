@@ -211,6 +211,7 @@ def test_coarse_range_reaches_handoff_without_a_plane(monkeypatch):
     node.emit = Mock()
     monkeypatch.setattr(module, 'CachedStaticCorridorValidator',
                         Mock(return_value=Mock(return_value=True)))
+
     def drive(_distance, **kwargs):
         reason = kwargs['watch']()
         assert reason == 'rear box coarse handoff ready'
@@ -244,12 +245,12 @@ def test_invalid_scan_is_fitted_and_reported_once_per_stamp(monkeypatch):
     for _ in range(3):
         with pytest.raises(RuntimeError, match='rear box face unavailable'):
             node._rear_box_observation(GEOMETRY, .275, .225)
-    assert fit.call_count == 1
+    assert fit.call_count == 3
     assert node.emit.call_count == 1
     node._rear_box_scan.return_value = None, 5.1
     with pytest.raises(RuntimeError):
         node._rear_box_observation(GEOMETRY, .275, .225)
-    assert fit.call_count == 2
+    assert fit.call_count == 6
 
 
 def test_missing_near_face_reobserves_after_bounded_live_range_advance():
@@ -290,6 +291,7 @@ def test_operator_stop_during_face_wait_never_starts_range_reapproach():
     node = route_node()
     node.run_deadline_s = time.monotonic() + 10.
     node._operator_link_ready = Mock(return_value=True)
+
     def stopped(*_args):
         node.stop_requested = True
         raise RuntimeError('rear box observation unavailable: rear box face unavailable')

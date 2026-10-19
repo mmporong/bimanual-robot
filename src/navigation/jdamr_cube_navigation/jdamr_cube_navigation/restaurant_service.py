@@ -1909,6 +1909,7 @@ class ServiceRoute(CorridorRoute):
         after, _ = self.capture_stationary_pose(intermediate=True)
         if self.stop_requested:
             return False
+        departure['end'] = after
         self.emit('dock_departure_finished', distance_m=distance_m,
                   start_pose_map=list(start), stopped_pose_map=list(after),
                   tracking_frame='odom')

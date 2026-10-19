@@ -8,12 +8,15 @@ from geometry_msgs.msg import Twist
 from jdamr_cube_navigation.box_lidar_witness import (
     MAX_CANDIDATE_PLANE_DISTANCE_M, MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD,
 )
-from jdamr_cube_navigation.corridor_route import load_route, spin_node
+from jdamr_cube_navigation.corridor_route import (
+    load_route, spin_node, TRANSIT_PLAN_END_TOLERANCE_M,
+)
 from jdamr_cube_navigation.parking import (
     MAXIMUM_FRONT_GAP_M, MINIMUM_FRONT_GAP_M,
 )
 from jdamr_cube_navigation.rear_box_docking import (
-    estimate_rear_box_face, rear_corridor_clearance, RearBoxFaceTracker,
+    derive_robot_pose_from_dock_reference, estimate_rear_box_face,
+    MINIMUM_SUPPORT, MINIMUM_TANGENT_SPREAD_M, rear_corridor_clearance, RearBoxFaceTracker,
 )
 from jdamr_cube_navigation.rear_collision_profile import rear_collision_profile
 from jdamr_cube_navigation.restaurant_service import (
@@ -33,10 +36,39 @@ from tf2_ros import TransformException
 REAR_COARSE_HANDOFF_M = 0.5
 REAR_COARSE_SEGMENT_M = 0.5
 REAR_FACE_REOBSERVE_GAP_M = 0.2
+# Observation only: the swept footprint and gap calculation retain the chassis width.
+REAR_FACE_OBSERVATION_HALF_WIDTH_M = 1.2
+REAR_FACE_OBSERVATION_WIDTHS_M = (0.6, 0.9, REAR_FACE_OBSERVATION_HALF_WIDTH_M)
 
 
 def _angle(value):
     return math.atan2(math.sin(value), math.cos(value))
+
+
+def _observe_rear_face_roi(scan, geometry, extent, half_width, expected_span_m=None):
+    """Prefer the nearest useful view before including more side furniture."""
+    candidate, failure = None, None
+    for width_m in REAR_FACE_OBSERVATION_WIDTHS_M:
+        try:
+            observed = estimate_rear_box_face(
+                scan, geometry=geometry, rear_extent_m=extent,
+                rear_half_width_m=half_width, observation_half_width_m=width_m)
+        except ValueError as error:
+            failure = error
+            continue
+        if candidate is None:
+            candidate = observed
+        if observed['observation_roi_clipped']:
+            continue
+        if (expected_span_m is not None
+                and abs(observed['span_m'] - expected_span_m) > max(.08, .25 * expected_span_m)):
+            continue
+        return observed
+    if candidate is not None and expected_span_m is None:
+        return candidate
+    if candidate is not None:
+        raise ValueError('rear dock reference face width or visibility changed')
+    raise failure or ValueError('rear face unavailable in observation ROI')
 
 
 def _same_target(reference, observed):
@@ -73,11 +105,190 @@ def _stationary_face(observations, extent, half_width):
         center_gap_m=-offset / nx - extent,
         gap_m=-offset - extent * nx - half_width * abs(ny),
         averaged_frames=len(observations))
+    for midpoint in ('face_midpoint_base_xy_m', 'midpoint_odom'):
+        if all(midpoint in item for item in observations):
+            result[midpoint] = tuple(sum(item[midpoint][i] for item in observations)
+                                     / len(observations) for i in (0, 1))
+    result['observation_roi_clipped'] = any(
+        item.get('observation_roi_clipped', False) for item in observations)
     return result
 
 
 class RearBoxParkingMixin:
     """Observe a rear box without starting the depth camera or a transit task."""
+
+    def _depart_dock_straight(self, distance_m):
+        # Only the route's initial dock exit teaches a landmark. A terminal
+        # clearance/retry must never replace the outbound reference.
+        outbound = (getattr(self, 'home_rear_geometry', None) is not None
+                    and self.config.get('dock_departure_distance_m') == distance_m
+                    and self.registry.get('home', {}).get('rear_parking_reference') == 'lidar_box')
+        if outbound and getattr(self, '_dock_departure', None) is None:
+            self._rear_dock_reference = None
+        teach = outbound and getattr(self, '_rear_dock_reference', None) is None
+        if not super()._depart_dock_straight(distance_m):
+            return False
+        if teach:
+            geometry = self.home_rear_geometry
+            extent = geometry['frame_length']['value'] - geometry['front_to_wheel_axis']['value']
+            half_width = geometry['frame_width']['value'] / 2.
+            try:
+                # The parent already confirmed stopped odometry at the exit.
+                # Use its latest fresh stamped scan without another dwell.
+                observation = self._rear_box_observation(geometry, extent, half_width)
+                if observation['observation_roi_clipped']:
+                    raise RuntimeError('rear dock face is clipped by observation ROI')
+                if (observation['support_count'] < 2 * MINIMUM_SUPPORT
+                        or observation['span_m'] < 2 * MINIMUM_TANGENT_SPREAD_M):
+                    raise RuntimeError('rear dock reference support is too small')
+                departure = self._dock_departure
+                end_map, end_odom = departure['end'], self._odom_pose()
+                scan_odom = observation['base_pose_odom']
+                turn = end_map[2] - end_odom[2]
+                cosine, sine = math.cos(turn), math.sin(turn)
+                dx, dy = scan_odom[0] - end_odom[0], scan_odom[1] - end_odom[1]
+                # The scan can predate the stopped exit pose. Apply its stamped
+                # odom displacement before associating the face with map.
+                pose = {'x_m': end_map[0] + cosine * dx - sine * dy,
+                        'y_m': end_map[1] + sine * dx + cosine * dy,
+                        'yaw_rad': _angle(scan_odom[2] + turn)}
+                self._rear_dock_reference = {
+                    'observation': observation, 'pose_map': pose,
+                    'start_pose_map': list(departure['start']),
+                    'exit_pose_map': list(departure['end']),
+                }
+                self.emit('rear_dock_reference_recorded', reference=self._rear_dock_reference,
+                          source='same_run_straight_departure', internal_estimate_only=True)
+            except (ValueError, RuntimeError) as error:
+                self.emit('rear_dock_reference_unavailable', reason=str(error))
+        return True
+
+    def _rear_reference_stage(self, stage):
+        reference = getattr(self, '_rear_dock_reference', None)
+        if reference is None:
+            return stage
+        pose, observation = reference['pose_map'], reference['observation']
+        angle = pose['yaw_rad'] + observation['normal_yaw_error_rad']
+        start, exit_pose = reference['start_pose_map'], reference['exit_pose_map']
+        distance = sum((exit_pose[i] - start[i]) * direction
+                       for i, direction in enumerate((math.cos(angle), math.sin(angle))))
+        if distance <= 0.0:
+            raise RuntimeError('rear dock reference has no forward departure')
+        # Preserve the outbound origin's tangent position; use the observed
+        # box normal for the reverse axis instead of a separate map heading.
+        return {**stage, 'x': start[0] + distance * math.cos(angle),
+                'y': start[1] + distance * math.sin(angle), 'yaw': _angle(angle)}
+
+    def _rear_reference_pose(self, observed, *, actual_pose_map=None):
+        reference = self._rear_dock_reference
+        taught = reference['observation']
+        if observed.get('observation_roi_clipped', True):
+            raise RuntimeError('rear dock reference face is clipped')
+        if abs(observed['span_m'] - taught['span_m']) > max(.08, .25 * taught['span_m']):
+            raise RuntimeError('rear dock reference face width changed')
+        measured = derive_robot_pose_from_dock_reference(taught, observed, reference['pose_map'])
+        if actual_pose_map is not None:
+            inferred = tuple(measured[k] for k in ('x_m', 'y_m', 'yaw_rad'))
+            if (math.dist(actual_pose_map[:2], inferred[:2]) > REAR_FACE_OBSERVATION_HALF_WIDTH_M
+                    or abs(_angle(actual_pose_map[2] - inferred[2])) > math.radians(30.)):
+                raise RuntimeError('rear dock landmark disagrees with return region')
+        return measured
+
+    def _align_rear_reference(self, stage, pose):
+        """Correct observed dock drift, then center the existing reverse entry."""
+        if getattr(self, '_rear_dock_reference', None) is None:
+            return True
+        reason = ('operator_stop' if self.stop_requested else
+                  'operator_link_lost' if not self._operator_link_ready() else
+                  self._guard_failure(False))
+        if reason:
+            raise RuntimeError(reason)
+        geometry = self.home_rear_geometry
+        extent = geometry['frame_length']['value'] - geometry['front_to_wheel_axis']['value']
+        half_width = geometry['frame_width']['value'] / 2.
+        observed = self._observe_rear_box(geometry, extent, half_width)
+        actual, _ = self.capture_stationary_pose(intermediate=True)
+        measured = self._rear_reference_pose(observed, actual_pose_map=actual)
+        inferred = tuple(measured[k] for k in ('x_m', 'y_m', 'yaw_rad'))
+        shift = math.dist(actual[:2], inferred[:2])
+        turn = abs(_angle(actual[2] - inferred[2]))
+        # This seed comes from a measured landmark, not the registered dock pose.
+        if shift > .02 or turn > math.radians(.5):
+            from jdamr_cube_navigation.activate_navigation import initialize_localization
+
+            initialize_localization(self, {
+                'frame_id': self.registry['frame_id'], **measured,
+                'covariance_x_m2': .0025, 'covariance_y_m2': .0025,
+                'covariance_yaw_rad2': math.radians(3.) ** 2,
+            })
+            localized, _ = self.capture_stationary_pose(intermediate=True)
+            if (math.dist(localized[:2], inferred[:2]) > .05
+                    or abs(_angle(localized[2] - inferred[2])) > math.radians(2.)):
+                raise RuntimeError('rear dock landmark localization not retained')
+            self.emit('rear_dock_landmark_localized', prior_pose_map=list(actual),
+                      observed_pose_map=list(inferred), translation_correction_m=shift,
+                      yaw_correction_rad=turn, source='same_run_rear_face_midpoint_and_normal')
+            actual = localized
+        if (math.dist(actual[:2], (stage['x'], stage['y'])) > .05
+                or abs(_angle(actual[2] - stage['yaw'])) > math.radians(3.)):
+            stage_pose = {**pose, 'id': stage['id'], 'x_m': stage['x'], 'y_m': stage['y'],
+                          'yaw_rad': stage['yaw'], 'parking_direction': 'forward'}
+            planned = self._plan_with_input_recovery(
+                stage_pose, single=True, end_tolerance_m=TRANSIT_PLAN_END_TOLERANCE_M)
+            if not planned['ok']:
+                return False
+            actual = self._reach_staging(stage)
+            if actual is None:
+                return False
+            observed = self._observe_rear_box(geometry, extent, half_width)
+        return self._center_rear_reference(observed, extent, actual_pose_map=actual)
+
+    def _center_rear_reference(self, observed, extent, *, actual_pose_map):
+        """Use one guarded reverse curve while there is room to remove lateral error."""
+        reference = self._rear_dock_reference
+        measured = self._rear_reference_pose(observed, actual_pose_map=actual_pose_map)
+        actual = tuple(measured[k] for k in ('x_m', 'y_m', 'yaw_rad'))
+        stage = self._rear_reference_stage({'id': 'home_dock_approach'})
+        normal = math.cos(stage['yaw']), math.sin(stage['yaw'])
+        tangent = -normal[1], normal[0]
+        start = reference['start_pose_map']
+        lateral = sum((actual[i] - start[i]) * tangent[i] for i in (0, 1))
+        self.emit('rear_dock_center_observed', lateral_error_m=lateral,
+                  angle_rad=observed['normal_yaw_error_rad'], basis='same_run_dock_face')
+        if abs(lateral) <= .02 and abs(observed['normal_yaw_error_rad']) <= math.radians(3.):
+            return True
+        # Stop this curve at the existing coarse/fine handoff; fine feedback
+        # still measures the live face for the requested final 1 cm gap.
+        midpoint = observed['face_midpoint_base_xy_m']
+        nx, ny = observed['normal_base_xy']
+        offset = midpoint[0] * nx + midpoint[1] * ny
+        # Construct the target from the observed face plane in map, avoiding
+        # any assumption that the operator's initial rear gap was exactly 1 cm.
+        face_offset_map = sum(actual[i] * normal[i] for i in (0, 1)) + offset
+        target_offset = face_offset_map + extent + REAR_FACE_REOBSERVE_GAP_M
+        along = target_offset - sum(start[i] * normal[i] for i in (0, 1))
+        target = (start[0] + along * normal[0], start[1] + along * normal[1], stage['yaw'])
+        path = self._make_reverse_path(actual, target, curve=True)
+        points = [(item.pose.position.x, item.pose.position.y,
+                   2. * math.atan2(item.pose.orientation.z, item.pose.orientation.w))
+                  for item in path.poses]
+        check = CachedStaticCorridorValidator(
+            Path(self.registry['map']['yaml_path']),
+            Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
+        if not check(points):
+            raise RuntimeError('rear dock centering static corridor blocked')
+        # Anchor this observed-landmark path to the current stationary odom,
+        # rather than reintroducing a later AMCL correction into its geometry.
+        odom = self._odom_pose()
+        turn = odom[2] - actual[2]
+        cosine, sine = math.cos(turn), math.sin(turn)
+        frozen = self._odom_path([
+            (odom[0] + cosine * (x - actual[0]) - sine * (y - actual[1]),
+             odom[1] + sine * (x - actual[0]) + cosine * (y - actual[1]),
+             _angle(yaw + turn)) for x, y, yaw in points])
+        return self._execute_reverse_once(
+            frozen, goal_checker_id='dock_position_checker', final=False,
+            motion='rear_dock_centering')
 
     def _rear_box_scan(self):
         scan = self.last_scan
@@ -102,18 +313,20 @@ class RearBoxParkingMixin:
 
     def _rear_box_observation(self, geometry, extent, half_width):
         scan, stamp = self._rear_box_scan()
-        key = id(geometry), extent, half_width
+        reference = getattr(self, '_rear_dock_reference', None)
+        expected_span = (None if reference is None or getattr(self, '_rear_fine_face', None)
+                         is not None else reference['observation']['span_m'])
+        key = id(geometry), extent, half_width, expected_span
         failed = getattr(self, '_rear_box_detection_failure', None)
         if failed is not None and failed[:2] == (stamp, key):
             raise RuntimeError('rear box face unavailable')
         cached = getattr(self, '_rear_box_detection_cache', None)
         if (cached is not None and cached[0] == stamp
-                and cached[1] == (id(geometry), extent, half_width)):
+                and cached[1] == key):
             return cached[2]
         try:
-            observation = estimate_rear_box_face(
-                self._rear_scan_values(scan), geometry=geometry,
-                rear_extent_m=extent, rear_half_width_m=half_width)
+            observation = _observe_rear_face_roi(
+                self._rear_scan_values(scan), geometry, extent, half_width, expected_span)
         except ValueError as error:
             self._rear_box_detection_failure = stamp, key
             self.emit('rear_box_face_unavailable', reason=str(error))
@@ -132,10 +345,15 @@ class RearBoxParkingMixin:
         x, y = observation['face_center_base_xy_m']
         nx, ny = observation['normal_base_xy']
         result = {**observation, 'stamp_s': stamp,
+                  'base_pose_odom': (transform.translation.x, transform.translation.y, yaw),
                   'face_odom': (transform.translation.x + cosine * x - sine * y,
                                 transform.translation.y + sine * x + cosine * y),
                   'normal_odom': (cosine * nx - sine * ny, sine * nx + cosine * ny)}
-        self._rear_box_detection_cache = (stamp, (id(geometry), extent, half_width), result)
+        mx, my = observation['face_midpoint_base_xy_m']
+        result['midpoint_odom'] = (
+            transform.translation.x + cosine * mx - sine * my,
+            transform.translation.y + sine * mx + cosine * my)
+        self._rear_box_detection_cache = stamp, key, result
         return result
 
     def _rear_corridor_observation(self, geometry, extent, half_width):
@@ -294,7 +512,7 @@ class RearBoxParkingMixin:
         raise RuntimeError(f'rear box observation unavailable: {failure}')
 
     def _observe_rear_box_recovering(self, geometry, extent, half_width, command_watch=None,
-                                    *, allow_range_reapproach=False):
+                                     *, allow_range_reapproach=False):
         """Keep a temporary perception gap inside the current return task."""
         range_reapproached = False
         while not self.stop_requested and time.monotonic() < self.run_deadline_s:
@@ -443,8 +661,15 @@ class RearBoxParkingMixin:
             initial = self._observe_rear_box_recovering(
                 geometry, extent, half_width, command_watch, allow_range_reapproach=True)
             self.emit('rear_box_observed', observation=initial, target_gap_m=target_gap)
-            return self._park_rear_face(
-                initial, geometry, route_path, extent, half_width, target_gap, command_watch)
+            # Landmark localization needs visible endpoints. After latching the
+            # plane, near-range clipping must not replace plane feedback with
+            # a requirement to see the complete box width again.
+            self._rear_fine_face = initial
+            try:
+                return self._park_rear_face(
+                    initial, geometry, route_path, extent, half_width, target_gap, command_watch)
+            finally:
+                self._rear_fine_face = None
 
     def _park_rear_face(self, initial, geometry, route_path, extent, half_width,
                         target_gap, command_watch):

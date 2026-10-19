@@ -15,6 +15,12 @@ import numpy as np
 PROVENANCE = 'REAR_LIDAR_FACE_RELATIVE_GEOMETRY'
 RANSAC_ITERATIONS = 160
 RANSAC_REFINEMENT_CANDIDATES = 8
+# A valid face itself must span at least MINIMUM_TANGENT_SPREAD_M.  A missing
+# return band up to twice that evidence width is retained for the recorded
+# centreline minimum-range hole; a larger unsupported tangent interval starts
+# a different physical segment.  This is a support-continuity criterion, not a
+# measured dock-box width.
+MAXIMUM_TANGENT_SUPPORT_GAP_M = 2.0 * MINIMUM_TANGENT_SPREAD_M
 
 
 def _finite(value, label):
@@ -29,6 +35,86 @@ def _positive(value, label):
     if value <= 0.0:
         raise ValueError(f'{label} must be positive')
     return value
+
+
+def _unit_xy(value, label):
+    vector = np.asarray(value, dtype=np.float64)
+    if vector.shape != (2,) or not np.all(np.isfinite(vector)):
+        raise ValueError(f'{label} must be a finite XY vector')
+    if not math.isclose(float(np.linalg.norm(vector)), 1.0, abs_tol=1e-3):
+        raise ValueError(f'{label} must be a unit vector')
+    return vector
+
+
+def _point_xy(value, label):
+    point = np.asarray(value, dtype=np.float64)
+    if point.shape != (2,) or not np.all(np.isfinite(point)):
+        raise ValueError(f'{label} must be a finite XY point')
+    return point
+
+
+def _pose_xyyaw(value, label):
+    if not isinstance(value, dict):
+        raise ValueError(f'{label} must be a mapping')
+    try:
+        return tuple(
+            _finite(value[key], f'{label}.{key}')
+            for key in ('x_m', 'y_m', 'yaw_rad')
+        )
+    except KeyError as error:
+        raise ValueError(
+            f'{label} must contain x_m, y_m, and yaw_rad') from error
+
+
+def _angle(value):
+    return math.atan2(math.sin(value), math.cos(value))
+
+
+def derive_robot_pose_from_dock_reference(reference, observed, reference_pose):
+    """Recover a map pose from the same dock face seen in two base frames.
+
+    ``reference_pose`` is the registered robot pose for ``reference``.  The
+    returned mapping is the robot pose that maps the observed face midpoint
+    and normal onto that registered dock face in SE(2).
+    """
+    if not isinstance(reference, dict) or not isinstance(observed, dict):
+        raise ValueError('dock face observations must be mappings')
+    reference_midpoint = _point_xy(
+        reference.get('face_midpoint_base_xy_m'),
+        'reference.face_midpoint_base_xy_m')
+    observed_midpoint = _point_xy(
+        observed.get('face_midpoint_base_xy_m'),
+        'observed.face_midpoint_base_xy_m')
+    reference_normal = _unit_xy(
+        reference.get('normal_base_xy'), 'reference.normal_base_xy')
+    observed_normal = _unit_xy(
+        observed.get('normal_base_xy'), 'observed.normal_base_xy')
+    reference_x, reference_y, reference_yaw = _pose_xyyaw(
+        reference_pose, 'reference_pose')
+
+    reference_cosine = math.cos(reference_yaw)
+    reference_sine = math.sin(reference_yaw)
+    reference_rotation = np.array((
+        (reference_cosine, -reference_sine),
+        (reference_sine, reference_cosine),
+    ))
+    face_midpoint_map = (
+        reference_rotation @ reference_midpoint
+        + np.array((reference_x, reference_y)))
+    face_normal_map = reference_rotation @ reference_normal
+
+    yaw = _angle(
+        math.atan2(face_normal_map[1], face_normal_map[0])
+        - math.atan2(observed_normal[1], observed_normal[0]))
+    cosine = math.cos(yaw)
+    sine = math.sin(yaw)
+    rotation = np.array(((cosine, -sine), (sine, cosine)))
+    translation = face_midpoint_map - rotation @ observed_midpoint
+    return {
+        'x_m': float(translation[0]),
+        'y_m': float(translation[1]),
+        'yaw_rad': yaw,
+    }
 
 
 def _laser_mount(geometry):
@@ -166,6 +252,45 @@ def _fit_rear_face(points):
         raise ValueError('rear face line residual is too large')
     if span_m < MINIMUM_TANGENT_SPREAD_M:
         raise ValueError('rear face tangent spread is too narrow')
+
+    tangent_positions = selected @ tangent
+    order = np.argsort(tangent_positions)
+    ordered = selected[order]
+    ordered_positions = tangent_positions[order]
+    split_indices = np.flatnonzero(
+        np.diff(ordered_positions) > MAXIMUM_TANGENT_SUPPORT_GAP_M) + 1
+    segments = np.split(ordered, split_indices)
+    segment_candidates = []
+    for segment in segments:
+        if len(segment) < MINIMUM_SUPPORT:
+            continue
+        try:
+            segment_fit = _canonical_line(segment)
+        except ValueError:
+            continue
+        segment_tangent, _segment_normal, segment_offset, _, segment_span = (
+            segment_fit)
+        if segment_span < MINIMUM_TANGENT_SPREAD_M:
+            continue
+        segment_positions = segment @ segment_tangent
+        lower = float(np.min(segment_positions))
+        upper = float(np.max(segment_positions))
+        centreline_distance = max(lower, 0.0) if lower > 0.0 else (
+            max(-upper, 0.0) if upper < 0.0 else 0.0)
+        segment_candidates.append((
+            centreline_distance,
+            abs(segment_offset),
+            -len(segment),
+            segment_fit,
+            segment,
+        ))
+    if not segment_candidates:
+        raise ValueError('rear face has no continuous supported segment')
+    _centreline, _depth, _negative_support, fitted, selected = min(
+        segment_candidates, key=lambda candidate: candidate[:3])
+    tangent, normal, offset, residual_rms_m, span_m = fitted
+    if residual_rms_m > MAXIMUM_RESIDUAL_RMS_M:
+        raise ValueError('rear face line residual is too large')
     return tangent, normal, offset, residual_rms_m, span_m, selected
 
 
@@ -210,7 +335,7 @@ def rear_corridor_clearance(
 
 def estimate_rear_box_face(
         scan, *, geometry, rear_extent_m, rear_half_width_m,
-        diagnostics=None):
+        observation_half_width_m=None, diagnostics=None):
     """Estimate the nearest transverse face behind the rectangular base.
 
     Coordinates are in ``base_footprint``. The normal always points from the
@@ -219,13 +344,18 @@ def estimate_rear_box_face(
     """
     rear_extent_m = _positive(rear_extent_m, 'rear_extent_m')
     rear_half_width_m = _positive(rear_half_width_m, 'rear_half_width_m')
+    if observation_half_width_m is None:
+        observation_half_width_m = rear_half_width_m
+    else:
+        observation_half_width_m = _positive(
+            observation_half_width_m, 'observation_half_width_m')
     if diagnostics is not None and not isinstance(diagnostics, dict):
         raise ValueError('diagnostics must be a mapping')
 
     points = _scan_points_base(scan, geometry)
     roi = points[
         (points[:, 0] <= -rear_extent_m)
-        & (np.abs(points[:, 1]) <= rear_half_width_m)
+        & (np.abs(points[:, 1]) <= observation_half_width_m)
     ]
     foreground, layer_count = _nearest_rear_layer(roi)
     if diagnostics is not None:
@@ -235,8 +365,11 @@ def estimate_rear_box_face(
             'rear_roi_points': int(len(roi)),
             'foreground_layer_points': int(len(foreground)),
             'rear_depth_layer_count': layer_count,
+            'observation_half_width_m': observation_half_width_m,
             'minimum_support': MINIMUM_SUPPORT,
             'minimum_span_m': MINIMUM_TANGENT_SPREAD_M,
+            'maximum_tangent_support_gap_m':
+                MAXIMUM_TANGENT_SUPPORT_GAP_M,
             'maximum_residual_rms_m': MAXIMUM_RESIDUAL_RMS_M,
         })
     tangent, normal, offset, residual_rms_m, span_m, selected = _fit_rear_face(
@@ -252,8 +385,22 @@ def estimate_rear_box_face(
     support_center = np.mean(selected, axis=0)
     yaw_error_rad = math.atan2(normal[1], normal[0])
     line_anchor = normal * offset
+    tangent_positions = selected @ tangent
+    tangent_bounds = (
+        float(np.min(tangent_positions)),
+        float(np.max(tangent_positions)),
+    )
+    face_endpoints = tuple(
+        line_anchor + tangent * position for position in tangent_bounds)
+    face_midpoint = (face_endpoints[0] + face_endpoints[1]) / 2.0
+    observation_roi_clipped = any(
+        abs(float(endpoint[1]))
+        >= observation_half_width_m - MAXIMUM_RESIDUAL_RMS_M
+        for endpoint in face_endpoints)
     result = {
         'face_center_base_xy_m': tuple(float(value) for value in face_center),
+        'face_midpoint_base_xy_m': tuple(
+            float(value) for value in face_midpoint),
         'support_center_base_xy_m': tuple(
             float(value) for value in support_center),
         'normal_base_xy': tuple(float(value) for value in normal),
@@ -264,6 +411,8 @@ def estimate_rear_box_face(
         'gap_m': gap_m,
         'center_gap_m': center_gap_m,
         'span_m': span_m,
+        'tangent_bounds_m': tangent_bounds,
+        'observation_roi_clipped': observation_roi_clipped,
         'support_count': int(len(selected)),
         'residual_rms_m': residual_rms_m,
         'provenance': PROVENANCE,

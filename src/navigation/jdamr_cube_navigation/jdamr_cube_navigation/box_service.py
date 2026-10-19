@@ -251,9 +251,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return super()._go_home_reverse(
                 pose, execute, _map_reapproach=_map_reapproach)
         config = route_config(self.registry, pose)
-        stage = config['waypoints'][0]
+        stage = self._rear_reference_stage(config['waypoints'][0])
+        config['waypoints'][0] = stage
         self.config, self.waypoints = config, config['waypoints']
         stage_pose = {**pose, 'id': stage['id'], 'x_m': stage['x'], 'y_m': stage['y'],
+                      'yaw_rad': stage['yaw'],
                       'parking_direction': 'forward'}
         try:
             # A box may occupy the old map-coordinate endpoint. Plan to the
@@ -273,6 +275,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                               final_path_validation='LIVE_REAR_LIDAR_AT_STAGING')
                     return True
                 if self._reach_staging(stage) is None:
+                    return False
+                if not self._align_rear_reference(stage, pose):
                     return False
             self.pose_id = pose['id']
             self.confirmation = None

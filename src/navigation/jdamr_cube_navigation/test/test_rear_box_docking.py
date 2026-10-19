@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 
 from jdamr_cube_navigation.rear_box_docking import (
+    derive_robot_pose_from_dock_reference,
     estimate_rear_box_face,
     PROVENANCE,
     rear_corridor_clearance,
@@ -189,6 +190,159 @@ def test_mount_transform_and_rotated_face_produce_corner_clearance():
     assert result['gap_m'] == pytest.approx(
         expected_body_projection - offset, abs=0.002)
     assert result['face_center_base_xy_m'][1] == 0.0
+
+
+def test_observation_width_does_not_change_physical_gap_width():
+    angle = math.radians(6.0)
+    normal = np.array((math.cos(angle), math.sin(angle)))
+    tangent = np.array((-normal[1], normal[0]))
+    offset = -0.38
+    points = [normal * offset + tangent * lateral
+              for lateral in np.linspace(-0.42, 0.08, 121)]
+
+    result = estimate_rear_box_face(
+        scan_from_base_points(points), geometry=GEOMETRY,
+        rear_extent_m=REAR_EXTENT_M,
+        rear_half_width_m=REAR_HALF_WIDTH_M,
+        observation_half_width_m=0.45)
+
+    expected_body_projection = (
+        -REAR_EXTENT_M * normal[0]
+        - REAR_HALF_WIDTH_M * abs(normal[1]))
+    incorrectly_widened_projection = (
+        -REAR_EXTENT_M * normal[0] - 0.45 * abs(normal[1]))
+    assert result['gap_m'] == pytest.approx(
+        expected_body_projection - offset, abs=0.002)
+    assert result['gap_m'] != pytest.approx(
+        incorrectly_widened_projection - offset, abs=0.01)
+    assert result['face_midpoint_base_xy_m'][1] < -0.1
+
+
+def test_face_midpoint_uses_tangent_endpoints_and_marks_clipped_roi():
+    observation_half_width_m = 0.30
+    points = [(-0.42, lateral) for lateral in np.linspace(-0.50, 0.50, 201)]
+
+    result = estimate_rear_box_face(
+        scan_from_base_points(points), geometry=GEOMETRY,
+        rear_extent_m=REAR_EXTENT_M,
+        rear_half_width_m=REAR_HALF_WIDTH_M,
+        observation_half_width_m=observation_half_width_m)
+
+    lower, upper = result['tangent_bounds_m']
+    tangent = np.asarray(result['tangent_base_xy'])
+    anchor = np.asarray(result['line_anchor_base_xy_m'])
+    expected_midpoint = (
+        (anchor + tangent * lower) + (anchor + tangent * upper)) / 2.0
+    assert result['face_midpoint_base_xy_m'] == pytest.approx(
+        expected_midpoint, abs=1e-12)
+    assert result['observation_roi_clipped'] is True
+
+
+def test_complete_face_inside_observation_roi_is_not_marked_clipped():
+    points = [(-0.42, lateral) for lateral in np.linspace(-0.18, 0.18, 101)]
+
+    result = estimate_rear_box_face(
+        scan_from_base_points(points), geometry=GEOMETRY,
+        rear_extent_m=REAR_EXTENT_M,
+        rear_half_width_m=REAR_HALF_WIDTH_M,
+        observation_half_width_m=0.30)
+
+    assert result['observation_roi_clipped'] is False
+
+
+def test_wide_roi_does_not_join_disjoint_collinear_faces():
+    dock_face = [(-0.42, lateral)
+                 for lateral in np.linspace(-0.18, 0.18, 101)]
+    other_table_face = [(-0.42, lateral)
+                        for lateral in np.linspace(-0.85, -0.40, 121)]
+    scan = scan_from_base_points(dock_face + other_table_face)
+
+    results = [estimate_rear_box_face(
+        scan, geometry=GEOMETRY, rear_extent_m=REAR_EXTENT_M,
+        rear_half_width_m=REAR_HALF_WIDTH_M,
+        observation_half_width_m=half_width)
+        for half_width in (0.6, 0.9, 1.2)]
+
+    for result in results:
+        assert result['face_midpoint_base_xy_m'] == pytest.approx(
+            (-0.42, 0.0), abs=0.004)
+        assert result['span_m'] == pytest.approx(0.36, abs=0.01)
+        assert result['support_count'] >= 90
+    assert results[1]['face_midpoint_base_xy_m'] == pytest.approx(
+        results[0]['face_midpoint_base_xy_m'], abs=0.002)
+    assert results[2]['face_midpoint_base_xy_m'] == pytest.approx(
+        results[0]['face_midpoint_base_xy_m'], abs=0.002)
+
+
+def test_dock_reference_recovers_lateral_position_and_heading():
+    reference_pose = {
+        'x_m': 1.0, 'y_m': 2.0, 'yaw_rad': math.radians(30.0),
+    }
+    reference = {
+        'face_midpoint_base_xy_m': (-0.42, 0.08),
+        'normal_base_xy': (
+            math.cos(math.radians(4.0)), math.sin(math.radians(4.0))),
+    }
+    expected = np.array((1.7, 1.2, math.radians(-20.0)))
+    reference_rotation = np.array((
+        (math.cos(reference_pose['yaw_rad']), -math.sin(reference_pose['yaw_rad'])),
+        (math.sin(reference_pose['yaw_rad']), math.cos(reference_pose['yaw_rad'])),
+    ))
+    face_map = (
+        reference_rotation @ np.asarray(reference['face_midpoint_base_xy_m'])
+        + np.array((reference_pose['x_m'], reference_pose['y_m'])))
+    normal_map = reference_rotation @ np.asarray(reference['normal_base_xy'])
+    current_rotation = np.array((
+        (math.cos(expected[2]), -math.sin(expected[2])),
+        (math.sin(expected[2]), math.cos(expected[2])),
+    ))
+    observed = {
+        'face_midpoint_base_xy_m': tuple(
+            current_rotation.T @ (face_map - expected[:2])),
+        'normal_base_xy': tuple(current_rotation.T @ normal_map),
+    }
+
+    result = derive_robot_pose_from_dock_reference(
+        reference, observed, reference_pose)
+
+    assert tuple(result[key] for key in ('x_m', 'y_m', 'yaw_rad')) == (
+        pytest.approx(expected, abs=1e-12))
+
+
+@pytest.mark.parametrize(
+    ('reference', 'observed', 'reference_pose', 'message'),
+    [
+        (
+            {'face_midpoint_base_xy_m': (-0.4, 0.0),
+             'normal_base_xy': (2.0, 0.0)},
+            {'face_midpoint_base_xy_m': (-0.4, 0.0),
+             'normal_base_xy': (1.0, 0.0)},
+            {'x_m': 0.0, 'y_m': 0.0, 'yaw_rad': 0.0},
+            'unit vector',
+        ),
+        (
+            {'face_midpoint_base_xy_m': (-0.4, 0.0),
+             'normal_base_xy': (1.0, 0.0)},
+            {'face_midpoint_base_xy_m': (-0.4, math.nan),
+             'normal_base_xy': (1.0, 0.0)},
+            {'x_m': 0.0, 'y_m': 0.0, 'yaw_rad': 0.0},
+            'finite XY point',
+        ),
+        (
+            {'face_midpoint_base_xy_m': (-0.4, 0.0),
+             'normal_base_xy': (1.0, 0.0)},
+            {'face_midpoint_base_xy_m': (-0.4, 0.0),
+             'normal_base_xy': (1.0, 0.0)},
+            {'x_m': 0.0, 'y_m': 0.0, 'yaw_rad': math.inf},
+            'must be finite',
+        ),
+    ],
+)
+def test_dock_reference_rejects_invalid_geometry(
+        reference, observed, reference_pose, message):
+    with pytest.raises(ValueError, match=message):
+        derive_robot_pose_from_dock_reference(
+            reference, observed, reference_pose)
 
 
 def test_central_minimum_range_hole_still_uses_both_return_sides():
