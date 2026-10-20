@@ -2463,6 +2463,70 @@ def test_one_centimetre_table_correction_stops_when_gap_does_not_improve(mission
                for call in mission.emit.call_args_list)
 
 
+@pytest.mark.parametrize('map_shift', [(.02, 0.0, 0.0), (0.0, .03, .4), (-.1, .1, -2.0)])
+def test_final_depth_gap_survives_stationary_map_pose_updates(mission, map_shift):
+    evidence = json.loads((ROOT / 'jdamr_cube_navigation/test/fixtures/'
+                           'table_final_gap_map_shift_20261020.json').read_text())
+    observed = evidence['target']['observation_robot_pose_map']
+    parked = tuple(observed[i] + map_shift[i] for i in range(3))
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = evidence['target_gap_m']
+    mission.parking_motion_revision = 7
+    before = deepcopy(mission.observe_target.return_value)
+    measured = deepcopy(evidence['target'])
+    mission.observe_target.side_effect = [before, before, measured]
+    mission.capture_stationary_pose.side_effect = [((0, 0, 0), {}), (parked, {})]
+
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': evidence['front_extent_m']},
+                      'wheel_outer_width': {'value': .540},
+                      'frame_width': {'value': evidence['frame_width_m']}},
+        'water_station', (0.06, -1.27), .6, execute=True, candidate_trial=True)
+
+    mission._straight_final_approach.assert_called_once()
+    final = mission.emit.call_args.kwargs
+    assert final['estimated_front_corner_gaps_m'] == pytest.approx(
+        evidence['coherent_corner_gaps_m'])
+    assert final['confirmation_basis'] == 'fresh_depth_table_edge'
+    assert final['physical_accuracy'] == 'NOT_EXTERNALLY_MEASURED'
+    assert mission.selected_pose == dict(
+        zip(('id', 'x_m', 'y_m', 'yaw_rad'), ('final_approach', *parked)))
+    # The escape face must share the current map pose used by the stop hold.
+    face = mission.last_box_face['face_center_map_xy_m']
+    normal = mission.last_box_face['outward_normal_map_xy']
+    assert sum((parked[i] - face[i]) * normal[i] for i in (0, 1)) == pytest.approx(
+        sum((observed[i] - measured['face_center_map_xy_m'][i])
+            * measured['outward_normal_map_xy'][i] for i in (0, 1)))
+    assert measured == evidence['target']
+
+
+def test_final_depth_is_reobserved_if_motion_occurs_during_stop_capture(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    mission.parking_motion_revision = 7
+    before = deepcopy(mission.observe_target.return_value)
+    measured = {**before, 'observation_robot_pose_map': [.925, 0.0, 0.0]}
+    fresh = {**before, 'observation_robot_pose_map': [.945, 0.0, 0.0],
+             'face_center_map_xy_m': [1.02, 0.0], 'x_m': .945}
+    mission.observe_target.side_effect = [before, before, measured, fresh]
+    captures = iter([(0.0, 0.0, 0.0), (.945, 0.0, 0.0), (.945, 0.0, 0.0)])
+
+    def capture(**_kwargs):
+        pose = next(captures)
+        if pose[0] > 0.0:
+            mission.parking_motion_revision = 8
+        return pose, {}
+
+    mission.capture_stationary_pose.side_effect = capture
+    assert invoke(mission)
+    mission._straight_final_approach.assert_called_once()
+    assert mission.observe_target.call_count == 4
+    assert any(call.args == ('box_target_discarded',)
+               and call.kwargs.get('reason') == 'motion_after_table_observation'
+               for call in mission.emit.call_args_list)
+    assert mission.emit.call_args.kwargs['estimated_front_gap_m'] == pytest.approx(.01)
+
+
 def test_one_centimetre_table_correction_never_reuses_face_after_observation_loss(mission):
     mission.surface_mode = 'table_edge'
     mission.final_gap_override_m = 0.01
