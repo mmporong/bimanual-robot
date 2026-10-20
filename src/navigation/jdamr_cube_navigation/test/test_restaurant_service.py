@@ -2812,8 +2812,9 @@ def test_zero_turn_drive_commands_no_rotation_and_stops_at_the_distance(monkeypa
 @pytest.mark.parametrize('distance_m, expected_speed', [
     (0.022, 0.01), (0.08, 0.02), (0.30, 0.05),
 ])
+@pytest.mark.parametrize('setup_delay_s', [0.0, 11.0])
 def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
-        monkeypatch, distance_m, expected_speed):
+        monkeypatch, distance_m, expected_speed, setup_delay_s):
     node = route()
     clock = [0.0]
     position = [0.0]
@@ -2841,7 +2842,11 @@ def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
             translation=SimpleNamespace(x=position[0], y=0.0),
             rotation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0)))
 
-    node.escape_velocity = SimpleNamespace(publish=publish)
+    def create_publisher(*_args, **_kwargs):
+        clock[0] += setup_delay_s
+        return SimpleNamespace(publish=publish)
+
+    node.create_publisher = create_publisher
     node.parking_tf = SimpleNamespace(lookup_transform=lookup)
     monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
@@ -2855,6 +2860,7 @@ def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
     assert position[0] >= first_stop_position[0]
     assert travelled == pytest.approx(position[0])
     assert travelled <= distance_m + 0.003
+    assert node._last_direct_motion_failure is None
     finished = [event for event in _events(node)
                 if event['event'] == 'precision_straight_finished']
     assert finished[-1]['travelled_m'] == pytest.approx(travelled)
@@ -3622,6 +3628,54 @@ def test_something_in_the_front_blind_range_backs_off_instead_of_driving_forward
     node._drive_straight = Mock(return_value=True)
     assert node._escape_blocked() is True
     assert node._drive_straight.call_args.args[1] == 'path_blocked_escape_forward'
+
+
+@pytest.mark.parametrize('setup_s, task_deadline_s, stopped, guard_failure, should_move', [
+    (11.0, None, False, None, True),
+    (11.0, 5.0, False, None, False),
+    (11.0, None, True, None, False),
+    (11.0, None, False, 'scan stale', False),
+])
+def test_direct_motion_setup_keeps_move_budget_without_extending_task(
+        monkeypatch, setup_s, task_deadline_s, stopped, guard_failure, should_move):
+    node = route()
+    clock = [0.0]
+    travelled = [0.0]
+    published = []
+    node.run_deadline_s = task_deadline_s
+
+    def publish(message):
+        published.append(message.linear.x)
+        if message.linear.x:
+            travelled[0] += 0.02
+
+    def prepare():
+        clock[0] += setup_s
+        node.stop_requested = stopped
+        return SimpleNamespace(publish=publish)
+
+    def spin(*_args, **_kwargs):
+        clock[0] += 0.02
+        node.latest_motion = (clock[0], 0.0, 0.0)
+
+    node._escape_publisher = prepare
+    node._guard_failure = lambda *_args: guard_failure
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    command = restaurant_service.Twist()
+    command.linear.x = 0.05
+
+    result = node._direct_motion(
+        command, lambda distance: distance >= 0.10, lambda: travelled[0],
+        7.0, 'straight_drive_stopped')
+
+    assert any(published) is should_move
+    assert (result >= 0.10) is should_move
+    assert published[-5:] == [0.0] * 5
+    assert node.run_deadline_s == task_deadline_s
+    expected_failure = ('operator_stop' if stopped else guard_failure
+                        or ('direct_motion_timeout' if not should_move else None))
+    assert node._last_direct_motion_failure == expected_failure
 
 
 def test_direct_motion_stops_on_a_failed_input(monkeypatch):

@@ -1715,3 +1715,20 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **검증:** 관련 8개 스위트 950건(15.23초), 변경 생산 모듈 2개 lint·구문·diff 확인 통과다. 실제 계획 함수의 endpoint 경계, 같은 visit의 짧은 후진·frozen 면 유지, skew 재관측, 막힘/정지/링크/무진전, slow-coast를 포함한다. 원본 run 로그는 PC/Pi `$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261019_122616_83b101eb/cycle_events.jsonl`이다. 사용자가 도크 재배치를 예고한 뒤 이동하지 않았으며 HOME/AMCL를 갱신하지 않았다. 이 수정의 실차 완주는 아직 수행하지 않았다.
 
 **독립 검수·비이동 배포:** 주행 도중 partial travelled와 함께 stop/link/sensor/timeout이 반환되는 경로의 성공 오분류를 수정하고 4종 회귀·검수 PASS를 확인했다. Pi 소스/설치 2쌍 SHA·import 일치와 idle executor PID235200·기존 Nav2/base active, fresh scan/odom·속도0·pending0·CM 두 구역 활성 상태를 확인했다. 복원본은 `$HOME/.local/state/jdamr/parking-sequence-repair/20261019_124055/`, PC receipt는 `$HOME/.local/state/bimanual-robot/dock_return_20261019/parking_sequence_repair_deployment.json`이다. 기존 사용자용 서비스는 유지하며 종료는 §22.14 명령과 같다. 임시 확인 노드는 종료했다. 도크 재배치 완료를 받기 전 HOME/AMCL는 바꾸지 않았으며 새 주행은 제출하지 않았다.
+
+
+### 22.19 2026-10-20 첫 구동 준비시간과 재부팅 후 도크 초기화 거부
+
+**첫 구동의 관측:** `table_01_20261020_103756_40c6c2e1`은 관측점 재개 뒤 0.284532 m 전진을 요청했지만 이동은 0 m였다. 속도 0.05 m/s와 추가 5초에서 이동 예산은 10.6906초였고, 접근 시작부터 종료 기록까지 10.8407초였다. 이동 deadline은 `_direct_motion`의 첫 발행기 생성·초기 odom 조회보다 먼저 계산됐다. 기존 지연 없는 발행기 mock으로는 이 경로를 검증하지 못했다. 원래 로그에는 준비 하위 단계별 시간이 없어 11초 지연 전부를 DDS 생성 때문이라고 확정하지 않는다.
+
+**조치와 증거:** `a25b1fd`는 준비시간을 짧은 이동 예산에서 분리하되 전체 태스크 deadline은 연장하지 않는다. 준비 중 사용자 정지·전체 deadline 만료·센서 오류 시 구동하지 않는 회귀를 포함했다. 실제 정밀 직선 제어 모형의 11초 첫 발행 지연은 이전 구현에서 실패하고 수정본에서 통과했다. 관련 642건·구문·치명 lint·diff 검사를 통과했고 Pi 소스/설치 SHA와 import를 확인했다. 현재 로그에는 `direct_motion_ready`의 준비시간과 `direct_motion_timeout` 원인을 남긴다. 이는 첫 준비 지연 자체나 전체 왕복 실차 연속성이 해결됐다는 뜻은 아니다.
+
+**재부팅과 도크 확인:** 부팅 후 베이스는 자동 기동했으나 Nav2·상주 실행기는 내려갔고 Astra USB 복구 실패 기록이 남았다. 사용자 USB 재연결 뒤 새 320×240 깊이 영상·scan·odom·배터리 수신을 확인했다. 이후 USB 복구 결과는 success, 시스템 상태는 running이었다. 기존 준비 전용 세션과 idle 실행기를 복구했고 과거 위치초기화는 무효화했다. 사용자는 현재 도크이며 후면 박스가 있다고 확인했다. 이전 테이블 위치의 seed나 임의 전역 정합 후보를 현재 위치로 발행하지 않았다.
+
+**중복 비율 조건:** `init_20261020_133500`에서 현재/기준 스캔 130/143개 중 93/98점이 5 cm 내 일치했다. 상대 자세는 평행이동 5 mm·회전 1°, 65% trimmed 평균 잔차 3.834 mm였다. 기존 양방향 70% 조건 중 기준 쪽 68.531%에서 거부됐다. `init_20261020_134025`에서는 같은 상대 자세·94/99개 일치점·잔차 5.248 mm였지만 현재 반환점이 143개로 늘어 현재 비율도 65.734%가 됐다. 이는 일치점의 소실과 전체 반환점 수 변화가 같은 상태를 반복 거부한 사례다.
+
+도크 고정 기준에 한해 두 비율 거부를 양방향 최소 80개 일치점으로 정리했다. 서로 다른 3개 사분면의 지지, 65% trimmed 평균 잔차 2 cm 이내, 이동/회전 경계, 인접 다른 자세와의 점수 차, 지도·HOME·라이다 장착 일치는 유지한다. 지도 기반 초기화의 기존 inlier 기준은 변경하지 않았다. 비율은 진단값으로 남기고 정합 근거·일치점 수를 기록한다. 저장 기준 일부 가림·새 반환점 추가는 수락하지만 희소 일치점·무작위 장면·대칭 원·일직선·다른 지도/도크/큰 이동은 거부하는 회귀를 확인했다.
+
+**좌표 저장 경계 오류:** 정합 후 `initial_pose.yaml`을 작성하면서 NumPy 실수형을 `yaml.safe_dump`가 거부했다. 기존 초기화 모의 결과는 일반 실수형이라 이 경계를 놓쳤다. 도크 정합의 반환 좌표와 상대 자세를 일반 실수형으로 변환하고 실제 정합 결과의 YAML 왕복 검사를 추가했다. helper 스위트 131건·구문·치명 lint·diff 검사를 통과했다. Pi 소스 scripts 경로와 운영 tools 사본에 같은 파일을 반영했다.
+
+**실제 준비 결과와 남은 범위:** `init_20261020_134208`에서 새 도크 스캔 정합, AMCL과 약 2 mm·0.1° 일치, Nav2 비이동 활성화를 완료했다. 등록 HOME은 유지하고 도크 출발 대기를 기록했다. 사용자의 출발 전 준비 요청에 따라 카메라·인식기는 기동 대기를 줄이도록 함께 유지하며 별도 녹화·RViz·진단 상주 프로세스는 만들지 않았다. 해당 쌍의 종료는 Pi `sudo systemctl stop jdamr-box-rgbd.service jdamr-box-observer.service`다. 기존 base·Nav2·상주 실행기는 다음 명시적 출발을 기다린다. 실행 로그는 기존 runs, 배포·검사 receipt는 `$HOME/.local/state/bimanual-robot/motion_setup_fix_20261020/`와 `$HOME/.local/state/bimanual-robot/reboot_check_20261020/`에 보존한다. 이번 준비 중 실물 이동·전체 왕복 검증은 수행하지 않았다.

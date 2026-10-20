@@ -1286,9 +1286,20 @@ class ServiceRoute(CorridorRoute):
         measurement once the base is at rest (odom speed under 0.01) or
         DIRECT_SETTLE_S has passed.
         """
+        setup_started_s = time.monotonic()
         publisher = self._escape_publisher()
         self._last_direct_motion_failure = None
         value = measure()
+        # DDS publisher creation precedes motion and can exceed a short move's
+        # budget. Keep that budget for motion; the task deadline stays fixed.
+        setup_s = time.monotonic() - setup_started_s
+        deadline_s += setup_s
+        task_deadline_s = getattr(self, 'run_deadline_s', None)
+        if task_deadline_s is not None:
+            deadline_s = min(deadline_s, task_deadline_s)
+        if setup_s >= 0.1:
+            self.emit('direct_motion_ready', setup_s=setup_s,
+                      motion_budget_s=max(0.0, deadline_s - time.monotonic()))
         published_s = guarded_s = 0.0
         try:
             while not done(value) and not self.stop_requested and time.monotonic() < deadline_s:
@@ -1311,6 +1322,7 @@ class ServiceRoute(CorridorRoute):
                 self._last_direct_motion_failure = 'operator_stop'
             elif time.monotonic() >= deadline_s and not done(value):
                 self._last_direct_motion_failure = 'direct_motion_timeout'
+                self.emit(event, reason='direct_motion_timeout')
         finally:
             for _repeat in range(5):
                 publisher.publish(Twist())

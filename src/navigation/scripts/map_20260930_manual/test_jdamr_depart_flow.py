@@ -1157,6 +1157,13 @@ def _dock_scan_pair(monkeypatch, *, delta=(.03, -.02, .04), shape='room'):
         current = rng.uniform(-5., 5., (120, 2))
     if shape == 'sparse':
         current = current[:40]
+    if shape == 'occluded_reference':
+        current = current[:80]
+    if shape == 'weak_matched_support':
+        current = np.concatenate((current[np.linspace(0, 119, 75, dtype=int)],
+                                  rng.uniform(-5., 5., (25, 2))))
+    if shape == 'new_current_returns':
+        current = np.concatenate((current, rng.uniform(5., 8., (60, 2))))
 
     def laser_points(path):
         points = current if path == 'current' else anchored
@@ -1184,11 +1191,24 @@ def test_registered_dock_reference_retains_its_map_anchor(monkeypatch):
         [.12 + c * delta[0] - s * delta[1], .165 + s * delta[0] + c * delta[1],
          .134 + delta[2]], abs=.006)
     assert reference['pose_map'] == [.12, .165, .134]
+    # The accepted numeric result is persisted as the activation seed and state.
+    assert yaml.safe_load(yaml.safe_dump(result)) == result
+
+
+@pytest.mark.parametrize('shape', ['occluded_reference', 'new_current_returns'])
+def test_registered_dock_accepts_changed_visibility_with_enough_matched_support(
+        monkeypatch, shape):
+    click, reference = _dock_scan_pair(monkeypatch, shape=shape)
+    result = d.refine_at_registered_dock('current', click, reference)
+    assert result is not None
+    assert min(result['inlier_5cm'], result['reference_inlier_5cm']) < .70
+    assert min(result['current_inlier_count'], result['reference_inlier_count']) >= 80
+    assert result['relative_pose'] == pytest.approx((.03, -.02, .04), abs=.006)
 
 
 @pytest.mark.parametrize('case', ['click', 'previous_seed', 'new_map', 'new_home',
                                   'translation', 'rotation', 'circle', 'line',
-                                  'sparse', 'clutter'])
+                                  'sparse', 'clutter', 'weak_matched_support'])
 def test_dock_reference_does_not_accept_a_different_or_ambiguous_placement(monkeypatch, case):
     delta = (.3, 0., 0.) if case == 'translation' else (
         (0., 0., .3) if case == 'rotation' else (.03, -.02, .04))
