@@ -1527,12 +1527,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and yaw_error <= allowed_yaw_error_rad
                 and max(corner_gaps) - nearest_gap_m <= 2 * gap_tolerance_m
                 and estimated_gap_m > target_gap_m)
-            if (fine_table and not realignment_reapproached
-                    and not straight_correction
-                    and all(math.isfinite(gap) and gap > 0.0 for gap in corner_gaps)
-                    and nearest_gap_m <= target_gap_m + gap_tolerance_m
-                    and (max(corner_gaps) > target_gap_m + gap_tolerance_m
-                         or max(corner_gaps) - nearest_gap_m > 2.0 * gap_tolerance_m)):
+            corner_spread_m = max(corner_gaps) - nearest_gap_m
+            close_table_misalignment = (
+                fine_table
+                and all(math.isfinite(gap) and gap > 0.0 for gap in corner_gaps)
+                and nearest_gap_m <= FINAL_PLAN_GAP_M
+                and (yaw_error > allowed_yaw_error_rad
+                     or corner_spread_m > 2.0 * gap_tolerance_m))
+            if close_table_misalignment and not realignment_reapproached:
                 if (self.stop_requested or not self._operator_link_ready()
                         or not self._navigation_ready(require_fresh_amcl=False)):
                     return False
@@ -1556,6 +1558,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     return False
                 previous_gap_m = None
                 continue
+            if close_table_misalignment:
+                self.emit(
+                    'failed', phase='final_approach',
+                    reason='final_table_alignment_unconfirmed',
+                    estimated_front_corner_gaps_m=corner_gaps,
+                    estimated_face_yaw_error_rad=yaw_error,
+                    realignment_reapproach_consumed=True)
+                return False
             # Corrections consume fresh stopped observations within the same task
             # budget; a lost face or an overshoot never dispatches another advance.
             if (not fine_table or not all(math.isfinite(gap) for gap in corner_gaps)
