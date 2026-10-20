@@ -30,6 +30,19 @@ def route_node():
     return node
 
 
+def test_rear_readiness_failure_records_battery_cause_without_motion():
+    node = route_node()
+    node._final_gap_m = Mock(return_value=.01)
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=False)
+    node.last_readiness_failure = 'battery low: voltage=10.192V limit=10.500V'
+    node.emit = Mock()
+    assert not node.park_rear_box(GEOMETRY, 'route', execute=True, timeout_s=90)
+    node.emit.assert_called_once_with(
+        'failed', phase='rear_box_readiness', reason=node.last_readiness_failure)
+    node._approach_rear_corridor.assert_not_called()
+
+
 def face(gap=0.01, angle=0.0, stamp=5.0):
     normal = math.cos(angle), math.sin(angle)
     tangent = -normal[1], normal[0]

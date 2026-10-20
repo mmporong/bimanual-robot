@@ -1700,6 +1700,7 @@ class ServiceRoute(CorridorRoute):
         limit_s = getattr(self, 'operator_link_timeout_s', OPERATOR_LINK_TIMEOUT_S)
         if age_s is not None and age_s <= limit_s:
             return True
+        self.last_readiness_failure = 'operator_link_lost'
         self.emit('departure_blocked', reason='operator_link_lost',
                   heartbeat_age_s=age_s, limit_s=limit_s)
         return False
@@ -1748,6 +1749,15 @@ class ServiceRoute(CorridorRoute):
                        else self.service_contract['minimum_start_battery_v'])
         if (voltage_v is None or not math.isfinite(voltage_v)
                 or voltage_v < threshold_v):
+            if voltage_v is None:
+                self.last_readiness_failure = 'battery voltage missing'
+            elif not math.isfinite(voltage_v):
+                self.last_readiness_failure = (
+                    f'battery voltage non-finite: value={voltage_v}')
+            else:
+                self.last_readiness_failure = (
+                    f'battery departure reserve: voltage={voltage_v:.3f}V '
+                    f'limit={threshold_v:.3f}V')
             self.emit('departure_blocked', reason='battery_departure_reserve',
                       voltage_v=voltage_v if voltage_v is not None
                       and math.isfinite(voltage_v) else None,
@@ -2299,7 +2309,7 @@ class ServiceRoute(CorridorRoute):
         self.verify_live_maps()
         self.run_deadline_s = time.monotonic() + timeout_s
         if not self.wait_until_ready(timeout=10.0):
-            raise RuntimeError('navigation data unavailable')
+            raise RuntimeError(self.readiness_failure_reason())
         if not self._parking_parameters_ready():
             raise RuntimeError('load the generated Parking controller parameters into Nav2')
         pose, attempts = select_destination(poses, self.plan_pose)
@@ -2352,7 +2362,7 @@ class ServiceRoute(CorridorRoute):
         self.verify_live_maps()
         self.run_deadline_s = time.monotonic() + timeout_s
         if not self.wait_until_ready(timeout=10.0):
-            raise RuntimeError('navigation data unavailable')
+            raise RuntimeError(self.readiness_failure_reason())
         reverse = pose.get('parking_direction', 'forward') == 'reverse'
         if not (self._parking_parameters_ready(reverse=True) if reverse
                 else self._parking_parameters_ready()):

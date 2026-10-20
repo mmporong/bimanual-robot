@@ -787,6 +787,7 @@ class CorridorRoute(Node):
 
     def wait_until_ready(self, timeout=15.0):
         """Require current sensors, battery, and a bounded AMCL estimate."""
+        self.last_readiness_failure = None
         deadline = time.monotonic() + timeout
         protection_failure = None
         while time.monotonic() < deadline and not self.stop_requested:
@@ -804,10 +805,17 @@ class CorridorRoute(Node):
                         'travel pose gate passed: '
                         f'max_error={maximum_error_rad:.6f}rad')
                 return True
+        self.last_readiness_failure = (
+            'operator stop' if self.stop_requested else
+            self._guard_failure() or protection_failure or 'navigation readiness timeout')
         self.get_logger().error(
-            'navigation readiness timeout: '
-            f'{self._guard_failure() or protection_failure or "operator stop"}')
+            'navigation readiness timeout: ' + self.last_readiness_failure)
         return False
+
+    def readiness_failure_reason(self):
+        """Retain the failed readiness attempt's cause for the caller's result log."""
+        return (getattr(self, 'last_readiness_failure', None)
+                or 'navigation data unavailable')
 
     def _pose(self, index, waypoint):
         if 'yaw' in waypoint:

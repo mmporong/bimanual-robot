@@ -681,6 +681,8 @@ class RearBoxParkingMixin:
         self.confirmation = None
         self.verify_live_maps()
         if not self.wait_until_ready(timeout=10.0):
+            self.emit('failed', phase='rear_box_readiness',
+                      reason=self.readiness_failure_reason())
             return False
         if not execute:
             self.capture_stationary_pose()

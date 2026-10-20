@@ -77,6 +77,19 @@ def invoke(node, execute=True, *, search=False):
         candidate_trial=execute, search=search)
 
 
+@pytest.mark.parametrize('entrypoint', ['visit', 'observation'])
+def test_readiness_cause_reaches_box_caller_without_motion(mission, entrypoint):
+    mission.wait_until_ready.return_value = False
+    mission.last_readiness_failure = 'battery low: voltage=10.192V limit=10.500V'
+    with pytest.raises(RuntimeError, match=mission.last_readiness_failure):
+        if entrypoint == 'visit':
+            invoke(mission)
+        else:
+            mission.at_observation('route')
+    mission.execute.assert_not_called()
+    mission.capture_stationary_pose.assert_not_called()
+
+
 def _rear_home_node(monkeypatch, *, planned=True, parked=True):
     node = object.__new__(BoxServiceRoute)
     home = {'id': 'home_dock', 'x_m': .12, 'y_m': .165, 'yaw_rad': .134,

@@ -1819,3 +1819,11 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - **운영 조치:** 사용자의 정지 요청으로 출발 대기를 취소했고 fresh odom 3표본의 선속도·각속도 0을 확인했다. 배터리 교체·충전 완료는 확인되지 않았다. 새 주행·위치초기화·서비스 재시작은 수행하지 않았다.
 - **재발 시 우선순위:** 같은 메시지 또는 출발 직후 실행기 실패가 나면 현재 run의 배터리 사유·새 전압부터 확인하고 측정값과 기준을 설명한다. 전압이 충분하면 실제 센서·위치·통신 사유를 확인한다. 기존 입력과 guard를 사용하며 출발에 새 장기 검수 단계를 추가하지 않는다. 이 우선순위를 `src/navigation/AGENTS.md`에 저장했다.
 - **미완료:** 이번 요청은 기억·운영 규칙 반영이며 실제 사유를 구조화 실패 이벤트로 전달하는 실행기 코드 수정은 아직 반영하지 않았다. 메시지 표시가 고쳐졌다고 주장하지 않는다. 로그 근거는 해당 run의 `cycle_events.jsonl` 및 Pi `jdamr-box-executor.service`의 2026-10-20 18:44 journal이다.
+
+
+### 22.25. 준비 실패의 실제 사유를 최종 오류까지 보존 (2026-10-20)
+
+- **확정 원인과 수정:** §22.24의 `10.192 V < 10.5 V`는 하위 guard에만 남고 box caller가 고정 위치·센서 오류로 바꿨다. `CorridorRoute.wait_until_ready()`가 실패 사유를 저장하고 새 시도에서 초기화하도록 수정했다. `ServiceRoute`의 별도 출발 예비전압·operator link 검사도 사유를 보존한다. box 방문/관측 재개/복귀/정차 재개, restaurant 방문/복귀, 단독 후면 주차, `activate_navigation`, 수동 이탈 caller에 이를 전달했다. 정지 요청은 준비 실패 반환 시 우선한다.
+- **검증:** 관련 5개 스위트 873건과 activation 58건, 치명 flake8·구문·diff 통과. 기존 일반 오류 문자열을 기대하던 covariance 테스트를 구체 사유 보존으로 갱신하고, 예전 배터리 실행 테스트에서 누락된 `config={}` fixture 상태를 보완했다. 초기 패키지 조회 실패는 통합 리포 install만 source한 검증 환경 문제였으며 기존 `$HOME/jdamr_rgbd_ws/install/setup.bash` overlay를 포함한 재검증에서 통과했다. 독립 리뷰의 activation 전달 누락 지적을 반영한 뒤 APPROVE를 받았다.
+- **Pi 반영:** source/install 모듈 5쌍과 `$HOME/jdamr_data/map_20260930_manual/tools/box_escape_once.py`, 총 11경로의 SHA·import 확인. 실제 설치 모듈에 모의 입력만 넣어 low `10.192/10.5 V`, reserve `10.6/10.8 V`, 충분 `12.2 V` 결과를 확인했다. 이 모의 입력을 실물 저전압 재현 또는 주행 성공으로 해석하지 않는다. 배포 receipt는 PC `$HOME/.local/state/bimanual-robot/battery_reason_20261020/deployment_receipt.json`, 복원본은 Pi `$HOME/.local/state/jdamr/battery-reason/20261020_191954/`다.
+- **현재 상태/한계:** 실물 새 전압 12.200–12.228 V, 배포 전후 fresh odom 각 3개 모두 선속도·각속도 0, spool request/running 0. idle 실행기 PID39453만 새 코드로 재시작했고 base PID31767·Nav2 PID32377은 유지했다. RGB-D/관측기는 비활성이며 새 상주 진단 프로세스는 없다. 다음 요청을 받기 위해 기존 서비스는 유지한다. 종료 명령은 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. 사용자 정지 유지, 새 이동 명령 없음, 수정본의 전체 왕복/실물 정밀주차 재검증은 남아 있다. 배터리 기준·guard·대기시간을 변경하거나 새 출발 절차를 추가하지 않았다.

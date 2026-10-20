@@ -222,7 +222,7 @@ def activate_prepared(node):
     require_active(node, LOCALIZATION_NODES)
     node.verify_live_maps(require_command_path=False)
     if not node.wait_until_ready(timeout=10.0):
-        raise RuntimeError('fresh localization or departure battery unavailable')
+        raise RuntimeError(node.readiness_failure_reason())
     client = node.create_client(
         ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
     startup_requested = False

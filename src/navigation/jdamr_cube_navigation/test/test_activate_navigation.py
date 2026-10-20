@@ -408,6 +408,7 @@ def test_unconfirmed_localization_never_requests_startup(monkeypatch, failure):
         node.verify_live_maps.side_effect = RuntimeError('map mismatch')
     elif failure == 'sensors':
         node.wait_until_ready.return_value = False
+        node.readiness_failure_reason.return_value = 'scan missing'
     elif failure == 'stationary':
         node.capture_stationary_pose.side_effect = RuntimeError('no current TF')
     else:
@@ -415,6 +416,23 @@ def test_unconfirmed_localization_never_requests_startup(monkeypatch, failure):
     with pytest.raises(RuntimeError):
         module.activate_prepared(node)
     client.call_async.assert_not_called()
+
+
+@pytest.mark.parametrize('reason', [
+    'battery low: voltage=10.192V limit=10.500V',
+    'battery departure reserve: voltage=10.600V limit=10.800V',
+    'scan missing', 'operator stop',
+])
+def test_activation_preserves_readiness_cause_without_startup(monkeypatch, reason):
+    monkeypatch.setattr(module, 'require_active', Mock())
+    node, client = prepared_node()
+    node.wait_until_ready.return_value = False
+    node.readiness_failure_reason.return_value = reason
+    with pytest.raises(RuntimeError, match=reason):
+        module.activate_prepared(node)
+    client.call_async.assert_not_called()
+    node.create_client.assert_not_called()
+    node.capture_stationary_pose.assert_not_called()
 
 
 @pytest.mark.parametrize('success', [False, True])

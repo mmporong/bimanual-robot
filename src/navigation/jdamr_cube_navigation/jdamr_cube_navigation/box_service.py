@@ -1130,7 +1130,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.verify_live_maps()
         with self._localization_bound(True):
             if not self.wait_until_ready(timeout=10.0):
-                raise RuntimeError('localization or sensor data unavailable')
+                raise RuntimeError(self.readiness_failure_reason())
             actual, _ = self.capture_stationary_pose(intermediate=True)
         end = route['waypoints'][-1]
         return math.dist(actual[:2], (end['x'], end['y'])) <= limit_m
@@ -1189,7 +1189,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         # covariance of its last transit update; a fresh start is judged strictly.
         with self._localization_bound(resume_at_observation):
             if not self.wait_until_ready(timeout=10.0):
-                raise RuntimeError('localization or sensor data unavailable')
+                raise RuntimeError(self.readiness_failure_reason())
             # Normal starts validate this in preflight; observation resumes skip it.
             if resume_at_observation and not self._parking_parameters_ready():
                 raise RuntimeError('parking controller parameters unavailable')
@@ -2593,7 +2593,7 @@ def run_attempt(args, active=None):
                 node.home_return = True
                 node.verify_live_maps()
                 if not node.wait_until_ready(timeout=10.0):
-                    raise RuntimeError('localization or sensor data unavailable')
+                    raise RuntimeError(node.readiness_failure_reason())
                 ok = node.go_home(execute=True, timeout_s=args.return_timeout_s)
                 return _attempt_code(node, ok)
             if args.resume_parked_from_log is not None:
@@ -2601,7 +2601,7 @@ def run_attempt(args, active=None):
                 face = last_logged_face(args.resume_parked_from_log)
                 node.verify_live_maps()
                 if not node.wait_until_ready(timeout=10.0):
-                    raise RuntimeError('localization or sensor data unavailable')
+                    raise RuntimeError(node.readiness_failure_reason())
                 ok = node.resume_parked(face, args.dwell_s)
                 if args.via_id is None:
                     # The parked stop was the table: its escape leads straight home.
