@@ -1749,3 +1749,21 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **비이동 반영과 현재 상태:** Pi 소스/설치/import의 `box_service.py` SHA는 `a5d99c060d62d14e07180882da7412db6677fb324b4a1498d3022ef8420e91dc`로 일치하며 idle executor PID7399를 반영했다. 복원본은 Pi `$HOME/.local/state/jdamr/final-gap-frame/20261020_142206/`, receipt는 PC `$HOME/.local/state/bimanual-robot/final_gap_frame_20261020/deployment.json`이다. base PID1212·Nav2 PID2010은 재시작하지 않았고 카메라/인식기는 inactive 상태다. spool pending/running 0이며 이번 수정에서 이동을 요청하지 않았다. 기존 서비스 유지 이유는 다음 명시적 요청 대기이며 종료 명령은 Pi `sudo systemctl stop jdamr-box-executor.service jdamr-restaurant-navigation.service jdamr-base.service`다.
 
 **별도 남은 복귀 문제:** 잘못 전환된 복귀는 급수대 후진 이탈과 `home_dock_approach` 이동까지 수행했지만 `rear box coarse static corridor blocked`로 후면 주차에 들어가지 못했다. 이는 이번 최종 간격 좌표 수정과 별개이며 아직 해결됐다고 주장하지 않는다. 1번 테이블은 방문하지 않았고 도크 도착도 미확정이다. 사용자 정지 뒤 자동 재개는 비허용이며 과거 `ready_not_started` 도크 준비 상태를 최신 run의 정지 상태로 정정했다. HOME·AMCL·물리 위치를 임의로 덮어쓰지 않았고 수정 후 전체 왕복 실차 검증도 수행하지 않았다.
+
+
+### 22.21 2026-10-20 후면 TF 시작 외삽·도크 킵아웃 충돌·남은 조기 감속
+
+**관측:** `table_01_20261020_152202_c340f169`은 직선 도크 이탈 0.7 m, 급수대와 1번 테이블 접근·각 후진 이탈, 도크 staging을 수행했다. 전면 양쪽 내부 추정은 각각 7.731/11.092 mm와 11.662/9.666 mm로, 외부 줄자 정밀도가 아니다. 복귀는 coarse 후진 전에 `_align_rear_reference`가 완전한 폭의 박스를 요구해 `rear box observation unavailable`로 끝났다. 후속 `152631_b6893a5a`는 requested TF 1792477595.756052 < earliest 1792477595.877148로 약 121 ms 과거 외삽, `152720_aa8626a9`도 약 42 ms 같은 시작 오류였다. 원인 변화 없이 추가 반복하지 않았다.
+
+기존 staging 경유 복귀 `152813_ba33585f`는 159° 회전에 약 36초가 걸렸다. 후진 중 통로 거리는 1.401 m→0.484 m로 갱신됐고, 후면 면 gap 0.477646 m·각도 −0.218519 rad·span 0.351175 m·60점을 얻었다. 그 후 요청 −0.478678 m의 실제 이동은 0이며 `rear box approach static corridor blocked`로 끝났다. 현재 위치는 후면 복귀 접근 중 정지이며 도크 도착으로 기록하지 않는다. 원본 네 run은 PC/Pi `$HOME/jdamr_data/map_20260930_manual/aligned/runs/`에 있다.
+
+**확정 원인과 수정:**
+
+1. 새 노드의 map→base와 odom→base 최신 조회는 서로 다른 TF 이력 범위에 의존했다. 한 번의 odom←map edge 조회로 frozen 좌표계를 계산하도록 바꿨다. 경로·목표에 같은 변환을 사용하며 누락 TF는 오류로 남긴다. 실제 `tf2_ros.Buffer`에 42/121 ms 시작 차이를 넣으면 이전 조회는 실패하고 새 조회는 통과한다. 별도 대기·임의 pose 초기화는 추가하지 않았다.
+2. 도크 전체 폭을 이용한 랜드마크 정합을 거리 관측 coarse 후진 뒤로 옮겼다. 충분히 가까워진 뒤 관측한 폭·끝점으로 기존 같은 run의 실측 위치 보정·중앙 접근을 수행하고, 먼 staging 재방문만 생략한다. 잘못된 면·다른 폭·ROI 가림·위치 불일치·센서/링크/정지 실패는 그대로 전파한다.
+3. 마지막 면과 이후 정지 TF를 합친 비이동 재생에서 원본 지도는 통과하고 keepout만 막혔다. 첫 셀은 column70/map-row110, bounds [−0.20,−0.05,−0.15,0] m였다. 15 cm 후퇴는 정렬 preview까지만 통과하고 명목 1 cm 종점에서는 여전히 막혀, 5 cm 격자에서 20 cm 후퇴를 선택했다. 실제 마스크의 도크 영역 107셀만 0→254로 해제했다. 전체 폴리곤 재생성은 다른 수동 픽셀을 바꾸므로 사용하지 않았다. 원본 지도 SHA·HOME·다른 영역은 유지하며 새 마스크 SHA는 `334370d62965730df807a1a2a42a9145429551c95947b0b369bd877e01cb7283`다. 등록부·모든 route hash·설정 사본을 함께 갱신했다. 새 rear target-surface 통과 예외는 검수에서 제거했으며 일반 validator로 끝까지 통과한다.
+4. 실제 파라미터에서 FollowPath min-approach 0.075 m/s·curve scaling true, Parking/ParkingReverse approach-band 0.15 m·curve scaling true를 확인했다. 이동의 min-approach를 desired 0.12 m/s와 맞추고 세 controller의 curve scaling을 false로 바꿨다. 주차 band는 desired×0.5초(현재 4 cm)다. 면 제어는 방향 보정 상한을 0.10 rad/s·Kp2로 맞춰 중간 각도에서 전진 전 구간의 creep를 줄였고, 큰 staging 회전은 0.3 rad/s로 진행한 뒤 기존 0.08 rad/s 보정으로 잇는다. 실제 이번 run에서 CM 개입점은 수집하지 않았으므로 감속 전부가 이 설정 때문이라고 단정하지 않는다. 실제 충돌·제동·센서 신선도·명령 timeout·통신·정지 감시는 유지한다.
+
+**검증과 한계:** 실측 로그/정지 TF 출처와 SHA·이전 실제 마스크·HOME은 `test/fixtures/rear_dock_keepout_20261020.json`에 있다. 재생에 사용한 map 변환은 실패 시각의 변환이 아닌 이후 정지 표본이므로 정확한 과거 궤적 재현이 아니다. frozen TF·회전 plant·면 접근 rollout·실패 입력·실제 마스크 재생·후면 reference의 coarse/fine 연결·정지 조건을 검사했다. native code-reviewer는 신규 target-surface의 span 중심 결함을 발견했고 예외 제거 후 재검수 PASS했다. 수정본의 전체 왕복·외부 1 cm 반복 정밀도·시간 단축은 아직 실차에서 검증하지 않았다. 전면 실물 거의 0 cm와 내부 1 cm의 불일치는 §22.20의 미해결 항목으로 유지한다.
+
+**비이동 반영:** 최종 관련 13스위트 1,221건·저장소 기본 1,036통과/3skip, 구문·치명 lint·diff·문서 링크/README 상태 검사를 통과했다. Pi source/install 및 운영 자산 24개 SHA·import·등록부, 실제 세 controller 값과 keepout signature 일치, fresh odom/scan·속도0·spool0을 확인했다. base PID1212·Nav2 PID2010은 유지하고 idle executor만 PID15019로 재기동했다. 복원본은 Pi `$HOME/.local/state/jdamr/navigation-repair/20261020_160033/`, PC receipt는 `$HOME/.local/state/bimanual-robot/navigation_repair_20261020/deployment.json`이다. 배포 도구의 최초 map reload는 잘못된 nav_msgs 서비스 타입 때문에 미적용됐고 nav2_msgs/LoadMap으로 수정한 뒤 result0·실시간 새 mask를 확인했다. 이 도구 오류를 주행 알고리즘 실패로 분류하지 않는다. 임시 probe는 종료했으며 기존 서비스 종료 명령은 §22.20과 같다. 수정 중 새 이동은 요청하지 않았다.

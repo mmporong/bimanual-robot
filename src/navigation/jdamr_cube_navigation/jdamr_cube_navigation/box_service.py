@@ -275,8 +275,6 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     return True
                 if self._reach_staging(stage) is None:
                     return False
-                if not self._align_rear_reference(stage, pose):
-                    return False
             self.pose_id = pose['id']
             self.confirmation = None
             remaining_s = self.run_deadline_s - time.monotonic()

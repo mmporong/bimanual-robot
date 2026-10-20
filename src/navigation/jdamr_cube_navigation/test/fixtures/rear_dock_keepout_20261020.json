@@ -1,0 +1,123 @@
+{
+  "provenance": {
+    "source": "$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261020_152813_ba33585f/cycle_events.jsonl",
+    "sha256": "52879091d2131ca457e89f3951ee03ae676eb465d5b2980aa18abe91df286467",
+    "transform_source": "$HOME/.local/state/bimanual-robot/navigation_repair_20261020/before_live.json",
+    "transform_sha256": "b5fa20858028417f1dbf692bc7d31a3c3fed3df71c1c8763ae25ac53e845418f",
+    "scope": "replay with latest stopped map/odom, not a reconstruction of the unlogged historical map pose",
+    "measured_at": "2026-10-20",
+    "physical_accuracy": "NOT_EXTERNALLY_MEASURED"
+  },
+  "observation": {
+    "face_center_base_xy_m": [
+      -0.8142461901063689,
+      0.0
+    ],
+    "face_midpoint_base_xy_m": [
+      -0.7994946218062196,
+      0.06658193941641007
+    ],
+    "support_center_base_xy_m": [
+      -0.7975774502133608,
+      0.07945476398457996
+    ],
+    "normal_base_xy": [
+      0.9762195892227139,
+      -0.21678402528285107
+    ],
+    "tangent_base_xy": [
+      0.21678402528285107,
+      0.9762195892227139
+    ],
+    "line_anchor_base_xy_m": [
+      -0.7759804350401921,
+      0.17231795397866492
+    ],
+    "line_offset_m": -0.7948830812317993,
+    "normal_yaw_error_rad": -0.21851894378746572,
+    "gap_m": 0.4776462885069115,
+    "center_gap_m": 0.5392461901063689,
+    "span_m": 0.3511751234058245,
+    "tangent_bounds_m": [
+      -0.27434559127584396,
+      0.07682953212998057
+    ],
+    "observation_roi_clipped": false,
+    "support_count": 60,
+    "residual_rms_m": 0.004345375049857543,
+    "provenance": "REAR_LIDAR_FACE_RELATIVE_GEOMETRY",
+    "stamp_s": 1792477752.2024374,
+    "base_pose_odom": [
+      0.8399520618340849,
+      -0.16994686856719976,
+      -0.20865369425760077
+    ],
+    "face_odom": [
+      0.03674888387559956,
+      -0.01672646951033185
+    ],
+    "normal_odom": [
+      0.9101570760209642,
+      -0.4142633183966072
+    ],
+    "midpoint_odom": [
+      0.07196415017110985,
+      0.060689227581496086
+    ],
+    "averaged_frames": 8
+  },
+  "odom_to_map": {
+    "translation": [
+      -0.3762242123385559,
+      0.11859720370616485,
+      0.0
+    ],
+    "rotation": [
+      0.0,
+      0.0,
+      0.1820619087067632,
+      0.983287069679069
+    ],
+    "stamp_s": 1792478158.1482835
+  },
+  "motion": {
+    "linear_mps": 0.0,
+    "angular_radps": 0.0
+  },
+  "rear_extent_m": 0.275,
+  "half_width_m": 0.225,
+  "target_gap_m": 0.01,
+  "old_dock_polygon": [
+    [
+      -0.75,
+      -0.6
+    ],
+    [
+      -0.08458014712400408,
+      -0.6
+    ],
+    [
+      -0.2647811818248595,
+      0.7362682348479284
+    ],
+    [
+      -0.7,
+      0.7
+    ]
+  ],
+  "retreat_m": 0.2,
+  "first_old_block_cell_bounds_m": [
+    -0.2,
+    -0.05,
+    -0.15,
+    0.0
+  ],
+  "old_mask_pixels_zlib_base64": "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",
+  "old_mask_image_sha256": "8278dcef38b06d469b53f32b1c6ab2c5a14b27f23523f27bcb83aa11ab4a8526",
+  "expected_home_pose_map": [
+    0.12002282933008113,
+    0.16495971131874898,
+    0.13404527824949672
+  ],
+  "cleared_mask_cells": 107
+}

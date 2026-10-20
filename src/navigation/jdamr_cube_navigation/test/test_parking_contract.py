@@ -133,6 +133,9 @@ def test_overrides_only_append_parking_plugins_and_deep_copy_follow_path():
     assert configured['Parking']['use_rotate_to_heading'] is True
     assert configured['Parking']['allow_reversing'] is False
     assert configured['Parking']['stateful'] is False
+    assert configured['Parking']['use_regulated_linear_velocity_scaling'] is False
+    assert configured['Parking']['approach_velocity_scaling_dist'] == pytest.approx(
+        .5 * configured['Parking']['desired_linear_vel'])
     checker = configured['parking_goal_checker']
     assert checker == {
         'plugin': 'nav2_controller::SimpleGoalChecker',

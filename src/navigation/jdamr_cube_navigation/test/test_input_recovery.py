@@ -503,10 +503,13 @@ class _World:
         transform.header.frame_id = target_frame
         transform.child_frame_id = source_frame
         transform.header.stamp = _stamp(stamp)
-        transform.transform.translation.x = self.pose[0]
-        transform.transform.translation.y = self.pose[1]
-        transform.transform.rotation.z = math.sin(self.pose[2] / 2.0)
-        transform.transform.rotation.w = math.cos(self.pose[2] / 2.0)
+        # This plant uses identical map/odom coordinates; their frame relation
+        # is identity, independently of the moving base pose.
+        pose = (0., 0., 0.) if {target_frame, source_frame} == {'map', 'odom'} else self.pose
+        transform.transform.translation.x = pose[0]
+        transform.transform.translation.y = pose[1]
+        transform.transform.rotation.z = math.sin(pose[2] / 2.0)
+        transform.transform.rotation.w = math.cos(pose[2] / 2.0)
         return transform
 
     # Scenario controls -----------------------------------------------------
@@ -1190,7 +1193,9 @@ def test_t22_pose_diagnostic_is_motionless(monkeypatch, tmp_path, case):
     assert len(subscriptions) == 1
     assert subscriptions[0].message_type is CameraInfo
     assert subscriptions[0].qos.reliability == ReliabilityPolicy.BEST_EFFORT
-    assert world.destroyed == ([] if info is None else subscriptions)
+    assert world.destroyed == []
+    if subscriptions:
+        assert node.depth_info_subscription is subscriptions[-1]
     assert not world.motions
 
 
@@ -1628,7 +1633,9 @@ def test_heading_hold_dock_preserves_absolute_goal_and_stops_on_input_loss(
 def test_entry_heading_stops_without_reissuing_trim_after_input_failure(
         monkeypatch, tmp_path, case):
     node, world, _stage = _home_stub_node(monkeypatch, tmp_path, BOX_CONTRACT, CONTRACT)
-    world.pose[2] = -0.3
+    # Keep the scan-loss case in motion long enough to exceed input freshness,
+    # even with normal staging rotation speed.
+    world.pose[2] = -0.8 if case == 'scan_gap' else -0.3
     world.run(0.1)
     began_s = world.now
     if case == 'link_lost':
@@ -2644,7 +2651,7 @@ def test_final_approach_follows_the_reobserved_face_when_squared_off():
     sent, turns = {}, []
     captures = iter([((0.0, -0.47, yaw), None), ((0.0, -0.47, -math.pi / 2), None)])
     fake = SimpleNamespace(
-        capture_stationary_pose=lambda: next(captures),
+        capture_stationary_pose=lambda **_kwargs: next(captures),
         parking_contract={'yaw_tolerance_rad': math.radians(3.0)},
         _final_gap_m=lambda: BOX_GAP_M,
         _rotate_in_place=lambda delta: turns.append(delta) or delta,
@@ -2843,7 +2850,7 @@ def _zero_turn_fake(yaw, poses_after=None):
     sent, calls = {}, []
     captures = iter([((0.0, -0.47, yaw), None)] + (poses_after or []))
     fake = SimpleNamespace(
-        capture_stationary_pose=lambda: next(captures),
+        capture_stationary_pose=lambda **_kwargs: next(captures),
         parking_contract={'yaw_tolerance_rad': math.radians(3.0)},
         box_front_half_width_m=0.225,
         _final_gap_m=lambda: BOX_GAP_M,
@@ -2852,7 +2859,7 @@ def _zero_turn_fake(yaw, poses_after=None):
         _pose=lambda _i, wp: SimpleNamespace(header=None, yaw=wp['yaw'], x=wp['x'], y=wp['y']),
         _frozen_in_odom=lambda path: (path, lambda x, y, yaw: (x, y, yaw)))
     fake._rotate_in_place = lambda delta: calls.append(('turn', delta)) or delta
-    fake._drive_zero_turn = lambda distance: calls.append(('drive', distance)) or distance
+    fake._drive_zero_turn = lambda distance, **_kwargs: calls.append(('drive', distance)) or distance
     fake._fail_final = lambda reason, **fields: box_service.BoxServiceRoute._fail_final(
         fake, reason, **fields)
     return fake, sent, calls
@@ -2884,11 +2891,11 @@ def test_zero_turn_final_skips_a_tiny_trim_and_fails_a_missed_one():
     reached, _ = box_service.BoxServiceRoute._zero_turn_final_approach(fake, TARGET, 0.085)
     assert not reached and sent['failed']['reason'] == 'final_trim_missed'
     fake, sent, calls = _zero_turn_fake(-math.pi / 2)
-    fake._drive_zero_turn = lambda distance: distance - 0.02   # 2 cm short
+    fake._drive_zero_turn = lambda distance, **_kwargs: distance - 0.02
     reached, _ = box_service.BoxServiceRoute._zero_turn_final_approach(fake, TARGET, 0.085)
     assert not reached and 'final_approach_short' in sent
     fake, sent, calls = _zero_turn_fake(-math.pi / 2)
-    fake._drive_zero_turn = lambda distance: distance - 0.008  # a StopZone stop 8 mm early
+    fake._drive_zero_turn = lambda distance, **_kwargs: distance - 0.008
     reached, _ = box_service.BoxServiceRoute._zero_turn_final_approach(fake, TARGET, 0.085)
     assert reached                                            # the gap judgement decides
 
@@ -2912,12 +2919,12 @@ def test_zero_turn_final_turns_either_way_and_rejects_what_it_cannot_do():
     # travel <= 0 (the front already 5 mm inside the gap) or > 0.6 m
     for y_m in (-1.0 + 0.085 + BOX_GAP_M - 0.005, 0.2):
         fake, sent, calls = _zero_turn_fake(-math.pi / 2)
-        fake.capture_stationary_pose = lambda y=y_m: ((0.0, y, -math.pi / 2), None)
+        fake.capture_stationary_pose = lambda y=y_m, **_kwargs: ((0.0, y, -math.pi / 2), None)
         reached, _ = box_service.BoxServiceRoute._zero_turn_final_approach(fake, TARGET, 0.085)
         assert not reached and sent['failed']['reason'] == 'final_approach_unavailable'
         assert [kind for kind, _ in calls] == []
     fake, sent, calls = _zero_turn_fake(-math.pi / 2)
-    fake._drive_zero_turn = lambda distance: None                 # no odom
+    fake._drive_zero_turn = lambda distance, **_kwargs: None
     reached, _ = box_service.BoxServiceRoute._zero_turn_final_approach(fake, TARGET, 0.085)
     assert not reached and sent['final_approach_short']['travelled_m'] is None
 

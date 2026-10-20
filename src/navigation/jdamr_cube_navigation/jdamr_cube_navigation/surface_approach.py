@@ -8,6 +8,8 @@ FACE_HEADING_DEADBAND_RAD = math.radians(0.1)
 FACE_ALIGNMENT_GAP_M = 0.05
 FACE_HEADING_FILTER_S = 0.35
 FACE_APPROACH_TIME_S = 0.5
+FACE_APPROACH_MAX_ANGULAR_RADPS = 0.10
+FACE_APPROACH_HEADING_KP = 2.0
 
 
 def filtered_face_heading(previous, observed, elapsed_s):
@@ -28,7 +30,11 @@ def face_approach_command(remaining_m, error_rad, target_gap_m=0.01, *,
     if not all(math.isfinite(v) for v in (
             remaining_m, error_rad, target_gap_m, approach_time_s)) or approach_time_s <= 0.0:
         raise ValueError('nonfinite table approach command')
-    angular = max(-0.02, min(0.02, error_rad))
+    # Match steering authority to normal approach speed so a modest heading
+    # correction does not force the whole approach to creep.
+    angular = max(-FACE_APPROACH_MAX_ANGULAR_RADPS,
+                  min(FACE_APPROACH_MAX_ANGULAR_RADPS,
+                      FACE_APPROACH_HEADING_KP * error_rad))
     if abs(error_rad) <= FACE_HEADING_DEADBAND_RAD:
         angular = 0.0
     linear = min(0.05, max(0.01, remaining_m / approach_time_s)) if remaining_m > 0.0 else 0.0

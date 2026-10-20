@@ -29,10 +29,85 @@ import pytest
 from rclpy.parameter import Parameter
 from rclpy.task import Future
 from rclpy.time import Time
+from tf2_ros import Buffer, TransformException
 import yaml
 
 
 PACKAGE = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize('base_delay_s', [.042, .121])
+def test_frozen_map_to_odom_does_not_require_overlapping_base_history(base_delay_s):
+    node = object.__new__(ServiceRoute)
+    node.parking_contract = {'robot_base_frame': 'base_link'}
+    node.parking_tf = Buffer()
+    frame = TransformStamped()
+    frame.header.frame_id, frame.child_frame_id = 'map', 'odom'
+    frame.header.stamp = Time(seconds=100).to_msg()
+    frame.transform.translation.x, frame.transform.translation.y = 1.0, 2.0
+    frame.transform.rotation.z = math.sin(math.pi / 4)
+    frame.transform.rotation.w = math.cos(math.pi / 4)
+    node.parking_tf.set_transform(frame, 'synthetic_reproduction')
+    base = TransformStamped()
+    base.header.frame_id, base.child_frame_id = 'odom', 'base_link'
+    base.header.stamp = Time(seconds=100 + base_delay_s).to_msg()
+    base.transform.rotation.w = 1.0
+    node.parking_tf.set_transform(base, 'synthetic_reproduction')
+    with pytest.raises(TransformException):
+        node.parking_tf.lookup_transform('map', 'base_link', Time())
+    path = RosPath()
+    path.header.frame_id, path.header.stamp = 'map', frame.header.stamp
+    item = PoseStamped()
+    item.header = path.header
+    item.pose.position.x, item.pose.position.y = 2.0, 4.0
+    item.pose.orientation.z = math.sin((math.pi - .1) / 2)
+    item.pose.orientation.w = math.cos((math.pi - .1) / 2)
+    path.poses = [item]
+    frozen, to_odom = node._frozen_in_odom(path)
+    assert frozen.header.frame_id == 'odom'
+    assert frozen.header.stamp == path.header.stamp
+    assert to_odom(2., 4., math.pi - .1) == pytest.approx((2., -1., math.pi / 2 - .1))
+    assert frozen.poses[0].pose.position.x == pytest.approx(2.)
+    assert frozen.poses[0].pose.position.y == pytest.approx(-1.)
+    assert -math.pi <= to_odom(0., 0., -math.pi)[2] <= math.pi
+    empty, same_frame = node._frozen_in_odom(RosPath())
+    assert empty.poses == []
+    assert same_frame(2., 4., 0.) == pytest.approx((2., -1., -math.pi / 2))
+
+
+def test_frozen_path_still_rejects_missing_map_to_odom():
+    node = object.__new__(ServiceRoute)
+    node.parking_contract = {'robot_base_frame': 'base_link'}
+    node.parking_tf = Buffer()
+    with pytest.raises(RuntimeError, match='map/odom transform unavailable'):
+        node._frozen_in_odom(RosPath())
+
+
+@pytest.mark.parametrize('requested_deg', [-159., 159.])
+def test_large_staging_turn_cruises_then_brakes_without_reversing(requested_deg):
+    node = route()
+    yaw, elapsed, rates = [0.0], [0.0], []
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
+        transform=SimpleNamespace(rotation=SimpleNamespace(
+            x=0., y=0., z=math.sin(yaw[0] / 2), w=math.cos(yaw[0] / 2)))))
+
+    def direct(command, done, measure, deadline, event):
+        while not done(measure()):
+            rates.append(command.angular.z)
+            yaw[0] += command.angular.z * .02
+            elapsed[0] += .02
+            assert elapsed[0] < 60.
+        yaw[0] += command.angular.z * .19
+        return measure()
+
+    node._direct_motion = direct
+    requested = math.radians(requested_deg)
+    turned = node._rotate_in_place(requested)
+    assert max(abs(rate) for rate in rates) == pytest.approx(.3)
+    assert abs(rates[-1]) == pytest.approx(.08)
+    assert all(rate * requested > 0. for rate in rates)
+    assert abs(turned - requested) < math.radians(.3)
+    assert elapsed[0] < abs(requested) / .3 + 2.
 
 
 @pytest.mark.parametrize('override,expected', [(None, 'LOCALHOST'), ('SUBNET', 'SUBNET')])

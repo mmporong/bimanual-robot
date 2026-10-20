@@ -76,9 +76,9 @@ zones:
   - &id001
     - -0.75
     - -0.6
-  - - -0.08458014712400408
+  - - -0.2863905120508253
     - -0.6
-  - - -0.2647811818248595
+  - - -0.4665915467516807
     - 0.7362682348479284
   - &id002
     - -0.7
@@ -97,8 +97,8 @@ zones:
     footprint_overlap_area_m2: 0.0568545
     max_rear_overlap_m: 0.136087
     interpretation: 동일 폭 연장 추정과 고정 도크의 실제 배치가 불일치. 테이블 외곽 또는 지도 정합 재확인 필요
-  boundary_basis: 사용자가 확인한 현재 도크의 차체 뒤끝–테이블 간격 0.03m와 평행 배치로 전면 직선을 추정. 기존 지도 검은 셀은
-    삭제하지 않음
+  boundary_basis: 도크 접근 구간은 사용자 지시로 기존 추정 경계를 법선 방향 0.20m 후퇴. 정지 후면 관측과 최신 map/odom의
+    명목 1cm 전체 차체 경로로 검증. 원본 지도 점유와 다른 테이블 영역은 유지
   provenance:
     source_run: $HOME/jdamr_data/map_20260930_manual/aligned/runs/dock_table_fit_20261016_121145
     operator_report:
@@ -128,6 +128,27 @@ zones:
   - 0.06
   - -0.6
   - 0.8
+  boundary_before_retreat_20261020:
+  - - -0.75
+    - -0.6
+  - - -0.08458014712400408
+    - -0.6
+  - - -0.2647811818248595
+    - 0.7362682348479284
+  - - -0.7
+    - 0.7
+  precision_dock_corridor:
+    retreat_m: 0.2
+    unit: m
+    derived_at: '2026-10-20'
+    source: operator_requested_dock_priority_and_stopped_rear_approach_replay
+    evidence: test/fixtures/rear_dock_keepout_20261020.json
+    method: 元 boundary normal retreat; 0.15m passes alignment preview, 0.20m also
+      clears the nominal 1cm endpoint with the full footprint on 5cm grid
+    original_map_occupancy_preserved: true
+    other_table_zones_unchanged: true
+    physical_table_outline_measured: false
+    raster_method: 기존 마스크에서 후퇴로 해제되는 도크 셀만 복원. 다른 영역의 기존 수동 조정과 base mask는 보존
 - id: table_01
   enabled: true
   confidence: medium

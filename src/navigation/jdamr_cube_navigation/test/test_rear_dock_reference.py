@@ -196,6 +196,29 @@ def test_other_same_width_face_after_replanning_cannot_start_centering(monkeypat
     node._execute_reverse_once.assert_not_called()
 
 
+def test_near_landmark_localizes_and_centers_without_backtracking_to_far_stage(monkeypatch):
+    node = node_with_reference()
+    physical = (.4, -.08, math.radians(4.))
+    observed = observed_at(physical)
+    node._observe_rear_box = Mock(side_effect=AssertionError('reuse the matched face'))
+    node.capture_stationary_pose = Mock(side_effect=[((.45, 0., 0.), {}), (physical, {})])
+    initialize = Mock()
+    monkeypatch.setattr(activate_navigation, 'initialize_localization', initialize)
+    node._plan_with_input_recovery = Mock()
+    node._reach_staging = Mock()
+    node._center_rear_reference = Mock(return_value=True)
+    assert node._align_rear_reference(
+        node._rear_reference_stage({'id': 'home_approach'}), {'id': 'home'},
+        observed=observed, return_to_stage=False)
+    seed = initialize.call_args.args[1]
+    assert tuple(seed[k] for k in ('x_m', 'y_m', 'yaw_rad')) == pytest.approx(physical)
+    node._plan_with_input_recovery.assert_not_called()
+    node._reach_staging.assert_not_called()
+    node._observe_rear_box.assert_not_called()
+    node._center_rear_reference.assert_called_once_with(
+        observed, pytest.approx(.275), actual_pose_map=physical)
+
+
 @pytest.mark.parametrize('case', ['operator_stop', 'link_lost', 'sensor_lost'])
 def test_reference_alignment_respects_abort_conditions(monkeypatch, case):
     node = node_with_reference()

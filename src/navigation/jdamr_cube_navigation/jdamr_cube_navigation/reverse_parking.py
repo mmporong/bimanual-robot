@@ -856,14 +856,18 @@ class CachedStaticCorridorValidator:
             maximum_sagitta = max(
                 maximum_sagitta,
                 self._footprint_radius * (1.0 - math.cos(yaw_change / 2.0)))
-        clear = _corridor_blockage(
+        self.last_blockage = _corridor_blockage(
             self._source, self._keepout,
             [(swept_hull, maximum_sagitta)],
-            skip_clearly_free_cells=True) is None
+            skip_clearly_free_cells=True)
+        clear = self.last_blockage is None
         if clear or target_surface is None:
             return clear
-        return _observed_surface_corridor_clear(
+        clear = _observed_surface_corridor_clear(
             self._source, self._keepout, checked_poses, self._footprint, target_surface)
+        if clear:
+            self.last_blockage = None
+        return clear
 
 
 def static_corridor_clear(

@@ -207,7 +207,7 @@ class RearBoxParkingMixin:
                 raise RuntimeError('rear dock landmark disagrees with return region')
         return measured
 
-    def _align_rear_reference(self, stage, pose):
+    def _align_rear_reference(self, stage, pose, *, observed=None, return_to_stage=True):
         """Correct observed dock drift, then center the existing reverse entry."""
         if getattr(self, '_rear_dock_reference', None) is None:
             return True
@@ -219,7 +219,8 @@ class RearBoxParkingMixin:
         geometry = self.home_rear_geometry
         extent = geometry['frame_length']['value'] - geometry['front_to_wheel_axis']['value']
         half_width = geometry['frame_width']['value'] / 2.
-        observed = self._observe_rear_box(geometry, extent, half_width)
+        if observed is None:
+            observed = self._observe_rear_box(geometry, extent, half_width)
         actual, _ = self.capture_stationary_pose(intermediate=True)
         measured = self._rear_reference_pose(observed, actual_pose_map=actual)
         inferred = tuple(measured[k] for k in ('x_m', 'y_m', 'yaw_rad'))
@@ -242,7 +243,7 @@ class RearBoxParkingMixin:
                       observed_pose_map=list(inferred), translation_correction_m=shift,
                       yaw_correction_rad=turn, source='same_run_rear_face_midpoint_and_normal')
             actual = localized
-        if (math.dist(actual[:2], (stage['x'], stage['y'])) > .05
+        if return_to_stage and (math.dist(actual[:2], (stage['x'], stage['y'])) > .05
                 or abs(_angle(actual[2] - stage['yaw'])) > math.radians(3.)):
             stage_pose = {**pose, 'id': stage['id'], 'x_m': stage['x'], 'y_m': stage['y'],
                           'yaw_rad': stage['yaw'], 'parking_direction': 'forward'}
@@ -588,8 +589,12 @@ class RearBoxParkingMixin:
                 (*actual[:2], actual[2] + math.pi), state['face_odom'],
                 state['normal_odom'], extent, half_width, target_gap,
                 command_heading_rad=heading + math.pi)
-            if len(preview) > 1 and not check([
-                    to_map((x, y, yaw - math.pi)) for x, y, yaw in preview]):
+            map_preview = [to_map((x, y, yaw - math.pi)) for x, y, yaw in preview]
+            if len(preview) > 1 and not check(map_preview):
+                self.emit('rear_box_static_corridor_blocked',
+                          preview_start_map=list(map_preview[0]),
+                          preview_end_map=list(map_preview[-1]),
+                          blocked_cell=getattr(check, 'last_blockage', None))
                 raise RuntimeError('rear box approach static corridor blocked')
             validated.update(stamp=state['stamp_s'], pose=actual, heading=heading)
 
@@ -673,6 +678,17 @@ class RearBoxParkingMixin:
                 return False
             initial = self._observe_rear_box_recovering(
                 geometry, extent, half_width, command_watch, allow_range_reapproach=True)
+            if getattr(self, '_rear_dock_reference', None) is not None:
+                # Full-width landmark matching belongs after range-guided
+                # approach, when the box has enough returns. Do not backtrack
+                # to the far staging pose after correcting the measured pose.
+                with self._localization_bound(True):
+                    if not self._align_rear_reference(
+                            self._rear_reference_stage({'id': 'home_dock_approach'}),
+                            self.registry['home'], observed=initial, return_to_stage=False):
+                        return False
+                initial = self._observe_rear_box_recovering(
+                    geometry, extent, half_width, command_watch)
             self.emit('rear_box_observed', observation=initial, target_gap_m=target_gap)
             # Landmark localization needs visible endpoints. After latching the
             # plane, near-range clipping must not replace plane feedback with

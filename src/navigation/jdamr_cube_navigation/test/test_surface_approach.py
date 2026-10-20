@@ -79,8 +79,8 @@ def test_command_rejects_nonfinite_inputs(remaining, error):
 
 def test_command_preserves_parking_speed_and_requires_early_alignment():
     linear, angular = face_approach_command(0.3, math.radians(12.0))
-    assert 0.0 < linear < 0.05
-    assert angular == 0.02
+    assert linear == 0.05
+    assert angular == 0.10
     with pytest.raises(ValueError, match='more clearance'):
         face_approach_command(0.02, math.radians(12.0))
     assert face_approach_command(0.3, 0.0) == (0.05, 0.0)
