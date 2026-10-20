@@ -572,7 +572,8 @@ def refine_at_registered_dock(scan_path, click, reference):
             return None
         current, *_c, laser, _data = scan_match.laser_points(str(scan_path))
         anchored, *_a, old_laser, _old = scan_match.laser_points(reference['scan_path'])
-        if (min(len(current), len(anchored)) < 80
+        minimum_matched_points = 80
+        if (min(len(current), len(anchored)) < minimum_matched_points
                 or math.dist(laser[:2], old_laser[:2]) > .001
                 or abs(wrap(laser[2] - old_laser[2])) > .001
                 or not np.isfinite(current).all() or not np.isfinite(anchored).all()):
@@ -600,7 +601,12 @@ def refine_at_registered_dock(scan_path, click, reference):
         sectors = np.floor((np.arctan2(current[inliers, 1], current[inliers, 0])
                             + math.pi) / (math.pi / 2)).astype(int) % 4
         supported_sectors = sum(np.count_nonzero(sectors == i) >= 8 for i in range(4))
-        if (float(inliers.mean()) < .70 or float((reverse_distances < .05).mean()) < .70
+        reference_inliers = reverse_distances < .05
+        # Occlusion and new returns change both denominators at a fixed dock.
+        # Use matched support in both scans; residual, sectors and uniqueness
+        # still distinguish the anchor from another placement.
+        if (min(np.count_nonzero(inliers), np.count_nonzero(reference_inliers))
+                < minimum_matched_points
                 or supported_sectors < 3):
             return None
         # A corridor wall or rotationally symmetric landmark cannot anchor a pose.
@@ -612,15 +618,19 @@ def refine_at_registered_dock(scan_path, click, reference):
                     return None
         origin = reference['pose_map']
         c, s = math.cos(origin[2]), math.sin(origin[2])
-        pose = [origin[0] + c * relative[0] - s * relative[1],
-                origin[1] + s * relative[0] + c * relative[1],
-                wrap(origin[2] + relative[2])]
+        pose = [float(origin[0] + c * relative[0] - s * relative[1]),
+                float(origin[1] + s * relative[0] + c * relative[1]),
+                float(wrap(origin[2] + relative[2]))]
         if (math.dist(pose[:2], (click['x_m'], click['y_m'])) > .2
                 or abs(wrap(pose[2] - click['yaw_rad'])) > math.radians(15)):
             return None
         return {'pose': pose, 'mean_dist_m': best, 'inlier_5cm': float(inliers.mean()),
+                'reference_inlier_5cm': float(reference_inliers.mean()),
+                'current_inlier_count': int(np.count_nonzero(inliers)),
+                'reference_inlier_count': int(np.count_nonzero(reference_inliers)),
+                'minimum_matched_points': minimum_matched_points,
                 'global_agrees': False, 'basis': 'anchored_dock_scan',
-                'reference': reference, 'relative_pose': list(relative),
+                'reference': reference, 'relative_pose': [float(v) for v in relative],
                 'click': [click['x_m'], click['y_m'], click['yaw_rad']],
                 'click_offset_m': math.dist(pose[:2], (click['x_m'], click['y_m'])),
                 'click_offset_deg': math.degrees(wrap(pose[2] - click['yaw_rad']))}
@@ -717,7 +727,7 @@ def cmd_init(args):
         if not args.local_only or override < MATCH_OVERRIDE_FLOOR:
             fail(f'--min-inlier needs --local-only and >= {MATCH_OVERRIDE_FLOOR}')
         min_inlier = override
-    refined['min_inlier_used'] = .70 if dock_reference_used else min_inlier
+    refined['min_inlier_used'] = None if dock_reference_used else min_inlier
     refined['threshold_basis'] = 'anchored_dock_scan' if dock_reference_used else 'map_scan'
     (run_dir / 'refine.json').write_text(json.dumps(refined, indent=1))
     if not dock_reference_used and (
