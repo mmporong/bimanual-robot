@@ -65,8 +65,6 @@ git pull --ff-only origin main
 
 `main`에는 직접 푸시하지 않는다. Issue 하나마다 작업 브랜치 하나를 만든다.
 
-큰 작업 단위의 구현과 검증을 마치면 작업 브랜치 push에서 끝내지 않고 PR을 `main`에 병합하고 원격 커밋을 확인한다. 다음 작업은 최신 `main`에서 새 브랜치를 만들어 시작한다. Squash로 병합한 이전 작업 브랜치를 계속 사용해 같은 변경 이력이 다시 충돌하는 일을 피한다.
-
 ```bash
 git switch main
 git pull --ff-only origin main
