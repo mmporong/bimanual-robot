@@ -2,15 +2,15 @@ schema_version: 1
 frame_id: map
 map_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/map.yaml
 keepout_mask_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/keepout.yaml
-expected_mask_sha256: 334370d62965730df807a1a2a42a9145429551c95947b0b369bd877e01cb7283
+expected_mask_sha256: 76bdb54527ab9b73aa658ff5decce5837d7af7e5c61393c270f47732a42673f2
 start_pose:
   x: 0.12
-  y: 0.165
+  y: 0.164
 max_route_start_distance_m: 0.3
 waypoints:
 - id: home_exit
-  x: 0.814
-  y: 0.259
+  x: 0.818
+  y: 0.215
 - id: table_02_pre
   x: 0.689
   y: -1.591

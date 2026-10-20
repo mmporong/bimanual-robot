@@ -30,7 +30,9 @@ from jdamr_cube_navigation.restaurant_service import (
     ServiceRoute, TRANSIT_VARIANTS)
 from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
-from jdamr_cube_navigation.surface_approach import face_approach_waypoints
+from jdamr_cube_navigation.surface_approach import (
+    FACE_APPROACH_TIME_S, face_approach_waypoints,
+)
 from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
 from nav2_msgs.action import Spin
 from nav_msgs.msg import Path as RosPath
@@ -1024,7 +1026,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                   start_pose_map=list(actual), target_pose_map=list(end),
                   final_parking_confirmed=False)
         travelled_m = self._drive_zero_turn(
-            distance_m, precision=True, hold_heading=True)
+            distance_m, precision=True, hold_heading=True,
+            approach_time_s=FACE_APPROACH_TIME_S)
         reached = (travelled_m is not None and travelled_m >= distance_m - .01
                    and not self.stop_requested and self._operator_link_ready()
                    and getattr(self, '_last_direct_motion_failure', None) is None)

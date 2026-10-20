@@ -2884,12 +2884,13 @@ def test_zero_turn_drive_commands_no_rotation_and_stops_at_the_distance(monkeypa
     assert published[-5:] == [(0.0, 0.0)] * 5
 
 
-@pytest.mark.parametrize('distance_m, expected_speed', [
-    (0.022, 0.01), (0.08, 0.02), (0.30, 0.05),
+@pytest.mark.parametrize('distance_m, expected_speed, approach_time_s', [
+    (0.022, 0.01, None), (0.08, 0.02, None), (0.30, 0.05, None),
+    (0.09990421312116261, 0.05, 0.5),
 ])
 @pytest.mark.parametrize('setup_delay_s', [0.0, 11.0])
 def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
-        monkeypatch, distance_m, expected_speed, setup_delay_s):
+        monkeypatch, distance_m, expected_speed, approach_time_s, setup_delay_s):
     node = route()
     clock = [0.0]
     position = [0.0]
@@ -2926,7 +2927,8 @@ def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
     monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
 
-    travelled = node._drive_zero_turn(distance_m, precision=True)
+    approach_options = {} if approach_time_s is None else {'approach_time_s': approach_time_s}
+    travelled = node._drive_zero_turn(distance_m, precision=True, **approach_options)
 
     assert {round(v, 6) for v, _w in published if v} == {round(expected_speed, 6)}
     assert published[-5:] == [(0.0, 0.0)] * 5
@@ -3656,6 +3658,24 @@ def test_returns_the_base_drove_into_the_blind_range_are_remembered():
     assert len(found) == 1 and found[0] == pytest.approx((0.19, 0.0))
     # Still visible from where the keyframe was taken: the live scan decides.
     assert remembered_blind_points([((0.0, 0.0, 0.0), scan)], (0.0, 0.0, 0.0), laser, 0.28) == []
+
+
+def test_filtered_blind_memory_uses_one_current_pose_snapshot(monkeypatch):
+    node = route()
+    laser = (-0.01, 0.0, math.pi)
+    scan = SimpleNamespace(
+        ranges=[math.inf, 1.0, .40, math.inf], angle_min=0.0,
+        angle_increment=math.pi / 2, range_min=.28, range_max=12.0)
+    node.scan_memory = [(9.0, (0.0, 0.0, 0.0), scan)]
+    node._odom_pose = Mock(return_value=(.20, 0.0, 0.0))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: 10.0)
+
+    found = node._remembered_blind_points(
+        laser, scan,
+        source_point_filter=lambda _pose, _scan, _point: True)
+
+    assert len(found) == 1 and found[0] == pytest.approx((.19, 0.0))
+    node._odom_pose.assert_called_once_with()
 
 
 def test_escape_snapshot_needs_a_fresh_scan_and_carries_the_blind_memory(monkeypatch):

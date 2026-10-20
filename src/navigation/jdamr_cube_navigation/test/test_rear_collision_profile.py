@@ -1,8 +1,12 @@
 """Rear docking keeps StopZone while replacing only predictive approach."""
 
+import base64
+import json
 import math
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+import zlib
 
 from geometry_msgs.msg import Twist
 from jdamr_cube_navigation import rear_collision_profile as module
@@ -74,6 +78,18 @@ def command(linear=0.0, angular=0.0):
     result = Twist()
     result.linear.x, result.angular.z = linear, angular
     return result
+
+
+def target_face(*, stamp_s=10.0, current_gap_m=.0175,
+                tangent_bounds=(-.18, .18), offset_m=-.2925, residual_rms_m=.0005):
+    return ({
+        'normal_base_xy': (1.0, 0.0),
+        'tangent_base_xy': (0.0, 1.0),
+        'tangent_bounds_m': tangent_bounds,
+        'line_offset_m': offset_m,
+        'residual_rms_m': residual_rms_m,
+        'stamp_s': stamp_s,
+    }, .01, current_gap_m)
 
 
 def node(monkeypatch, *, stop_zone=True, approach=True, restore_fails=False,
@@ -229,6 +245,151 @@ def test_reverse_path_entry_is_detected(monkeypatch):
     route, _monitor, _clock = node(monkeypatch, points=[(-.29, 0.0)])
     with module.rear_collision_profile(route) as watch:
         assert watch(command(-.05)) == 'rear docking swept footprint occupied'
+
+
+def test_verified_goal_face_is_excluded_from_low_speed_reverse_prediction(
+        monkeypatch):
+    route, _monitor, _clock = node(monkeypatch, points=[(-.2925, 0.0)])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face())
+        assert watch(command(-.05)) is None
+
+
+def test_recorded_dock_face_blocks_prediction_until_same_scan_target_is_known(
+        monkeypatch):
+    evidence = json.loads((Path(__file__).parent / 'fixtures' /
+                           'rear_laser_yaw_20261020.json').read_text())['guard_replay']
+    route, _monitor, clock = node(monkeypatch)
+    stamp = evidence['stamp_s']
+    ranges = json.loads(zlib.decompress(base64.b64decode(
+        evidence['ranges_zlib_base64'])))
+    message = SimpleNamespace(
+        **evidence['scan_metadata'],
+        header=SimpleNamespace(frame_id=evidence['frame_id'], stamp=SimpleNamespace(
+            sec=int(stamp), nanosec=int(round((stamp % 1.) * 1e9)))),
+        ranges=[math.inf if value is None else value for value in ranges])
+    route.last_scan = message
+    clock['ros'] = stamp
+    laser = tuple(evidence['laser_pose_m_rad'])
+    route._scan_in_base.return_value = message, laser, OUTLINE, []
+    with module.rear_collision_profile(route) as watch:
+        move = command(evidence['velocity_mps'])
+        assert watch(move) == 'rear docking swept footprint occupied'
+        observation = dict(evidence['observation'], stamp_s=stamp)
+        watch.set_target(observation, evidence['target_gap_m'], observation['gap_m'])
+        assert watch(move) is None
+        watch.clear_target()
+        assert watch(move) == 'rear docking swept footprint occupied'
+
+
+@pytest.mark.parametrize('case', [
+    'outside_residual', 'outside_tangent', 'stale_stamp', 'past_target',
+])
+def test_goal_exception_preserves_non_target_and_invalid_context_obstacles(
+        monkeypatch, case):
+    point = (-.2925, 0.0)
+    kwargs = {}
+    if case == 'outside_residual':
+        point = (-.289, 0.0)
+    elif case == 'outside_tangent':
+        point = (-.2925, .20)
+        kwargs['tangent_bounds'] = (-.18, .18)
+    elif case == 'stale_stamp':
+        kwargs['stamp_s'] = 9.9
+    elif case == 'past_target':
+        kwargs['current_gap_m'] = .006
+    route, _monitor, _clock = node(monkeypatch, points=[point])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(**kwargs))
+        assert watch(command(-.05)) == (
+            'rear docking swept footprint occupied')
+
+
+def test_only_source_verified_goal_face_is_removed_from_blind_range_memory(
+        monkeypatch):
+    remembered = (-.2725, 0.0)
+    route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
+    route._remembered_blind_points.side_effect = (
+        lambda _laser, _scan, source_point_filter=None:
+        [remembered] if source_point_filter is None or
+        source_point_filter(None, None, None) else [])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(), lambda _pose, _scan, _point: True)
+        assert watch(command(-.05)) is None
+
+
+def test_unverified_or_different_source_memory_still_blocks(monkeypatch):
+    remembered = (-.2725, 0.0)
+    route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
+    route._remembered_blind_points.side_effect = (
+        lambda _laser, _scan, source_point_filter=None:
+        [remembered] if source_point_filter is None or
+        source_point_filter(None, None, None) else [])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(), lambda _pose, _scan, _point: False)
+        assert watch(command(-.05)) == (
+            'rear docking swept footprint occupied')
+
+
+@pytest.mark.parametrize('point', [(-.289, 0.0), (-.2925, .20)])
+def test_non_target_blind_range_memory_still_blocks(monkeypatch, point):
+    route, _monitor, _clock = node(monkeypatch, memory=(point,))
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face())
+        assert watch(command(-.05)) == (
+            'rear docking swept footprint occupied')
+
+
+@pytest.mark.parametrize('protrusion_m', [.004, .010, .014])
+@pytest.mark.parametrize('remembered', [False, True])
+def test_rough_accepted_target_never_hides_a_near_side_protrusion(
+        monkeypatch, protrusion_m, remembered):
+    point = (-.2925 + protrusion_m, 0.)
+    route, _monitor, _clock = node(
+        monkeypatch, points=() if remembered else [point],
+        memory=[point] if remembered else ())
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(residual_rms_m=.004))
+        assert watch(command(-.05)) == 'rear docking swept footprint occupied'
+
+
+def test_rough_target_accepts_far_side_fit_noise_without_loosening_near_side():
+    target = module._target_context(*target_face(residual_rms_m=.004))
+    assert module._is_target_face_point((-.3025, 0.), target)
+    assert not module._is_target_face_point((-.2885, 0.), target)
+
+
+def test_goal_face_is_not_excluded_for_in_place_rotation(monkeypatch):
+    route, _monitor, _clock = node(monkeypatch, points=[(-.29, .15)])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(offset_m=-.29))
+        assert watch(command(0.0, .3)) == (
+            'rear docking swept footprint occupied')
+
+
+def test_contact_face_is_excluded_only_for_straight_motion_away(monkeypatch):
+    route, _monitor, _clock = node(
+        monkeypatch, memory=((-0.28, .15),))
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(
+            offset_m=-.28, current_gap_m=0.0))
+        assert watch(command(.05)) is None
+        assert watch(command(-.05)) == (
+            'rear docking swept footprint occupied')
+    target = module._target_context(*target_face(
+        offset_m=-.28, current_gap_m=0.0))
+    assert module._may_ignore_target(command(.05), target, 10.0)
+    assert not module._may_ignore_target(command(.05, .3), target, 10.0)
+    assert not module._may_ignore_target(command(0.0, .3), target, 10.0)
+
+
+def test_profile_finally_clears_goal_face_context(monkeypatch):
+    route, _monitor, _clock = node(monkeypatch, points=[(-.2925, 0.0)])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face())
+        assert watch.target_active is True
+    assert watch.target_active is False
+    assert watch._state['filtered_memory'] == ()
 
 
 def test_rotation_corner_collision_is_detected(monkeypatch):

@@ -31,12 +31,67 @@ def route_node():
 
 
 def face(gap=0.01, angle=0.0, stamp=5.0):
+    normal = math.cos(angle), math.sin(angle)
+    tangent = -normal[1], normal[0]
+    center = -0.275-gap, 0.
     return {'gap_m': gap, 'normal_yaw_error_rad': angle, 'stamp_s': stamp,
-            'span_m': .35,
-            'face_center_base_xy_m': (-0.275-gap, 0.),
-            'normal_base_xy': (math.cos(angle), math.sin(angle)),
+            'span_m': .35, 'face_center_base_xy_m': center,
+            'normal_base_xy': normal, 'tangent_base_xy': tangent,
+            'line_offset_m': sum(center[i] * normal[i] for i in (0, 1)),
+            'tangent_bounds_m': (-.175, .175), 'residual_rms_m': .001,
             'face_odom': (-0.275-gap, 0.),
-            'normal_odom': (math.cos(angle), math.sin(angle))}
+            'normal_odom': normal}
+
+
+def _historical_face_scan(x_m):
+    count = 7201
+    increment = 2*math.pi/(count-1)
+    ranges = [math.inf] * count
+    for index in range(101):
+        y_m = -.175 + .35*index/100
+        scan_x, scan_y = -(x_m+.01), -y_m
+        bearing = math.atan2(scan_y, scan_x)
+        beam = round((bearing+math.pi)/increment)
+        ranges[beam] = math.hypot(scan_x, scan_y)
+    return SimpleNamespace(ranges=ranges, angle_min=-math.pi,
+                           angle_increment=increment, range_min=.28, range_max=16.)
+
+
+def _source_face_classifier():
+    node = route_node()
+    initial, final = face(.2), face(.01)
+    final['face_odom'] = initial['face_odom']
+    node._observe_rear_box_recovering = Mock(return_value=final)
+    node._rear_box_update = Mock(return_value=Mock(return_value={'remaining_m': 0.}))
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node.emit = Mock()
+    watch = Mock()
+    geometry = {**GEOMETRY,
+                'laser_translation': {'unit': 'm', 'value': [-.01, 0., .15]},
+                'laser_yaw': {'unit': 'rad', 'value': math.pi}}
+    assert node._park_rear_face(initial, geometry, 'route', .275, .225, .01, watch)
+    return watch.set_target.call_args.args[3]
+
+
+def test_real_source_face_classifier_preserves_non_target_points():
+    classifier = _source_face_classifier()
+    target = _historical_face_scan(-.475)
+    assert classifier((0., 0., 0.), target, (-.475, 0.))
+    assert not classifier((0., 0., 0.), target, (-.471, 0.))
+    assert not classifier((0., 0., 0.), target, (-.475, .3))
+    other = _historical_face_scan(-.65)
+    assert not classifier((0., 0., 0.), other, (-.65, 0.))
+
+
+def test_source_face_cache_checks_scan_identity_and_acquisition_pose(monkeypatch):
+    monkeypatch.setattr(module, 'id', lambda _scan: 7, raising=False)
+    classifier = _source_face_classifier()
+    target, other = _historical_face_scan(-.475), _historical_face_scan(-.65)
+    assert classifier((0., 0., 0.), target, (-.475, 0.))
+    assert not classifier((0., 0., 0.), other, (-.65, 0.))
+    assert classifier((0., 0., 0.), target, (-.475, 0.))
+    assert not classifier((.2, 0., 0.), target, (-.475, 0.))
+    assert classifier((0., 0., 0.), target, (-.475, 0.))
 
 
 @pytest.mark.parametrize('moved', [None, -0.2])
@@ -126,6 +181,47 @@ def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monk
     retry = [call for call in node.emit.call_args_list
              if call.args and call.args[0] == 'rear_box_terminal_retry_started']
     assert len(retry) == 1
+    command_watch.clear_target.assert_called_once_with()
+
+
+def test_failed_terminal_retry_records_fresh_gap_without_reporting_success(
+        monkeypatch):
+    node = route_node()
+    initial = face(.20, 0., stamp=1.)
+    missed = face(.011, math.radians(.6), stamp=2.)
+    cleared = face(.20, 0., stamp=3.)
+    current = face(.012, 0., stamp=4.)
+    for item in (initial, missed, cleared, current):
+        item['face_odom'], item['normal_odom'] = (-.475, 0.), (1., 0.)
+    node._observe_rear_box_recovering = Mock(
+        side_effect=[missed, cleared, current])
+    node._operator_link_ready = Mock(return_value=True)
+    node._depart_dock_straight = Mock(return_value=True)
+    node._rear_box_update = Mock(side_effect=[
+        Mock(return_value={'remaining_m': .19}),
+        Mock(return_value={'remaining_m': .19}),
+    ])
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._drive_zero_turn = Mock(side_effect=[-.19, None])
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'load_route', lambda _p: {'waypoints': [
+        {'id': 'home_exit'}, {'id': 'observation'}]})
+
+    assert not node._park_rear_face(
+        initial, GEOMETRY, 'route', .275, .225, .01, Mock())
+    assert node.confirmation == {
+        'confirmed': False,
+        'reason': 'rear_box_gap_out_of_tolerance',
+        'reference': 'live_rear_lidar_face',
+        'nearest_gap_m': pytest.approx(.012),
+        'farthest_gap_m': pytest.approx(.012),
+        'internal_estimate_only': True,
+        'external_accuracy_verified': False,
+    }
+    finished = [call for call in node.emit.call_args_list
+                if call.args and call.args[0] == 'rear_box_parking_finished']
+    assert finished[-1].kwargs['confirmed'] is False
+    assert finished[-1].kwargs['nearest_gap_m'] == pytest.approx(.012)
 
 
 def test_terminal_miss_does_not_retry_after_operator_link_loss():
@@ -427,10 +523,37 @@ def test_live_scan_cannot_switch_target_or_regress_time(monkeypatch, change):
     else:
         next_face['stamp_s'] = 4.
     node._rear_box_observation = Mock(return_value=next_face)
+    command_watch = Mock()
     monkeypatch.setattr(module, 'CachedStaticCorridorValidator', Mock())
-    update = node._rear_box_update(face(.2), GEOMETRY, .275, .225, .01)
+    update = node._rear_box_update(
+        face(.2), GEOMETRY, .275, .225, .01,
+        command_watch=command_watch)
     with pytest.raises(RuntimeError):
         update((0., 0., 0.))
+    command_watch.set_target.assert_not_called()
+
+
+def test_latest_verified_fine_face_refreshes_collision_target(monkeypatch):
+    node = route_node()
+    node.registry = {'map': {'yaml_path': '/map.yaml'},
+                     'keepout': {'yaml_path': '/mask.yaml'}}
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._frozen_in_odom = Mock(return_value=(
+        None, lambda x, y, yaw: (x, y, yaw)))
+    node._footprint_outline = Mock(return_value=[])
+    observation = face(.0175, stamp=6.)
+    node._rear_box_observation = Mock(return_value=observation)
+    node.emit = Mock()
+    command_watch = Mock()
+    monkeypatch.setattr(module, 'CachedStaticCorridorValidator', Mock())
+
+    update = node._rear_box_update(
+        face(.02, stamp=5.), GEOMETRY, .275, .225, .01,
+        command_watch=command_watch)
+    update((0., 0., 0.))
+
+    command_watch.set_target.assert_called_once_with(
+        observation, .01, .0175, None)
 
 
 @pytest.mark.parametrize('change', ['position', 'normal'])

@@ -162,6 +162,7 @@ def _lidar_nodes(context, lidar_port):
             parameters=[{
                 'input_topic': 'scan_raw',
                 'output_topic': 'scan',
+                'base_frame': document.get('base_frame', 'base_footprint'),
                 'self_boxes_json': json.dumps(document['self_boxes']),
                 'margin_m': float(document.get('margin_m', 0.01)),
             }],

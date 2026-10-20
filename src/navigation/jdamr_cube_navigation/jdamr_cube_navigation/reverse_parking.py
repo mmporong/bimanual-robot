@@ -274,14 +274,17 @@ def trail_retrace_points(current, trail, distance_m, max_gap_m, max_turn_rad,
     return points, length_m
 
 
-def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m):
+def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m,
+                            source_point_filter=None):
     """
     Return remembered returns that now lie inside the LiDAR blind range, base frame.
 
     keyframes are (base pose in odom, scan) pairs, current_pose the base pose in odom
     and laser_pose the scan frame in the base frame. Inside blind_radius_m of the
     laser the G4 reports nothing (range_min), so an object the base drove up to
-    vanishes from the live scan; outside it the live scan decides.
+    vanishes from the live scan; outside it the live scan decides.  An optional
+    source_point_filter(pose, scan, point) selects points using the scan and pose
+    that acquired them, before odometry drift changes their current projection.
     """
     lx, ly, _lyaw = laser_pose
     found = []
@@ -293,6 +296,9 @@ def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m)
         limit_m = blind_radius_m + moved_m + 2.0 * math.hypot(lx, ly)
         for x_m, y_m in _base_points(scan, laser_pose):
             if math.hypot(x_m - lx, y_m - ly) > limit_m:
+                continue
+            if (source_point_filter is not None
+                    and not source_point_filter(pose, scan, (x_m, y_m))):
                 continue
             bx = relative[0] + cos_yaw * x_m - sin_yaw * y_m
             by = relative[1] + sin_yaw * x_m + cos_yaw * y_m

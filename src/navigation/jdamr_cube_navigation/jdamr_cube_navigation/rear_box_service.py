@@ -7,6 +7,7 @@ import time
 from geometry_msgs.msg import Twist
 from jdamr_cube_navigation.box_lidar_witness import (
     MAX_CANDIDATE_PLANE_DISTANCE_M, MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD,
+    MAXIMUM_RESIDUAL_RMS_M,
 )
 from jdamr_cube_navigation.corridor_route import (
     load_route, spin_node, TRANSIT_PLAN_END_TOLERANCE_M,
@@ -81,6 +82,19 @@ def _same_target(reference, observed):
     if (change > MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD
             or displacement > MAX_CANDIDATE_PLANE_DISTANCE_M):
         raise RuntimeError('rear box target changed')
+
+
+def _set_collision_target(command_watch, observation, target_gap_m,
+                          current_gap_m, source_point_filter=None):
+    setter = getattr(command_watch, 'set_target', None)
+    if callable(setter):
+        setter(observation, target_gap_m, current_gap_m, source_point_filter)
+
+
+def _clear_collision_target(command_watch):
+    clearer = getattr(command_watch, 'clear_target', None)
+    if callable(clearer):
+        clearer()
 
 
 def _stationary_face(observations, extent, half_width):
@@ -563,7 +577,8 @@ class RearBoxParkingMixin:
                            else 'rear box observation deadline exceeded')
 
     def _rear_box_update(self, initial, geometry, extent, half_width, target_gap,
-                         reference=None):
+                         reference=None, command_watch=None,
+                         source_point_filter=None):
         state = dict(initial)
         reference = initial if reference is None else reference
         reference = {'face_odom': tuple(reference['face_odom']),
@@ -604,6 +619,9 @@ class RearBoxParkingMixin:
                 raise RuntimeError('rear box scan clock regressed')
             if observation['stamp_s'] != state['stamp_s']:
                 _same_target(reference, observation)
+                _set_collision_target(
+                    command_watch, observation, target_gap,
+                    observation['gap_m'], source_point_filter)
                 old_heading = math.atan2(state['normal_odom'][1], state['normal_odom'][0])
                 raw_heading = math.atan2(observation['normal_odom'][1],
                                          observation['normal_odom'][0])
@@ -698,11 +716,56 @@ class RearBoxParkingMixin:
                 return self._park_rear_face(
                     initial, geometry, route_path, extent, half_width, target_gap, command_watch)
             finally:
+                _clear_collision_target(command_watch)
                 self._rear_fine_face = None
 
     def _park_rear_face(self, initial, geometry, route_path, extent, half_width,
                         target_gap, command_watch):
         """Keep the fine target fixed after the moving range-only handoff."""
+
+        source_cache = {}
+
+        def source_goal_face_point(pose, scan, point):
+            """Classify memory in its acquisition frame, before odom drift."""
+            key = id(scan)
+            acquisition_pose = tuple(pose)
+            cached = source_cache.get(key)
+            if (cached is None or cached[0] is not scan
+                    or cached[1] != acquisition_pose):
+                try:
+                    observed = _observe_rear_face_roi(
+                        self._rear_scan_values(scan), geometry, extent,
+                        half_width, expected_span_m=initial['span_m'])
+                    cosine, sine = math.cos(pose[2]), math.sin(pose[2])
+                    x_m, y_m = observed['face_center_base_xy_m']
+                    nx, ny = observed['normal_base_xy']
+                    source = {
+                        **observed,
+                        'face_odom': (
+                            pose[0] + cosine * x_m - sine * y_m,
+                            pose[1] + sine * x_m + cosine * y_m),
+                        'normal_odom': (
+                            cosine * nx - sine * ny,
+                            sine * nx + cosine * ny),
+                    }
+                    _same_target(initial, source)
+                    source_cache[key] = (scan, acquisition_pose, observed)
+                except (KeyError, RuntimeError, TypeError, ValueError):
+                    source_cache[key] = (scan, acquisition_pose, None)
+            observed = source_cache[key][2]
+            if observed is None:
+                return False
+            normal = observed['normal_base_xy']
+            tangent = observed['tangent_base_xy']
+            residual_m = (point[0] * normal[0] + point[1] * normal[1]
+                          - observed['line_offset_m'])
+            tangent_m = point[0] * tangent[0] + point[1] * tangent[1]
+            lower_m, upper_m = observed['tangent_bounds_m']
+            residual_limit_m = min(
+                4.0 * observed['residual_rms_m'], MAXIMUM_RESIDUAL_RMS_M)
+            near_limit_m = min(residual_limit_m, 0.003)
+            return (-residual_limit_m <= residual_m <= near_limit_m
+                    and lower_m <= tangent_m <= upper_m)
 
         def make_straight_clearance(observation):
             # At contact range a turn sweeps a rear corner toward the box. Reuse
@@ -721,9 +784,13 @@ class RearBoxParkingMixin:
             return reobserved
 
         def approach(observation):
+            _set_collision_target(
+                command_watch, observation, target_gap, observation['gap_m'],
+                source_goal_face_point)
             update = self._rear_box_update(
                 observation, geometry, extent, half_width, target_gap,
-                reference=initial)
+                reference=initial, command_watch=command_watch,
+                source_point_filter=source_goal_face_point)
             remaining = update(self._odom_pose())['remaining_m']
             if remaining <= 0.0:
                 return True
@@ -754,12 +821,18 @@ class RearBoxParkingMixin:
                       farthest_gap_m=far_gap, angle_rad=error,
                       target_gap_m=target_gap, target_preserved=True)
             retry_start = make_straight_clearance(final)
-            if retry_start is not None and approach(retry_start):
-                retried = self._observe_rear_box_recovering(
-                    geometry, extent, half_width, command_watch)
-                _same_target(initial, retried)
-                final = retried
-                confirmed, gap, far_gap, error = confirmation(final)
+            retry_completed = retry_start is not None and approach(retry_start)
+            if retry_start is not None:
+                try:
+                    retried = self._observe_rear_box_recovering(
+                        geometry, extent, half_width, command_watch)
+                    _same_target(initial, retried)
+                    final = retried
+                    confirmed, gap, far_gap, error = confirmation(final)
+                except RuntimeError:
+                    pass
+            if not retry_completed:
+                confirmed = False
         self.confirmation = {
             'confirmed': confirmed,
             'reason': ('confirmed' if confirmed

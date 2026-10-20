@@ -1,0 +1,198 @@
+{
+  "schema_version": 1,
+  "status": "provisional_single_pose_same_surface_not_repeatability_validated",
+  "source": "operator rear-corner gaps plus eight stopped rear-face LiDAR fits",
+  "source_path": "~/.local/state/bimanual-robot/rear_angle_20261020/stationary_scan.json",
+  "source_sha256": "59fa064eb7673bbb72d6247e0bd7cddb7752768d3842f7a96c103d03d9a02557",
+  "external_reference": {
+    "rear_left_gap_m": 0.028,
+    "rear_right_gap_m": 0.0,
+    "corner_separation_m": 0.45,
+    "left_gap_resolution_m": null,
+    "right_gap_approximate": true,
+    "surface_identity_confirmed": true,
+    "box_ahead_of_table_m": 0.06,
+    "surface_identity_source": "operator explicitly confirmed same rear box face"
+  },
+  "stopped_scan_face_yaw": {
+    "mean_rad": 0.0007552122618754031,
+    "mean_deg": 0.04327075978454465,
+    "sample_count": 8,
+    "acceptance_contract": {
+      "maximum_absolute_linear_velocity_mps": 0.01,
+      "maximum_absolute_angular_velocity_radps": 0.02
+    },
+    "observations": [
+      {
+        "normal_yaw_error_rad": 0.0029986099487857515,
+        "gap_m": 0.01693161496999418,
+        "support_count": 159
+      },
+      {
+        "normal_yaw_error_rad": -0.0014450615121116418,
+        "gap_m": 0.017283061225944363,
+        "support_count": 158
+      },
+      {
+        "normal_yaw_error_rad": 0.00041998924268382167,
+        "gap_m": 0.017680049205416104,
+        "support_count": 157
+      },
+      {
+        "normal_yaw_error_rad": -0.0005246458905023435,
+        "gap_m": 0.017663509815847356,
+        "support_count": 160
+      },
+      {
+        "normal_yaw_error_rad": 0.001470038005530847,
+        "gap_m": 0.017402972087788626,
+        "support_count": 158
+      },
+      {
+        "normal_yaw_error_rad": 0.0005848584316981287,
+        "gap_m": 0.01756938473952563,
+        "support_count": 159
+      },
+      {
+        "normal_yaw_error_rad": 0.000894113827545226,
+        "gap_m": 0.017553640011365723,
+        "support_count": 160
+      },
+      {
+        "normal_yaw_error_rad": 0.001643795969564903,
+        "gap_m": 0.01724722349518326,
+        "support_count": 158
+      }
+    ],
+    "source_scope": "rear-face fit summaries from accepted stopped frames; raw LaserScan omitted"
+  },
+  "derivation": "pi + atan2(rear_left_gap_m - rear_right_gap_m, corner_separation_m) - stopped_scan_face_yaw.mean_rad",
+  "limitations": [
+    "one operator-reported docking pose",
+    "right gap was reported as almost touching",
+    "repeatability has not been measured",
+    "laser translation and range bias are unchanged",
+    "operator did not specify measurement uncertainty or instrument resolution",
+    "provisional operating trial; external angular accuracy and repeatability unverified"
+  ],
+  "candidate_laser_yaw_rad": 3.202979549615386,
+  "candidate_correction_rad": 0.06138689602559309,
+  "operating_laser_yaw_rad": 3.202979549615386,
+  "supersedes_operating_calibration": true,
+  "prior_estimate": {
+    "laser_yaw_rad": 3.141592653589793,
+    "status": "verify_against_scan_directions",
+    "reason": "the prior pi value was an unvalidated orientation estimate"
+  },
+  "guard_replay": {
+    "source_sha256": "59fa064eb7673bbb72d6247e0bd7cddb7752768d3842f7a96c103d03d9a02557",
+    "sample_index": 0,
+    "stamp_s": 1792485513.8343334,
+    "frame_id": "laser_link",
+    "scan_metadata": {
+      "angle_min": -0.9722029566764832,
+      "angle_increment": -0.006763385608792305,
+      "range_min": 0.2800000011920929,
+      "range_max": 16.0
+    },
+    "ranges_zlib_base64": "eJzVWlmS5TYOvJDjBUFwPcvE3MAxf3P/yUzoSZSeZFeXa7Z2VNnOpiQSSyIB6W/p1W1M/Bk2RsLPb0ByK0B66bk3T42Q14Q/VjxVs9IFlY5lPY+c8PPbP/75+++/9stefVrmo1JpnmsbgjKfVKubm6UiSPtpvfaaumdB+lOzW8ujEMI2uEf8P+7ZnBfiL3iv1FuePkslNDpukvKszWdyPnF60dlqrqOPSaRVHW0mm9Z4GZ7O5+1IfiVPtBr+sVRzFtSqLAm7WDYDYngQ/uBohoe4E3KZG79bGQUbANQLrICdldZg4A4oG++OfbTWO45DqLpWeavWHecDFLuCpbyWMm+Qi8Xzq04ZvHMbvacakK6pVuFgHa6VTgOkNKyPzpP05LJ4s1E95R4QFo1Z06wDBvh4Vs6Fzypp9Gx4riDdpnczG9bK/VFtdnokt47IGnw8/Ai3mcEIXtt0QUW29Z5aqiWsBh8unuTzZI850sywW7mDPqISJz45+wHpiyHflzbkAuABR45aZxNkCmiDrYr53aL3xa6VxWDl1gVo4WqtnnnCNOpAYo5RBbkumxWh2MoGKRdgLCslxYUflgckoxYsmTa+lcETvuIWK9xRWh8BKTd7GoimOn6rLzyVfsH2csvZAqEPHMcn7QAZ5jwas2IixiqhqoTCXWbJzkUTd+DfIOJ4vgGL1dLmDfLrh/nBX/6qzthfspWQPGCkDAfBxCqeOSdEI2zx3930T/8qL69DZcMHeGV2IZOJneBXWCbHmkzeQRg6WP37D0PBQDQjtUBZs1Yhov8josqrDKXPXhCAaJE1XpdHIMbMRjz5AGUL4KYdxNHqhiRRn6Nglnf2O0iBRL4wKSH+BgeeKkN5YQ8qHyA67LsEwhzp1lAsjnsiK4h7cc/4rxLQ6VogZXBRY4mEBYioFg1sseNmIMwb6NetPJG3iuv95EKWuuBCSMPFuakyvsMraxWx2lRdrfazN2+g47oOy5PnQSEgVPwQcYXa7uoOGcFi3EdzLK4uZBZZqYJ70uBVkhA2oTwKFnLNOCUykda1BumOhB6BiM0sMRra/0A6/vEve1WV89kaChbOF4joF0lsKKhCCtMHCdJRinM53QAsprwB4XXkhwmS2JlIbxRtywHRMKV2aEsYiW4M/YUKBld1OdZNxIFoRl2RJMjnCgwkpONbAkpt6UbTakUgliJJdikqgLJYoUN7ISFaF6RiDmmJem4fHETVGJZA5jhEhj9AIb5WA0xTST8KMSEV9d2qK4cZkhcchp8GYTGJ6NjvcMw3yJfK0dQ2FtnwNejNa6qttG4FXRrJBNK1nOQvoDzOEhFQmuQlVPg0kBkNEDx4JSZAclKerIYfVdBw5CqttfnHAtJekbUNrsyCFJxHZH1YoRXGzKFYhahAZRJ3RgNCiNx+J6EhyNooiyCRmGvqRXB4R0Blv1v1jqKSeefKQoIN1IAkBZ9E9EqE1VS7Sm/DUSWESPltCo6pVLX36TwQyE2ISk+mQsNPIKRB+mSCwm+EewHlllNqlWDaozoBMvVbq+xESV+dQkQafe/veCv3VROokwCU13bja3VB7eBpS9abzAFDouPSYbGKWwDpdzDb2xMzhGVHkWpptvwEqaquMYa/kB0gphFlTSmeZaytnfAubogOA50K6t9GF5O3Aos5onQGNBbv2RCDyGDrJuJWs+M8sJj2kCS5dzFxo7gBkUlX76irleHdUfCSrhvtzCWgwjQXj/Ub5EvOgUVEsrmgny9DPlaXiSZhgFpmC4iBeLhrTTVUZEnjgRKa0a4HJFOQJcAct9AHd+DQPDbMkPtAEBAqV5MC4cM43EBUjY8IxIohLx99MyHlhCPp4apygyDXol1bg71+1h9A0o24Lzz77TbAX6g6/dRZElKUDZQkCFqSsrO8k7jzQA0dQuStvdwCqeJFbojjIWpMRGRelZ4gRedbKQNgBw8ACYmWxnRZ2ATVMkcb5DET2Yutv8Igi6u5IzlpL5IOulGQH8MEQFmJcEwOAJXz5ABIU4u1nB89gNJunyUAmmxUQIg4Le7PzkxGWsY0gpSce6u7GT1VRerGEtYCEukaOLinDWE+HmG4Xdz9lIL3iMZYmiW1EUW0qOgktCPgth5r8sUWd7fWouMEzlnfeRqCAjibSByUlC3TQe2zmWguXq14rDf5vqVTsy5I85h325+4zxZlNxf1T7t6+DM+gc/72igLmfM8DvuAflAfs32a9RI2FvFPjV8a+ldCXRttTEEIQSGim72Yao0K8Fvv8kYXEUHoNBnVdSpRJ81lVb3qmvDoBU8diyD1kCTjCvWh/tDX4pMfGs1QdGepytvJ0yg2BeHz729u8MQpEt/dL+TUUYNFRkyt9wEXuefaKKPp76eSg9xPH1YFJFO8efwHz1JA9qKRLVM1p8hFI4iO6g0J+rnkfaWdU5VIYx5V5DiEiQlZeSvWUI0OqEfo29R1+/Ps7XbNJa6EUDxjnxxe5YdncaJ4jFceLOAnTwmpAsp0VgHtUfMRsE3GLnuN46tIOd3TYgMUaEdrfr9GsnnPBiDxnmCXXZ/IScmkqkHeOpxPIkgeu/qoG3RSzKfjqnAO3IdDkVkD0umgOMDq2rhSCsyJE9di94hYApW0j9xN95HgRUeGSEVjQGScpTQQ0bnBHZAWIOmAaJMo93Xu3WeRHXbuEkK/oOqikS40VdIA7xixo2ns4q7jHQcWdYXlEioXZR7IIpt/NMf0K71GTKYOnUdIrLfzCJBgljTJAnrVNUOf7JN9rilxp7cEBjSiW+hIPRThJqitgfYxXsOKaykgFPrVYHO0KLp1ZPnM5Db2zIBiwo8NZXi+B1TPnR6hIP7jKKiEMe6kuzhxBqQeedFahHS8warkFKQ/QNh1fowH6hTLHW0ndYXaVbKOzeb3cgSQtMKbxD+ehQqgSvkOeSIqDrue/kT+bP89VOM68ehqn9aqDUSaa38v+UtGshfCQIfdffgA+Xn4IoiL1heiqBgqWfsgg9CluxOkY+VpfEHxnZe2/9lf9oJ4vFrkFtKbv2P0QCheeMEyOGqJVfNqJDNxOcpnY/1l925RfY+ZjHEeKR/sb+bQ38Q7gsnX1eU79JWu3ZqIxVO82oYQ1DFrYNKCzslcsyzoUh2eIDHCkv++vcdF8hfOw1tgWsY32qVwlklMOnYPFUGXSYCgoA70AON9YahP9GjIYTb66ZXPQ/UsKMiqD5gd5hWkJ+7fGFRh4epE8phFSBAfMiGDNWcsSueREjHlAw3QODSObcTZ3xXhEYoRT3O0uqU/QaeZS9xeJltZOn9MVIGNOCeLhzWTV7bJKSfbMDZ648B0bamZM8MHZAQpTb5uQKsrLHoJVNxMoohluVxqyu2y1kPrTDBNG7Eq/LlPHbUsqtE20/a/jEXuDvaJoHhBMaIBC3sn5wmSdSFjHB2YP66KGoj4crbBT9BHFbxd5jFxhZ40hEd5WqbG6agMgqKG7x8n6G5KApRGMDob5Kd14asBIT75FuHxdjebu71dXqv782O/vL2vYl987nXdxo5/8dA32J2Db858tyy+9TiE5H3oyXEGFYJGqj2u+i50mzlBmWgbSVH1l9bdZfYNJ9xB2h3EPlio1keCueGv+O6lGF/4P/HeHWfeYimchzKQyrDnS29Y+ZO7lcOHfniqA18qIJG/2ACqEcriIxYd0PaWID/VO71ITpygNbizPxXPsX6hVx8q8QP2pboe7x0bJ1xI2UctUeLLI0gj5NWTCNEAAN1YSdTQm/CJnWWOSj0/6qP4WhHNdENHHpDGwOBKzlCqHhDflB0SjlBMmRvf2CZr5RmL5ZeX0oK0nZUtPOTjWpVQwdQHrgkILCj9qKznmXtYKr4UOymDmNiuc0Bi4iNkU4d89RlYaKBV73jul7cPxK5NokdsQpVwcGjSjREm/ADTE9JLp4/O5BQS27pVI3q88QMFgrry2KVuvPRD012QcSm24i1ybo0Mv3zZSazEl37Huxdi5y87tZ0SbD7YJm6hXYJHl1rqRSJnpWmPl1WQ22Al1yewfp61Kevg4HplF69hdvSvY4z4VtZbRPySnR5fhh4fVwiKchGfRtj/8cdf/GJ4fYXj9wiHdfq3TMavdZ2BIiiifGldenDSFkd9alWEgffu/Hz37/8CDziI4w==",
+    "observation": {
+      "face_center_base_xy_m": [
+        -0.29260638035262626,
+        0.0
+      ],
+      "face_midpoint_base_xy_m": [
+        -0.29275979885058667,
+        0.051163052464733065
+      ],
+      "support_center_base_xy_m": [
+        -0.29277634589713836,
+        0.039567508787927995
+      ],
+      "normal_base_xy": [
+        0.9999955041725564,
+        0.002998605455040105
+      ],
+      "tangent_base_xy": [
+        -0.002998605455040105,
+        0.9999955041725564
+      ],
+      "line_anchor_base_xy_m": [
+        -0.29260374934295064,
+        -0.0008774071436160747
+      ],
+      "line_offset_m": -0.2926050648448313,
+      "normal_yaw_error_rad": 0.0029986099487857515,
+      "gap_m": 0.01693161496999418,
+      "center_gap_m": 0.01760638035262624,
+      "span_m": 0.35009487490306107,
+      "tangent_bounds_m": [
+        -0.12300674387720303,
+        0.22708813102585804
+      ],
+      "observation_roi_clipped": false,
+      "support_count": 159,
+      "residual_rms_m": 0.0007782965300013109,
+      "provenance": "REAR_LIDAR_FACE_RELATIVE_GEOMETRY"
+    },
+    "laser_pose_m_rad": [
+      -0.01,
+      0.0,
+      3.141592653589793
+    ],
+    "velocity_mps": -0.05,
+    "target_gap_m": 0.01,
+    "receipt_scope": "stopped input replay; no new motion or accuracy claim"
+  },
+  "self_filter_replay": {
+    "source_sha256": "28fd0f35211f54a563a4df3d2c9586f50388f73a49dd4bd43056287d1e0b26d8",
+    "source_path": "~/.local/state/bimanual-robot/rear_angle_20261020/post_clearance_blocker_probe.json",
+    "scan_metadata": {
+      "angle_min": -0.961021900177002,
+      "angle_increment": -0.006763385608792305,
+      "range_min": 0.2800000011920929,
+      "range_max": 16.0
+    },
+    "ranges_zlib_base64": "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",
+    "laser_pose_m_rad": [
+      -0.01,
+      0.0,
+      -3.0802057575642006
+    ],
+    "observed_blocking_points_base_xy_m": [
+      [
+        -0.266683850279188,
+        -0.2267590170697409
+      ],
+      [
+        -0.2678346800626371,
+        -0.2246893032066802
+      ],
+      [
+        -0.26347138068330667,
+        -0.21788832861462523
+      ],
+      [
+        -0.25940950499791,
+        -0.21148024416277705
+      ],
+      [
+        -0.26294358050845557,
+        -0.2115528504251001
+      ],
+      [
+        -0.27401996118222627,
+        0.2209106565226169
+      ],
+      [
+        -0.27232919766274544,
+        0.22252954880461945
+      ],
+      [
+        -0.2704390422398913,
+        0.22397264844458942
+      ]
+    ],
+    "scope": "stationary after 20cm straight departure; prior filter used old base-frame boxes with new laser yaw"
+  }
+}

@@ -15,6 +15,8 @@ from jdamr_cube_navigation.rear_box_docking import (
 )
 import numpy as np
 import pytest
+import yaml
+import zlib
 
 
 GEOMETRY = {
@@ -29,6 +31,25 @@ REAR_EXTENT_M = 0.275
 REAR_HALF_WIDTH_M = 0.225
 FIXTURE_PATH = (
     Path(__file__).parent / 'fixtures/rear_box_scan_20261016.json')
+
+
+def test_current_yaw_trial_replays_operator_same_face_skew_in_recorded_scan():
+    evidence = json.loads((Path(__file__).parent / 'fixtures' /
+                           'rear_laser_yaw_20261020.json').read_text())
+    replay = evidence['guard_replay']
+    ranges = json.loads(zlib.decompress(base64.b64decode(replay['ranges_zlib_base64'])))
+    scan = {**replay['scan_metadata'],
+            'ranges': [math.inf if value is None else value for value in ranges]}
+    geometry = yaml.safe_load((Path(__file__).resolve().parents[2] /
+        'jdamr_cube_description/config/new_base_geometry.yaml').read_text())
+    observed = estimate_rear_box_face(
+        scan, geometry=geometry, rear_extent_m=REAR_EXTENT_M,
+        rear_half_width_m=REAR_HALF_WIDTH_M, observation_half_width_m=.6)
+    reference = evidence['external_reference']
+    expected = math.atan2(reference['rear_left_gap_m'] - reference['rear_right_gap_m'],
+                          reference['corner_separation_m'])
+    assert observed['normal_yaw_error_rad'] == pytest.approx(expected, abs=math.radians(.2))
+    assert geometry['laser_yaw']['value'] == evidence['candidate_laser_yaw_rad']
 
 
 def scan_from_base_points(points):

@@ -3371,7 +3371,8 @@ def test_recorded_table_views_advance_to_map_view_instead_of_reversing(monkeypat
         assert end[0] == pytest.approx(fixture['region_xy_m'][0] - .37)
         assert end[2] == pose[2]
         assert node._drive_zero_turn.call_args.kwargs == {
-            'precision': True, 'hold_heading': True}
+            'precision': True, 'hold_heading': True,
+            'approach_time_s': 0.5}
 
 
 @pytest.mark.parametrize('case', ['already_there', 'too_near', 'facing_away',

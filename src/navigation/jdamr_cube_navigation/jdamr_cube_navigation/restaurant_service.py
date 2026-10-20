@@ -977,7 +977,7 @@ class ServiceRoute(CorridorRoute):
             return None
         return scan, laser, outline, memory
 
-    def _remembered_blind_points(self, laser, scan):
+    def _remembered_blind_points(self, laser, scan, source_point_filter=None):
         """Remembered returns now inside the LiDAR range_min, in the base frame."""
         now_s = time.monotonic()
         keyframes = [(pose, frame) for stamp_s, pose, frame
@@ -985,7 +985,10 @@ class ServiceRoute(CorridorRoute):
                      if now_s - stamp_s <= SCAN_MEMORY_MAX_AGE_S]
         if not keyframes:
             return []
-        return remembered_blind_points(keyframes, self._odom_pose(), laser, scan.range_min)
+        current_pose = self._odom_pose()
+        return remembered_blind_points(
+            keyframes, current_pose, laser, scan.range_min,
+            source_point_filter=source_point_filter)
 
     def _remember_scan(self, scan):
         """Keep a scan whenever the base moved SCAN_MEMORY_STEP_M or turned STEP_RAD."""
