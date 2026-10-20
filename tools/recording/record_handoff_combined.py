@@ -114,7 +114,16 @@ def make_dataset(repo_id: str, root: Path, single_task_text: str, robot, dataset
 def run_phase(robot, teleop, events, episode_time_s, single_task, dataset,
               teleop_action_processor, robot_action_processor, robot_observation_processor,
               display_data, label):
-    """한 단계(물따르기 또는 컵배치)를 녹화한다. r이면 재시도, 끝나면 save_episode()."""
+    """한 단계(물따르기 또는 컵배치)를 **녹화만** 한다. 저장(save_episode)은 하지 않는다.
+
+    핸드오프 한 라운드는 '물따르기 + 컵배치'가 하나의 단위라, 어느 쪽이든 중간에
+    끊기면(->키 안 누름) 아무것도 저장되면 안 된다. 그래서 이 함수는 버퍼를 채우기만
+    하고, 저장/폐기 결정은 호출부가 두 단계 결과를 보고 일괄로 내린다.
+
+    r(재녹화): 이 단계 버퍼를 비우고 다시 녹화(단계 내부에서만 처리).
+    반환: -> 또는 n으로 정상 완료하면 True(버퍼 채워진 채, 저장 안 함),
+          ESC/q로 중간 종료하면 False(버퍼는 호출부가 비운다).
+    """
     while True:
         log_say(f"Recording episode {dataset.num_episodes} ({label})", True)
         record_loop(
@@ -132,7 +141,6 @@ def run_phase(robot, teleop, events, episode_time_s, single_task, dataset,
             display_mode=DISPLAY_MODE,
         )
         if events["stop_recording"]:
-            dataset.clear_episode_buffer()
             return False
         if events["rerecord_episode"]:
             log_say("Re-record", True)
@@ -140,7 +148,6 @@ def run_phase(robot, teleop, events, episode_time_s, single_task, dataset,
             events["exit_early"] = False
             dataset.clear_episode_buffer()
             continue
-        dataset.save_episode()
         return True
 
 
@@ -198,6 +205,7 @@ def main():
     dataset_place = make_dataset(PLACE_REPO_ID, PLACE_ROOT, PLACE_TASK, robot, dataset_features)
 
     listener = None
+    round_saved = False
     try:
         teleop.connect()
         robot.connect()
@@ -207,19 +215,33 @@ def main():
 
         with VideoEncodingManager(dataset_pour), VideoEncodingManager(dataset_place):
             log_say("Round: pour", True)
-            ok = run_phase(
+            pour_ok = run_phase(
                 robot, teleop, events, POUR_EPISODE_TIME_S, POUR_TASK, dataset_pour,
                 teleop_action_processor, robot_action_processor, robot_observation_processor,
                 display_data=True, label="pour",
             )
 
-            if ok:
+            place_ok = False
+            if pour_ok:
                 log_say("Round: cup place", True)
-                run_phase(
+                place_ok = run_phase(
                     robot, teleop, events, PLACE_EPISODE_TIME_S, PLACE_TASK, dataset_place,
                     teleop_action_processor, robot_action_processor, robot_observation_processor,
                     display_data=True, label="cup place",
                 )
+
+            # 원자적 저장: 물따르기·컵배치 둘 다 ->로 완료됐을 때만 둘 다 저장한다.
+            # 어느 하나라도 중간에 끊기면(ESC/q) 둘 다 버린다 - 짝 없는 에피소드나
+            # 반쪽짜리 라운드가 절대 저장되지 않는다.
+            if pour_ok and place_ok:
+                dataset_pour.save_episode()
+                dataset_place.save_episode()
+                round_saved = True
+                log_say("Round saved", True)
+            else:
+                dataset_pour.clear_episode_buffer()
+                dataset_place.clear_episode_buffer()
+                log_say("Round discarded - nothing saved", True)
     finally:
         log_say("Stop recording", True, blocking=True)
 
@@ -235,13 +257,16 @@ def main():
 
         shutdown_visualization(DISPLAY_MODE)
 
-        logging.info(f"물따르기 총 {dataset_pour.num_episodes}개, 컵배치 총 {dataset_place.num_episodes}개 - HF 업로드 시작")
-        if dataset_pour.num_episodes > 0:
+        # 이번 라운드가 실제로 저장됐을 때만 업로드한다. 중간에 끊긴 라운드는
+        # 로컬에도 저장이 안 됐으니 HF도 건드리지 않는다(아무 일도 안 일어남).
+        if round_saved:
+            logging.info(f"물따르기 총 {dataset_pour.num_episodes}개, 컵배치 총 {dataset_place.num_episodes}개 - HF 업로드 시작")
             dataset_pour.push_to_hub(private=True)
             logging.info("물따르기 업로드 완료")
-        if dataset_place.num_episodes > 0:
             dataset_place.push_to_hub(private=True)
             logging.info("컵배치 업로드 완료")
+        else:
+            logging.info("이번 라운드는 저장 안 됨 - 로컬·HF 모두 변경 없음, 업로드 생략")
 
         log_say("Exiting", True)
 
