@@ -1387,10 +1387,20 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     final_depth_measurement = True
                     frozen_target_odom = None
                     confirmation_basis = 'fresh_depth_table_edge'
-                    self.last_box_face = {
-                        'face_center_map_xy_m': list(target['face_center_map_xy_m']),
-                        'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
+                    observation_revision = getattr(self, 'parking_motion_revision', None)
             parked, _ = self.capture_stationary_pose()
+            if final_depth_measurement:
+                if observation_revision != getattr(self, 'parking_motion_revision', None):
+                    self.emit('box_target_discarded', phase='final_depth_measurement',
+                              reason='motion_after_table_observation')
+                    continue
+                # The stop hold may receive a new map->odom correction while the
+                # base stays still. Move the whole observed geometry into that
+                # map frame, preserving the measured base-to-table relation.
+                target = self._rebase_stopped_table_target(target, parked)
+                self.last_box_face = {
+                    'face_center_map_xy_m': list(target['face_center_map_xy_m']),
+                    'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
             actual = parked
             outward = target['outward_normal_map_xy']
             face = target['face_center_map_xy_m']
@@ -1585,6 +1595,35 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 if not self._final_failure_reported:
                     self.emit('failed', phase='final_approach', reason='nav2_or_stop_confirmation')
                 return False
+
+    def _rebase_stopped_table_target(self, target, parked):
+        """Keep a stopped depth measurement coherent with a later map pose."""
+        observed = target.get('observation_robot_pose_map')
+        if observed is None:
+            return target
+        turn = parked[2] - observed[2]
+        cosine, sine = math.cos(turn), math.sin(turn)
+
+        def rotate(vector):
+            x, y = vector
+            return cosine * x - sine * y, sine * x + cosine * y
+
+        def translate(point):
+            dx, dy = rotate((point[0] - observed[0], point[1] - observed[1]))
+            return parked[0] + dx, parked[1] + dy
+
+        rebased = dict(target)
+        rebased['x_m'], rebased['y_m'] = translate((target['x_m'], target['y_m']))
+        rebased['face_center_map_xy_m'] = translate(target['face_center_map_xy_m'])
+        rebased['outward_normal_map_xy'] = rotate(target['outward_normal_map_xy'])
+        if 'edge_basis_map_xy' in target:
+            rebased['edge_basis_map_xy'] = rotate(target['edge_basis_map_xy'])
+        rebased['yaw_rad'] = math.atan2(
+            math.sin(target['yaw_rad'] + turn), math.cos(target['yaw_rad'] + turn))
+        rebased['observation_robot_pose_map'] = list(parked)
+        self.emit('table_stop_target_rebased', observation_pose_map=list(observed),
+                  stopped_pose_map=list(parked), motion_revision_unchanged=True)
+        return rebased
 
     def _fresh_table_edge_occlusion(self, error):
         """Recognize a healthy depth stream whose table edge is hidden at close range."""

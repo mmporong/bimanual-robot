@@ -1,0 +1,70 @@
+{
+  "provenance": {
+    "source": "$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261020_141003_4d291fb0/cycle_events.jsonl",
+    "sha256": "08a4dc7272364ae87e4caaca950fdd2ac7bfe52cab1934a15ce286242a602aeb",
+    "target_event_index": 44,
+    "gap_event_index": 45,
+    "measured_at": "2026-10-20",
+    "valid_for": "water_station final stopped depth observation; internal estimate, no ruler measurement"
+  },
+  "target": {
+    "x_m": 0.0488855819387785,
+    "y_m": -1.2380309848194857,
+    "yaw_rad": -3.090459589510663,
+    "estimate_gap_m": 0.009999999999999981,
+    "provenance": "TABLE_EDGE_CAMERA_MOUNT_ESTIMATE",
+    "face_center_map_xy_m": [
+      -0.0260163922880369,
+      -1.2418642936937456
+    ],
+    "outward_normal_map_xy": [
+      0.9986929896908721,
+      0.05111078499013209
+    ],
+    "table_height_m": 0.7834896283701007,
+    "edge_basis_map_xy": [
+      -0.05111078499013209,
+      0.9986929896908721
+    ],
+    "edge_rms_m": 0.0007825644503738346,
+    "surface_kind": "table_edge",
+    "table_edge_calibration": {
+      "applied": true,
+      "yaw_offset_rad": -0.04392325219698101,
+      "plane_offset_bias_m": 0.04960505180184195,
+      "raw_normal_base_xy": [
+        -0.9994333528311765,
+        -0.0336596679816195
+      ],
+      "raw_plane_offset_m": 0.025960780545551027,
+      "corrected_plane_offset_m": 0.07556583234739297,
+      "scope": "table_line_observation_not_physical_camera_transform"
+    },
+    "front_extent_m": 0.065,
+    "observed_face_span_m": 0.5319525105135191,
+    "observation_robot_pose_map": [
+      0.048970451886100774,
+      -1.228618620558994,
+      -3.080202364455207
+    ],
+    "front_extent_provenance": {
+      "value": 0.065,
+      "unit": "m",
+      "measured_at": "2026-09-15",
+      "valid_for": "current_bimanual_lower_frame_and_wheels",
+      "source": "user_tape_measurement"
+    },
+    "physical_accuracy": "NOT_EXTERNALLY_MEASURED"
+  },
+  "logged_mixed_frame_corner_gaps_m": [
+    0.026545557737176075,
+    0.03433968031581979
+  ],
+  "front_extent_m": 0.065,
+  "frame_width_m": 0.45,
+  "target_gap_m": 0.01,
+  "coherent_corner_gaps_m": [
+    0.008261416495218336,
+    0.01287708683288866
+  ]
+}

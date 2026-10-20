@@ -1732,3 +1732,18 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **좌표 저장 경계 오류:** 정합 후 `initial_pose.yaml`을 작성하면서 NumPy 실수형을 `yaml.safe_dump`가 거부했다. 기존 초기화 모의 결과는 일반 실수형이라 이 경계를 놓쳤다. 도크 정합의 반환 좌표와 상대 자세를 일반 실수형으로 변환하고 실제 정합 결과의 YAML 왕복 검사를 추가했다. helper 스위트 131건·구문·치명 lint·diff 검사를 통과했다. Pi 소스 scripts 경로와 운영 tools 사본에 같은 파일을 반영했다.
 
 **실제 준비 결과와 남은 범위:** `init_20261020_134208`에서 새 도크 스캔 정합, AMCL과 약 2 mm·0.1° 일치, Nav2 비이동 활성화를 완료했다. 등록 HOME은 유지하고 도크 출발 대기를 기록했다. 사용자의 출발 전 준비 요청에 따라 카메라·인식기는 기동 대기를 줄이도록 함께 유지하며 별도 녹화·RViz·진단 상주 프로세스는 만들지 않았다. 해당 쌍의 종료는 Pi `sudo systemctl stop jdamr-box-rgbd.service jdamr-box-observer.service`다. 기존 base·Nav2·상주 실행기는 다음 명시적 출발을 기다린다. 실행 로그는 기존 runs, 배포·검사 receipt는 `$HOME/.local/state/bimanual-robot/motion_setup_fix_20261020/`와 `$HOME/.local/state/bimanual-robot/reboot_check_20261020/`에 보존한다. 이번 준비 중 실물 이동·전체 왕복 검증은 수행하지 않았다.
+
+
+### 22.20 2026-10-20 정지 중 지도 자세 갱신과 깊이 면 혼용으로 성공 간격을 무진전으로 오판
+
+**관측:** `table_01_20261020_141003_4d291fb0`은 도크 이탈·급수대 관측점 접근과 정밀 전진을 수행했다. 마지막 보정 요청은 19.898 mm, odom 이동은 20.339 mm였고 이동 종료의 표적 오류는 없었다. 새 깊이 관측은 stable 8프레임·처리 0.123초·입력 지연 0.003초로 유효했다. 그 면과 `observation_robot_pose_map`을 함께 계산하면 차체 양쪽 간격은 8.261/12.877 mm, yaw 오차는 0.588°로 기존 목표 10±3 mm·1° 안이다. 이는 저장된 깊이 관측의 내부 기하 재생이며 외부 실측이 아니다. 당시 로그의 후속 판정은 26.546/34.340 mm였고 이전 nearest 27.414 mm와 비교해 개선 0.869 mm로 분류됐다.
+
+**확정 원인과 기능의 출처:** `observe_target`는 관측 전 정지 자세에 면 좌표를 결합한다. 최종 판정은 추가 `capture_stationary_pose`의 더 늦은 지도 자세를 사용하면서 면을 갱신하지 않았다. 따라서 정지 중 map→odom 갱신이 물리적 간격 변화처럼 들어갔다. 기존 `TABLE_FINE_MIN_PROGRESS_M=0.001` 조건이 `final_gap_no_progress`를 반환했고 `incomplete_parking_return_started`로 이어졌다. 이 조건은 원래 JD-AMR 저장소의 2026-10-13 `f36232fa51f63aa39d0aaa5fbf4474c9d541bce6`에서 들어와 양팔 저장소에 이관된 코드다. 이번 사용자가 새로 요청한 성공 기준이 아니다. 원래 로그에는 두 번째 정지 자세 자체가 없어 그 지도 갱신의 전체 XY를 재구성했다고 주장하지 않는다.
+
+**수정:** 최종 새 깊이 관측 뒤 이동 revision을 보존하고 정지 확인 뒤 같은지 비교한다. 변하지 않았으면 목표 XY·yaw, 면 중심·법선·접선, 관측 자세를 하나의 SE(2) 변환으로 정지 확인의 지도 자세에 맞춘다. 양쪽 간격과 각도는 관측과 일관되고 정지 hold·후속 이탈·필요한 보정 목표도 같은 지도 좌표를 쓴다. 실제 이동 revision이 달라지면 해당 면으로 성공/추가 전진을 판단하지 않고 새 정지 관측으로 이어간다. 기존 전체 deadline을 연장하거나 목표 허용오차·실물 제원·센서/링크/정지·보정 상한을 바꾸지 않았다. `table_stop_target_rebased`에는 관측/정지 지도 자세를 함께 기록한다.
+
+**검증:** 원본 run SHA와 마지막 target/event index를 `test/fixtures/table_final_gap_map_shift_20261020.json`에 보존했다. 기존 코드에서 지도 평행이동·회전의 3가지 재생이 실패했고 수정본에서는 같은 8.261/12.877 mm로 확인한다. 관측 뒤 이동 발생 시 새 관측을 기다리고 추가 전진을 발행하지 않는 회귀도 통과했다. 관련 7개 스위트 848건·구문·치명 lint·diff 확인을 통과했다. 별도 로컬 검증 패스를 수행했으며 native code-reviewer 생성은 agent thread limit으로 거부돼 독립 승인으로 취급하지 않는다.
+
+**비이동 반영과 현재 상태:** Pi 소스/설치/import의 `box_service.py` SHA는 `a5d99c060d62d14e07180882da7412db6677fb324b4a1498d3022ef8420e91dc`로 일치하며 idle executor PID7399를 반영했다. 복원본은 Pi `$HOME/.local/state/jdamr/final-gap-frame/20261020_142206/`, receipt는 PC `$HOME/.local/state/bimanual-robot/final_gap_frame_20261020/deployment.json`이다. base PID1212·Nav2 PID2010은 재시작하지 않았고 카메라/인식기는 inactive 상태다. spool pending/running 0이며 이번 수정에서 이동을 요청하지 않았다. 기존 서비스 유지 이유는 다음 명시적 요청 대기이며 종료 명령은 Pi `sudo systemctl stop jdamr-box-executor.service jdamr-restaurant-navigation.service jdamr-base.service`다.
+
+**별도 남은 복귀 문제:** 잘못 전환된 복귀는 급수대 후진 이탈과 `home_dock_approach` 이동까지 수행했지만 `rear box coarse static corridor blocked`로 후면 주차에 들어가지 못했다. 이는 이번 최종 간격 좌표 수정과 별개이며 아직 해결됐다고 주장하지 않는다. 1번 테이블은 방문하지 않았고 도크 도착도 미확정이다. 사용자 정지 뒤 자동 재개는 비허용이며 과거 `ready_not_started` 도크 준비 상태를 최신 run의 정지 상태로 정정했다. HOME·AMCL·물리 위치를 임의로 덮어쓰지 않았고 수정 후 전체 왕복 실차 검증도 수행하지 않았다.
