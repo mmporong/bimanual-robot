@@ -72,6 +72,12 @@ python3 tools/jdamr/jdamr_depart.py stop
 이어가며 리뷰·전체 검사·문서 작업을 출발 단계에 끼워 넣지 않는다.
 실물 이동은 사용자가 요청한 실행 범위에서만 수행한다.
 
+기본 주차 간격은 책상·박스 모두 계약의 1 cm다. `--final-gap-m`으로 지정한 간격이
+우선한다. `go`는 상주 실행기를 사용하고 종료 코드와 도크 도착을 함께 확인한다.
+이동 전 지도 수신 실패는 현재 위치추정을 유지하며 실행기만 한 번 재시작한다.
+출발 중 전체 서비스 복구나 화면·녹화 기동은 수행하지 않는다.
+RViz는 `display-start`, PC 녹화까지 필요하면 `display-start --record-diagnostics`를 쓴다.
+
 상세 하위 명령과 `JDAMR_HOST`, `JDAMR_PI_HOME`, `JDAMR_PI_WS`,
 `JDAMR_DATA_ROOT`, `JDAMR_PC_WS` 등의 환경변수는
 [운영 도구 안내](../../tools/jdamr/README.md)를 참고한다.
@@ -95,7 +101,7 @@ ros2 launch jdamr_cube_cartographer cartographer_real.launch.py
 양팔 시뮬 모델 `hold_flow_description`의 차체 중심 원점과 105 mm 차이가 있다.
 주행의 검증된 TF를 임의로 양팔 시뮬 모델로 바꾸거나 두 모델을 같은 프레임으로 동시에 띄우지 않는다.
 카메라 렌즈는 상판 720 mm + 상대 높이 540 mm = 바닥 기준 1260 mm다.
-새 높이에서 1 cm 주차 실측 성공은 아직 확인하지 않았다.
+1 cm 주차 성공은 사용자가 확인했다. 이후 제어 수정본의 실차 결과와 반복 정밀도는 별도로 확인한다.
 
 ## 개발과 검증
 

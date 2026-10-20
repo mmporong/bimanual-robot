@@ -19,7 +19,8 @@ from jdamr_cube_navigation.corridor_route import (
     _quaternion_yaw, AMCL_QOS, CorridorRoute, ODOM_TRAIL_STEP_M, PATH_BLOCKED_NAV2_CODES,
     spin_node)
 from jdamr_cube_navigation.parking import (
-    ENTRY_HEADING_TOLERANCE_DEG, load_parking_contract, MAXIMUM_CONTRACT_VALUES, ParkingHold,
+    DOCK_POSITION_TOLERANCE_M, ENTRY_HEADING_TOLERANCE_DEG, load_parking_contract,
+    MAXIMUM_CONTRACT_VALUES, ParkingHold,
     pose_errors,
 )
 from jdamr_cube_navigation.reverse_parking import (
@@ -32,6 +33,10 @@ from jdamr_cube_navigation.service_destinations import (
     validate_gap_measurement,
     validate_registry, verify_identity,
 )
+from jdamr_cube_navigation.surface_approach import (
+    FACE_ALIGNMENT_GAP_M, face_approach_command, FACE_APPROACH_TIME_S, FACE_HEADING_TOLERANCE_RAD,
+    filtered_face_heading,
+)
 from nav2_msgs.action import (
     ComputePathThroughPoses, FollowPath, NavigateThroughPoses, NavigateToPose, Spin)
 from nav2_msgs.srv import IsPathValid, Toggle
@@ -43,6 +48,7 @@ from rclpy.parameter import parameter_value_to_python
 from rclpy.signals import SignalHandlerOptions
 from rclpy.utilities import remove_ros_args
 from std_msgs.msg import String
+from std_srvs.srv import Empty
 from tf2_ros import TransformException
 import yaml
 
@@ -79,6 +85,10 @@ DOCK_END_TURN_MAX_RAD = math.radians(5.0)
 # front corner about 2 cm ahead of the right (operator, 2026-10-06).
 DOCK_HEADING_TOLERANCE_RAD = math.radians(1.0)
 DOCK_TRIM_ATTEMPTS = 3
+# The configured global costmap updates at 1 Hz; recheck a rejected snapshot
+# across two updates while stopped before reporting a blocked reverse path.
+REVERSE_PATH_UPDATE_S = 1.0
+REVERSE_PATH_CHECK_ATTEMPTS = 3
 ENTRY_HEADING_CHECKER = 'entry_heading_checker'
 ENTRY_HEADING_TOLERANCE_RAD = math.radians(ENTRY_HEADING_TOLERANCE_DEG)
 # Events whose reason may explain why a cycle stopped short (operator_call).
@@ -122,7 +132,8 @@ PATH_BLOCKED_FORWARD_MAX_M = 0.35
 # 10 Hz cycle.
 STRAIGHT_ESCAPE_SPEED_MPS = 0.05
 PRECISION_STRAIGHT_MIN_SPEED_MPS = 0.01
-PRECISION_STRAIGHT_TARGET_S = 2.0
+PRECISION_STRAIGHT_TARGET_S = 4.0
+LIVE_APPROACH_MAX_M = 0.6
 # A 1/s proportional correction removes a one-degree drift without snapping the
 # chassis. 0.02 rad/s is below the 0.08 rad/s in-place trim and, on the configured
 # 0.51 m wheel separation, keeps both wheels moving forward at the 0.01 m/s
@@ -366,7 +377,7 @@ class ServiceRoute(CorridorRoute):
         self.box_status = None
         self.box_status_received_s = None
         self.create_subscription(
-            String, '/box_parking/perception_status', self._box_callback, 10)
+            String, '/box_parking/perception_status', self._box_callback, 1)
         for key, topic in (('map', '/map'), ('keepout', '/keepout_filter_mask')):
             self.create_subscription(
                 OccupancyGrid, topic,
@@ -1276,6 +1287,7 @@ class ServiceRoute(CorridorRoute):
         DIRECT_SETTLE_S has passed.
         """
         publisher = self._escape_publisher()
+        self._last_direct_motion_failure = None
         value = measure()
         published_s = guarded_s = 0.0
         try:
@@ -1283,8 +1295,11 @@ class ServiceRoute(CorridorRoute):
                 now_s = time.monotonic()
                 if now_s - guarded_s >= DIRECT_GUARD_PERIOD_S:
                     guarded_s = now_s
-                    failure = self._guard_failure(False) or (watch() if watch else None)
+                    failure = (self._guard_failure(False)
+                               or (None if self._operator_link_ready() else 'operator_link_lost')
+                               or (watch() if watch else None))
                     if failure:
+                        self._last_direct_motion_failure = failure
                         self.emit(event, reason=failure)
                         break
                 if now_s - published_s >= 0.05:
@@ -1292,6 +1307,10 @@ class ServiceRoute(CorridorRoute):
                     published_s = time.monotonic()
                 spin_node(self, timeout_sec=0.02)
                 value = measure()
+            if self.stop_requested:
+                self._last_direct_motion_failure = 'operator_stop'
+            elif time.monotonic() >= deadline_s and not done(value):
+                self._last_direct_motion_failure = 'direct_motion_timeout'
         finally:
             for _repeat in range(5):
                 publisher.publish(Twist())
@@ -1315,13 +1334,14 @@ class ServiceRoute(CorridorRoute):
                 stationary_since_s = None
             spin_node(self, timeout_sec=0.02)
         if not stopped_confirmed:
+            self._last_direct_motion_failure = 'odometry did not confirm stop'
             self.emit(event, reason='odometry did not confirm stop')
             return None
         return measure()
 
     def _rotate_in_place(self, delta_rad):
         """
-        Command (0, +-TRIM_ANGULAR_RADPS) until odom shows delta_rad turned.
+        Turn without translation, reducing the rate for small corrections.
 
         Same path as the controller (smoother, Collision Monitor); the stop is
         sent early by the smoother's deceleration and the stop latency. Returns the
@@ -1350,28 +1370,46 @@ class ServiceRoute(CorridorRoute):
             state['last'] = yaw
             return state['turned']
 
+        # All face and dock trims share this damping; callers cannot bypass it.
+        speed_radps = min(TRIM_ANGULAR_RADPS, max(
+            PRECISION_HEADING_MAX_RADPS,
+            TRIM_ANGULAR_RADPS * abs(delta_rad) / (2.0 * TRIM_STOP_RAD)))
         command = Twist()
-        command.angular.z = math.copysign(TRIM_ANGULAR_RADPS, delta_rad)
+        command.angular.z = math.copysign(speed_radps, delta_rad)
         # At most half the turn: a trim just over the minimum must still turn.
-        early_rad = min(TRIM_STOP_RAD, abs(delta_rad) / 2.0)
-        deadline_s = time.monotonic() + abs(delta_rad) / TRIM_ANGULAR_RADPS + TRIM_EXTRA_S
-        return self._direct_motion(
+        early_rad = min(TRIM_STOP_RAD * speed_radps / TRIM_ANGULAR_RADPS,
+                        abs(delta_rad) / 2.0)
+        deadline_s = time.monotonic() + abs(delta_rad) / speed_radps + TRIM_EXTRA_S
+        turned_rad = self._direct_motion(
             command, lambda turned: abs(turned) >= abs(delta_rad) - early_rad, measure,
             deadline_s, 'trim_rotation_stopped')
+        return None if getattr(self, '_last_direct_motion_failure', None) else turned_rad
 
     def _drive_zero_turn(self, distance_m, watch=None, precision=False,
-                         hold_heading=False):
+                         hold_heading=False, target_update=None, command_watch=None,
+                         approach_time_s=None):
         """
         Command (+-STRAIGHT_ESCAPE_SPEED_MPS, 0) until odom shows distance_m.
 
         The stop is sent early by the smoother's deceleration and the stop latency.
         Precision moves lower their speed with the requested distance and update
         that early-stop point from fresh odometry speed and the observed loop delay.
-        Heading hold feeds odometry yaw back into a bounded angular command while
-        keeping the same velocity-smoother, Collision Monitor and guard path.
+        Heading hold feeds odometry yaw back into a bounded angular command. A live
+        face may supply heading_rad as well as remaining_m; its filtered normal
+        replaces the starting heading and slows translation until alignment settles.
+        Both use the same velocity-smoother, Collision Monitor and guard path.
         It runs only between goals. Returns the signed travel along the start heading
         once the base is at rest, or None without odom.
         """
+        if target_update is not None and not (precision and hold_heading and distance_m != 0.0):
+            raise ValueError('live approach requires nonzero precision heading hold')
+        if approach_time_s is None:
+            approach_time_s = (FACE_APPROACH_TIME_S if target_update is not None
+                               else PRECISION_STRAIGHT_TARGET_S)
+        if (isinstance(approach_time_s, bool) or not math.isfinite(approach_time_s)
+                or approach_time_s <= 0.0):
+            raise ValueError('invalid approach time')
+        direction = math.copysign(1.0, distance_m)
         base_frame = self.parking_contract['robot_base_frame']
 
         def odom_pose():
@@ -1384,7 +1422,11 @@ class ServiceRoute(CorridorRoute):
             start = odom_pose()
         except TransformException:
             return None
-        state = {'travelled': 0.0, 'tf_failure': None}
+        state = {'travelled': 0.0, 'tf_failure': None,
+                 'target_failure': None, 'remaining_m': abs(distance_m),
+                 'target_reached': False, 'face_heading': None, 'heading_updated_s': None,
+                 'validate_control': None, 'allow_near_alignment': False,
+                 'alignment_in_progress': False, 'observed_heading': None}
         command = Twist()
 
         def measure():
@@ -1398,20 +1440,84 @@ class ServiceRoute(CorridorRoute):
                 return state['travelled']
             state['travelled'] = ((x_m - start[0]) * math.cos(start[2])
                                   + (y_m - start[1]) * math.sin(start[2]))
-            if hold_heading:
+            if (target_update is not None and state['target_failure'] is None
+                    and not state['target_reached']):
+                try:
+                    update = target_update((x_m, y_m, yaw))
+                    remaining = update['remaining_m']
+                    if (isinstance(remaining, bool)
+                            or not isinstance(remaining, (int, float))
+                            or not math.isfinite(remaining)):
+                        raise RuntimeError('invalid live approach distance')
+                    state['remaining_m'] = remaining
+                    allow_near = update.get('allow_near_alignment', False)
+                    if not isinstance(allow_near, bool):
+                        raise RuntimeError('invalid near alignment mode')
+                    state['allow_near_alignment'] = allow_near
+                    next_speed = max(PRECISION_STRAIGHT_MIN_SPEED_MPS,
+                                     remaining / approach_time_s)
+                    if 'heading_rad' in update:
+                        heading = update['heading_rad']
+                        if (isinstance(heading, bool) or not isinstance(heading, (int, float))
+                                or not math.isfinite(heading)):
+                            raise RuntimeError('invalid live approach heading')
+                        now_s = time.monotonic()
+                        elapsed_s = (0.0 if state['heading_updated_s'] is None
+                                     else max(0.0, now_s - state['heading_updated_s']))
+                        state['face_heading'] = filtered_face_heading(
+                            state['face_heading'], heading, elapsed_s)
+                        state['observed_heading'] = heading
+                        state['heading_updated_s'] = now_s
+                        state['validate_control'] = update.get('validate_control')
+                        if (state['validate_control'] is not None
+                                and not callable(state['validate_control'])):
+                            raise RuntimeError('invalid table control validator')
+                    else:
+                        command.linear.x = direction * min(abs(command.linear.x), next_speed)
+                except (KeyError, TypeError, ValueError, RuntimeError) as error:
+                    state['target_failure'] = str(error) or type(error).__name__
+                    state['resume_speed_mps'] = command.linear.x
+                    command.linear.x = command.angular.z = 0.0
+            if hold_heading and state['target_failure'] is None:
+                heading = (start[2] if state['face_heading'] is None
+                           else state['face_heading'])
                 error_rad = math.atan2(
-                    math.sin(start[2] - yaw), math.cos(start[2] - yaw))
+                    math.sin(heading - yaw), math.cos(heading - yaw))
+                raw_error_rad = (error_rad if state['observed_heading'] is None else math.atan2(
+                    math.sin(state['observed_heading'] - yaw),
+                    math.cos(state['observed_heading'] - yaw)))
+                state['alignment_in_progress'] = (
+                    state['allow_near_alignment']
+                    and max(abs(error_rad), abs(raw_error_rad)) > FACE_HEADING_TOLERANCE_RAD)
                 command.angular.z = max(
                     -PRECISION_HEADING_MAX_RADPS,
                     min(PRECISION_HEADING_MAX_RADPS,
                         PRECISION_HEADING_KP * error_rad))
+                if state['face_heading'] is not None:
+                    try:
+                        if state['validate_control'] is not None:
+                            state['validate_control']((x_m, y_m, yaw), heading)
+                        linear, angular = face_approach_command(
+                            state['remaining_m'], error_rad, approach_time_s=approach_time_s,
+                            allow_near_alignment=state['allow_near_alignment'])
+                        command.linear.x = direction * linear
+                        command.angular.z = angular
+                        if (state['allow_near_alignment']
+                                and state['remaining_m'] <= FACE_ALIGNMENT_GAP_M - .01):
+                            if state['alignment_in_progress']:
+                                command.linear.x = 0.
+                            if command.angular.z * raw_error_rad <= 0.:
+                                command.angular.z = 0.
+                    except (ValueError, RuntimeError) as error:
+                        state['target_failure'] = str(error)
+                        command.linear.x = command.angular.z = 0.0
             return state['travelled']
 
         speed_mps = STRAIGHT_ESCAPE_SPEED_MPS
         if precision:
             speed_mps = min(speed_mps, max(
                 PRECISION_STRAIGHT_MIN_SPEED_MPS,
-                abs(distance_m) / PRECISION_STRAIGHT_TARGET_S))
+                abs(distance_m) / approach_time_s))
         command.linear.x = math.copysign(speed_mps, distance_m)
         timing = {'checked_s': None, 'loop_s': 0.02}
 
@@ -1420,7 +1526,7 @@ class ServiceRoute(CorridorRoute):
             if timing['checked_s'] is not None:
                 timing['loop_s'] = min(0.1, max(0.0, now_s - timing['checked_s']))
             timing['checked_s'] = now_s
-            live_speed_mps = speed_mps
+            live_speed_mps = abs(command.linear.x) or speed_mps
             motion = getattr(self, 'latest_motion', None)
             odom_age_s = 0.0
             if motion is not None and all(math.isfinite(value) for value in motion):
@@ -1432,8 +1538,14 @@ class ServiceRoute(CorridorRoute):
                     + live_speed_mps * reaction_s)
 
         def reached_stop_point(travelled):
-            if state['tf_failure'] is not None:
+            if state['tf_failure'] is not None or state['target_failure'] is not None:
                 return False
+            if target_update is not None:
+                if state['alignment_in_progress']:
+                    return False
+                reached = state['remaining_m'] <= stopping_distance_m()
+                state['target_reached'] = reached
+                return reached
             if not precision:
                 early_m = min(
                     STRAIGHT_ESCAPE_SPEED_MPS ** 2 / (2.0 * STRAIGHT_DECEL_MPS2)
@@ -1444,16 +1556,100 @@ class ServiceRoute(CorridorRoute):
             return abs(travelled) >= abs(distance_m) - early_m
 
         def motion_watch():
-            if state['tf_failure'] is not None:
-                return state['tf_failure']
+            failure = state['tf_failure'] or state['target_failure']
+            if failure is not None:
+                return failure
+            if command_watch is not None:
+                failure = command_watch(command)
+                if failure:
+                    state['target_failure'] = failure
+                    state['resume_speed_mps'] = command.linear.x
+                    command.linear.x = command.angular.z = 0.0
+                    return failure
             return watch() if watch else None
 
-        deadline_s = (time.monotonic() + abs(distance_m) / speed_mps
-                      + STRAIGHT_ESCAPE_EXTRA_S)
-        travelled_m = self._direct_motion(
-            command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
-            watch=motion_watch if hold_heading else watch, confirm_stopped=precision)
-        return None if state['tf_failure'] is not None else travelled_m
+        if target_update is not None:
+            # Remaining-distance taper and fresh depth corrections share one move.
+            deadline_s = (time.monotonic()
+                          + LIVE_APPROACH_MAX_M / PRECISION_STRAIGHT_MIN_SPEED_MPS
+                          + STRAIGHT_ESCAPE_EXTRA_S)
+        else:
+            deadline_s = (time.monotonic() + abs(distance_m) / speed_mps
+                          + STRAIGHT_ESCAPE_EXTRA_S)
+        recoverable_depth_failures = {
+            'table approach observer silent',
+            'table approach depth stale or future-dated',
+            'table approach observer latency',
+        }
+        recoverable_rear_failures = {
+            'rear box scan unavailable', 'rear box scan stale or future-dated',
+            'rear box stamped odom TF unavailable', 'rear box face unavailable',
+            'rear box target changed', 'rear docking swept footprint occupied',
+        }
+        recoverable_target_failures = recoverable_depth_failures | recoverable_rear_failures
+        while True:
+            travelled_m = self._direct_motion(
+                command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
+                watch=motion_watch if hold_heading or target_update is not None else watch,
+                confirm_stopped=precision)
+            if (target_update is None or travelled_m is None or self.stop_requested
+                    or state['tf_failure'] is not None
+                    or state['target_failure'] not in recoverable_target_failures):
+                break
+            reason = state['target_failure']
+            resume_speed = state.get('resume_speed_mps', speed_mps)
+            paused_s = time.monotonic()
+            rear_recovery = reason in recoverable_rear_failures
+            recovery_deadline_s = (min(deadline_s, getattr(self, 'run_deadline_s', deadline_s))
+                                   if rear_recovery else math.inf)
+            event_prefix = 'rear_box' if rear_recovery else 'table_approach'
+            self.emit(f'{event_prefix}_waiting_for_input', reason=reason,
+                      travelled_m=state['travelled'], target_preserved=True)
+            # A temporary depth gap pauses this same odom-frozen move. No goal,
+            # nonzero velocity or changed stop point is sent while inputs are bad.
+            link_lost = False
+            while not self.stop_requested and time.monotonic() < recovery_deadline_s:
+                spin_node(self, timeout_sec=0.05)
+                if not link_lost and not self._operator_link_ready():
+                    link_lost = True
+                if link_lost or self._guard_failure(False):
+                    continue
+                state['target_failure'] = None
+                command.linear.x = resume_speed
+                measure()
+                if state['tf_failure'] is not None:
+                    break
+                if state['target_failure'] is None and command_watch is not None:
+                    state['target_failure'] = command_watch(command)
+                    if state['target_failure']:
+                        command.linear.x = command.angular.z = 0.0
+                if state['target_failure'] is None:
+                    self.emit(f'{event_prefix}_input_recovered',
+                              paused_s=time.monotonic() - paused_s,
+                              travelled_m=state['travelled'], target_preserved=True)
+                    break
+                if state['target_failure'] not in recoverable_target_failures:
+                    break
+            if (rear_recovery and time.monotonic() >= recovery_deadline_s
+                    and not self.stop_requested):
+                state['target_failure'] = 'rear box input recovery deadline exceeded'
+            if self.stop_requested or state['tf_failure'] or state['target_failure']:
+                command.linear.x = command.angular.z = 0.0
+                break
+            if not rear_recovery:
+                deadline_s += time.monotonic() - paused_s
+            timing['checked_s'] = None
+        if precision:
+            self.emit('precision_straight_finished',
+                      requested_distance_m=distance_m,
+                      travelled_m=travelled_m, speed_mps=speed_mps,
+                      loop_s=timing['loop_s'],
+                      odom_tf_failed=state['tf_failure'] is not None,
+                      target_failure=state['target_failure'])
+        failed = (state['tf_failure'] or state['target_failure']
+                  or (target_update is not None
+                      and (self.stop_requested or not state['target_reached'])))
+        return None if failed else travelled_m
 
     def _departure_ready(self):
         """Check, before every goal, the battery reserve and the operator link."""
@@ -1549,6 +1745,12 @@ class ServiceRoute(CorridorRoute):
         finally:
             self._intermediate_localization = previous
 
+    @staticmethod
+    def _input_gap_recoverable(reason):
+        return (CorridorRoute._input_gap_recoverable(reason)
+                or (isinstance(reason, str) and reason.startswith(
+                    'stationary teaching unavailable: need fresh TF, odometry and localization')))
+
     def execute(self, *, final_parking=True, alignment=False, staging=False, face=False):
         """Bound transit and parking actions and retain their terminal result."""
         if not isinstance(final_parking, bool):
@@ -1564,6 +1766,7 @@ class ServiceRoute(CorridorRoute):
         # caller's stage and a final leg is always strict, input recovery included.
         intermediate = not final_parking and (
             not alignment or getattr(self, '_intermediate_localization', False))
+        self._dock_departure = None
         with self._localization_bound(intermediate):
             return self._run_with_input_recovery(
                 lambda: self._execute_service_once(
@@ -1574,6 +1777,23 @@ class ServiceRoute(CorridorRoute):
         """Retry only a canceled input gap, never an unresolved action."""
         if not self.navigate.wait_for_server(timeout_sec=2.0):
             return False
+        distance_m = self.config.get('dock_departure_distance_m')
+        if (distance_m is not None and not (final_parking or alignment or staging)
+                and self._resume_waypoint_index == 0):
+            try:
+                departed = self._depart_dock_straight(distance_m)
+            except RuntimeError as error:
+                reason = self._guard_failure(False) or str(error)
+                if self.stop_requested:
+                    return False
+                if not self._input_gap_recoverable(reason):
+                    raise
+                self._retry_guard_reason = reason
+                self.emit('dock_departure_waiting_for_input', reason=reason)
+                return False
+            if not departed:
+                return False
+            self._resume_waypoint_index = 1
         through = getattr(self, 'navigate_through', None)
         if (through is not None and not (final_parking or alignment or staging)
                 and len(self.waypoints) - self._resume_waypoint_index >= 2):
@@ -1636,6 +1856,85 @@ class ServiceRoute(CorridorRoute):
             finally:
                 if not self.finish_navigation():
                     raise RuntimeError('navigation cancellation unconfirmed')
+        return True
+
+    def _depart_dock_straight(self, distance_m):
+        """Finish the dock exit along the stopped heading before transit may turn."""
+        if self.stop_requested:
+            return False
+        if (isinstance(distance_m, bool) or not isinstance(distance_m, (float, int))
+                or not math.isfinite(distance_m) or distance_m <= 0.0
+                or len(self.waypoints) < 2 or self.waypoints[0]['id'] != 'home_exit'):
+            raise ValueError('dock departure requires a positive distance and first home_exit')
+        if self._dock_departure is None:
+            actual, _ = self.capture_stationary_pose(intermediate=True)
+            x_m, y_m, yaw_rad = actual
+            count = max(2, math.ceil(distance_m / 0.025))
+            path = RosPath()
+            path.poses = [self._pose(0, {
+                'x': x_m + distance_m * i / count * math.cos(yaw_rad),
+                'y': y_m + distance_m * i / count * math.sin(yaw_rad),
+                'yaw': yaw_rad}) for i in range(count + 1)]
+            path.header = path.poses[0].header
+            # The live Collision Monitor checks the straight exit while driving.
+            # A single global-costmap snapshot must not terminate dock departure;
+            # retain the static map/keepout check for the whole swept footprint.
+            points = [(p.pose.position.x, p.pose.position.y, yaw_rad) for p in path.poses]
+            if not static_corridor_clear(
+                    Path(self.registry['map']['yaml_path']),
+                    Path(self.registry['keepout']['yaml_path']), points,
+                    self._reverse_footprint(), allow_rear_keepout_escape=True):
+                self.emit('dock_departure_path_checked', valid=False,
+                          reason='static_obstacle_unknown_keepout_or_map_boundary')
+                return False
+            frozen, _ = self._frozen_in_odom(path)
+            self._dock_departure = {'path': frozen, 'start': actual, 'motion_complete': False}
+            self.emit('dock_departure_started', distance_m=distance_m,
+                      start_pose_map=list(actual), tracking_frame='odom')
+        departure = self._dock_departure
+        frozen, start = departure['path'], departure['start']
+        saved_config, saved_waypoints = self.config, self.waypoints
+        self.waypoints = [saved_waypoints[0]]
+        self.config = {**saved_config, 'waypoints': self.waypoints}
+        try:
+            if not departure['motion_complete']:
+                home = self.registry.get('home') or {}
+                if (home.get('rear_parking_reference') == 'lidar_box'
+                        and not departure.get('rear_release_complete', False)):
+                    found = self._scan_in_base()
+                    if found is None:
+                        self.emit('dock_departure_release_failed', reason='no fresh scan')
+                        return False
+                    if self._footprint_intrusion(found=found) in ('front', 'both'):
+                        self.emit('dock_departure_release_failed',
+                                  reason='front footprint occupied')
+                        return False
+                    # A close rear face can hold StopZone during the speed ramp.
+                    # The existing escape watches fresh scans ahead while paused,
+                    # restores the monitor, then follows the original frozen goal.
+                    if self._rear_swing_need(found=found) > 0.0:
+                        if not self._escape_forward(found, pause_monitor=True):
+                            self.emit('dock_departure_release_failed',
+                                      reason='guarded_forward_escape_failed')
+                            return False
+                    departure['rear_release_complete'] = True
+                reached = self._execute_reverse_once(
+                    frozen, goal_checker_id='dock_position_checker', final=False,
+                    controller_id='Parking', motion='dock_departure')
+                if reached:
+                    departure['motion_complete'] = True
+                    self.emit('dock_departure_motion_complete', distance_m=distance_m)
+        finally:
+            self.config, self.waypoints = saved_config, saved_waypoints
+        if not departure['motion_complete'] or self.stop_requested:
+            return False
+        after, _ = self.capture_stationary_pose(intermediate=True)
+        if self.stop_requested:
+            return False
+        departure['end'] = after
+        self.emit('dock_departure_finished', distance_m=distance_m,
+                  start_pose_map=list(start), stopped_pose_map=list(after),
+                  tracking_frame='odom')
         return True
 
     def _execute_through_once(self):
@@ -1867,14 +2166,45 @@ class ServiceRoute(CorridorRoute):
             if not self.finish_navigation():
                 raise RuntimeError('search rotation cancellation unconfirmed')
 
-    def capture_stationary_pose(self, timeout_s=10.0):
+    def _refresh_amcl_at_rest(self):
+        """Request a fresh scan update at rest without replacing the robot pose."""
+        motion = getattr(self, 'latest_motion', None)
+        if (self.stop_requested or motion is None
+                or time.monotonic() - motion[0] > 0.5
+                or abs(motion[1]) >= 0.01 or abs(motion[2]) >= 0.01
+                or self._guard_failure(False) or not self._operator_link_ready()):
+            return False
+        client = None
+        try:
+            requested_s = time.monotonic()
+            client = self.create_client(Empty, '/request_nomotion_update')
+            if not client.wait_for_service(timeout_sec=0.2):
+                return False
+            if self._wait(client.call_async(Empty.Request()), 1.0) is None:
+                return False
+            while time.monotonic() - requested_s < 1.5 and not self.stop_requested:
+                if (getattr(self, 'amcl_seen', None) or 0.0) > requested_s:
+                    self.emit('stationary_localization_refreshed', pose_reset=False)
+                    return True
+                spin_node(self, timeout_sec=0.05)
+        except (AttributeError, RuntimeError):
+            return False
+        finally:
+            if client is not None:
+                self.destroy_client(client)
+        return False
+
+    def capture_stationary_pose(self, timeout_s=10.0, *, intermediate=False):
         """Capture fresh TF while odometry and consecutive poses remain still."""
-        gate = ParkingHold(self.parking_contract)
+        contract = ({**self.parking_contract, 'hold_s': DIRECT_STOP_CONFIRM_S}
+                    if intermediate else self.parking_contract)
+        gate = ParkingHold(contract)
         target = None
         last_stamp = None
         revision = self.parking_motion_revision
         deadline_s = time.monotonic() + timeout_s
         last_guard_failure = None
+        refresh_attempted = False
         while time.monotonic() < deadline_s and not self.stop_requested:
             spin_node(self, timeout_sec=0.05)
             if self.parking_odom is None or self.amcl_covariance is None:
@@ -1883,6 +2213,9 @@ class ServiceRoute(CorridorRoute):
             if guard_failure:
                 last_guard_failure = guard_failure
                 target = None
+                if (not refresh_attempted and 'AMCL pose stale' in guard_failure):
+                    refresh_attempted = True
+                    self._refresh_amcl_at_rest()
                 continue
             received_s, stamp, linear_mps, angular_radps = self.parking_odom
             stamp_key = (stamp.sec, stamp.nanosec)
@@ -1904,7 +2237,7 @@ class ServiceRoute(CorridorRoute):
                     raise ValueError('observation ahead of ROS time')
                 if target is None:
                     target = actual
-                    gate = ParkingHold(self.parking_contract)
+                    gate = ParkingHold(contract)
                 command = self.parking_command
                 # Teaching measures a stationary robot; a silent command topic
                 # is recorded as unobserved rather than as measured zero.
@@ -2113,7 +2446,7 @@ class ServiceRoute(CorridorRoute):
         return (math.isclose(values[0][0], -limit, abs_tol=1e-9)
                 and 0.0 < values[1][0] <= max(limit, SERVICE_TRANSIT_MAX_MPS))
 
-    def _reverse_path_valid(self, path, validate_from_m=0.0):
+    def _reverse_path_valid(self, path, validate_from_m=0.0, phase=None):
         """
         Validate the whole path, or its tail after validate_from_m of travel.
 
@@ -2139,24 +2472,64 @@ class ServiceRoute(CorridorRoute):
             checked.poses = path.poses[offset:]
             excluded = {'excluded_indices': [0, offset - 1],
                         'excluded_front_band_m': cumulative[offset]}
+        phase_fields = {} if phase is None else {'phase': phase}
         if not static_corridor_clear(
                 Path(self.registry['map']['yaml_path']),
                 Path(self.registry['keepout']['yaml_path']), points,
                 self._reverse_footprint()):
             self.emit('reverse_path_checked', valid=False,
-                      reason='static_obstacle_unknown_keepout_or_map_boundary', **excluded)
+                      reason='static_obstacle_unknown_keepout_or_map_boundary',
+                      **phase_fields, **excluded)
             return False
         if not self.validate_reverse_path.wait_for_service(timeout_sec=2.0):
             raise RuntimeError('reverse path collision validation unavailable')
         request = IsPathValid.Request()
         request.path = checked
-        result = self._wait(self.validate_reverse_path.call_async(request), 3.0)
-        # Report indices of the original path, not of the validated tail.
-        self.emit('reverse_path_checked', valid=result.is_valid,
-                  invalid_pose_indices=[index + offset
-                                        for index in result.invalid_pose_indices],
-                  **excluded)
-        return result.is_valid and not result.invalid_pose_indices
+
+        def wait_abort_reason():
+            if self.stop_requested:
+                return 'operator_stop'
+            if not self._operator_link_ready():
+                return 'operator_link_lost'
+            return self._guard_failure(False)
+
+        for attempt in range(REVERSE_PATH_CHECK_ATTEMPTS):
+            try:
+                result = self._wait(self.validate_reverse_path.call_async(request), 3.0)
+            except RuntimeError:
+                reason = wait_abort_reason()
+                if reason:
+                    self.emit('path_blocked_wait_aborted', reason=reason,
+                              attempt=attempt + 1, **phase_fields, **excluded)
+                    return False
+                raise
+            # Report indices of the original path, not of the validated tail.
+            invalid_indices = [index + offset for index in result.invalid_pose_indices]
+            rejection = {} if result.is_valid and not invalid_indices else {
+                'reason': 'nav2_live_costmap_rejected'}
+            self.emit('reverse_path_checked', valid=result.is_valid,
+                      invalid_pose_indices=invalid_indices,
+                      attempt=attempt + 1, **rejection, **phase_fields, **excluded)
+            if result.is_valid and not invalid_indices:
+                return True
+            if attempt + 1 == REVERSE_PATH_CHECK_ATTEMPTS:
+                self.emit('path_blocked_give_up',
+                          reason='nav2_live_costmap_rejected',
+                          invalid_pose_indices=invalid_indices,
+                          attempts=REVERSE_PATH_CHECK_ATTEMPTS,
+                          **phase_fields, **excluded)
+                return False
+            self.emit('reverse_path_waiting_for_update', attempt=attempt + 1,
+                      **phase_fields, **excluded)
+            until_s = time.monotonic() + REVERSE_PATH_UPDATE_S
+            while time.monotonic() < until_s:
+                reason = wait_abort_reason()
+                if reason:
+                    self.emit('path_blocked_wait_aborted', reason=reason,
+                              attempt=attempt + 1, **phase_fields, **excluded)
+                    return False
+                spin_node(self, timeout_sec=0.05)
+        return False
 
     def _footprint_outline(self):
         """
@@ -2243,14 +2616,14 @@ class ServiceRoute(CorridorRoute):
         127 s) and the final heading turn followed AMCL, which near the dock was
         off by about 15 deg, so the robot swung the long way and back. The
         position leg now replans only on an invalid, expired or new path; the
-        heading is set by odom Spins whose direction is fixed at rest. A position
+        heading uses damped odom turns whose direction is fixed at rest. A position
         offset is left to the curved pre-dock reverse (_dock_straight). Returns the
         last stationary pose, or None on failure.
         """
         if not self.execute(final_parking=False, staging=True):
             return None
         for turn in range(2):   # the large turn, then a correction only if far off
-            actual, _ = self.capture_stationary_pose()
+            actual, _ = self.capture_stationary_pose(intermediate=True)
             delta_rad = math.atan2(math.sin(stage['yaw'] - actual[2]),
                                    math.cos(stage['yaw'] - actual[2]))
             self.emit('staging_heading_measured', delta_yaw_rad=delta_rad)
@@ -2260,14 +2633,15 @@ class ServiceRoute(CorridorRoute):
                          else STAGING_CORRECTION_MIN_RAD)
             if abs(delta_rad) <= limit_rad:
                 return actual
-            if not self._search_rotation_once(
-                    delta_rad, limit_rad=math.pi, event='staging_turn',
-                    measure_in_odom=True):
+            turned = self._rotate_in_place(delta_rad)
+            self.emit('staging_turn_observed', requested_yaw_rad=delta_rad,
+                      observed_yaw_rad=turned, observation_frame='odom', controller='damped')
+            if turned is None:
                 return None
-        actual, _ = self.capture_stationary_pose()
+        actual, _ = self.capture_stationary_pose(intermediate=True)
         return actual
 
-    def _go_home_reverse(self, pose, execute):
+    def _go_home_reverse(self, pose, execute, *, _map_reapproach=False):
         """
         Align outside the dock, then follow a bounded reverse path via Nav2.
 
@@ -2276,6 +2650,7 @@ class ServiceRoute(CorridorRoute):
         uses its single contract for every step, exactly as before.
         """
         full_config = route_config(self.registry, pose)
+        self._dock_map_recovery = None
         self.config, self.waypoints = full_config, full_config['waypoints']
         target = tuple(pose[key] for key in ('x_m', 'y_m', 'yaw_rad'))
         home = getattr(self, 'home_contract', None) or self.parking_contract
@@ -2291,7 +2666,8 @@ class ServiceRoute(CorridorRoute):
         if precision_home:
             self._home_goal_checker()
         actual = None
-        if (execute and getattr(self, 'parking_command', None) is not None
+        if (execute and not _map_reapproach
+                and getattr(self, 'parking_command', None) is not None
                 and getattr(self, 'parking_odom', None) is not None):
             try:
                 actual = self._parking_observation()['actual_pose']
@@ -2310,7 +2686,7 @@ class ServiceRoute(CorridorRoute):
                       'parking_direction': 'forward'}
         nominal_path = self._make_reverse_path(
             (stage['x'], stage['y'], stage['yaw']), target, **path_kwargs)
-        if not self._reverse_path_valid(nominal_path):
+        if not self._reverse_path_valid(nominal_path, phase='nominal_precheck'):
             return False
         try:
             # Precision staging is an intermediate leg; the docking below is not.
@@ -2367,8 +2743,23 @@ class ServiceRoute(CorridorRoute):
         # the path. Reject misalignment before any reverse action is sent.
         self.verify_live_maps()
         actual, _evidence = self.capture_stationary_pose()
+        # The staging confirmation describes the intermediate pose.  Do not
+        # attach it to a later dock-path failure as if the dock were confirmed.
+        self.confirmation = None
         if precision_home:
             success = self._dock_straight(actual, target, pre_dock, home)
+            recovery = self._dock_map_recovery
+            if (not success and recovery is not None and not _map_reapproach
+                    and not self.stop_requested and self._operator_link_ready()
+                    and self._navigation_ready(require_fresh_amcl=False)):
+                # Leave along the established odom axis before any new heading.
+                # Replan from outside the dock so map drift and lateral error are
+                # both included in the next staging/curve/freeze operation.
+                self.emit('dock_map_reapproach_requested',
+                          reason=self.confirmation.get('reason'),
+                          confirmation=self.confirmation)
+                if self._pull_out_to(*recovery):
+                    return self._go_home_reverse(pose, execute, _map_reapproach=True)
         else:
             try:
                 path = self._make_reverse_path(actual, target, **path_kwargs)
@@ -2462,7 +2853,8 @@ class ServiceRoute(CorridorRoute):
         up to DOCK_END_TURN_MAX_RAD off is trimmed in place there to
         DOCK_HEADING_TOLERANCE_RAD; a larger one pulls straight out to that
         start, sets the heading and enters once more. Staging was confirmed on the map; every leg
-        runs and is confirmed in odom as frozen here, so AMCL jumps cannot bend it.
+        runs in odom as frozen here, so AMCL jumps cannot bend it. Final arrival
+        must also agree with the original registered map pose.
         """
         controller = getattr(self, 'dock_leg_controller', 'ParkingReverse')
         # The straight part starts on the dock axis, heading set first.
@@ -2475,7 +2867,10 @@ class ServiceRoute(CorridorRoute):
             self.emit('reverse_staging_out_of_tolerance', reason=str(error),
                       actual_pose=list(actual))
             return False
-        if not all(self._reverse_path_valid(path) for path in legs):
+        if (pre_dock is not None
+                and not self._reverse_path_valid(legs[0], phase='dock_curve')):
+            return False
+        if not self._reverse_path_valid(legs[-1], phase='dock_final_straight'):
             return False
         frozen, to_odom = self._frozen_in_odom(legs[0])
         dock = dict(zip(('x', 'y', 'yaw'), to_odom(*target)))
@@ -2506,10 +2901,14 @@ class ServiceRoute(CorridorRoute):
                 self.emit('reverse_staging_out_of_tolerance', reason=str(error),
                           actual_pose=list(start), frame='odom')
                 return False
-            if not self._execute_reverse_path(
+            if controller == 'ParkingReverse':
+                reached = self._drive_dock_straight(dock, home)
+            else:
+                reached = self._execute_reverse_path(
                     legs[-1], path_contract=home, goal_checker_id='dock_position_checker',
                     final=False, send_path=self._odom_path(points),
-                    controller_id=controller):
+                    controller_id=controller)
+            if not reached:
                 return False
             _x, _y, yaw = self._odom_pose()
             error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
@@ -2517,9 +2916,28 @@ class ServiceRoute(CorridorRoute):
             if abs(error) <= DOCK_END_TURN_MAX_RAD:
                 if not self._trim_dock_heading(dock):
                     return False
-                return self._verify_parking_stop(
-                    len(self.waypoints) - 1, dock, None,
-                    contract={**home, 'reference_frame': 'odom'})
+                if not self._verify_parking_stop(
+                        len(self.waypoints) - 1, dock, None,
+                        contract={**home, 'reference_frame': 'odom'}):
+                    return False
+                odom_confirmation = dict(self.confirmation or {})
+                map_dock = dict(zip(('x', 'y', 'yaw'), target))
+                confirmed = self._verify_parking_stop(
+                    len(self.waypoints) - 1, map_dock, None, contract=home)
+                if (not confirmed and (self.confirmation or {}).get('reason') in {
+                        'position_out_of_tolerance', 'yaw_out_of_tolerance'}
+                        and self._refresh_amcl_at_rest()):
+                    # Reconsider a quiet filter with a new scan before leaving a
+                    # stopped dock; the registered goal and tolerances stay fixed.
+                    confirmed = self._verify_parking_stop(
+                        len(self.waypoints) - 1, map_dock, None, contract=home)
+                self.emit('dock_pose_frame_confirmation',
+                          odom_confirmation=odom_confirmation,
+                          map_confirmation=self.confirmation, confirmed=confirmed)
+                if (not confirmed and (self.confirmation or {}).get('reason') in {
+                        'position_out_of_tolerance', 'yaw_out_of_tolerance'}):
+                    self._dock_map_recovery = (entry_odom, dock['yaw'])
+                return confirmed
         self.emit('dock_heading_out_of_tolerance', delta_yaw_rad=error,
                   attempts=DOCK_ENTRY_ATTEMPTS)
         return False
@@ -2533,6 +2951,9 @@ class ServiceRoute(CorridorRoute):
         still judges the stop. False only without odom.
         """
         for trims in range(DOCK_TRIM_ATTEMPTS + 1):
+            if (self.stop_requested or not self._departure_ready()
+                    or not self._navigation_ready(require_fresh_amcl=False)):
+                return False
             _x, _y, yaw = self._odom_pose()
             error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
             if (abs(error) <= DOCK_HEADING_TOLERANCE_RAD or trims == DOCK_TRIM_ATTEMPTS
@@ -2568,21 +2989,57 @@ class ServiceRoute(CorridorRoute):
 
     def _turn_to_dock_heading(self, dock, limit_rad, goal_checker_id,
                               event='dock_heading_measured'):
-        """
-        Turn in place to the dock heading where the robot stands, if over limit_rad.
+        """Set the entry heading with damped trims and remeasure after stopping."""
+        for attempt in range(DOCK_TRIM_ATTEMPTS + 1):
+            _x, _y, yaw = self._odom_pose()
+            error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
+            self.emit(event, delta_yaw_rad=error, attempt=attempt,
+                      goal_checker_id=goal_checker_id)
+            if (self.stop_requested or not self._departure_ready()
+                    or not self._navigation_ready(require_fresh_amcl=False)):
+                return False
+            if abs(error) <= limit_rad:
+                return True
+            if attempt == DOCK_TRIM_ATTEMPTS or self._rotate_in_place(error) is None:
+                return False
+        return False
 
-        The forward Parking controller turns to the goal heading in place (as in the
-        box face alignment) and its goal checker ends the turn inside the tolerance.
-        """
-        x, y, yaw = self._odom_pose()
-        error = math.atan2(math.sin(dock['yaw'] - yaw), math.cos(dock['yaw'] - yaw))
-        self.emit(event, delta_yaw_rad=error)
-        if abs(error) <= limit_rad:
-            return True
-        return self._execute_reverse_once(
-            self._odom_path([(x, y, yaw), (x, y, dock['yaw'])]),
-            goal_checker_id=goal_checker_id, final=False, controller_id='Parking',
-            motion='turn_in_place')
+    def _drive_dock_straight(self, dock, home):
+        """Close the frozen odom target with heading hold, without RPP steering."""
+        tolerance_m = min(home['xy_tolerance_m'], DOCK_POSITION_TOLERANCE_M)
+
+        def attempt():
+            if (self.stop_requested or not self._departure_ready()
+                    or not self._navigation_ready(require_fresh_amcl=False)):
+                reason = self._guard_failure(False)
+                if not self.stop_requested and self._input_gap_recoverable(reason):
+                    self._retry_guard_reason = reason
+                return False
+            x_m, y_m, yaw_rad = self._odom_pose()
+            dx_m, dy_m = dock['x'] - x_m, dock['y'] - y_m
+            if math.hypot(dx_m, dy_m) <= tolerance_m:
+                return True
+            distance_m = dx_m * math.cos(yaw_rad) + dy_m * math.sin(yaw_rad)
+            lateral_m = -dx_m * math.sin(yaw_rad) + dy_m * math.cos(yaw_rad)
+            if distance_m >= 0.0 or abs(lateral_m) > tolerance_m:
+                self.emit('reverse_staging_out_of_tolerance', frame='odom',
+                          remaining_forward_m=distance_m, lateral_error_m=lateral_m)
+                return False
+            travelled_m = self._drive_zero_turn(
+                distance_m, precision=True, hold_heading=True,
+                watch=lambda: None if self._operator_link_ready() else 'operator_link_lost')
+            reason = (getattr(self, '_last_direct_motion_failure', None)
+                      or self._guard_failure(False))
+            if reason:
+                if self._input_gap_recoverable(reason):
+                    self._retry_guard_reason = reason
+                return False
+            if travelled_m is None or self.stop_requested or not self._departure_ready():
+                return False
+            end_x, end_y, _yaw = self._odom_pose()
+            return math.hypot(dock['x'] - end_x, dock['y'] - end_y) <= tolerance_m
+
+        return self._run_with_input_recovery(attempt)
 
     def _execute_reverse_once(self, path, goal_checker_id='parking_goal_checker',
                               verify_contract=None, final=True, verify_waypoint=None,

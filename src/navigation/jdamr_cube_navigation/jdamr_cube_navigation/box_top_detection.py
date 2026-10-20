@@ -347,12 +347,45 @@ class DetectionStability:
         table_edge_window = all(
             item.surface_kind == 'table_edge' for item in self._history)
         if table_edge_window:
+            # Cropping changes the visible segment's midpoint along the same line.
+            # Compare the perpendicular line offset, not that arbitrary midpoint.
+            offsets = []
+            heights = []
+            tangents = []
+            for item in self._history:
+                endpoints = np.asarray(
+                    getattr(item, 'edge_endpoints_optical_m', ()), dtype=np.float64)
+                if endpoints.shape != (2, 3) or not np.all(np.isfinite(endpoints)):
+                    self._history = [detection]
+                    return False
+                center = np.array((item.center_x_m, item.center_y_m, item.front_distance_m))
+                if not np.allclose(center, endpoints.mean(axis=0), rtol=0.0, atol=1e-6):
+                    self._history = [detection]
+                    return False
+                tangent = endpoints[1] - endpoints[0]
+                length = np.linalg.norm(tangent)
+                if length <= 0.0:
+                    self._history = [detection]
+                    return False
+                tangent /= length
+                tangents.append(tangent)
+                offsets.append(endpoints[0] - tangent * np.dot(endpoints[0], tangent))
+                heights.append(item.table_height_m)
+            points = np.asarray(offsets)
+            distance_spread_m = float(np.max(np.linalg.norm(
+                points[:, None, :] - points[None, :, :], axis=2)))
+            lateral_spread_m = 0.0
+            vertical_spread_m = max(heights) - min(heights)
             # SVD can reverse the endpoints of the same undirected table line.
             angles_rad = np.asarray(angles)
             differences_rad = angles_rad[:, None] - angles_rad[None, :]
             line_differences_rad = (
                 differences_rad + math.pi / 2.0) % math.pi - math.pi / 2.0
             edge_angle_spread_rad = float(np.max(np.abs(line_differences_rad)))
+            directions = np.asarray(tangents)
+            spatial_angle_spread_rad = float(np.max(np.arccos(np.clip(
+                np.abs(directions @ directions.T), 0.0, 1.0))))
+            edge_angle_spread_rad = max(edge_angle_spread_rad, spatial_angle_spread_rad)
         else:
             edge_angle_spread_rad = max(angles) - min(angles)
         normal_angle_spread_rad = _maximum_normal_angle_rad(self._history)

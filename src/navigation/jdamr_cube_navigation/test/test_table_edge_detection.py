@@ -1,18 +1,22 @@
 """Synthetic projection tests for table-top front-edge detection."""
 
 from dataclasses import replace
+import json
 import math
+from pathlib import Path
 
 from jdamr_cube_navigation.box_top_detection import (
     CameraIntrinsics,
     DetectionStability,
 )
 from jdamr_cube_navigation.table_edge_detection import (
+    _has_depth_discontinuity_below,
     _horizontal_plane_is_valid,
     _optical_to_level_rotation,
     _visible_front_edge,
     detect_table_edge,
     TableEdgeConfig,
+    TableEdgeDetection,
 )
 
 import numpy as np
@@ -117,16 +121,18 @@ def test_visible_edge_endpoints_remain_on_tilted_fitted_plane(monkeypatch):
         np.linspace(0.45, 1.05, 32),
         np.linspace(-0.25, 0.25, 32),
     ))
+    level_xy = np.repeat(level_xy, 4, axis=0)
+    level_xy[:, 0] += np.tile([.03, .02, .01, 0.0], 32)
     level_z = -(plane_normal[0] * level_xy[:, 0]
                 + plane_normal[1] * level_xy[:, 1]
                 + plane_offset) / plane_normal[2]
     points_level = np.column_stack((level_xy, level_z))
     points_optical = points_level @ rotation
-    columns = np.arange(32)
-    rows = np.full(32, 20)
-    plane_mask = np.ones(32, dtype=bool)
+    columns = np.repeat(np.arange(32), 4)
+    rows = np.tile([14, 16, 18, 20], 32)
+    plane_mask = np.ones(128, dtype=bool)
     depth_mm = np.full((80, 32), 1000, dtype=np.uint16)
-    depth_mm[20, :] = np.rint(points_optical[:, 2] * 1000).astype(np.uint16)
+    depth_mm[20, :] = np.rint(points_optical[3::4, 2] * 1000).astype(np.uint16)
     monkeypatch.setattr(
         'jdamr_cube_navigation.table_edge_detection.'
         '_has_depth_discontinuity_below',
@@ -181,6 +187,68 @@ def test_stability_rejects_changed_table_edge_direction():
 
     assert results == [False] * 8
     assert tracker.frame_count == 1
+
+
+def test_stability_rejects_three_dimensional_line_tilt_with_same_xz_heading():
+    # Rotation about the optical Z axis changes a line's Y component while its
+    # projected X-Z heading and closest point can remain identical.
+    def observation(angle):
+        tangent = np.array((math.cos(angle), math.sin(angle), 0.0))
+        center = np.array((0.0, 0.0, 0.5))
+        return TableEdgeDetection(
+            center_x_m=0.0, center_y_m=0.0, front_distance_m=0.5,
+            edge_angle_rad=0.0, confidence=0.9, inlier_count=100,
+            plane_normal=(0.0, -1.0, 0.0), table_height_m=0.75,
+            width_m=0.4, depth_extent_m=0.5, plane_rms_m=0.001,
+            candidate_count=100, surface_kind='table_edge', edge_rms_m=0.001,
+            edge_endpoints_optical_m=tuple(tuple(p) for p in (
+                center - 0.2 * tangent, center + 0.2 * tangent)))
+
+    tracker = DetectionStability(required_frames=8)
+    frames = (observation(0.0), observation(math.radians(6.0)))
+    assert [tracker.update(frames[i % 2]) for i in range(8)] == [False] * 8
+
+
+@pytest.mark.parametrize('perpendicular_shift_m,stable', [(0.0, True), (0.06, False)])
+def test_stability_tracks_line_offset_instead_of_visible_segment_midpoint(
+        perpendicular_shift_m, stable):
+    configured = config()
+    depth, _, _ = _render_table(configured, background_depth_m=1.8)
+    detection = detect_table_edge(depth, INTRINSICS, configured)
+    assert detection is not None
+    endpoints = np.asarray(detection.edge_endpoints_optical_m)
+    tangent = endpoints[1] - endpoints[0]
+    tangent /= np.linalg.norm(tangent)
+    normal = np.cross(tangent, (0.0, 1.0, 0.0))
+    normal /= np.linalg.norm(normal)
+    shifted = endpoints + tangent * 0.10 + normal * perpendicular_shift_m
+    center = shifted.mean(axis=0)
+    changed = replace(detection, center_x_m=center[0], center_y_m=center[1],
+                      front_distance_m=center[2],
+                      edge_endpoints_optical_m=tuple(tuple(p) for p in shifted))
+    tracker = DetectionStability(required_frames=8)
+    results = [tracker.update((detection, changed)[i % 2]) for i in range(8)]
+    assert results == [False] * 7 + [stable]
+
+
+def test_recorded_stationary_water_face_stabilizes_despite_segment_cropping():
+    fixture = json.loads((Path(__file__).parent / 'fixtures/table_edge_stability_20261016.json')
+                         .read_text())
+    tracker = DetectionStability(required_frames=8)
+    results = []
+    for frame in fixture['observations']:
+        detection = TableEdgeDetection(
+            center_x_m=frame['lateral_error_m'], center_y_m=frame['vertical_position_m'],
+            front_distance_m=frame['front_distance_m'], width_m=frame['width_m'],
+            depth_extent_m=frame['depth_extent_m'],
+            edge_angle_rad=math.radians(frame['edge_angle_deg']),
+            plane_normal=tuple(frame['plane_normal']), plane_rms_m=frame['plane_rms_m'],
+            inlier_count=frame['inlier_count'], candidate_count=frame['candidate_count'],
+            confidence=frame['confidence'], surface_kind='table_edge',
+            edge_endpoints_optical_m=tuple(tuple(p) for p in frame['edge_endpoints_optical_m']),
+            table_height_m=frame['table_height_m'], edge_rms_m=frame['edge_rms_m'])
+        results.append(tracker.update(detection))
+    assert results == [False] * 7 + [True] * 9
 
 
 def test_stability_uses_table_edge_geometry_when_fitted_plane_tilt_varies():
@@ -332,6 +400,47 @@ def test_rejects_image_boundary_instead_of_calling_it_a_table_edge():
     depth, _, _ = _render_table(
         configured, front_x_m=0.05, width_m=2.0, depth_m=2.0)
     assert detect_table_edge(depth, INTRINSICS, configured) is None
+
+
+def test_near_edge_uses_later_measured_point_below_the_apron():
+    configured = replace(config(1.26, 36.64), plane_distance_m=.025)
+    rotation = _optical_to_level_rotation(configured)
+    depth = np.zeros((240, 320), dtype=np.uint16)
+    column, row = 160, 210
+
+    def ray(at_row):
+        return rotation @ np.array([
+            (column - INTRINSICS.center_x_px) / INTRINSICS.focal_x_px,
+            (at_row - INTRINSICS.center_y_px) / INTRINSICS.focal_y_px, 1.0])
+
+    for at_row in (row, row + 2):
+        depth[at_row, column] = round(.36 / ray(at_row)[0] * 1000)
+    depth[230, column] = round((.72 - 1.26) / ray(230)[2] * 1000)
+    assert _has_depth_discontinuity_below(
+        depth, row, column, INTRINSICS, rotation,
+        np.array([0., 0., 1.]), 1.26 - .784, configured)
+
+
+def test_near_table_front_with_vertical_apron_remains_detectable():
+    configured = replace(config(1.26, 36.64), plane_distance_m=.025)
+    depth, front, basis = _render_table(
+        configured, table_height_m=.784, front_x_m=.36, background_depth_m=1.5)
+    rows, columns = np.mgrid[:INTRINSICS.height, :INTRINSICS.width]
+    rays = np.stack(((columns - INTRINSICS.center_x_px) / INTRINSICS.focal_x_px,
+                     (rows - INTRINSICS.center_y_px) / INTRINSICS.focal_y_px,
+                     np.ones_like(rows)), axis=-1)
+    rays = rays @ _optical_to_level_rotation(configured).T
+    scale = .36 / rays[..., 0]
+    heights = 1.26 + scale * rays[..., 2]
+    apron = ((heights >= .724) & (heights <= .784)
+             & (np.abs(scale * rays[..., 1]) <= .4)
+             & (scale > 0) & (scale < depth * .001))
+    depth[apron] = np.rint(scale[apron] * 1000).astype(np.uint16)
+    detection = detect_table_edge(depth, INTRINSICS, configured)
+    assert detection is not None
+    center = np.mean(_to_level(detection, configured)[:, :2], axis=0)
+    inward = np.array([basis[1], -basis[0]])
+    assert abs(float((center - front) @ inward)) < .01
 
 
 def test_rejects_minimum_depth_clipping_as_an_edge():

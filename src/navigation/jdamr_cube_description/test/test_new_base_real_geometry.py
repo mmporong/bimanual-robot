@@ -45,8 +45,30 @@ def test_new_base_footprint_lidar_and_wheels():
     assert joints['imu_joint'].find('parent').attrib['link'] == 'base_link'
     assert 'arm_base_link' not in links
     assert 'caster_link_front' not in links
-    assert {'rear_left_caster_contact_projection',
-            'rear_right_caster_contact_projection'} <= links.keys()
+    assert not any('caster' in name for name in links)
+    for side, front_name in (('left', 'left_wheel_joint'), ('right', 'right_wheel_joint')):
+        joint = joints[f'rear_{side}_wheel_joint']
+        x_m, y_m, z_m = _xyz(joint)
+        assert x_m == -geometry['wheelbase']['value']
+        assert (y_m, z_m) == _xyz(joints[front_name])[1:]
+        assert joint.attrib['type'] == 'continuous'
+        rear_wheel = links[f'rear_{side}_wheel_link'].find('collision/geometry/cylinder')
+        assert rear_wheel.attrib == wheel.attrib
+    assert abs(geometry['wheelbase']['value'] - 2 * (
+        geometry['frame_length']['value'] / 2 - geometry['front_to_wheel_axis']['value'])) < 1e-9
+
+
+def test_runtime_wheelbase_matches_final_bimanual_design_without_claiming_tape_measurement():
+    geometry = yaml.safe_load(CONTRACT.read_text())
+    repository = ROOT.parents[2]
+    navigation = yaml.safe_load((repository / 'design/mechanical/'
+                                'hold_flow_mechanical_v0_3.yaml').read_text())['navigation']
+    provenance = navigation['geometry_provenance']
+    wheelbase_m = (provenance['front_axle_from_chassis_center']['value']
+                   - provenance['rear_axle_from_chassis_center']['value'])
+    assert geometry['wheelbase']['value'] == wheelbase_m
+    assert geometry['wheelbase']['unit'] == 'm'
+    assert geometry['wheelbase']['status'] == 'user_confirmed_symmetry_derived_not_tape_measured'
 
 
 def test_camera_height_chain_matches_current_mount_without_duplicate_optical_tf():

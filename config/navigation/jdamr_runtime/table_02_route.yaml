@@ -2,7 +2,7 @@ schema_version: 1
 frame_id: map
 map_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/map.yaml
 keepout_mask_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/keepout.yaml
-expected_mask_sha256: 616c0caf306980111eec95ca940a94c9bf30409ff1c179a61103a68ceb37e191
+expected_mask_sha256: 8278dcef38b06d469b53f32b1c6ab2c5a14b27f23523f27bcb83aa11ab4a8526
 start_pose:
   x: 0.625
   y: -1.27
@@ -13,9 +13,10 @@ waypoints:
   y: -1.591
 - id: table_02_observation
   x: 0.689
-  y: -2.011
+  y: -2.221
   yaw: -1.5708
 purpose: table_02 box observation approach; not a final parking goal
 target_basis: destinations.json LiDAR box corner fit from the dock (aligned/box_scan_150112.json)
   after the operator moved the boxes; face width 0.31 m assumed from table_02
 start_basis: water_station escape pose (face + 0.565 m along its normal)
+camera_observation_base_offset_m: 0.37

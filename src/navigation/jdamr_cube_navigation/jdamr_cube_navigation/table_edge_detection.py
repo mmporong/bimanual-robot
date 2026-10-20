@@ -126,11 +126,13 @@ def _strongest_table_plane(
         count = int(np.count_nonzero(mask))
         if count < config.minimum_inliers:
             continue
+        residual = float(np.sqrt(np.mean(distances[mask] ** 2)))
+        score = count / max(residual, 0.001)
+        if score <= best_score:
+            continue
         candidate = search_points[mask]
         if not _horizontal_plane_is_valid(normal, candidate, config):
             continue
-        residual = float(np.sqrt(np.mean(distances[mask] ** 2)))
-        score = count / max(residual, 0.001)
         if score > best_score:
             best_plane = normal, offset
             best_score = score
@@ -144,7 +146,10 @@ def _has_depth_discontinuity_below(
         config: TableEdgeConfig) -> bool:
     """Require a measured point below, outside the fitted tabletop plane."""
     step = config.pixel_step
-    for offset in range(step, 5 * step, step):
+    edge_depth_m = float(depth_mm[row, column]) * 0.001
+    # The tabletop's front apron can occupy the first valid pixels below the
+    # plane. Continue to measured background without treating it as a rejection.
+    for offset in range(step, 17 * step, step):
         below = row + offset
         if below >= depth_mm.shape[0]:
             return False
@@ -156,7 +161,7 @@ def _has_depth_discontinuity_below(
         depth_m = raw_depth_mm * 0.001
         if not (config.minimum_depth_m
                 < depth_m < config.maximum_background_depth_m):
-            continue
+            return False
         optical_point = np.array([
             (column - intrinsics.center_x_px) * depth_m
             / intrinsics.focal_x_px,
@@ -167,7 +172,12 @@ def _has_depth_discontinuity_below(
         level_point = rotation @ optical_point
         signed_plane_distance_m = float(
             level_point @ plane_normal + plane_offset)
-        return signed_plane_distance_m < -2.0 * config.plane_distance_m
+        if signed_plane_distance_m < -2.0 * config.plane_distance_m:
+            return True
+        if abs(depth_m - edge_depth_m) > 2.0 * config.plane_distance_m:
+            return False
+        if signed_plane_distance_m >= -config.plane_distance_m:
+            return False
     return False
 
 
@@ -185,7 +195,14 @@ def _visible_front_edge(
     plane_rows = rows[plane_mask].astype(np.int64)
     for column in np.unique(plane_columns):
         in_column = np.flatnonzero(plane_columns == column)
-        local_index = in_column[int(np.argmax(plane_rows[in_column]))]
+        ordered = in_column[np.argsort(plane_rows[in_column])]
+        breaks = np.flatnonzero(np.diff(plane_rows[ordered]) > 2 * config.pixel_step) + 1
+        # A background wall can cross the top plane in a separate thin band.
+        # Follow the dominant connected top surface rather than that lower band.
+        top_run = max(np.split(ordered, breaks), key=len)
+        if len(top_run) < 4:
+            continue
+        local_index = int(top_run[-1])
         point_index = int(plane_indices[local_index])
         row = int(rows[point_index])
         point_depth_m = float(points_optical[point_index, 2])

@@ -11,6 +11,7 @@ import struct
 import tempfile
 
 from jdamr_cube_navigation.keepout_mask import _read_pgm
+from jdamr_cube_navigation.parking import MAXIMUM_FRONT_GAP_M, MINIMUM_FRONT_GAP_M
 import numpy as np
 import yaml
 
@@ -170,6 +171,15 @@ def validate_registry(document, verify_files=True):
             raise ValueError('home must be a taught pose or null')
         if home.get('parking_direction', 'forward') not in ('forward', 'reverse'):
             raise ValueError('home parking_direction must be forward or reverse')
+        reference = home.get('rear_parking_reference', 'map')
+        if reference not in ('map', 'lidar_box'):
+            raise ValueError('home rear_parking_reference must be map or lidar_box')
+        if reference == 'lidar_box':
+            if home.get('parking_direction') != 'reverse':
+                raise ValueError('lidar_box home requires reverse parking_direction')
+            gap = _number(home.get('target_rear_gap_m'), 'target_rear_gap_m')
+            if not MINIMUM_FRONT_GAP_M <= gap <= MAXIMUM_FRONT_GAP_M:
+                raise ValueError('target_rear_gap_m is outside the parking gap bounds')
         home_id = _identifier(home.get('id'))
         if home_id in pose_ids:
             raise ValueError('duplicate service pose ID')

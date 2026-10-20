@@ -1,0 +1,27 @@
+{
+  "source_run": "table_01_20261019_192036_ad727cc6",
+  "region_xy_m": [
+    1.438,
+    -1.817
+  ],
+  "heading_rad": 0.0,
+  "observation_base_offset_m": 0.37,
+  "poses_map": [
+    [
+      1.000971779603336,
+      -1.8223830559792193,
+      -0.21133624779447613
+    ],
+    [
+      0.9736432682877423,
+      -1.7948550322307735,
+      0.03869542521255364
+    ],
+    [
+      0.7933981681194071,
+      -1.7667089354908085,
+      0.020723589563767655
+    ]
+  ],
+  "recorded_failure": "no_table_edge_candidate at transit arrival; reverse_same_heading increased camera distance"
+}

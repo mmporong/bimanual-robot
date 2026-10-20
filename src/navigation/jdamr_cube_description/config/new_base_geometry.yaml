@@ -1,6 +1,15 @@
 schema_version: 1
 claim_scope: installed_lower_base_without_arms_or_payload
 no_external_protrusions_confirmed_on: 2026-09-15
+drive_type: skid_steer_four_wheel_drive
+wheelbase:
+  value: 0.210
+  unit: m
+  derived_at: 2026-10-16
+  valid_for: four_wheel_final_design_with_runtime_front_axle_origin
+  source: design/mechanical/hold_flow_mechanical_v0_3.yaml navigation.geometry_provenance
+  method: front_axle_from_chassis_center minus rear_axle_from_chassis_center
+  status: user_confirmed_symmetry_derived_not_tape_measured
 frame_length:
   value: 0.340
   unit: m
@@ -66,10 +75,3 @@ wheel_visual_width:
   valid_for: current_bimanual_lower_frame_and_wheels
   source: derived_from_wheel_outer_width_minus_center_separation
   status: derived_symmetric_visual_proxy_not_independent_tape_measurement
-rear_caster_lateral_positions:
-  value: [-0.215, 0.215]
-  unit: m
-  modeled_at: 2026-09-09
-  valid_for: current_rear_caster_contact_projection_proxy
-  source: outer_profile_centerline_design_proxy
-  status: actual_mounting_offset_unmeasured

@@ -29,6 +29,7 @@ REVERSE_CURVE_MIN_RADIUS_M = 0.3
 # 2026-10-01: 0.06 m/s was too slow). Parking controllers keep their own
 # contract speeds.
 SERVICE_TRANSIT_MAX_MPS = 0.12
+CACHED_CORRIDOR_SUPPORT_DIRECTIONS = 16
 RPP_PLUGIN = (
     'nav2_regulated_pure_pursuit_controller::'
     'RegulatedPurePursuitController')
@@ -481,6 +482,75 @@ def _convex_hull(
     return hull
 
 
+def _circumscribed_support_polygon(
+        points: Sequence[Sequence[float]],
+        direction_count: int = CACHED_CORRIDOR_SUPPORT_DIRECTIONS,
+        additional_directions: Sequence[Sequence[float]] = (),
+) -> list[tuple[float, float]]:
+    """Bound a point cloud by a bounded-size outer support polygon."""
+    if direction_count < 8 or direction_count % 4:
+        raise ValueError('direction_count must be a multiple of four and at least eight')
+    directions = [
+        (math.cos(2.0 * math.pi * index / direction_count),
+         math.sin(2.0 * math.pi * index / direction_count))
+        for index in range(direction_count)]
+    for direction in additional_directions:
+        normal_x = _finite_number(direction[0], 'support direction')
+        normal_y = _finite_number(direction[1], 'support direction')
+        length = math.hypot(normal_x, normal_y)
+        if length <= 1e-12:
+            raise ValueError('support direction must have positive length')
+        unit = (normal_x / length, normal_y / length)
+        if not any(
+                abs(unit[0] - existing[0]) <= 1e-12
+                and abs(unit[1] - existing[1]) <= 1e-12
+                for existing in directions):
+            directions.append(unit)
+    supports = []
+    for normal_x, normal_y in directions:
+        support = max(
+            x_value * normal_x + y_value * normal_y
+            for x_value, y_value in points)
+        supports.append(support + max(1e-12, abs(support) * 1e-12))
+
+    minimum_x = min(point[0] for point in points)
+    maximum_x = max(point[0] for point in points)
+    minimum_y = min(point[1] for point in points)
+    maximum_y = max(point[1] for point in points)
+    epsilon = max(
+        1e-12, max(abs(minimum_x), abs(maximum_x),
+                   abs(minimum_y), abs(maximum_y)) * 1e-12)
+    polygon = [
+        (minimum_x - epsilon, minimum_y - epsilon),
+        (maximum_x + epsilon, minimum_y - epsilon),
+        (maximum_x + epsilon, maximum_y + epsilon),
+        (minimum_x - epsilon, maximum_y + epsilon),
+    ]
+    for (normal_x, normal_y), support in zip(directions, supports):
+        clipped = []
+        previous = polygon[-1]
+        previous_projection = previous[0] * normal_x + previous[1] * normal_y
+        previous_inside = previous_projection <= support
+        for current in polygon:
+            current_projection = current[0] * normal_x + current[1] * normal_y
+            current_inside = current_projection <= support
+            if current_inside != previous_inside:
+                denominator = current_projection - previous_projection
+                fraction = (support - previous_projection) / denominator
+                clipped.append((
+                    previous[0] + fraction * (current[0] - previous[0]),
+                    previous[1] + fraction * (current[1] - previous[1])))
+            if current_inside:
+                clipped.append(current)
+            previous = current
+            previous_projection = current_projection
+            previous_inside = current_inside
+        polygon = clipped
+    if len(polygon) < 3:
+        raise ValueError('swept footprint must enclose an area')
+    return polygon
+
+
 def _world_footprint(
         pose: Sequence[float], footprint: Sequence[Sequence[float]],
 ) -> list[tuple[float, float]]:
@@ -498,12 +568,15 @@ def _polygon_intersects_cell(
         polygon: Sequence[Sequence[float]], padding: float,
         cell_left: float, cell_bottom: float, resolution: float,
 ) -> bool:
-    cell = (
-        (cell_left, cell_bottom),
-        (cell_left + resolution, cell_bottom),
-        (cell_left + resolution, cell_bottom + resolution),
-        (cell_left, cell_bottom + resolution),
-    )
+    projections = _polygon_projections(polygon)
+    return _prepared_polygon_intersects_cell(
+        projections, padding, cell_left, cell_bottom, resolution)
+
+
+def _polygon_projections(
+        polygon: Sequence[Sequence[float]],
+) -> list[tuple[float, float, float, float]]:
+    """Return SAT axes and polygon extents reused for every candidate cell."""
     axes = [(1.0, 0.0), (0.0, 1.0)]
     for start, end in zip(polygon, polygon[1:] + polygon[:1]):
         delta_x = end[0] - start[0]
@@ -511,17 +584,32 @@ def _polygon_intersects_cell(
         length = math.hypot(delta_x, delta_y)
         if length > 0.0:
             axes.append((-delta_y / length, delta_x / length))
+    projections = []
     for axis_x, axis_y in axes:
-        polygon_projection = [
+        values = [
             x_value * axis_x + y_value * axis_y
-            for x_value, y_value in polygon
-        ]
-        cell_projection = [
-            x_value * axis_x + y_value * axis_y
-            for x_value, y_value in cell
-        ]
-        if (max(polygon_projection) + padding < min(cell_projection)
-                or max(cell_projection) < min(polygon_projection) - padding):
+            for x_value, y_value in polygon]
+        projections.append((axis_x, axis_y, min(values), max(values)))
+    return projections
+
+
+def _prepared_polygon_intersects_cell(
+        projections: Sequence[tuple[float, float, float, float]],
+        padding: float, cell_left: float, cell_bottom: float,
+        resolution: float,
+) -> bool:
+    """SAT test using polygon projections prepared once for a grid scan."""
+    cell_right = cell_left + resolution
+    cell_top = cell_bottom + resolution
+    for axis_x, axis_y, polygon_minimum, polygon_maximum in projections:
+        projections_at_corners = (
+            cell_left * axis_x + cell_bottom * axis_y,
+            cell_right * axis_x + cell_bottom * axis_y,
+            cell_right * axis_x + cell_top * axis_y,
+            cell_left * axis_x + cell_top * axis_y,
+        )
+        if (polygon_maximum + padding < min(projections_at_corners)
+                or max(projections_at_corners) < polygon_minimum - padding):
             return False
     return True
 
@@ -529,12 +617,15 @@ def _polygon_intersects_cell(
 def _corridor_blockage(
         source: dict, keepout: dict,
         pieces: Sequence[tuple[Sequence[Sequence[float]], float]],
+        ignored_keepout_cells=frozenset(),
+        *, skip_clearly_free_cells: bool = False,
 ) -> dict | None:
     resolution = source['resolution']
     origin_x, origin_y, _origin_yaw = source['origin']
     width = source['width']
     height = source['height']
     for polygon, padding in pieces:
+        projections = _polygon_projections(polygon)
         minimum_column = math.floor(
             (min(point[0] for point in polygon) - padding - origin_x)
             / resolution) - 1
@@ -551,10 +642,17 @@ def _corridor_blockage(
             cell_bottom = origin_y + map_row * resolution
             for column in range(minimum_column, maximum_column + 1):
                 cell_left = origin_x + column * resolution
-                if not _polygon_intersects_cell(
-                        polygon, padding, cell_left, cell_bottom, resolution):
+                inside_grid = (
+                    0 <= map_row < height and 0 <= column < width)
+                if skip_clearly_free_cells and inside_grid:
+                    row = height - 1 - map_row
+                    if (_clearly_free(source, row, column)
+                            and _clearly_free(keepout, row, column)):
+                        continue
+                if not _prepared_polygon_intersects_cell(
+                        projections, padding, cell_left, cell_bottom, resolution):
                     continue
-                if not (0 <= map_row < height and 0 <= column < width):
+                if not inside_grid:
                     return {
                         'reason': 'outside_grid',
                         'column': column,
@@ -563,6 +661,9 @@ def _corridor_blockage(
                 row = height - 1 - map_row
                 for grid_name, metadata in (
                         ('map', source), ('keepout', keepout)):
+                    if (grid_name == 'keepout'
+                            and (column, map_row) in ignored_keepout_cells):
+                        continue
                     if not _clearly_free(metadata, row, column):
                         index = row * width + column
                         return {
@@ -580,10 +681,196 @@ def _corridor_blockage(
     return None
 
 
+def _exact_corridor_pieces(poses, footprint):
+    footprints = [_world_footprint(pose, footprint) for pose in poses]
+    radius_m = max(math.hypot(x, y) for x, y in footprint)
+    pieces = [(polygon, 0.) for polygon in footprints]
+    for index, (start, end) in enumerate(zip(poses, poses[1:])):
+        turn_rad = abs(_shortest_angle(end[2] - start[2]))
+        pieces.append((_convex_hull(footprints[index] + footprints[index + 1]),
+                       radius_m * (1. - math.cos(turn_rad / 2.))))
+    return pieces
+
+
+def _cell_overlap_polygon(polygon, bounds, padding):
+    """Clip a swept piece to a cell expanded by its conservative rotation pad."""
+    left, bottom, right, top = bounds
+    result = list(polygon)
+    for axis, sign, limit in ((0, -1., -left + padding), (0, 1., right + padding),
+                              (1, -1., -bottom + padding), (1, 1., top + padding)):
+        if not result:
+            break
+        clipped = []
+        previous = result[-1]
+        previous_value = sign * previous[axis]
+        for current in result:
+            value = sign * current[axis]
+            if (value <= limit) != (previous_value <= limit):
+                fraction = (limit - previous_value) / (value - previous_value)
+                clipped.append(tuple(previous[i] + fraction * (current[i] - previous[i])
+                                     for i in (0, 1)))
+            if value <= limit:
+                clipped.append(current)
+            previous, previous_value = current, value
+        result = clipped
+    return result
+
+
+def _observed_surface_corridor_clear(source, keepout, poses, footprint, surface):
+    """Resolve only black target-mask cells protruding outside a measured plane."""
+    face = tuple(_finite_number(v, 'surface point') for v in surface['point_xy_m'])
+    normal = tuple(_finite_number(v, 'surface normal') for v in surface['normal_xy'])
+    half_span_m = _finite_number(surface['half_span_m'], 'surface half span')
+    if (len(face) != 2 or len(normal) != 2 or half_span_m <= 0.
+            or not math.isclose(math.hypot(*normal), 1., abs_tol=1e-6)):
+        raise ValueError('invalid observed surface')
+    tangent = -normal[1], normal[0]
+    length_m = 0.
+    for start, end in zip(poses, poses[1:]):
+        step = end[0] - start[0], end[1] - start[1]
+        length_m += math.hypot(*step)
+        if sum(step[i] * normal[i] for i in (0, 1)) > 1e-9:
+            return False
+    if length_m > .6 + 1e-9:
+        return False
+    pieces = _exact_corridor_pieces(poses, footprint)
+    if any(min(sum((point[i] - face[i]) * normal[i] for i in (0, 1))
+               for point in polygon) <= padding for polygon, padding in pieces):
+        return False
+    ignored = set()
+    while True:
+        blocked = _corridor_blockage(source, keepout, pieces, ignored,
+                                     skip_clearly_free_cells=True)
+        if blocked is None:
+            return True
+        if (blocked.get('grid') != 'keepout' or keepout['negate'] != 0
+                or blocked.get('pixel') != 0):
+            return False
+        outward_m, lateral_m = [], []
+        for polygon, padding in pieces:
+            overlap = _cell_overlap_polygon(polygon, blocked['cell_bounds'], padding)
+            outward_m.extend(
+                sum((p[i] - face[i]) * normal[i] for i in (0, 1)) + padding for p in overlap)
+            lateral_m.extend(
+                abs(sum((p[i] - face[i]) * tangent[i] for i in (0, 1))) + padding for p in overlap)
+        # This is a grid-resolution allowance, not a new physical parking gap.
+        half_cell_tangent_m = .5 * source['resolution'] * (abs(tangent[0]) + abs(tangent[1]))
+        if (not outward_m or max(outward_m) <= 0.
+                or max(outward_m) > 2. * source['resolution']
+                or max(lateral_m) > half_span_m + half_cell_tangent_m):
+            return False
+        ignored.add((blocked['column'], blocked['map_row']))
+
+
+class CachedStaticCorridorValidator:
+    """Reuse one verified map pair and footprint for conservative path checks.
+
+    Each call reduces all sampled footprint poses to one outer support polygon.
+    Fixed map axes bound its cost, while start/end footprint-edge normals avoid
+    excess at the actual body angle.  Maximum between-sample rotation sagitta
+    padding keeps every piece checked by :func:`static_corridor_clear` inside.
+    It may therefore reject extra free space, but cannot make a blocked exact
+    corridor free.
+    """
+
+    def __init__(
+            self, map_yaml: Path, keepout_yaml: Path,
+            footprint: Sequence[Sequence[float]],
+    ) -> None:
+        source = _map_metadata(Path(map_yaml).resolve())
+        keepout = _map_metadata(Path(keepout_yaml).resolve())
+        if (not math.isclose(
+                source['resolution'], keepout['resolution'], abs_tol=1e-12)
+                or source['origin'] != keepout['origin']
+                or source['width'] != keepout['width']
+                or source['height'] != keepout['height']):
+            raise ValueError('map and keepout grids must have identical geometry')
+        resolution = source['resolution']
+        if not math.isfinite(resolution) or resolution <= 0.0:
+            raise ValueError('map resolution must be positive and finite')
+        for metadata in (source, keepout):
+            if (metadata['negate'] not in (0, 1)
+                    or not math.isfinite(metadata['free_thresh'])
+                    or not 0.0 <= metadata['free_thresh'] <= 1.0):
+                raise ValueError('map occupancy metadata is invalid')
+
+        try:
+            footprint_values = tuple(footprint)
+        except TypeError as error:
+            raise ValueError(
+                'footprint must contain at least three points') from error
+        if len(footprint_values) < 3:
+            raise ValueError('footprint must contain at least three points')
+        footprint_points = []
+        for point in footprint_values:
+            try:
+                if len(point) != 2:
+                    raise ValueError('footprint points must contain x and y')
+            except TypeError as error:
+                raise ValueError(
+                    'footprint points must contain x and y') from error
+            footprint_points.append((
+                _finite_number(point[0], 'footprint'),
+                _finite_number(point[1], 'footprint')))
+
+        self._source = source
+        self._keepout = keepout
+        self._footprint = tuple(_convex_hull(footprint_points))
+        edge_normals = []
+        for start, end in zip(
+                self._footprint, self._footprint[1:] + self._footprint[:1]):
+            delta_x = end[0] - start[0]
+            delta_y = end[1] - start[1]
+            length = math.hypot(delta_x, delta_y)
+            edge_normals.append((-delta_y / length, delta_x / length))
+        self._footprint_edge_normals = tuple(edge_normals)
+        self._footprint_radius = max(
+            math.hypot(x_value, y_value)
+            for x_value, y_value in self._footprint)
+
+    def __call__(self, poses: Sequence[Sequence[float]], *, target_surface=None) -> bool:
+        """Return whether the conservative hull of ``poses`` is clearly free."""
+        try:
+            checked_poses = tuple(_pose(pose, 'pose') for pose in poses)
+        except TypeError as error:
+            raise ValueError('poses must be a non-empty sequence') from error
+        if not checked_poses:
+            raise ValueError('poses must be a non-empty sequence')
+
+        swept_points = []
+        for pose in checked_poses:
+            swept_points.extend(_world_footprint(pose, self._footprint))
+        support_directions = []
+        for pose in (checked_poses[0], checked_poses[-1]):
+            cosine = math.cos(pose[2])
+            sine = math.sin(pose[2])
+            support_directions.extend(
+                (cosine * normal_x - sine * normal_y,
+                 sine * normal_x + cosine * normal_y)
+                for normal_x, normal_y in self._footprint_edge_normals)
+        swept_hull = _circumscribed_support_polygon(
+            swept_points, additional_directions=support_directions)
+        maximum_sagitta = 0.0
+        for current, following in zip(checked_poses, checked_poses[1:]):
+            yaw_change = abs(_shortest_angle(following[2] - current[2]))
+            maximum_sagitta = max(
+                maximum_sagitta,
+                self._footprint_radius * (1.0 - math.cos(yaw_change / 2.0)))
+        clear = _corridor_blockage(
+            self._source, self._keepout,
+            [(swept_hull, maximum_sagitta)],
+            skip_clearly_free_cells=True) is None
+        if clear or target_surface is None:
+            return clear
+        return _observed_surface_corridor_clear(
+            self._source, self._keepout, checked_poses, self._footprint, target_surface)
+
+
 def static_corridor_clear(
         map_yaml: Path, keepout_yaml: Path,
         poses: Sequence[Sequence[float]],
         footprint: Sequence[Sequence[float]],
+        *, allow_rear_keepout_escape: bool = False,
 ) -> bool:
     """
     Check a sampled footprint corridor against static map pixels.
@@ -639,6 +926,35 @@ def static_corridor_clear(
         for x_value, y_value in footprint_points)
     world_footprints = [
         _world_footprint(pose, footprint_points) for pose in checked_poses]
+    ignored_keepout_cells = set()
+    if allow_rear_keepout_escape:
+        start = checked_poses[0]
+        cosine, sine = math.cos(start[2]), math.sin(start[2])
+        previous_forward = 0.0
+        for pose in checked_poses:
+            dx, dy = pose[0] - start[0], pose[1] - start[1]
+            forward = dx * cosine + dy * sine
+            lateral = -dx * sine + dy * cosine
+            if (abs(_shortest_angle(pose[2] - start[2])) > 1e-9
+                    or abs(lateral) > 1e-9 or forward < previous_forward - 1e-9):
+                return False
+            previous_forward = forward
+        while True:
+            blockage = _corridor_blockage(
+                source, keepout, [(world_footprints[0], 0.0)], ignored_keepout_cells)
+            if blockage is None:
+                break
+            if (blockage.get('grid') != 'keepout' or keepout['negate'] != 0
+                    or blockage.get('pixel') != 0):
+                return False
+            left, bottom, right, top = blockage['cell_bounds']
+            corners = ((left, bottom), (right, bottom), (right, top), (left, top))
+            if (max((x - start[0]) * cosine + (y - start[1]) * sine
+                    for x, y in corners) >= 0.0
+                    or _polygon_intersects_cell(
+                        world_footprints[-1], 0.0, left, bottom, resolution)):
+                return False
+            ignored_keepout_cells.add((blockage['column'], blockage['map_row']))
     pieces = [(polygon, 0.0) for polygon in world_footprints]
     for index, (current, following) in enumerate(zip(
             checked_poses, checked_poses[1:])):
@@ -647,4 +963,4 @@ def static_corridor_clear(
         swept_hull = _convex_hull(
             world_footprints[index] + world_footprints[index + 1])
         pieces.append((swept_hull, sagitta))
-    return _corridor_blockage(source, keepout, pieces) is None
+    return _corridor_blockage(source, keepout, pieces, ignored_keepout_cells) is None

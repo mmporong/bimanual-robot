@@ -174,12 +174,20 @@ def validate_new_base_params(params, geometry, precision_parking=False):
     try:
         frame_half_width = geometry['frame_width']['value'] / 2.0
         wheel_radius = geometry['wheel_radius_initial']['value']
+        wheelbase_m = geometry['wheelbase']['value']
     except (KeyError, TypeError) as error:
-        raise RuntimeError('new-base geometry lacks frame width or wheel radius') from error
+        raise RuntimeError('new-base geometry lacks frame width, wheel radius or wheelbase') from error
+    if (geometry['wheelbase'].get('unit') != 'm' or isinstance(wheelbase_m, bool)
+            or not isinstance(wheelbase_m, (int, float))
+            or not math.isfinite(wheelbase_m) or not 0.0 < wheelbase_m < front - rear):
+        raise RuntimeError('new-base wheelbase must fit the four-wheel frame in meters')
     body = [(x, y) for x in (front, rear) for y in (-frame_half_width, frame_half_width)]
-    body += [(x, y) for x in (-wheel_radius, wheel_radius) for y in (-half_width, half_width)]
-    contains(costmaps[0]['footprint'], body, True,
-             'new-base footprint does not cover the measured body')
+    body += [(axle_m + offset_m, y_m) for axle_m in (0.0, -wheelbase_m)
+             for offset_m in (-wheel_radius, wheel_radius)
+             for y_m in (-half_width, half_width)]
+    for costmap in costmaps:
+        contains(costmap['footprint'], body, True,
+                 'new-base footprint does not cover the measured body')
     if any(costmap['robot_base_frame'] != 'base_footprint'
            for costmap in costmaps):
         raise RuntimeError('new-base costmaps need base_footprint')
