@@ -149,6 +149,8 @@ STRAIGHT_DECEL_MPS2 = 0.5
 # 0.08 rad/s trim still went 0.52 deg past (2026-10-06); the base kept turning
 # 70 ms after the stop and stopped over 140 ms, 0.87 deg in all.
 TRIM_ANGULAR_RADPS = 0.08
+STAGING_ANGULAR_RADPS = 0.3
+STAGING_CRUISE_THRESHOLD_RAD = math.radians(10.0)
 TRIM_STOP_RAD = math.radians(0.87)
 TRIM_EXTRA_S = 4.0
 # A direct move's stop is sent this much early on top of the deceleration: one
@@ -1369,6 +1371,8 @@ class ServiceRoute(CorridorRoute):
             start = odom_yaw()
         except TransformException:
             return None
+        cruise = abs(delta_rad) > STAGING_CRUISE_THRESHOLD_RAD
+        command = Twist()
         # Unwrapped, so a turn of any size is counted.
         state = {'last': start, 'turned': 0.0}
 
@@ -1380,16 +1384,23 @@ class ServiceRoute(CorridorRoute):
             state['turned'] += math.atan2(math.sin(yaw - state['last']),
                                           math.cos(yaw - state['last']))
             state['last'] = yaw
+            if cruise:
+                remaining = max(0.0, abs(delta_rad) - abs(state['turned']))
+                rate = min(STAGING_ANGULAR_RADPS, max(
+                    TRIM_ANGULAR_RADPS, remaining / FACE_APPROACH_TIME_S))
+                command.angular.z = math.copysign(rate, delta_rad)
             return state['turned']
 
         # All face and dock trims share this damping; callers cannot bypass it.
         speed_radps = min(TRIM_ANGULAR_RADPS, max(
             PRECISION_HEADING_MAX_RADPS,
             TRIM_ANGULAR_RADPS * abs(delta_rad) / (2.0 * TRIM_STOP_RAD)))
-        command = Twist()
+        if cruise:
+            speed_radps = STAGING_ANGULAR_RADPS
         command.angular.z = math.copysign(speed_radps, delta_rad)
         # At most half the turn: a trim just over the minimum must still turn.
-        early_rad = min(TRIM_STOP_RAD * speed_radps / TRIM_ANGULAR_RADPS,
+        early_rad = min(TRIM_STOP_RAD * min(speed_radps, TRIM_ANGULAR_RADPS)
+                        / TRIM_ANGULAR_RADPS,
                         abs(delta_rad) / 2.0)
         deadline_s = time.monotonic() + abs(delta_rad) / speed_radps + TRIM_EXTRA_S
         turned_rad = self._direct_motion(
@@ -2400,21 +2411,19 @@ class ServiceRoute(CorridorRoute):
         odom stays straight whatever AMCL does meanwhile. Returns the odom path
         and the map-to-odom pose function used for its confirmation target.
         """
-        base = self.parking_contract['robot_base_frame']
         try:
-            in_map = self.parking_tf.lookup_transform('map', base, rclpy.time.Time())
-            in_odom = self.parking_tf.lookup_transform('odom', base, rclpy.time.Time())
+            transform = self.parking_tf.lookup_transform('odom', 'map', rclpy.time.Time())
         except TransformException as error:
             raise RuntimeError(f'map/odom transform unavailable: {error}') from error
-        map_x, map_y = in_map.transform.translation.x, in_map.transform.translation.y
-        odom_x, odom_y = in_odom.transform.translation.x, in_odom.transform.translation.y
-        turn = (_quaternion_yaw(in_odom.transform.rotation)
-                - _quaternion_yaw(in_map.transform.rotation))
+        # Freeze the frame relation itself. Two separate base-chain lookups
+        # need overlapping startup histories and can sample different instants.
+        odom_x = transform.transform.translation.x
+        odom_y = transform.transform.translation.y
+        turn = _quaternion_yaw(transform.transform.rotation)
 
         def to_odom(x, y, yaw):
-            dx, dy = x - map_x, y - map_y
-            return (odom_x + math.cos(turn) * dx - math.sin(turn) * dy,
-                    odom_y + math.sin(turn) * dx + math.cos(turn) * dy,
+            return (odom_x + math.cos(turn) * x - math.sin(turn) * y,
+                    odom_y + math.sin(turn) * x + math.cos(turn) * y,
                     math.atan2(math.sin(yaw + turn), math.cos(yaw + turn)))
 
         frozen = RosPath()

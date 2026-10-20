@@ -9,6 +9,8 @@ from typing import Any, Sequence
 
 import yaml
 
+from jdamr_cube_navigation.surface_approach import FACE_APPROACH_TIME_S
+
 
 REQUIRED_CONTRACT = {
     'schema_version', 'reference_frame', 'robot_base_frame',
@@ -159,11 +161,11 @@ def parking_controller_overrides(
         'use_rotate_to_heading': True,
         'allow_reversing': False,
         'stateful': False,
-        # Slow down only over the last 0.15 m and ignore the box's own cost: from
-        # 0.6 m the straight 0.44 m approach never left the minimum speed
-        # (2026-10-01). The goal checker and the StopZone front end the stop.
-        'approach_velocity_scaling_dist': 0.15,
+        # Share the final braking band with the plane-relative controller.
+        'approach_velocity_scaling_dist': (
+            contract['desired_linear_mps'] * FACE_APPROACH_TIME_S),
         'regulated_linear_scaling_min_radius': 0.9,
+        'use_regulated_linear_velocity_scaling': False,
         'use_cost_regulated_linear_velocity_scaling': False,
     })
     configured['Parking'] = parking

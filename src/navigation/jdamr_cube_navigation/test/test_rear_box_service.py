@@ -32,6 +32,7 @@ def route_node():
 
 def face(gap=0.01, angle=0.0, stamp=5.0):
     return {'gap_m': gap, 'normal_yaw_error_rad': angle, 'stamp_s': stamp,
+            'span_m': .35,
             'face_center_base_xy_m': (-0.275-gap, 0.),
             'normal_base_xy': (math.cos(angle), math.sin(angle)),
             'face_odom': (-0.275-gap, 0.),
@@ -355,7 +356,44 @@ def test_reverse_preview_rotates_heading_without_rotating_actual_footprint(monke
     assert all(abs(p[2]) < 1e-8 for p in poses)
     assert result['remaining_m'] == pytest.approx(.19)
     assert factory.call_args.args[2] == outline
+    assert not check.call_args.kwargs
     node._reverse_footprint.assert_not_called()
+
+
+@pytest.mark.parametrize('alignment_ok', [True, False])
+def test_full_width_landmark_is_matched_after_coarse_and_never_returns_to_stage(alignment_ok):
+    node = route_node()
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    node._rear_dock_reference = {'observed': True}
+    node.registry = {'home': {'id': 'home'}}
+    node._rear_reference_stage = Mock(return_value={'id': 'home_dock_approach'})
+    node._localization_bound = lambda _intermediate: nullcontext()
+    sequence = Mock()
+    sequence.attach_mock(node._approach_rear_corridor, 'coarse')
+    initial, aligned = face(.48), face(.2)
+    node._observe_rear_box_recovering = Mock(side_effect=[initial, aligned])
+    sequence.attach_mock(node._observe_rear_box_recovering, 'observe')
+    node._align_rear_reference = Mock(return_value=alignment_ok)
+    sequence.attach_mock(node._align_rear_reference, 'align')
+    node._park_rear_face = Mock(return_value=True)
+    node.emit = Mock()
+
+    assert node.park_rear_box(
+        GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01) is alignment_ok
+    assert [call[0] for call in sequence.mock_calls] == (
+        ['coarse', 'observe', 'align', 'observe'] if alignment_ok else
+        ['coarse', 'observe', 'align'])
+    node._align_rear_reference.assert_called_once_with(
+        {'id': 'home_dock_approach'}, node.registry['home'],
+        observed=initial, return_to_stage=False)
+    if alignment_ok:
+        assert node._park_rear_face.call_args.args[0] is aligned
+    else:
+        node._park_rear_face.assert_not_called()
 
 
 @pytest.mark.parametrize('age,frame', [(1., 'laser_link'), (0., 'wrong_frame')])
