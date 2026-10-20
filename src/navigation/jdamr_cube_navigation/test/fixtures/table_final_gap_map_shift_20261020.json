@@ -66,5 +66,15 @@
   "coherent_corner_gaps_m": [
     0.008261416495218336,
     0.01287708683288866
-  ]
+  ],
+  "operator_report": {
+    "source": "same_thread_user_report_after_run",
+    "reported_at": "2026-10-20",
+    "approximate_gap_m": 0.0,
+    "wording": "방금 근접은 거의 0cm",
+    "left_right_values_m": null,
+    "measurement_resolution_m": null,
+    "physical_target_success": false,
+    "scope": "approximate physical observation; coherent depth replay is not external 1cm success"
+  }
 }
