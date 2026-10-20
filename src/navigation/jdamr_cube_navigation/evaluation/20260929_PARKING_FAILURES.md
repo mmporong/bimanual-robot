@@ -1810,3 +1810,12 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 **기억점 수정 최종 반영:** 과거 scan의 원시 좌표에서 동일 목표면·폭·잔차·관측 구간을 검증한 점만 후면 예측에서 구분한다. 일반/coarse 입력과 다른 물체·돌출점은 유지한다. 나이를 제한한 기존 메모리 helper가 한 odom 자세로 비목표 점을 투영해, 서로 다른 자세로 재계산한 float tuple 교집합의 경쟁을 없앴다. scan 캐시는 원 객체 강참조와 취득 자세를 함께 검증해 객체 ID 재사용을 막는다. 실제 분류기에 합성 scan을 넣은 goal/다른 면/4 mm 돌출/횡범위 밖과 ID 충돌·취득 자세 변경 회귀를 추가했다. 재시도 실패 뒤 새 관측이 있으면 현재 값을 기록하되 실행 실패를 성공으로 바꾸지 않는다. 재관측까지 실패하면 마지막 유효 값이 남는 관찰성 한계는 있으며 새 성공 근거로 쓰지 않는다.
 
 최종 관련 10개 스위트 872건(6.41초), 치명 lint·diff 검사를 통과했고 독립 code-reviewer는 캐시 식별 HIGH 수정 후 APPROVE했다. Pi Python 모듈 4개 source/install 8경로 SHA·import와 idle 실행기 재시작, 전후 정지 odom 3표본씩·pending/running 0을 확인했다. 최종 receipt는 `$HOME/.local/state/bimanual-robot/rear_angle_20261020/memory_source_deployment.json`이다. 사용자 실물 평행 확인 뒤 새 주행은 하지 않았으므로 이 마지막 기억점 수정의 실차 재검증은 남아 있다. `executor_exit_nonzero`였던 지난 run을 성공으로 고치지 않았다.
+
+
+### 22.24 2026-10-20 출발 거부의 배터리 부족 사유가 위치·센서 오류로 표시됨
+
+- **관찰:** `table_01_20261020_184412_2ee8a0b2`는 출발 직후 `localization or sensor data unavailable`로 실패했다. 실행기 journal에는 `navigation readiness timeout: battery low: voltage=10.192V limit=10.500V`가 남아 있다. `/map`·keepout·laser TF·scan의 별도 DDS health는 정상이었다. 이번 출발 거부의 확인된 원인은 배터리 부족이며 위치추정·USB·DDS 고장으로 단정할 근거는 없다.
+- **표시 오류:** `BoxServiceRoute`는 `wait_until_ready()` 실패 사유를 일반적인 위치·센서 오류로 치환한다. 이때 `10.5 V`는 주행 하한이며, 현재 계약의 신규 출발 예비 기준은 별도로 `10.8 V`다. 준비 완료 보고에서 정지 odom·활성 서비스만 확인하고 배터리 조건을 놓친 점도 기록한다.
+- **운영 조치:** 사용자의 정지 요청으로 출발 대기를 취소했고 fresh odom 3표본의 선속도·각속도 0을 확인했다. 배터리 교체·충전 완료는 확인되지 않았다. 새 주행·위치초기화·서비스 재시작은 수행하지 않았다.
+- **재발 시 우선순위:** 같은 메시지 또는 출발 직후 실행기 실패가 나면 현재 run의 배터리 사유·새 전압부터 확인하고 측정값과 기준을 설명한다. 전압이 충분하면 실제 센서·위치·통신 사유를 확인한다. 기존 입력과 guard를 사용하며 출발에 새 장기 검수 단계를 추가하지 않는다. 이 우선순위를 `src/navigation/AGENTS.md`에 저장했다.
+- **미완료:** 이번 요청은 기억·운영 규칙 반영이며 실제 사유를 구조화 실패 이벤트로 전달하는 실행기 코드 수정은 아직 반영하지 않았다. 메시지 표시가 고쳐졌다고 주장하지 않는다. 로그 근거는 해당 run의 `cycle_events.jsonl` 및 Pi `jdamr-box-executor.service`의 2026-10-20 18:44 journal이다.
