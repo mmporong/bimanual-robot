@@ -1,0 +1,184 @@
+diff --git a/src/lerobot/datasets/image_writer.py b/src/lerobot/datasets/image_writer.py
+index 41790b46..e3d002ab 100644
+--- a/src/lerobot/datasets/image_writer.py
++++ b/src/lerobot/datasets/image_writer.py
+@@ -17,6 +17,7 @@ import logging
+ import multiprocessing
+ import queue
+ import threading
++import time
+ from pathlib import Path
+ 
+ import numpy as np
+@@ -125,15 +126,20 @@ def save_kwargs_for_path(fpath: Path, compress_level: int) -> dict:
+         raise ValueError(f"Unsupported image file extension: {suffix}")
+ 
+ 
+-def write_image(image: np.ndarray | PIL.Image.Image, fpath: Path, compress_level: int = 1):
++def write_image(
++    image: np.ndarray | PIL.Image.Image,
++    fpath: Path,
++    compress_level: int = 1,
++    max_retries: int = 3,
++    retry_delay_s: float = 0.1,
++):
+     """
+     Saves a NumPy array or PIL Image to a file.
+ 
+     This function handles both NumPy arrays and PIL Image objects, converting
+-    the former to a PIL Image before saving. It includes error handling for
+-    the save operation. The output format is inferred from the *fpath*
+-    extension: ``.png`` → PNG with ``compress_level``, ``.tiff`` / ``.tif``
+-    → lossless raw depth maps (TIFF).
++    the former to a PIL Image before saving. The output format is inferred
++    from the *fpath* extension: ``.png`` → PNG with ``compress_level``,
++    ``.tiff`` / ``.tif`` → lossless raw depth maps (TIFF).
+ 
+     Args:
+         image (np.ndarray | PIL.Image.Image): The image data to save.
+@@ -142,41 +148,63 @@ def write_image(image: np.ndarray | PIL.Image.Image, fpath: Path, compress_level
+             image, as used by PIL.Image.save(). Defaults to 1.
+             Refer to: https://github.com/huggingface/lerobot/pull/2135
+             for more details on the default value rationale.
++        max_retries: Number of save attempts before giving up. Transient I/O
++            hiccups (disk contention, AV scan lock, etc.) are common enough
++            during a long recording session that a short retry is worth it.
++        retry_delay_s: Delay between retries.
+ 
+     Raises:
+         TypeError: If the input 'image' is not a NumPy array or a
+             PIL.Image.Image object.
+-
+-    Side Effects:
+-        Logs an error message if the image writing process fails for any reason.
++        Exception: Re-raises the last save error after exhausting retries.
++            (bimanual-robot local patch, 2026-10-20: the original fork
++            swallowed this exception here and only logged it, so a single
++            failed frame write was silently counted as "done" by
++            AsyncImageWriter.wait_until_done() and only surfaced minutes
++            later as a cryptic "image file is truncated" crash deep inside
++            the video encoder - by which point the live recording was long
++            over and unrecoverable. Re-raising lets the caller
++            (worker_thread_loop) record the failure so wait_until_done()
++            can fail loudly, right where the real problem happened.)
+     """
+-    try:
+-        if isinstance(image, np.ndarray):
+-            img = image_array_to_pil_image(image)
+-        elif isinstance(image, PIL.Image.Image):
+-            img = image
+-        else:
+-            raise TypeError(f"Unsupported image type: {type(image)}")
+-        img.save(fpath, **save_kwargs_for_path(fpath, compress_level))
+-    except Exception as e:
+-        logger.error("Error writing image %s: %s", fpath, e)
++    last_exc: Exception | None = None
++    for attempt in range(max_retries):
++        try:
++            if isinstance(image, np.ndarray):
++                img = image_array_to_pil_image(image)
++            elif isinstance(image, PIL.Image.Image):
++                img = image
++            else:
++                raise TypeError(f"Unsupported image type: {type(image)}")
++            img.save(fpath, **save_kwargs_for_path(fpath, compress_level))
++            return
++        except Exception as e:  # noqa: BLE001 - retried, then re-raised below
++            last_exc = e
++            if attempt < max_retries - 1:
++                time.sleep(retry_delay_s)
++    logger.error("Error writing image %s after %d attempts: %s", fpath, max_retries, last_exc)
++    raise last_exc
+ 
+ 
+-def worker_thread_loop(queue: queue.Queue):
++def worker_thread_loop(queue: queue.Queue, failures: list | None = None):
+     while True:
+         item = queue.get()
+         if item is None:
+             queue.task_done()
+             break
+         image_array, fpath, compress_level = item
+-        write_image(image_array, fpath, compress_level)
++        try:
++            write_image(image_array, fpath, compress_level)
++        except Exception as e:  # noqa: BLE001 - recorded for wait_until_done() to raise
++            if failures is not None:
++                failures.append((str(fpath), str(e)))
+         queue.task_done()
+ 
+ 
+-def worker_process(queue: queue.Queue, num_threads: int):
++def worker_process(queue: queue.Queue, num_threads: int, failures=None):
+     threads = []
+     for _ in range(num_threads):
+-        t = threading.Thread(target=worker_thread_loop, args=(queue,))
++        t = threading.Thread(target=worker_thread_loop, args=(queue, failures))
+         t.daemon = True
+         t.start()
+         threads.append(t)
+@@ -206,23 +234,33 @@ class AsyncImageWriter:
+         self.threads = []
+         self.processes = []
+         self._stopped = False
++        # (bimanual-robot local patch, 2026-10-20: see write_image() docstring)
++        # Failed frame writes (after retries) are recorded here instead of being
++        # silently swallowed, so wait_until_done() can raise instead of letting
++        # save_episode() proceed to video-encode a directory with a missing frame.
++        self._manager = None
+ 
+         if num_threads <= 0 and num_processes <= 0:
+             raise ValueError("Number of threads and processes must be greater than zero.")
+ 
+         if self.num_processes == 0:
+-            # Use threading
++            # Use threading - plain list append is atomic under the GIL, safe enough here.
++            self.failures: list = []
+             self.queue = queue.Queue()
+             for _ in range(self.num_threads):
+-                t = threading.Thread(target=worker_thread_loop, args=(self.queue,))
++                t = threading.Thread(target=worker_thread_loop, args=(self.queue, self.failures))
+                 t.daemon = True
+                 t.start()
+                 self.threads.append(t)
+         else:
+-            # Use multiprocessing
++            # Use multiprocessing - needs a manager-backed list to be shared across processes.
++            self._manager = multiprocessing.Manager()
++            self.failures = self._manager.list()
+             self.queue = multiprocessing.JoinableQueue()
+             for _ in range(self.num_processes):
+-                p = multiprocessing.Process(target=worker_process, args=(self.queue, self.num_threads))
++                p = multiprocessing.Process(
++                    target=worker_process, args=(self.queue, self.num_threads, self.failures)
++                )
+                 p.daemon = True
+                 p.start()
+                 self.processes.append(p)
+@@ -237,6 +275,17 @@ class AsyncImageWriter:
+ 
+     def wait_until_done(self):
+         self.queue.join()
++        # (bimanual-robot local patch, 2026-10-20: see write_image() docstring)
++        # Fail loudly here, before the caller proceeds to video-encode a directory
++        # that may be missing a frame a worker failed (even after retries) to write.
++        if self.failures:
++            failed = list(self.failures)
++            del self.failures[:]
++            preview = failed[:5]
++            more = f" (+{len(failed) - 5} more)" if len(failed) > 5 else ""
++            raise RuntimeError(
++                f"{len(failed)}개 프레임 이미지 저장 실패(재시도 후에도): {preview}{more}"
++            )
+ 
+     def stop(self):
+         if self._stopped:
+@@ -257,5 +306,8 @@ class AsyncImageWriter:
+                     p.terminate()
+             self.queue.close()
+             self.queue.join_thread()
++            if self._manager is not None:
++                self._manager.shutdown()
++                self._manager = None
+ 
+         self._stopped = True

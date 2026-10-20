@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-10-20 | 핸드오프 데이터 수집 인프라 — 통합 녹화·카메라 안정화·버그 수정·데이터 검증
+
+- **물따르기→컵배치 통합 녹화 스크립트** 신설: 두 프로세스로 따로 돌리다 재연결 구간에서
+  반복되던 `COM15 motor ID 6(왼팔 그리퍼)` 실패 지점을, 연결을 한 번만 맺고 핸드오프를
+  끊김 없이 잇는 방식으로 원천 제거했다. 명령어 1회 = 1라운드(물따르기→컵배치→두 레포
+  저장·업로드), `←` 즉시 재녹화, 로컬 root 있으면 자동 resume. 하드웨어 붙이기 전 API
+  전수 대조로 **실행 전·중 실제 버그 4개**(카메라 설정 타입·import 출처·rerun 초기화
+  누락·이미지 라이터 스레드 미설정→FPS 저하)를 데이터 손실 없이 잡았다.
+  상세: `docs/experiments/20261020_핸드오프_통합녹화_스크립트와_데이터무결성_검증.md`,
+  도구: [`tools/recording/record_handoff_combined.py`](tools/recording/record_handoff_combined.py).
+- **카메라 인덱스 안정화**: 인덱스가 세션마다 바뀌는 원인이 **OBS 가상 카메라의 열거
+  순서 개입**임을 규명하고, 숫자 인덱스가 아니라 물리 **DevicePath**로 매 실행 재탐색하는
+  리졸버를 만들었다([`tools/camera/resolve_camera_indices.py`](tools/camera/resolve_camera_indices.py)).
+  OBS 가상 캠 "starting virtual-output failed"는 권한이 아니라 **CLSID 등록 손상**(빈
+  InprocServer32)이었고 uninstall→install로 복구. "카메라 멈춤" 오탐(정적 장면)도 픽셀
+  차분법으로 교정. 상세: `docs/experiments/20261020_카메라_인덱스_안정화와_뎁스_프레임_검증.md`.
+- **LeRobot 이미지 저장 무음 실패 버그** 규명·수정: `write_image()`가 저장 예외를 삼켜
+  완료 대기가 거짓 보고 → 몇 분 뒤 인코더에서 `image file is truncated`로 폭발하던 것을,
+  재시도+재던짐+실패추적으로 실패 지점에서 크게 터지게 고쳤다. 패치:
+  [`tools/recording/lerobot_image_writer_silent_failure_fix.patch`](tools/recording/lerobot_image_writer_silent_failure_fix.patch).
+  상세: `docs/experiments/20261020_LeRobot_이미지저장_무음실패_버그_수정.md`.
+- **데이터 무결성 검증**: 이미 모은 핸드오프 9+9개와 이 스크립트로 모을 데이터가 추론을
+  망치지 않는지 스키마(글자단위 일치)·타임스탬프(합성값→반복 CPU starvation take는 버림)·
+  관절 연속성(구멍 없음)·카메라 유효 FPS/싱크를 데이터로 직접 검증. 결론: 데이터 자체엔
+  결함 없음, 남는 건 운영 습관(반복 경고 take 버리기·손목캠 케이블 고정·롤아웃 시작 자세).
+- 원격 GPU 서버에서 두 선행 모델(물따르기 step 8000 / 컵배치 step 9500) SmolVLA 학습·
+  업로드 완료. 에폭 수학상 파인튜닝은 1~2에폭 내 수렴이 정상임을 확인(롤아웃 평가는 미완).
+
 ## 2026-10-16 | SmolVLA 제자리 떨림 — 진짜 원인은 시작 자세 OOD
 
 - 어제와 같은 설정인데 롤아웃이 제자리에서 떨기만 하던 증상의 진짜 원인을 규명했다:
