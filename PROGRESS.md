@@ -12,6 +12,7 @@
 - 카메라 각도가 원인이라는 증거는 없다. 공장 intrinsics/extrinsics NaN과 기본 투영 사용, 한 실측 배치에서 얻은 +49.605 mm 면 거리 보정, 실제 근접 간격과 내부 추정의 불일치는 기존 미해결 항목이다. 이번 분기 수정이나 조향 복원으로 물리 1 cm 정확도·접촉 문제·전체 완주가 해결됐다고 주장하지 않는다.
 - 기록값을 재현한 회귀는 수정 전 이탈 없이 추가 접근해 실패했고 수정 후 이탈 1회·추가 세 번째 접근 없음·종료 사유를 확인했다. 관련 4개 스위트 699건(5.73초), 치명 lint·구문·diff 검사를 통과했고 별도 native `code-reviewer` 검수 PASS다. 상세 근거와 반영 상태는 기존 실패 기록 §22.22 및 `$HOME/.local/state/bimanual-robot/front_collision_20261020/`에 남긴다. 출발 검수 절차·새 물리 실행은 추가하지 않았다.
 - Pi 소스/설치 모듈 4개 SHA와 import를 대조하고 idle executor만 PID19080으로 반영했다. base PID1212·Nav2 PID2010·카메라/인식기 inactive 상태는 유지했다. 전후 fresh odom 3표본은 모두 v/w 0이며 pending/running도 0이다. 복원본은 Pi `$HOME/.local/state/jdamr/front-collision-repair/20261020_170148/`, receipt는 PC `$HOME/.local/state/bimanual-robot/front_collision_20261020/deployment.json`이다. 출발 대기 receipt를 무효화하고 현재 위치를 급수대 접근 중 정지로 맞췄으며 HOME·AMCL은 갱신하지 않았다.
+- 수정 커밋 `93b380b`는 작업 브랜치에 push됐으나, 이후 사용자가 매 작업의 main 반영을 중단하고 브랜치 커밋만 남기도록 변경했다. 자동 생성된 PR #79의 자동 병합을 해제하고 닫았으며 원격 main은 `ae15bc1` 그대로다. 주행 운영 규칙에도 검증 후 로컬 커밋까지만 수행하고 push/main은 별도 요청 시 진행하도록 반영했다. 이후 이 정책 변경은 로컬에만 커밋한다.
 
 ## 2026-10-20 | 후면 도킹 TF 시작 오류·킵아웃 경계·남은 조기 감속 수정
 
