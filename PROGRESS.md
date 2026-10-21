@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-21 | 도크 킵아웃 전체 해제와 후면 fine의 면 상대 제어
+
+- `table_01_20261021_105628_0deeaf19`는 급수대·1번 테이블 접근과 각 이탈, 도크 앞 복귀 및 후면 coarse를 수행했다. 출발 controller 오류는 이번 실행에서 재발하지 않았다. 후면 면을 약 0.489 m에서 관측했지만 남은 fine 경로가 도크 keepout 셀과 겹쳐 끝났다. 전체 왕복·후면 도킹 성공으로 기록하지 않는다.
+- 사용자 요청으로 `dock_table` zone을 비활성화하고 실제 mask의 도크 셀 119개만 base mask로 복원했다. 다른 zone·기존 수동 조정·원본 지도·HOME은 유지하며 registry/5개 route의 mask SHA를 함께 갱신했다. 새 SHA는 `834b0823b6796334527390f843f5a26d9b9d3336a5ed1417f4cd7c7d21cb2af8`이다. 최신 재생은 keepout-only에서 통과하지만 원본 지도 점유 셀과도 겹친다는 별도 사실을 보존했다.
+- 사용자가 도크 앞쪽은 박스라고 재확인해 마지막 `_rear_box_update`만 map 변환·정적 지도/keepout preview 차단을 제거했다. 등록 도크의 후면 fine은 기존 live LiDAR 면/odom 제어로 잇는다. coarse·centering·일반 경로의 지도 검사, 동일 목표면·scan/clock·heading·이동 한도·실시간 외곽 감시·사용자 정지는 유지한다.
+- 관련 7개 스위트 630건, 치명 lint·compile·diff 검사를 통과했다. 과거 2건의 마스크/재생 증거를 복원해 유지하고, 새 119셀 범위 및 fine의 지도 독립성·입력/각도/거리 실패를 확인했다. 독립 리뷰에서 active unit identity 변경 계획을 거부해 해당 조작을 제거했고, 최종 코드·배포 계획은 APPROVE를 받았다.
+- Pi mask의 LoadMap 성공과 실제 발행 grid 일치를 확인했다. fine source/install SHA·import 검증 후 idle executor만 PID52030으로 재기동했다. base PID31767·Nav2 PID47789·active unit identity와 기존 위치추정은 유지했고 새 이동 명령은 없다. 배포 뒤 odom은 기존 정지 검사 범위(v 0.002 m/s, w 0.01 rad/s 이내)를 통과했으며 완전한 0 표본이라고 기록하지 않는다. 현재는 도크 미도착 상태로 후면 fine만 남았고 새 실행 요청을 기다린다. 복원/receipt와 다음 정지 세션의 identity 이행 주의는 실패 기록 §22.27에 남겼다. 브랜치 로컬 커밋만 수행한다.
+
 ## 2026-10-21 | 출발 전 controller 응답 장애·세션 재기동·오류 전달 수정
 
 - `table_01_20261021_102400_3bc45058`는 급수대 관측 경로 선택 뒤 `controller_server` 파라미터 서비스 발견 실패로 이동 전에 끝났다. Nav2 journal의 10:22:39 controller graph 소실, 10:28 종료 중 local_costmap cleanup 정체와 SIGKILL을 확인했다. 프로세스 active만으로 정상이라고 판단할 수 없는 실제 hang이었다. native C++ 내부 선행 원인은 backtrace가 없어 미확정이며 카메라 부하·배터리·SHM 메시지 하나로 원인을 단정하지 않는다.

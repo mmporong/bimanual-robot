@@ -27,7 +27,7 @@ from jdamr_cube_navigation.reverse_parking import (
     CachedStaticCorridorValidator, MAX_REVERSE_DISTANCE_M, reverse_waypoints,
 )
 from jdamr_cube_navigation.surface_approach import (
-    FACE_APPROACH_TIME_S, face_approach_waypoints, FACE_HEADING_FILTER_S, filtered_face_heading,
+    FACE_APPROACH_TIME_S, FACE_HEADING_FILTER_S, filtered_face_heading,
 )
 from nav_msgs.msg import Path as RosPath
 import rclpy
@@ -579,39 +579,12 @@ class RearBoxParkingMixin:
     def _rear_box_update(self, initial, geometry, extent, half_width, target_gap,
                          reference=None, command_watch=None,
                          source_point_filter=None):
+        """Track the dock box in odom; live scan guards cover the final approach."""
         state = dict(initial)
         reference = initial if reference is None else reference
         reference = {'face_odom': tuple(reference['face_odom']),
                      'normal_odom': tuple(reference['normal_odom'])}
         start = self._odom_pose()
-        validated = {'stamp': None, 'pose': None, 'heading': None}
-        anchor = self._frozen_in_odom(RosPath())[1](0., 0., 0.)
-        cosine, sine = math.cos(anchor[2]), math.sin(anchor[2])
-        check = CachedStaticCorridorValidator(
-            Path(self.registry['map']['yaml_path']),
-            Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
-
-        def to_map(pose):
-            dx, dy = pose[0] - anchor[0], pose[1] - anchor[1]
-            return cosine * dx + sine * dy, -sine * dx + cosine * dy, pose[2] - anchor[2]
-
-        def validate_control(actual, heading):
-            if (validated['stamp'] == state['stamp_s'] and validated['pose'] is not None
-                    and math.dist(actual[:2], validated['pose'][:2]) < 0.025
-                    and abs(_angle(heading - validated['heading'])) < math.radians(0.3)):
-                return
-            preview = face_approach_waypoints(
-                (*actual[:2], actual[2] + math.pi), state['face_odom'],
-                state['normal_odom'], extent, half_width, target_gap,
-                command_heading_rad=heading + math.pi)
-            map_preview = [to_map((x, y, yaw - math.pi)) for x, y, yaw in preview]
-            if len(preview) > 1 and not check(map_preview):
-                self.emit('rear_box_static_corridor_blocked',
-                          preview_start_map=list(map_preview[0]),
-                          preview_end_map=list(map_preview[-1]),
-                          blocked_cell=getattr(check, 'last_blockage', None))
-                raise RuntimeError('rear box approach static corridor blocked')
-            validated.update(stamp=state['stamp_s'], pose=actual, heading=heading)
 
         def update(actual):
             observation = self._rear_box_observation(geometry, extent, half_width)
@@ -650,8 +623,7 @@ class RearBoxParkingMixin:
             remaining = (gap - target_gap) / math.cos(error)
             if math.dist(start[:2], actual[:2]) + max(0., remaining) > 0.6:
                 raise RuntimeError('rear box approach exceeds bounded travel')
-            return {'remaining_m': remaining, 'heading_rad': heading,
-                    'validate_control': validate_control}
+            return {'remaining_m': remaining, 'heading_rad': heading}
 
         return update
 

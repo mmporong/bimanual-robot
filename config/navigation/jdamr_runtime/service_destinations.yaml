@@ -8,7 +8,7 @@ map:
 keepout:
   yaml_path: /home/lim/jdamr_data/map_20260930_manual/aligned/keepout.yaml
   yaml_sha256: 41889c8a8d16fa94ad2e5c0fe730d2227676adf54b4ea93a8c2b267d54939344
-  image_sha256: 76bdb54527ab9b73aa658ff5decce5837d7af7e5c61393c270f47732a42673f2
+  image_sha256: 834b0823b6796334527390f843f5a26d9b9d3336a5ed1417f4cd7c7d21cb2af8
 home:
   id: home_dock
   priority: 1

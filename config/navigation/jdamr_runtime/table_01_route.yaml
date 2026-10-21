@@ -2,7 +2,7 @@ schema_version: 1
 frame_id: map
 map_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/map.yaml
 keepout_mask_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/keepout.yaml
-expected_mask_sha256: 76bdb54527ab9b73aa658ff5decce5837d7af7e5c61393c270f47732a42673f2
+expected_mask_sha256: 834b0823b6796334527390f843f5a26d9b9d3336a5ed1417f4cd7c7d21cb2af8
 start_pose:
   x: 0.625
   y: -1.27

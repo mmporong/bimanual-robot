@@ -441,32 +441,34 @@ def test_explicit_rear_target_gap_reuses_parking_contract_bounds(target_gap):
     node._final_gap_m.assert_not_called()
 
 
-def test_reverse_preview_rotates_heading_without_rotating_actual_footprint(monkeypatch):
+def test_fine_rear_docking_uses_live_face_without_static_map_gate(monkeypatch):
     node = route_node()
-    node.registry = {'map': {'yaml_path': '/map.yaml'},
-                     'keepout': {'yaml_path': '/mask.yaml'}}
     node._odom_pose = Mock(return_value=(0., 0., 0.))
-    node._frozen_in_odom = Mock(return_value=(None, lambda x, y, yaw: (x, y, yaw)))
-    outline = [(-.28, -.23), (-.248, -.275), (.038, -.275), (.12, -.23),
-               (.12, .23), (.038, .275), (-.248, .275), (-.28, .23)]
-    node._footprint_outline = Mock(return_value=outline)
-    node._reverse_footprint = Mock(side_effect=AssertionError('bounding box overstates corners'))
     node._rear_box_observation = Mock(return_value=face(.2))
     node.emit = Mock()
-    check = Mock(return_value=True)
-    factory = Mock(return_value=check)
+    factory = Mock(side_effect=AssertionError('static maps cannot gate live dock fine control'))
     monkeypatch.setattr(module, 'CachedStaticCorridorValidator', factory)
     update = node._rear_box_update(face(.2), GEOMETRY, .275, .225, .01)
     result = update((0., 0., 0.))
-    result['validate_control']((0., 0., 0.), 0.)
-    poses = check.call_args.args[0]
-    assert poses[0] == pytest.approx((0., 0., 0.))
-    assert poses[-1][0] < -.1
-    assert all(abs(p[2]) < 1e-8 for p in poses)
     assert result['remaining_m'] == pytest.approx(.19)
-    assert factory.call_args.args[2] == outline
-    assert not check.call_args.kwargs
-    node._reverse_footprint.assert_not_called()
+    assert result['heading_rad'] == pytest.approx(0.)
+    assert result.get('validate_control') is None
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize('failure', ['scan', 'heading', 'travel'])
+def test_live_dock_fine_control_keeps_input_heading_and_travel_guards(failure):
+    node = route_node()
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    initial = face(.2, math.radians(40.) if failure == 'heading' else 0.)
+    node._rear_box_observation = Mock(return_value=initial)
+    expected = {'scan': 'scan unavailable', 'heading': 'heading outside',
+                'travel': 'bounded travel'}[failure]
+    if failure == 'scan':
+        node._rear_box_observation.side_effect = RuntimeError('rear box scan unavailable')
+    update = node._rear_box_update(initial, GEOMETRY, .275, .225, .01)
+    with pytest.raises(RuntimeError, match=expected):
+        update((.5, 0., 0.) if failure == 'travel' else (0., 0., 0.))
 
 
 @pytest.mark.parametrize('alignment_ok', [True, False])
@@ -613,7 +615,6 @@ def test_one_noisy_close_range_scan_does_not_interrupt_an_aligned_approach(monke
     monkeypatch.setattr(module, 'CachedStaticCorridorValidator', Mock())
     update = node._rear_box_update(face(.0274), GEOMETRY, .275, .225, .01)
     result = update((0., 0., 0.))
-    result['validate_control']((0., 0., 0.), result['heading_rad'])
     assert abs(result['heading_rad']) < math.radians(.1)
     assert 0.016 < result['remaining_m'] < 0.018
     repeated = update((0., 0., 0.))

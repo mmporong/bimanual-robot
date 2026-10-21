@@ -8,7 +8,7 @@ import zlib
 from pathlib import Path
 
 from jdamr_cube_navigation.keepout_mask import (
-    _map_metadata, _point_in_polygon, _write_pgm)
+    _enabled_polygons, _map_metadata, _point_in_polygon, _write_pgm)
 from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.surface_approach import face_approach_waypoints
 
@@ -23,6 +23,25 @@ RUNTIME = (
 EVIDENCE = PACKAGE / 'test/fixtures/rear_dock_keepout_20261020.json'
 LATEST_EVIDENCE = (
     PACKAGE / 'test/fixtures/rear_dock_keepout_20261020_171136.json')
+REMOVAL_EVIDENCE = PACKAGE / 'test/fixtures/rear_dock_keepout_20261021.json'
+
+
+def _mask_before_dock_removal(tmp_path):
+    """Reconstruct the historical mask without rewriting recorded evidence."""
+    evidence = json.loads(REMOVAL_EVIDENCE.read_text())
+    current = _map_metadata(RUNTIME / 'keepout.yaml')
+    if hashlib.sha256((RUNTIME / 'keepout.pgm').read_bytes()).hexdigest() == (
+            evidence['previous_mask_image_sha256']):
+        return current
+    pixels = bytearray(current['pixels'])
+    for column, row in evidence['removed_cells_column_image_row']:
+        assert pixels[row * current['width'] + column] == 254
+        pixels[row * current['width'] + column] = 0
+    image = tmp_path / 'before_removal.pgm'
+    _write_pgm(image, current['width'], current['height'], bytes(pixels))
+    assert hashlib.sha256(image.read_bytes()).hexdigest() == (
+        evidence['previous_mask_image_sha256'])
+    return {**current, 'pixels': bytes(pixels), 'image': image}
 
 
 def _nominal_full_approach(evidence):
@@ -93,7 +112,7 @@ def test_retreat_clears_recorded_rear_approach_through_one_centimetre(
     assert evidence['motion'] == {'linear_mps': 0., 'angular_radps': 0.}
 
     old = _map_metadata(tmp_path / 'before.yaml')
-    new = _map_metadata(RUNTIME / 'keepout.yaml')
+    new = _mask_before_dock_removal(tmp_path)
     removed = 0
     pairs = zip(old['pixels'], new['pixels'])
     for index, (prior, current) in enumerate(pairs):
@@ -131,7 +150,7 @@ def test_latest_rear_preview_and_one_centimetre_endpoint_clear_dock_mask(
     assert poses[-1] == pytest.approx(
         evidence['derived_nominal_one_centimetre_endpoint_map'])
 
-    current = _map_metadata(RUNTIME / 'keepout.yaml')
+    current = _mask_before_dock_removal(tmp_path)
     prior_pixels = bytearray(current['pixels'])
     for column, row in evidence['restored_cells_column_image_row']:
         index = row * current['width'] + column
@@ -192,9 +211,59 @@ def test_latest_rear_preview_and_one_centimetre_endpoint_clear_dock_mask(
         RUNTIME / 'map.yaml', RUNTIME / 'keepout.yaml', footprint)
     assert after(poses)
     assert after.last_blockage is None
-    current_digest = hashlib.sha256(
-        (RUNTIME / 'keepout.pgm').read_bytes()).hexdigest()
+    _write_pgm(tmp_path / 'retreated.pgm', current['width'], current['height'],
+               current['pixels'])
+    current_digest = hashlib.sha256((tmp_path / 'retreated.pgm').read_bytes()).hexdigest()
     assert current_digest == evidence['new_mask_image_sha256']
+
+
+def test_disabled_dock_keepout_clears_latest_blocked_path_only(tmp_path):
+    evidence = json.loads(REMOVAL_EVIDENCE.read_text())
+    config = yaml.safe_load((RUNTIME / 'table_keepout_current.yaml').read_text())
+    assert 'dock_table' not in {zone_id for zone_id, _ in _enabled_polygons(config)}
+    current = _map_metadata(RUNTIME / 'keepout.yaml')
+    previous = _mask_before_dock_removal(tmp_path)
+    base = _map_metadata(RUNTIME / 'keepout_base_unknown.yaml')
+    changed = []
+    for index, (before, after) in enumerate(zip(previous['pixels'], current['pixels'])):
+        column, row = index % current['width'], index // current['width']
+        center = (
+            current['origin'][0] + (column + .5) * current['resolution'],
+            current['origin'][1] + (current['height'] - row - .5) * current['resolution'])
+        if _point_in_polygon(*center, evidence['disabled_dock_polygon']):
+            assert after == base['pixels'][index]
+        if before == after:
+            continue
+        assert before == 0 and after == 254
+        assert _point_in_polygon(*center, evidence['disabled_dock_polygon'])
+        changed.append([column, row])
+    assert changed == evidence['removed_cells_column_image_row']
+    assert [evidence['blocked_cell']['column'], evidence['blocked_cell']['image_row']] in (
+        changed)
+
+    params = yaml.safe_load((PACKAGE / 'config/new_base_nav2_params.yaml').read_text())
+    footprint = yaml.safe_load(
+        params['global_costmap']['global_costmap']['ros__parameters']['footprint'])
+    poses = _nominal_full_approach(evidence)
+    assert poses[0] == pytest.approx(evidence['logged_preview_start_map'])
+    assert poses[-10] == pytest.approx(evidence['logged_preview_end_map'], abs=.003)
+    document = yaml.safe_load((RUNTIME / 'keepout.yaml').read_text())
+    document['image'] = str(previous['image'])
+    prior_yaml = tmp_path / 'prior.yaml'
+    prior_yaml.write_text(yaml.safe_dump(document))
+    before = CachedStaticCorridorValidator(RUNTIME / 'map.yaml', prior_yaml, footprint)
+    assert not before(poses)
+    assert before.last_blockage['grid'] == 'keepout'
+    # Isolate the requested mask change from occupied cells in the SLAM map.
+    mask_only = CachedStaticCorridorValidator(
+        RUNTIME / 'keepout_base_unknown.yaml', RUNTIME / 'keepout.yaml', footprint)
+    assert mask_only(poses)
+    assert mask_only.last_blockage is None
+    after = CachedStaticCorridorValidator(
+        RUNTIME / 'map.yaml', RUNTIME / 'keepout.yaml', footprint)
+    assert not after(poses)
+    assert after.last_blockage['reason'] == 'map_not_free'
+    assert after.last_blockage['grid'] == 'map'
 
 
 def test_dock_mask_identity_and_source_geometry_remain_consistent():
