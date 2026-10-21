@@ -19,6 +19,7 @@ def prepared_node():
     node.create_client.return_value = client
     node._wait.return_value = SimpleNamespace(success=True)
     node.wait_until_ready.return_value = True
+    node._parking_parameters_ready.return_value = True
     node.capture_stationary_pose.return_value = ((1., 2., 0.), {'confirmed': True})
     node._guard_failure.return_value = None
     return node, client
@@ -670,3 +671,17 @@ def test_navigation_active_reads_every_server_state(monkeypatch, active):
     monkeypatch.setattr(module, 'require_active', check)
     assert REAL_NAVIGATION_ACTIVE(SimpleNamespace()) is active
     assert check.call_args.args[1] == module.NAVIGATION_NODES
+
+
+@pytest.mark.parametrize('already_active', [True, False])
+def test_preparation_requires_live_controller_response(monkeypatch, already_active):
+    monkeypatch.setattr(module, 'require_active', Mock())
+    monkeypatch.setattr(module, 'navigation_active', lambda _node: already_active)
+    node, client = prepared_node()
+    node._parking_parameters_ready.return_value = False
+    node.last_parking_parameters_failure = 'controller_server parameter service unavailable'
+    with pytest.raises(RuntimeError, match=node.last_parking_parameters_failure):
+        module.activate_prepared(node)
+    assert not any(call.args[0] == 'navigation_activated_without_motion'
+                   for call in node.emit.call_args_list)
+    node._parking_parameters_ready.assert_called_once()

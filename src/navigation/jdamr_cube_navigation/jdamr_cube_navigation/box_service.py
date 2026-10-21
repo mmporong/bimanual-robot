@@ -1192,7 +1192,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 raise RuntimeError(self.readiness_failure_reason())
             # Normal starts validate this in preflight; observation resumes skip it.
             if resume_at_observation and not self._parking_parameters_ready():
-                raise RuntimeError('parking controller parameters unavailable')
+                raise RuntimeError(getattr(self, 'last_parking_parameters_failure', None)
+                                   or 'parking controller parameters unavailable')
             if execute and not self._precision_collision_ready(geometry):
                 raise RuntimeError('precision collision-monitor profile unavailable')
             # The starting place is an explicit route contract, not a guessed pose.
@@ -1215,6 +1216,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                   physical_accuracy='NOT_EXTERNALLY_MEASURED')
         if not resume_at_observation and not self.preflight():
             self.emit('failed', phase='preflight',
+                      reason=getattr(self, 'last_preflight_failure', None),
                       end_error_m=getattr(self, 'preflight_end_error_m', None))
             return False
         if not execute:

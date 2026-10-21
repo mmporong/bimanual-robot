@@ -217,6 +217,12 @@ def navigation_active(node):
     return True
 
 
+def require_parking_controller(node):
+    """Prove the controller answers before reporting preparation as complete."""
+    if not node._parking_parameters_ready():
+        raise RuntimeError(node.last_parking_parameters_failure)
+
+
 def activate_prepared(node):
     """Send lifecycle startup only; never set a pose or send a motion goal."""
     require_active(node, LOCALIZATION_NODES)
@@ -239,6 +245,7 @@ def activate_prepared(node):
             # Re-init after a cycle (2026-10-01 16:18): STARTUP on active servers
             # failed at configure and the rollback reset the whole stack.
             node.verify_live_maps()
+            require_parking_controller(node)
             node.emit('navigation_activated_without_motion', stationary_pose=pose,
                       stationary_evidence=evidence, already_active=True)
             return
@@ -251,6 +258,7 @@ def activate_prepared(node):
         require_active(node, NAVIGATION_NODES)
         startup_confirmed = True
         node.verify_live_maps()
+        require_parking_controller(node)
         node.emit('navigation_activated_without_motion',
                   stationary_pose=pose, stationary_evidence=evidence)
     except Exception as verification_error:

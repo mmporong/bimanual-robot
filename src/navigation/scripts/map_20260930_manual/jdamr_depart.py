@@ -827,6 +827,41 @@ def map_wait_failed(events):
             and str(events[0].get('reason', '')).startswith(MAP_WAIT_FAILURE))
 
 
+def controller_wait_failed(events):
+    """Recover only an unavailable controller proven to fail before any route goal."""
+    allowed = {'observation_route_selected', 'failed', 'operator_call',
+               'box_camera', 'executor_failed'}
+    failures = [event for event in events if event.get('event') == 'failed']
+    if len(failures) != 1 or failures[0].get('phase') != 'preflight':
+        return False
+    reason = str(failures[0].get('reason', ''))
+    if not reason.startswith((
+            'controller_server parameter service unavailable',
+            'controller_server parameter read timed out:')):
+        return False
+    completion = [event for event in events if event.get('event') == 'executor_failed']
+    if len(completion) != 1 or completion[0].get('code') != 1 or \
+            completion[0].get('reason') != 'executor_exit_nonzero':
+        return False
+    return all(event.get('event') in allowed and not (
+        event.get('event') == 'box_camera' and not (
+            event.get('action') == 'stop' and event.get('ok') is True))
+        for event in events)
+
+
+def recover_controller_before_departure(started):
+    """Refresh a hung Nav2 session once while the original dock departure is unmoved."""
+    stop_requested_since(started)
+    refuse_during_cycle('controller connection recovery before motion')
+    cmd_session_stop(None)
+    stop_requested_since(started)
+    cmd_session_start(None)
+    stop_requested_since(started)
+    cmd_init(SimpleNamespace(keep_home=True, local_only=False, min_inlier=None,
+                             seed_from_state=False, click=False))
+    stop_requested_since(started)
+
+
 def show_event(event, *, notify=True):
     keep = {k: event[k] for k in ('event', 'level', 'category', 'phase', 'reason', 'waypoint_id',
                                   'terminal_status_code', 'nav2_error_code') if k in event}
@@ -1227,6 +1262,17 @@ def go_one(args, table_id):
         if map_wait_failed(events):
             fail('map still unavailable after one executor restart; no further departure '
                  'or full recovery was started; current localization is preserved')
+    fresh_departure = not any(getattr(args, flag, False) for flag in (
+        'resume_at_observation', 'resume_at_final_approach', 'resume_parked_log',
+        'dock_only', 'rear_box_only', 'route', 'region', 'skip_via'))
+    if (fresh_departure and state.get('init_pose_source') == 'anchored_dock_scan'
+            and state.get('init_local_only') is not True
+            and controller_wait_failed(events)):
+        log('controller unavailable before motion; restoring only Nav2/executor '
+            'and the registered dock localization once')
+        recover_controller_before_departure(started)
+        refuse_during_cycle('the restored departure')
+        events = run_cycle(args, load_state(), table_id)
     names = [e.get('event') for e in events]
     executor_failure = next((e for e in events if e.get('event') == 'executor_failed'), None)
     if executor_failure is not None:

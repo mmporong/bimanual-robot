@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-21 | 출발 전 controller 응답 장애·세션 재기동·오류 전달 수정
+
+- `table_01_20261021_102400_3bc45058`는 급수대 관측 경로 선택 뒤 `controller_server` 파라미터 서비스 발견 실패로 이동 전에 끝났다. Nav2 journal의 10:22:39 controller graph 소실, 10:28 종료 중 local_costmap cleanup 정체와 SIGKILL을 확인했다. 프로세스 active만으로 정상이라고 판단할 수 없는 실제 hang이었다. native C++ 내부 선행 원인은 backtrace가 없어 미확정이며 카메라 부하·배터리·SHM 메시지 하나로 원인을 단정하지 않는다.
+- 기존 읽기 전용 GetParameters endpoint·응답 재전송 함수를 CorridorRoute로 옮겨 주차 파라미터 검사에서도 재사용한다. 사용하지 않는 설정 쓰기 등 6개 서비스 전체에 대한 의존을 제거했다. 실제 서비스 부재·응답 timeout·불완전 응답·설정 불일치를 보존해 `failed(reason=...)`와 PC 최종 오류에 전달한다. 준비 완료 이벤트도 실제 controller 응답·값 검증 뒤에만 발생한다.
+- 새 일반 출발이 등록 도크의 anchored scan 초기화 상태이고, 이동 전 controller preflight 실패라는 로그 근거가 있을 때만 Nav2/executor stop/start·기존 도크 init·재제출을 한 번 수행한다. 이동/카메라 시작/미지 이벤트, 재개·후면/복귀 단독·사용자 경로·local init은 제외한다. 단계마다 stop timestamp를 확인하고 두 번째 실패는 실제 원인을 보존한다. 정상 `go`에 새 준비 작업을 추가하지 않았고, C++ hang 자체를 고쳤다고 주장하지 않는다.
+- 종료된 transient unit이 `loaded/inactive/dead`로 남아 systemd-run과 충돌한 복구 문제도 수정했다. 동일 identity·정확한 transient 경로·정지 상태일 때만 기존 unit을 start하며 다른 identity·persistent unit·불명확 상태는 거부한다. 배포 때 script hash 변경으로 필요한 fingerprint 이행은 별도 정지·argv/User 검증과 runtime drop-in으로 수행하고 전후 값을 확인했다.
+- 관련 Python 875건, parking/session 98건, PC 출발 흐름 144건으로 합계 1,117건 통과. 독립 리뷰가 찾은 기존 parking mock 31건을 get-only fake client로 갱신해 지연·불일치·불완전 응답 검증을 보존했다. 추가 복구도 정지 우선·1회 한도·재개 거부 회귀와 독립 리뷰를 통과했고 치명 flake8·구문·bash/diff 검사도 통과했다.
+- Pi Python source/install 4쌍과 shell source/share 2경로를 SHA·import·구문 확인 후 반영했다. 새 Nav2 PID47789·idle executor PID48133으로 복구했고 base PID31767은 유지했다. 기존 도크 scan seed를 재사용한 무이동 activation에서 실제 controller 조회를 통과했으며 최종 fresh odom 3개 모두 선속도·각속도 0, spool request/running 0이다. RGB-D/관측기는 비활성이다. 사용자 정지 유지, 새 주행 없음. 근거·복원·종료 경로는 실패 기록 §22.26에 기록한다. 현재 목적 브랜치에 로컬 커밋하며 push/main 병합은 하지 않는다.
+
 ## 2026-10-20 | 배터리·센서 출발 실패 원인 전달 수정 및 정지 상태 Pi 반영
 
 - `wait_until_ready()`의 실제 실패 사유를 보존하고, 일반 테이블 접근·관측점 재개·도크 복귀·단독 후면 주차·수동 이탈·무이동 위치초기화 경로가 이를 예외 또는 `failed` 이벤트에 전달하도록 수정했다. 배터리 부족은 실제 전압·적용 기준을 유지하며, 예비전압 부족·센서/AMCL 누락·operator link 상실·사용자 정지를 구분한다. 매 준비 시도에서 이전 사유를 초기화한다. 기존 배터리 기준·guard·대기시간·이동 제어는 변경하지 않았다.

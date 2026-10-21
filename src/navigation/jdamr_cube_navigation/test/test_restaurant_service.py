@@ -1268,7 +1268,7 @@ def test_parameter_reader_discards_pending_request_on_interruption(monkeypatch):
         clock['now'] += timeout_sec
         node.stop_requested = True
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', interrupt)
+    monkeypatch.setattr(corridor_route, 'spin_node', interrupt)
     with pytest.raises(RuntimeError, match='map_server parameter read interrupted'):
         node._read_parameters('map_server', ['yaml_filename'])
     client.remove_pending_request.assert_called_once_with(pending)
@@ -1303,7 +1303,7 @@ def test_parameter_reader_resends_two_lost_reads_then_uses_fresh_third(monkeypat
     def spin(_node, timeout_sec):
         clock['now'] += timeout_sec
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     assert node._read_parameters('map_server', ['yaml_filename']) is response
     assert client.remove_pending_request.call_args_list == [
         ((lost_first,),), ((lost_second,),)]
@@ -1329,7 +1329,7 @@ def test_parameter_reader_accepts_first_response_after_second_request(monkeypatc
         if clock['now'] >= 1.2 and not first.done():
             first.set_result(response)
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     assert node._read_parameters('map_server', ['yaml_filename']) is response
     assert client.call_async.call_count == 2
     client.remove_pending_request.assert_called_once_with(second)
@@ -1349,7 +1349,7 @@ def test_parameter_reader_timeout_stays_inside_five_second_budget(monkeypatch):
     def spin(_node, timeout_sec):
         clock['now'] += timeout_sec
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     with pytest.raises(RuntimeError, match=(
             r'keepout_filter_mask_server parameter read timed out: '
             r'total_budget=5\.0 s attempts=5 resend_interval=1\.0 s')):
@@ -1373,7 +1373,7 @@ def test_parameter_reader_never_sends_after_deadline(monkeypatch):
         assert timeout_sec <= 0.05
         clock['now'] = 5.1
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', overrun)
+    monkeypatch.setattr(corridor_route, 'spin_node', overrun)
     with pytest.raises(RuntimeError, match='total_budget=5.0 s attempts=1'):
         node._read_parameters('map_server', ['yaml_filename'])
     client.call_async.assert_called_once()
@@ -1425,7 +1425,7 @@ def test_parameter_reader_uses_real_read_only_service_and_fresh_responses(monkey
     def spin(_node, timeout_sec):
         executor.spin_once(timeout_sec=timeout_sec)
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     try:
         first = ServiceRoute._read_parameters(node, 'read_only_peer', ['revision'])
         second = ServiceRoute._read_parameters(node, 'read_only_peer', ['revision'])
@@ -2468,12 +2468,9 @@ def test_t15_precision_params_match_box_contract_only(monkeypatch):
             flat[prefix[:-1]] = value
 
     flatten('', controller)
-    client = Mock()
-    client.wait_for_services.return_value = True
-    client.get_parameters.side_effect = lambda names: done(SimpleNamespace(values=[
-        Parameter('value', value=flat.get(name)).get_parameter_value() for name in names]))
     node = route()
-    node.parking_parameters = client
+    node._read_parameters = Mock(side_effect=lambda remote, names: SimpleNamespace(values=[
+        Parameter('value', value=flat.get(name)).get_parameter_value() for name in names]))
     node.parking_contract = load_parking_contract(
         PACKAGE / 'config/box_parking_contract.yaml')
     assert node._parking_parameters_ready(reverse=True)
@@ -4187,3 +4184,14 @@ def test_intermediate_stationary_capture_uses_short_hold_without_relaxing_inputs
     assert 0.08 <= clock[0]-10.0 < (.3 if intermediate else 1.3)
     if not intermediate:
         assert clock[0]-10.0 >= node.parking_contract['hold_s']
+
+
+@pytest.mark.parametrize('failure', [None, RuntimeError('controller_server parameter read timed out')])
+def test_parking_read_failure_retains_controller_cause(failure):
+    node = route()
+    node.parking_contract = load_parking_contract(PACKAGE / 'config/box_parking_contract.yaml')
+    node._read_parameters = Mock(return_value=None, side_effect=failure)
+    assert not node._parking_parameters_ready()
+    assert node.last_parking_parameters_failure == (
+        str(failure) if failure else 'controller_server parameter service unavailable')
+    assert node._read_parameters.call_args.args[0] == 'controller_server'

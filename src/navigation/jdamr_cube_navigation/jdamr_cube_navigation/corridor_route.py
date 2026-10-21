@@ -20,11 +20,11 @@ from jdamr_cube_navigation.mobile_manipulator_protection import (
 from jdamr_cube_navigation.parking import load_parking_contract, ParkingHold
 from nav2_msgs.action import ComputePathThroughPoses, NavigateToPose
 from nav_msgs.msg import Odometry
+from rcl_interfaces.srv import GetParameters
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.parameter import parameter_value_to_python
-from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
@@ -389,6 +389,7 @@ class CorridorRoute(Node):
             self.revisit_tf = Buffer()
             self.revisit_tf_listener = TransformListener(self.revisit_tf, self)
         self.parking_contract = parking_contract
+        self._parameter_readers = {}
         self.parking_behavior_tree = os.path.join(
             package_share, 'behavior_trees', 'navigate_to_pose_parking.xml')
         self.parking_odom = None
@@ -399,8 +400,6 @@ class CorridorRoute(Node):
             validate_parking_route(config, parking_contract)
             self.parking_tf = Buffer()
             self.parking_tf_listener = TransformListener(self.parking_tf, self)
-            self.parking_parameters = AsyncParameterClient(
-                self, 'controller_server')
             self.create_subscription(
                 Twist, '/cmd_vel', self._parking_command_callback,
                 qos_profile_sensor_data)
@@ -838,8 +837,10 @@ class CorridorRoute(Node):
 
     def preflight(self):
         """Require Nav2 to plan the full remaining route before movement."""
+        self.last_preflight_failure = None
         if (getattr(self, 'parking_contract', None) is not None and
                 not self._parking_parameters_ready()):
+            self.last_preflight_failure = self.last_parking_parameters_failure
             return False
         if not self.compute.wait_for_server(timeout_sec=10.0):
             self.get_logger().error('compute_path_through_poses unavailable')
@@ -891,6 +892,74 @@ class CorridorRoute(Node):
         self.preflight_path_end_xy = (end.x, end.y)
         return True
 
+    def _read_parameters(self, remote_node, names):
+        """
+        Reuse one read-only endpoint; never cache the returned parameter values.
+
+        A new client's first response can be lost before the server matches its
+        reply reader ("client will not receive response", 20260929_RUNTIME_ROOT_CAUSE).
+        Every executor attempt starts with a new node, and this first map_server
+        read ended the 2026-10-06 10:26 and 17:09 cycles before any motion.
+        Unanswered reads are retried at one-second intervals within the same
+        five-second budget, so a reply reader matched after two seconds can
+        still receive a fresh request.
+        """
+        client = self._parameter_readers.get(remote_node)
+        if client is None:
+            client = self.create_client(GetParameters, f'{remote_node}/get_parameters')
+            self._parameter_readers[remote_node] = client
+        if getattr(self, 'stop_requested', False):
+            raise RuntimeError(
+                f'{remote_node} parameter read interrupted before service wait')
+        if not client.wait_for_service(timeout_sec=2.0):
+            return None
+        requested_names = list(names)
+        total_budget_s = 5.0
+        resend_interval_s = 1.0
+        started_s = time.monotonic()
+        deadline_s = started_s + total_budget_s
+        next_send_s = started_s
+        attempt = 0
+        pending = []
+        try:
+            while True:
+                if getattr(self, 'stop_requested', False):
+                    raise RuntimeError(
+                        f'{remote_node} parameter read interrupted after attempts={attempt}')
+                for attempt_index, future in enumerate(pending, start=1):
+                    if not future.done():
+                        continue
+                    error = future.exception()
+                    if error is not None:
+                        raise RuntimeError(
+                            f'{remote_node} parameter read failed on '
+                            f'attempt={attempt_index}: {error!r}') from error
+                    return future.result()
+                now_s = time.monotonic()
+                if now_s >= deadline_s:
+                    raise RuntimeError(
+                        f'{remote_node} parameter read timed out: '
+                        f'total_budget={total_budget_s:.1f} s attempts={attempt} '
+                        f'resend_interval={resend_interval_s:.1f} s')
+                if now_s >= next_send_s:
+                    attempt += 1
+                    request = GetParameters.Request()
+                    request.names = requested_names
+                    pending.append(client.call_async(request))
+                    next_send_s = now_s + resend_interval_s
+                    if attempt > 1:
+                        self.get_logger().warning(
+                            f'parameter read retry: node={remote_node} attempt={attempt}; '
+                            f'total_budget={total_budget_s:.1f} s '
+                            f'resend_interval={resend_interval_s:.1f} s')
+                    continue
+                spin_node(
+                    self, timeout_sec=min(0.05, deadline_s - now_s, next_send_s - now_s))
+        finally:
+            for future in pending:
+                if not future.done():
+                    client.remove_pending_request(future)
+
     def _parking_parameters_ready(self, reverse=False):
         """Reject missing or mismatched opt-in plugins before any route goal."""
         contract = self.parking_contract
@@ -923,24 +992,20 @@ class CorridorRoute(Node):
             })
             expected['ParkingReverse.use_rotate_to_heading'] = False
             expected['ParkingReverse.allow_reversing'] = True
-        if not self.parking_parameters.wait_for_services(timeout_sec=5.0):
-            self.get_logger().error('parking controller parameters unavailable')
-            return False
-        future = self.parking_parameters.get_parameters(list(expected))
-        deadline_s = time.monotonic() + 5.0
-        while (not future.done() and not self.stop_requested and
-               time.monotonic() < deadline_s):
-            spin_node(self, timeout_sec=0.1)
-        if not future.done() or future.exception() is not None:
-            self.get_logger().error('parking parameter query failed')
-            return False
-        values = future.result().values
+        self.last_parking_parameters_failure = None
+        try:
+            response = self._read_parameters('controller_server', list(expected))
+        except RuntimeError as error:
+            return self._parking_parameters_failed(str(error))
+        if response is None:
+            return self._parking_parameters_failed(
+                'controller_server parameter service unavailable')
+        values = response.values
         if len(values) != len(expected):
-            self.get_logger().error(
-                'parking parameter response incomplete: '
+            return self._parking_parameters_failed(
+                'controller_server parameter response incomplete: '
                 f'expected={len(expected)} received={len(values)} '
                 f'requested={",".join(expected)}')
-            return False
         for (name, wanted), value in zip(expected.items(), values):
             # GetParameters returns ParameterValue rather than Parameter.
             actual = parameter_value_to_python(value)
@@ -952,9 +1017,15 @@ class CorridorRoute(Node):
                     math.isclose(actual, wanted, rel_tol=0.0, abs_tol=1e-9)
                     if isinstance(wanted, float) else actual == wanted))
             if not matches:
-                self.get_logger().error(f'parking parameter mismatch: {name}')
-                return False
+                return self._parking_parameters_failed(
+                    f'controller_server parking parameter mismatch: {name}')
         return True
+
+    def _parking_parameters_failed(self, reason):
+        """Keep the failed controller read in both the journal and the result event."""
+        self.last_parking_parameters_failure = reason
+        self.get_logger().error(reason)
+        return False
 
     def _parking_observation(self, reference_frame=None):
         """Read current map (or odom) pose and independent odometry without commanding."""

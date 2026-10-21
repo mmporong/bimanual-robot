@@ -3569,3 +3569,13 @@ def test_zero_dwell_resume_has_one_short_capture_and_no_sleep():
     node.capture_stationary_pose.assert_called_once_with(intermediate=True)
     node._hold_still.assert_not_called()
     node._leave_parked_pose.assert_called_once()
+
+
+def test_failed_preflight_reports_controller_failure_without_motion(mission):
+    mission.preflight.return_value = False
+    mission.last_preflight_failure = 'controller_server parameter service unavailable'
+    assert not invoke(mission)
+    failure = next(call for call in mission.emit.call_args_list
+                   if call.args == ('failed',) and call.kwargs.get('phase') == 'preflight')
+    assert failure.kwargs['reason'] == mission.last_preflight_failure
+    mission.execute.assert_not_called()
