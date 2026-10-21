@@ -290,7 +290,7 @@ def test_lateral_drift_uses_one_static_checked_curve_to_twenty_cm_handoff(
     node._execute_reverse_once.assert_called_once()
     assert node._execute_reverse_once.call_args.kwargs['final'] is False
     assert node._execute_reverse_once.call_args.kwargs['goal_checker_id'] == 'dock_position_checker'
-    assert node._execute_reverse_once.call_args.kwargs['position_handoff_m'] == .05
+    assert node._execute_reverse_once.call_args.kwargs['position_handoff_m'] == .025
 
 
 @pytest.mark.parametrize('gap_m', [.85, .89, .9, .99, 1.])

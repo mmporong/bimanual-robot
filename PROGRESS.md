@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-21 | 근접 후 재전진 반복 제거·후면 도착과 추가 이동 판정 분리
+
+- 전체 실행 `table_01_20261021_175440_87661747`는 급수대·1번 테이블 뒤 도크로 돌아왔으나 중앙 보정 후 횡오차 +0.057698 m가 5 cm를 넘어 다시 clearance 0.788528 m를 요청했다. 앞선 1 m handoff 수정만으로 단일 후진이 해결되지 않았다. 근접 중앙 보정 반복과 fine의 20 cm 전진/terminal 재주차를 제거하고, 중앙 곡선의 odom 종점 인계를 5 cm에서 2.5 cm로 좁혔다. 기존 position-only checker는 유지한다. 실제 횡오차가 여전히 5 cm 밖이면 성공으로 바꾸지 않고 남은 오차를 기록하며, 또 크게 전진하지 않는다.
+- 후면 재개 `table_01_20261021_180116_f1b5f0ea`는 약 0.214025 m 후진했다. 마지막 raw gap 0.011634 m·각도 -0.000785 rad인데 추가 이동의 swept-footprint 판정을 기다리다 recovery deadline으로 끝났다. 이 실행을 미이동으로 해석하면 틀린다. 별도 정지 스캔 40프레임 재생의 최소 간격은 10.985–11.888 mm, 마지막 양끝은 11.729/11.780 mm였다. 모두 라이다 내부 추정이며 외부 실측/자동 완료 기록으로 대체하지 않는다.
+- 같은 면의 fresh raw 관측을 현재 odom에 투영해 기존 양끝 1 cm±3 mm 완료 조건을 충족하면, 필터 잔차·작은 정렬 상태보다 도착을 우선하고 속도 0으로 마친다. recovery도 유효 입력·guard/link 확인 후 도착이면 새 이동 예측을 재요청하지 않는다. 이후 정지 스캔으로 동일 면과 최종 간격을 다시 확인한다. CM·제원·scan/TF/link·stop·기존 0.6 m 접근 한도는 유지한다.
+- 관련 3스위트 512 PASS(5.74초), fatal lint·compile·diff PASS. 도착 허용범위 안의 비영 각도(7 mm/0.7°)와 영구 이동-preview 차단도 회귀로 확인했다. 초기 pose에서 후진 곡선 공간이 부족할 때 최초 clearance는 남아 있으므로 모든 배치의 단일 후진이나 실차 재현 성공은 아직 주장하지 않는다. 현재 정지 유지, 새 실물 실행 없음이다.
+- 독립 code-reviewer 최종 APPROVE와 별도 512 PASS(5.49초)를 받았다. Pi 두 모듈 source/install 4경로의 PC SHA 일치·compile/import를 확인하고 idle executor만 PID80464로 재기동했다. base31767·Nav2 47789는 유지했고 pending/running0, 배포 뒤 fresh odom 3표본은 기존 정지 허용 안이다. 새 실물 실행은 없었다.
+- 원본 로그는 Pi `$HOME/jdamr_data/map_20260930_manual/aligned/runs/`의 두 run `cycle_events.jsonl`이며 PC 근거는 `$HOME/.local/state/bimanual-robot/rear_no_terminal_replay_20261021/`다. 복원본·유지 서비스/종료 명령은 실패 기록 §22.33에 남겼다. 브랜치 로컬 커밋만 수행한다.
+
 ## 2026-10-21 | 도크 정렬을 앞당겨 근접 후 큰 전진 재접근 줄이기
 
 - 실행 `table_01_20261021_164729_07911177`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀·후면 접근을 같은 실행에서 수행했다. 사용자는 도킹이 잘됐다고 확인했지만 크게 전진했다 다시 후진하는 동작을 지적했다. 추가 보정은 중지했으며 소프트웨어는 마지막 `rear docking swept footprint occupied` 대기 뒤 정지 요청에 따라 `rear_box_parking_not_confirmed`로 종료했다. 사용자 확인과 자동 최종 확인은 구분한다.

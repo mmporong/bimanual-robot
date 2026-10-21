@@ -51,6 +51,12 @@ def _angle(value):
     return math.atan2(math.sin(value), math.cos(value))
 
 
+def _rear_gap_confirmed(gap_m, error_rad, half_width_m, target_gap_m):
+    far_gap_m = gap_m + 2. * half_width_m * abs(math.sin(error_rad))
+    return (target_gap_m - .003 <= gap_m <= target_gap_m + .003
+            and target_gap_m - .003 <= far_gap_m <= target_gap_m + .003)
+
+
 def _rear_center_target(observed, extent):
     normal, midpoint = observed['normal_odom'], observed['midpoint_odom']
     return (*(midpoint[i] + (extent + REAR_FACE_REOBSERVE_GAP_M) * normal[i]
@@ -357,9 +363,11 @@ class RearBoxParkingMixin:
                            'yaw': target[2]}]
         self.emit('rear_dock_centering_started', target_odom=list(target_odom),
                   lateral_error_m=lateral, target_gap_m=REAR_FACE_REOBSERVE_GAP_M)
+        # Leave room between the odom endpoint handoff and the lateral-error
+        # acceptance band. Keep the position-only checker to avoid final-yaw trim.
         completed = self._execute_reverse_once(
             frozen, goal_checker_id='dock_position_checker', final=False,
-            position_handoff_m=REAR_CENTER_TOLERANCE_M,
+            position_handoff_m=REAR_CENTER_TOLERANCE_M / 2.,
             motion='rear_dock_centering')
         self._rear_center_moved = bool(completed)
         return completed
@@ -702,9 +710,22 @@ class RearBoxParkingMixin:
             if abs(error) > math.radians(30.0):
                 raise RuntimeError('rear box heading outside approach range')
             remaining = (gap - target_gap) / math.cos(error)
+            # A fresh same-face fit can already satisfy both final corners while
+            # the filtered plane still asks for more travel. Finish this move;
+            # the caller will confirm again from stopped scans.
+            raw_normal = observation['normal_odom']
+            raw_error = _angle(math.atan2(raw_normal[1], raw_normal[0]) - actual[2])
+            raw_gap = (sum((actual[i] - observation['face_odom'][i]) * raw_normal[i]
+                           for i in (0, 1)) - extent * math.cos(raw_error)
+                       - half_width * abs(math.sin(raw_error)))
+            target_confirmed = _rear_gap_confirmed(
+                raw_gap, raw_error, half_width, target_gap)
+            if target_confirmed:
+                remaining = 0.
             if math.dist(start[:2], actual[:2]) + max(0., remaining) > 0.6:
                 raise RuntimeError('rear box approach exceeds bounded travel')
             return {'remaining_m': remaining, 'heading_rad': heading,
+                    'target_confirmed': target_confirmed,
                     'allow_near_alignment': (gap > 0. and abs(error) < math.atan2(
                         half_width, extent))}
 
@@ -803,8 +824,10 @@ class RearBoxParkingMixin:
                           observation=centered)
                 initial = centered
                 if abs(lateral) > REAR_CENTER_TOLERANCE_M:
-                    self.emit('rear_dock_centering_retry', lateral_error_m=lateral)
-                    continue
+                    self.emit('failed', phase='rear_box_centering',
+                              reason='rear box centering residual exceeds tolerance',
+                              lateral_error_m=lateral, forward_retry_requested=False)
+                    return False
                 initial = self._align_rear_face_before_clearance(
                     centered, geometry, extent, half_width)
             break
@@ -875,22 +898,6 @@ class RearBoxParkingMixin:
             return (-residual_limit_m <= residual_m <= near_limit_m
                     and lower_m <= tangent_m <= upper_m)
 
-        def make_straight_clearance(observation):
-            # At contact range a turn sweeps a rear corner toward the box. Reuse
-            # the validated straight dock departure before correcting heading.
-            if not (observation['gap_m'] < 0.05 and abs(
-                    observation['normal_yaw_error_rad']) > math.radians(0.3)):
-                return observation
-            self.config = load_route(route_path)
-            self.waypoints = self.config['waypoints']
-            self._dock_departure = None
-            if not self._clear_rear_dock_straight(0.2):
-                return None
-            reobserved = self._observe_rear_box_recovering(
-                geometry, extent, half_width, command_watch)
-            _same_target(initial, reobserved)
-            return reobserved
-
         def approach(observation):
             _set_collision_target(
                 command_watch, observation, target_gap, observation['gap_m'],
@@ -907,8 +914,9 @@ class RearBoxParkingMixin:
                 -remaining, precision=True, hold_heading=True,
                 target_update=update, approach_time_s=FACE_APPROACH_TIME_S, **kwargs) is not None
 
-        approach_start = make_straight_clearance(initial)
-        if approach_start is None or not approach(approach_start):
+        # Final feedback owns one reverse approach. A near-range residual must
+        # not trigger a new forward clearance or replay the parking manoeuvre.
+        if not approach(initial):
             return False
 
         final = self._observe_rear_box_recovering(geometry, extent, half_width, command_watch)
@@ -918,29 +926,10 @@ class RearBoxParkingMixin:
             error = observation['normal_yaw_error_rad']
             gap = observation['gap_m']
             far_gap = gap + 2.0 * half_width * abs(math.sin(error))
-            confirmed = (target_gap - 0.003 <= gap <= target_gap + 0.003
-                         and target_gap - 0.003 <= far_gap <= target_gap + 0.003)
+            confirmed = _rear_gap_confirmed(gap, error, half_width, target_gap)
             return confirmed, gap, far_gap, error
 
         confirmed, gap, far_gap, error = confirmation(final)
-        if (not confirmed and not getattr(self, 'stop_requested', False)
-                and self._operator_link_ready()):
-            self.emit('rear_box_terminal_retry_started', nearest_gap_m=gap,
-                      farthest_gap_m=far_gap, angle_rad=error,
-                      target_gap_m=target_gap, target_preserved=True)
-            retry_start = make_straight_clearance(final)
-            retry_completed = retry_start is not None and approach(retry_start)
-            if retry_start is not None:
-                try:
-                    retried = self._observe_rear_box_recovering(
-                        geometry, extent, half_width, command_watch)
-                    _same_target(initial, retried)
-                    final = retried
-                    confirmed, gap, far_gap, error = confirmation(final)
-                except RuntimeError:
-                    pass
-            if not retry_completed:
-                confirmed = False
         self.confirmation = {
             'confirmed': confirmed,
             'reason': ('confirmed' if confirmed

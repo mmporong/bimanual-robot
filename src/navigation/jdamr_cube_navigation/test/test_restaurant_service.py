@@ -4279,3 +4279,48 @@ def test_parking_read_failure_retains_controller_cause(failure):
     assert node.last_parking_parameters_failure == (
         str(failure) if failure else 'controller_server parameter service unavailable')
     assert node._read_parameters.call_args.args[0] == 'controller_server'
+
+
+@pytest.mark.parametrize('reached,invalid', [(True, False), (False, False), (True, True)])
+def test_rear_recovery_checks_valid_arrival_before_another_motion_preview(
+        monkeypatch, reached, invalid):
+    node = route()
+    clock, position, velocity = [10.], [0.], [0.]
+    commands, watch_calls = [], []
+    node.run_deadline_s = 12.
+    node._operator_link_ready = lambda: True
+    node._guard_failure = lambda *_a: None
+    node.latest_motion = (clock[0], 0., 0.)
+    def publish(message):
+        velocity[0] = message.linear.x
+        commands.append(message.linear.x)
+    def spin(*_a, **_k):
+        clock[0] += .02
+        position[0] += velocity[0] * .02
+        node.latest_motion = (clock[0], velocity[0], 0.)
+    def update(actual):
+        if len(watch_calls) >= 1:
+            if invalid:
+                raise RuntimeError('rear box face unavailable')
+            if reached:
+                return {'remaining_m': 0., 'heading_rad': math.radians(.7),
+                        'allow_near_alignment': True, 'target_confirmed': True}
+        return {'remaining_m': .2 + actual[0]}
+    def watch(command):
+        watch_calls.append(command.linear.x)
+        return 'rear docking swept footprint occupied'
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=position[0], y=0., z=0.),
+            rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    result = node._drive_zero_turn(-.2, precision=True, hold_heading=True,
+                                  target_update=update, command_watch=watch)
+    assert all(value == 0. for value in commands)
+    if reached and not invalid:
+        assert result == pytest.approx(0.)
+        assert len(watch_calls) == 1
+    else:
+        assert result is None

@@ -1386,7 +1386,7 @@ class ServiceRoute(CorridorRoute):
                  'target_reached': False, 'face_heading': None, 'heading_updated_s': None,
                  'validate_control': None, 'allow_near_alignment': False,
                  'alignment_in_progress': False, 'observed_heading': None,
-                 'surface_gap_m': None}
+                 'surface_gap_m': None, 'target_confirmed': False}
         command = Twist()
 
         def measure():
@@ -1410,6 +1410,10 @@ class ServiceRoute(CorridorRoute):
                             or not math.isfinite(remaining)):
                         raise RuntimeError('invalid live approach distance')
                     state['remaining_m'] = remaining
+                    confirmed = update.get('target_confirmed', False)
+                    if not isinstance(confirmed, bool):
+                        raise RuntimeError('invalid live target confirmation')
+                    state['target_confirmed'] = confirmed
                     state['surface_gap_m'] = update.get('surface_gap_m')
                     allow_near = update.get('allow_near_alignment', False)
                     if not isinstance(allow_near, bool):
@@ -1440,6 +1444,10 @@ class ServiceRoute(CorridorRoute):
                     state['resume_speed_mps'] = command.linear.x
                     command.linear.x = command.angular.z = 0.0
             if hold_heading and state['target_failure'] is None:
+                if state['target_confirmed']:
+                    command.linear.x = command.angular.z = 0.0
+                    state['alignment_in_progress'] = False
+                    return state['travelled']
                 heading = (start[2] if state['face_heading'] is None
                            else state['face_heading'])
                 error_rad = math.atan2(
@@ -1504,6 +1512,9 @@ class ServiceRoute(CorridorRoute):
             if state['tf_failure'] is not None or state['target_failure'] is not None:
                 return False
             if target_update is not None:
+                if state['target_confirmed']:
+                    state['target_reached'] = True
+                    return True
                 if state['alignment_in_progress']:
                     return False
                 reached = state['remaining_m'] <= stopping_distance_m()
@@ -1581,6 +1592,16 @@ class ServiceRoute(CorridorRoute):
                 command.linear.x = resume_speed
                 measure()
                 if state['tf_failure'] is not None:
+                    break
+                if (rear_recovery and state['target_failure'] is None
+                        and reached_stop_point(state['travelled'])):
+                    # Arrival needs no new motion preview. Valid feedback and the
+                    # normal stopped-pose confirmation still precede success.
+                    command.linear.x = command.angular.z = 0.0
+                    self.emit('rear_box_input_recovered',
+                              paused_s=time.monotonic() - paused_s,
+                              travelled_m=state['travelled'], target_preserved=True,
+                              arrival_reached=True)
                     break
                 if state['target_failure'] is None and command_watch is not None:
                     state['target_failure'] = command_watch(command)

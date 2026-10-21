@@ -187,7 +187,7 @@ def test_rear_readiness_failure_records_battery_cause_without_motion():
 
 
 @pytest.mark.parametrize('interruption', [None, 'stop', 'deadline'])
-def test_remaining_center_error_stays_in_the_same_parking_attempt(
+def test_center_curve_residual_never_starts_another_forward_clearance(
         monkeypatch, interruption):
     node = route_node()
     node.verify_live_maps = Mock()
@@ -195,16 +195,14 @@ def test_remaining_center_error_stays_in_the_same_parking_attempt(
     node._reverse_smoother_ready = Mock(return_value=True)
     node._parking_parameters_ready = Mock(return_value=True)
     node._confirm_collision_monitor_on = Mock()
-    node._operator_link_ready = Mock(return_value=True)
-    node._guard_failure = Mock(return_value=None)
-    observations = [face(.3, stamp=1.), face(.2, stamp=2.), face(.2, stamp=3.)]
-    for observation, lateral in zip(observations, (.23, .113, .02)):
+    initial, centered = face(.3, stamp=1.), face(.2, stamp=2.)
+    for observation, lateral in ((initial, .23), (centered, .057698)):
         observation.update(face_odom=(-.575, 0.), midpoint_odom=(-.575, 0.),
                            base_pose_odom=(0., lateral, 0.))
-    node._observe_rear_box_recovering = Mock(side_effect=observations)
+    node._observe_rear_box_recovering = Mock(side_effect=[initial, centered])
     node._align_rear_face_before_clearance = Mock(side_effect=lambda found, *_a: found)
     node._clear_rear_dock_straight = Mock(return_value=True)
-    node._odom_pose = Mock(side_effect=[(0., .113, 0.), (0., .02, 0.)])
+    node._odom_pose = Mock(return_value=(0., .057698, 0.))
     def center(*_a, **_k):
         node._rear_center_moved = True
         if interruption == 'stop':
@@ -217,15 +215,11 @@ def test_remaining_center_error_stays_in_the_same_parking_attempt(
     node.emit = Mock()
     monkeypatch.setattr(module, 'load_route', lambda _p: {
         'waypoints': [{'id': 'home_dock_approach'}]})
-    assert node.park_rear_box(
-        GEOMETRY, 'return-route', execute=True, timeout_s=90,
-        target_gap_m=.01) is (interruption is None)
-    assert node._center_rear_box.call_count == (1 if interruption else 2)
-    if interruption:
-        node._park_rear_face.assert_not_called()
-    else:
-        node._park_rear_face.assert_called_once()
-        assert node._park_rear_face.call_args.args[0] is observations[-1]
+    assert not node.park_rear_box(
+        GEOMETRY, 'return-route', execute=True, timeout_s=90, target_gap_m=.01)
+    node._center_rear_box.assert_called_once()
+    node._clear_rear_dock_straight.assert_called_once()
+    node._park_rear_face.assert_not_called()
 
 
 @pytest.mark.parametrize('interrupted', [False, True])
@@ -317,135 +311,49 @@ def test_source_face_cache_checks_scan_identity_and_acquisition_pose(monkeypatch
     assert classifier((0., 0., 0.), target, (-.475, 0.))
 
 
-@pytest.mark.parametrize('moved', [None, -0.2])
-def test_near_skewed_box_uses_straight_clearance_then_rear_feedback(monkeypatch, moved):
+@pytest.mark.parametrize('gap,error,remaining,moved', [
+    (.004, -.035, -.006, None),
+    (.20, 0., .19, -.19),
+    (.20, 0., .19, None),
+])
+def test_fine_rear_approach_never_pulls_forward(gap, error, remaining, moved):
     node = route_node()
-    node._final_gap_m = Mock(return_value=.01)
-    node.verify_live_maps = Mock()
-    node.wait_until_ready = Mock(return_value=True)
-    node.capture_stationary_pose = Mock(return_value=((0., 0., 0.), {}))
-    observations = [face(.004, -.035), face(.2, -.035), face(.01, 0.)]
-    for item in observations:
-        item['face_odom'], item['normal_odom'] = (-.29, 0.), (1., 0.)
-    node._observe_rear_box = Mock(side_effect=observations)
-    node._reverse_smoother_ready = Mock(return_value=True)
-    node._parking_parameters_ready = Mock(return_value=True)
-    node._confirm_collision_monitor_on = Mock()
-    node._operator_link_ready = Mock(return_value=True)
-    node._clear_rear_dock_straight = Mock(return_value=True)
-    update = Mock(return_value={'remaining_m': .2})
+    initial, final = face(gap, error, stamp=1.), face(.01, 0., stamp=2.)
+    final['face_odom'] = initial['face_odom']
+    node._observe_rear_box_recovering = Mock(return_value=final)
+    node._clear_rear_dock_straight = Mock(side_effect=AssertionError('unexpected forward'))
+    update = Mock(return_value={'remaining_m': remaining})
     node._rear_box_update = Mock(return_value=update)
     node._odom_pose = Mock(return_value=(0., 0., 0.))
     node._drive_zero_turn = Mock(return_value=moved)
-    node._camera = Mock()
     node.emit = Mock()
-    monkeypatch.setattr(module, 'load_route', lambda _p: {'waypoints': [
-        {'id': 'home_exit'}, {'id': 'observation'}]})
-    assert node.park_rear_box(GEOMETRY, 'route', execute=True, timeout_s=90) is (moved is not None)
-    node._clear_rear_dock_straight.assert_called_once_with(.2)
-    node._drive_zero_turn.assert_called_once_with(
-        -.2, precision=True, hold_heading=True, target_update=update,
-        approach_time_s=module.FACE_APPROACH_TIME_S)
-    node._camera.assert_not_called()
-    node.capture_stationary_pose.assert_not_called()
-    assert node._observe_rear_box.call_count == (2 if moved is None else 3)
+    result = node._park_rear_face(initial, GEOMETRY, 'route', .275, .225, .01, None)
+    assert result is (remaining <= 0. or moved is not None)
+    node._clear_rear_dock_straight.assert_not_called()
+    if remaining <= 0.:
+        node._drive_zero_turn.assert_not_called()
+    else:
+        assert node._drive_zero_turn.call_args.args[0] < 0.
+        node._drive_zero_turn.assert_called_once()
 
 
-def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monkeypatch):
+def test_terminal_corner_miss_is_reported_without_forward_or_reapproach():
     node = route_node()
-    command_watch = Mock(return_value=None)
-    monkeypatch.setattr(module, 'rear_collision_profile',
-                        lambda _node: nullcontext(command_watch))
-    node._observe_rear_box_recovering = Mock(wraps=node._observe_rear_box_recovering)
-    node._final_gap_m = Mock(return_value=.05)
-    node.verify_live_maps = Mock()
-    node.wait_until_ready = Mock(return_value=True)
-    node.capture_stationary_pose = Mock(return_value=((0., 0., 0.), {}))
-    initial = face(.58, 0., stamp=1.)
-    missed = face(.01085, math.radians(.548), stamp=2.)
-    cleared = face(.21, math.radians(.1), stamp=3.)
-    confirmed = face(.01, 0., stamp=4.)
-    for item in (initial, missed, cleared, confirmed):
-        item['face_odom'], item['normal_odom'] = (-.855, 0.), (1., 0.)
-    node._observe_rear_box = Mock(side_effect=[initial, missed, cleared, confirmed])
-    node._reverse_smoother_ready = Mock(return_value=True)
-    node._parking_parameters_ready = Mock(return_value=True)
-    node._confirm_collision_monitor_on = Mock()
-    node._operator_link_ready = Mock(return_value=True)
-    node._clear_rear_dock_straight = Mock(return_value=True)
-    updates = [Mock(return_value={'remaining_m': .57}),
-               Mock(return_value={'remaining_m': .20})]
-    node._rear_box_update = Mock(side_effect=updates)
+    initial, missed = face(.2, 0., stamp=1.), face(.01085, math.radians(.548), stamp=2.)
+    missed['face_odom'] = initial['face_odom']
+    node._observe_rear_box_recovering = Mock(return_value=missed)
+    node._clear_rear_dock_straight = Mock(side_effect=AssertionError('unexpected forward'))
+    node._rear_box_update = Mock(return_value=Mock(return_value={'remaining_m': .19}))
     node._odom_pose = Mock(return_value=(0., 0., 0.))
-    node._drive_zero_turn = Mock(side_effect=[-.57, -.20])
+    node._drive_zero_turn = Mock(return_value=-.19)
     node.emit = Mock()
-    monkeypatch.setattr(module, 'load_route', lambda _p: {'waypoints': [
-        {'id': 'home_exit'}, {'id': 'observation'}]})
-
-    assert node.park_rear_box(
-        GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01)
-    node._final_gap_m.assert_not_called()
-    node._clear_rear_dock_straight.assert_called_once_with(.2)
-    assert node._drive_zero_turn.call_count == 2
-    observations = node._observe_rear_box_recovering.call_args_list
-    assert len(observations) == 4
-    assert len(observations[0].args) == 3  # Coarse/centering uses the normal CM profile.
-    assert all(call.args[3] is command_watch for call in observations[1:])
-    assert observations[0].kwargs == {'allow_range_reapproach': True}
-    assert all(not call.kwargs for call in observations[1:])
-    assert node._rear_box_update.call_args_list[1].kwargs['reference'] is initial
-    assert node.confirmation == {
-        'confirmed': True, 'reason': 'confirmed',
-        'reference': 'live_rear_lidar_face',
-        'nearest_gap_m': pytest.approx(.01),
-        'farthest_gap_m': pytest.approx(.01),
-        'internal_estimate_only': True,
-        'external_accuracy_verified': False,
-    }
-    retry = [call for call in node.emit.call_args_list
-             if call.args and call.args[0] == 'rear_box_terminal_retry_started']
-    assert len(retry) == 1
-    command_watch.clear_target.assert_called_once_with()
-
-
-def test_failed_terminal_retry_records_fresh_gap_without_reporting_success(
-        monkeypatch):
-    node = route_node()
-    initial = face(.20, 0., stamp=1.)
-    missed = face(.011, math.radians(.6), stamp=2.)
-    cleared = face(.20, 0., stamp=3.)
-    current = face(.012, 0., stamp=4.)
-    for item in (initial, missed, cleared, current):
-        item['face_odom'], item['normal_odom'] = (-.475, 0.), (1., 0.)
-    node._observe_rear_box_recovering = Mock(
-        side_effect=[missed, cleared, current])
-    node._operator_link_ready = Mock(return_value=True)
-    node._clear_rear_dock_straight = Mock(return_value=True)
-    node._rear_box_update = Mock(side_effect=[
-        Mock(return_value={'remaining_m': .19}),
-        Mock(return_value={'remaining_m': .19}),
-    ])
-    node._odom_pose = Mock(return_value=(0., 0., 0.))
-    node._drive_zero_turn = Mock(side_effect=[-.19, None])
-    node.emit = Mock()
-    monkeypatch.setattr(module, 'load_route', lambda _p: {'waypoints': [
-        {'id': 'home_exit'}, {'id': 'observation'}]})
-
-    assert not node._park_rear_face(
-        initial, GEOMETRY, 'route', .275, .225, .01, Mock())
-    assert node.confirmation == {
-        'confirmed': False,
-        'reason': 'rear_box_gap_out_of_tolerance',
-        'reference': 'live_rear_lidar_face',
-        'nearest_gap_m': pytest.approx(.012),
-        'farthest_gap_m': pytest.approx(.012),
-        'internal_estimate_only': True,
-        'external_accuracy_verified': False,
-    }
-    finished = [call for call in node.emit.call_args_list
-                if call.args and call.args[0] == 'rear_box_parking_finished']
-    assert finished[-1].kwargs['confirmed'] is False
-    assert finished[-1].kwargs['nearest_gap_m'] == pytest.approx(.012)
+    assert not node._park_rear_face(initial, GEOMETRY, 'route', .275, .225, .01, Mock())
+    node._drive_zero_turn.assert_called_once()
+    node._clear_rear_dock_straight.assert_not_called()
+    node._observe_rear_box_recovering.assert_called_once()
+    assert node.confirmation['confirmed'] is False
+    assert node.confirmation['nearest_gap_m'] == pytest.approx(.01085)
+    assert node.confirmation['farthest_gap_m'] > .013
 
 
 def test_terminal_miss_does_not_retry_after_operator_link_loss():
@@ -935,3 +843,28 @@ def test_stopped_confirmation_uses_all_eight_scans_not_the_last_angle_outlier():
     normal = result['normal_base_xy']
     point = result['face_center_base_xy_m']
     assert sum(normal[i]*point[i] for i in (0, 1)) == pytest.approx(result['line_offset_m'])
+
+
+@pytest.mark.parametrize('raw_gap,angle,complete', [
+    (.012, 0., True), (.007, math.radians(.7), True),
+    (.014, 0., False), (.011, math.radians(.6), False),
+])
+def test_fresh_corner_confirmation_can_end_filtered_rear_approach(raw_gap, angle, complete):
+    node = route_node()
+    initial = face(.205, 0., stamp=1.)
+    observed = face(raw_gap, angle, stamp=1.01)
+    actual = (-.188, 0., 0.)
+    normal = math.cos(angle), math.sin(angle)
+    offset = (actual[0] * normal[0] - .275 * math.cos(angle)
+              - .225 * abs(math.sin(angle)) - raw_gap)
+    observed.update(normal_odom=normal, face_odom=tuple(offset*n for n in normal))
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._rear_box_observation = Mock(return_value=observed)
+    node.emit = Mock()
+    update = node._rear_box_update(initial, GEOMETRY, .275, .225, .01)
+    result = update(actual)
+    assert result['target_confirmed'] is complete
+    if complete:
+        assert result['remaining_m'] == 0.
+    else:
+        assert result['remaining_m'] > 0.
