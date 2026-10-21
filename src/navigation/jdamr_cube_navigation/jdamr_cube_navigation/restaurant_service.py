@@ -35,6 +35,7 @@ from jdamr_cube_navigation.service_destinations import (
 )
 from jdamr_cube_navigation.surface_approach import (
     FACE_ALIGNMENT_GAP_M, face_approach_command, FACE_APPROACH_TIME_S, FACE_HEADING_TOLERANCE_RAD,
+    TABLE_APPROACH_SPEED_MPS,
     filtered_face_heading,
 )
 from nav2_msgs.action import (
@@ -1343,7 +1344,7 @@ class ServiceRoute(CorridorRoute):
 
     def _drive_zero_turn(self, distance_m, watch=None, precision=False,
                          hold_heading=False, target_update=None, command_watch=None,
-                         approach_time_s=None):
+                         approach_time_s=None, continuous_table=False):
         """
         Command (+-STRAIGHT_ESCAPE_SPEED_MPS, 0) until odom shows distance_m.
 
@@ -1359,6 +1360,8 @@ class ServiceRoute(CorridorRoute):
         """
         if target_update is not None and not (precision and hold_heading and distance_m != 0.0):
             raise ValueError('live approach requires nonzero precision heading hold')
+        if continuous_table and (target_update is None or distance_m <= 0.):
+            raise ValueError('continuous table motion requires forward live face feedback')
         if approach_time_s is None:
             approach_time_s = (FACE_APPROACH_TIME_S if target_update is not None
                                else PRECISION_STRAIGHT_TARGET_S)
@@ -1382,7 +1385,8 @@ class ServiceRoute(CorridorRoute):
                  'target_failure': None, 'remaining_m': abs(distance_m),
                  'target_reached': False, 'face_heading': None, 'heading_updated_s': None,
                  'validate_control': None, 'allow_near_alignment': False,
-                 'alignment_in_progress': False, 'observed_heading': None}
+                 'alignment_in_progress': False, 'observed_heading': None,
+                 'surface_gap_m': None}
         command = Twist()
 
         def measure():
@@ -1406,6 +1410,7 @@ class ServiceRoute(CorridorRoute):
                             or not math.isfinite(remaining)):
                         raise RuntimeError('invalid live approach distance')
                     state['remaining_m'] = remaining
+                    state['surface_gap_m'] = update.get('surface_gap_m')
                     allow_near = update.get('allow_near_alignment', False)
                     if not isinstance(allow_near, bool):
                         raise RuntimeError('invalid near alignment mode')
@@ -1455,7 +1460,9 @@ class ServiceRoute(CorridorRoute):
                             state['validate_control']((x_m, y_m, yaw), heading)
                         linear, angular = face_approach_command(
                             state['remaining_m'], error_rad, approach_time_s=approach_time_s,
-                            allow_near_alignment=state['allow_near_alignment'])
+                            allow_near_alignment=state['allow_near_alignment'],
+                            **({'continuous_table': True, 'surface_gap_m': state['surface_gap_m']}
+                               if continuous_table else {}))
                         command.linear.x = direction * linear
                         command.angular.z = angular
                         if (state['allow_near_alignment']
@@ -1469,7 +1476,7 @@ class ServiceRoute(CorridorRoute):
                         command.linear.x = command.angular.z = 0.0
             return state['travelled']
 
-        speed_mps = STRAIGHT_ESCAPE_SPEED_MPS
+        speed_mps = TABLE_APPROACH_SPEED_MPS if continuous_table else STRAIGHT_ESCAPE_SPEED_MPS
         if precision:
             speed_mps = min(speed_mps, max(
                 PRECISION_STRAIGHT_MIN_SPEED_MPS,

@@ -3092,9 +3092,9 @@ def test_live_control_validates_filtered_heading_and_uses_shared_speed_law(monke
     (math.pi - 0.03, 0.15, 8.0, False), (-math.pi + 0.03, 0.45, -8.0, False),
     (0.0, .033676181083231255, .80565973, True), (0.0, .014, -.80565973, True),
 ])
-@pytest.mark.parametrize('direction', [-1.0, 1.0])
+@pytest.mark.parametrize('direction,continuous_table', [(-1., False), (1., False), (1., True)])
 def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
-        monkeypatch, heading, gap_m, offset_deg, allow_near, direction):
+        monkeypatch, heading, gap_m, offset_deg, allow_near, direction, continuous_table):
     node = route()
     clock, commands, velocity = [0.0], [], [0.0, 0.0]
     pose = [0.0, 0.0, heading + math.radians(offset_deg)]
@@ -3124,7 +3124,8 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
         lead = front * math.cos(residual) + half_width * abs(math.sin(residual))
         nearest = sum((actual[i] - face[i]) * normal[i] for i in (0, 1)) - lead
         return {'remaining_m': (nearest - 0.01) / math.cos(residual),
-                'heading_rad': heading, 'allow_near_alignment': allow_near}
+                'heading_rad': heading, 'allow_near_alignment': allow_near,
+                'surface_gap_m': nearest}
 
     node.escape_velocity = SimpleNamespace(publish=publish)
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
@@ -3137,7 +3138,7 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
 
     assert node._drive_zero_turn(
         direction * (gap_m - 0.01), precision=True,
-        hold_heading=True, target_update=update) is not None
+        hold_heading=True, target_update=update, continuous_table=continuous_table) is not None
     error = math.atan2(math.sin(pose[2] - heading), math.cos(pose[2] - heading))
     front_center = (pose[0] + direction * front * math.cos(pose[2]),
                     pose[1] + direction * front * math.sin(pose[2]))
@@ -3148,9 +3149,10 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
     assert abs(error) <= math.radians(0.3)
     moving = [command for command in commands if command != (0.0, 0.0)]
     assert moving and any(direction * linear > 0.0 for linear, _angular in moving)
-    assert all(direction * linear >= 0.0 if allow_near else direction * linear > 0.0
+    assert all(direction * linear >= 0.0 if allow_near or continuous_table
+               else direction * linear > 0.0
                for linear, _angular in moving)
-    assert max(abs(linear) for linear, _angular in moving) <= 0.05
+    assert max(abs(linear) for linear, _angular in moving) <= (0.1 if continuous_table else 0.05)
     angular = [w for _v, w in moving if w]
     assert all(w * offset_deg < 0.0 for w in angular)
     first_zero = commands.index((0.0, 0.0))
@@ -3186,7 +3188,8 @@ def test_near_face_flip_holds_motion_until_heading_filter_agrees(monkeypatch):
                                  target_update=update) is None
 
 
-def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch):
+@pytest.mark.parametrize('continuous_table', [False, True])
+def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch, continuous_table):
     node = route()
     clock, position = [0.0], [0.0]
     requested, velocity = [0.0], [0.0]
@@ -3218,10 +3221,12 @@ def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch):
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
 
     def update(actual):
-        return {'remaining_m': target_m - actual[0], 'heading_rad': 0.0}
+        return {'remaining_m': target_m - actual[0], 'heading_rad': 0.0,
+                'surface_gap_m': target_m - actual[0] + .01}
 
     assert node._drive_zero_turn(
-        target_m, precision=True, hold_heading=True, target_update=update) is not None
+        target_m, precision=True, hold_heading=True, target_update=update,
+        continuous_table=continuous_table) is not None
     assert target_m - 0.003 <= position[0] <= target_m + 0.003
 
 

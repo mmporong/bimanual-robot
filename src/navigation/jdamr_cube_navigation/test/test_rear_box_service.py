@@ -1,6 +1,6 @@
 """Rear-box control integration without a camera or hardware motion."""
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import math
 import time
 from types import SimpleNamespace
@@ -27,7 +27,70 @@ def route_node():
     node = object.__new__(BoxServiceRoute)
     node.stop_requested = False
     node._approach_rear_corridor = Mock(return_value=True)
+    node._center_rear_box = Mock(return_value=True)
     return node
+
+
+@pytest.mark.parametrize('center_ok', [True, False])
+def test_centering_without_departure_reference_precedes_fine_profile(monkeypatch, center_ok):
+    node = route_node()
+    events = []
+    initial = face(.2)
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    node._approach_rear_corridor = Mock(side_effect=lambda *_a, **_k: events.append('coarse') or True)
+    node._observe_rear_box_recovering = Mock(return_value=initial)
+    node._center_rear_box = Mock(side_effect=lambda *_a: events.append('center') or center_ok)
+    node._park_rear_face = Mock(side_effect=lambda *_a: events.append('fine') or True)
+    node.emit = Mock()
+
+    @contextmanager
+    def profile(_node):
+        events.append('profile_enter')
+        yield None
+        events.append('profile_exit')
+
+    monkeypatch.setattr(module, 'rear_collision_profile', profile)
+    assert node.park_rear_box(
+        GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01) is center_ok
+    assert events == (['coarse', 'center', 'profile_enter', 'fine', 'profile_exit']
+                      if center_ok else ['coarse', 'center'])
+    assert node._approach_rear_corridor.call_args.kwargs['handoff_m'] == 1.
+    if not center_ok:
+        node._park_rear_face.assert_not_called()
+
+
+@pytest.mark.parametrize('clearance_ok', [True, False])
+def test_near_off_center_box_gets_curve_clearance_before_fine(monkeypatch, clearance_ok):
+    node = route_node()
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    initial, cleared = face(.01), face(1.)
+    for observation in (initial, cleared):
+        observation.update(face_odom=(-.285, 0.), midpoint_odom=(-.285, .225))
+    cleared['base_pose_odom'] = (.99, 0., 0.)
+    node._observe_rear_box_recovering = Mock(side_effect=[initial, cleared])
+    node._depart_dock_straight = Mock(return_value=clearance_ok)
+    node._park_rear_face = Mock(return_value=True)
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'load_route', lambda _p: {
+        'dock_departure_distance_m': .7,
+        'waypoints': [{'id': 'home_exit'}, {'id': 'observation'}]})
+    assert node.park_rear_box(
+        GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01) is clearance_ok
+    node._depart_dock_straight.assert_called_once_with(.99)
+    assert 'dock_departure_distance_m' not in node.config
+    if clearance_ok:
+        node._center_rear_box.assert_called_once_with(cleared, pytest.approx(.275))
+    else:
+        node._center_rear_box.assert_not_called()
+        node._park_rear_face.assert_not_called()
 
 
 def test_rear_readiness_failure_records_battery_cause_without_motion():
@@ -53,7 +116,8 @@ def face(gap=0.01, angle=0.0, stamp=5.0):
             'line_offset_m': sum(center[i] * normal[i] for i in (0, 1)),
             'tangent_bounds_m': (-.175, .175), 'residual_rms_m': .001,
             'face_odom': (-0.275-gap, 0.),
-            'normal_odom': normal}
+            'normal_odom': normal, 'midpoint_odom': center,
+            'base_pose_odom': (0., 0., 0.), 'observation_roi_clipped': False}
 
 
 def _historical_face_scan(x_m):
@@ -179,8 +243,9 @@ def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monk
     assert node._drive_zero_turn.call_count == 2
     observations = node._observe_rear_box_recovering.call_args_list
     assert len(observations) == 4
-    assert all(call.args[3] is command_watch for call in observations)
-    assert observations[0].kwargs == {'allow_range_reapproach': True}
+    assert len(observations[0].args) == 3  # Coarse/centering uses the normal CM profile.
+    assert all(call.args[3] is command_watch for call in observations[1:])
+    assert observations[0].kwargs == {'allow_range_reapproach': True, 'range_handoff_m': .9}
     assert all(not call.kwargs for call in observations[1:])
     assert node._rear_box_update.call_args_list[1].kwargs['reference'] is initial
     assert node.confirmation == {
@@ -397,6 +462,28 @@ def test_missing_face_never_advances_past_live_range_reobserve_gap():
     node._rear_coarse_step.assert_not_called()
 
 
+@pytest.mark.parametrize('range_gap', [.85, 1.0])
+def test_pre_center_range_recovery_preserves_curve_room(range_gap):
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    observed = face(.9)
+    node._observe_rear_box = Mock(side_effect=[RuntimeError(
+        'rear box observation unavailable: rear box face unavailable'), observed])
+    node._rear_corridor_observation = Mock(return_value={'gap_m': range_gap})
+    node._rear_coarse_step = Mock(return_value=True)
+    node.emit = Mock()
+    assert node._observe_rear_box_recovering(
+        GEOMETRY, .275, .225, allow_range_reapproach=True,
+        range_handoff_m=.9) is observed
+    if range_gap > .9:
+        assert node._rear_coarse_step.call_args.args[3] == pytest.approx(.1)
+        assert node._rear_coarse_step.call_args.kwargs['handoff_m'] == .9
+    else:
+        node._rear_coarse_step.assert_not_called()
+
+
 def test_operator_stop_during_face_wait_never_starts_range_reapproach():
     node = route_node()
     node.run_deadline_s = time.monotonic() + 10.
@@ -485,24 +572,25 @@ def test_full_width_landmark_is_matched_after_coarse_and_never_returns_to_stage(
     node._localization_bound = lambda _intermediate: nullcontext()
     sequence = Mock()
     sequence.attach_mock(node._approach_rear_corridor, 'coarse')
-    initial, aligned = face(.48), face(.2)
-    node._observe_rear_box_recovering = Mock(side_effect=[initial, aligned])
+    initial = face(.48)
+    node._observe_rear_box_recovering = Mock(return_value=initial)
     sequence.attach_mock(node._observe_rear_box_recovering, 'observe')
     node._align_rear_reference = Mock(return_value=alignment_ok)
     sequence.attach_mock(node._align_rear_reference, 'align')
+    sequence.attach_mock(node._center_rear_box, 'center')
     node._park_rear_face = Mock(return_value=True)
     node.emit = Mock()
 
     assert node.park_rear_box(
         GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01) is alignment_ok
     assert [call[0] for call in sequence.mock_calls] == (
-        ['coarse', 'observe', 'align', 'observe'] if alignment_ok else
+        ['coarse', 'observe', 'align', 'center'] if alignment_ok else
         ['coarse', 'observe', 'align'])
     node._align_rear_reference.assert_called_once_with(
         {'id': 'home_dock_approach'}, node.registry['home'],
         observed=initial, return_to_stage=False)
     if alignment_ok:
-        assert node._park_rear_face.call_args.args[0] is aligned
+        assert node._park_rear_face.call_args.args[0] is initial
     else:
         node._park_rear_face.assert_not_called()
 

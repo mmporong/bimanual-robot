@@ -1758,7 +1758,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 preview = face_approach_waypoints(
                     actual, face, normal, front_extent_m, self.box_front_half_width_m,
                     self._final_gap_m(), command_heading_rad=command_heading_rad,
-                    allow_near_alignment=True)
+                    allow_near_alignment=True, continuous_table=True)
             except ValueError as error:
                 raise RuntimeError(str(error)) from error
             if len(preview) == 1:
@@ -1938,6 +1938,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                            'y_m': face_map[1] + normal_map[1] * offset},
                 'basis': state['basis'], 'observation_stamp_s': state['stamp']}
             return {'remaining_m': remaining, 'heading_rad': heading, 'basis': state['basis'],
+                    'surface_gap_m': gap,
                     'allow_near_alignment': (gap > 0. and abs(residual) < math.atan2(
                         self.box_front_half_width_m, front_extent_m)),
                     'validate_control': validate_control}
@@ -2097,7 +2098,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.emit('table_continuous_approach_started', travel_m=travel_m,
                       target_front_gap_m=requested_gap_m)
             travelled_m = self._drive_zero_turn(
-                travel_m, precision=True, hold_heading=True, target_update=update)
+                travel_m, precision=True, hold_heading=True, target_update=update,
+                continuous_table=True)
             stopped = getattr(self, '_continuous_table_stop', None)
             if stopped is not None:
                 target.update(stopped['target'])

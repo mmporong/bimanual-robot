@@ -2960,6 +2960,7 @@ def test_fine_table_starts_with_heading_error_without_a_stationary_trim():
 
     def drive(*_args, **kwargs):
         assert kwargs['target_update']((0.5, 0.0, 0.12))['heading_rad'] == 0.0
+        assert kwargs['continuous_table'] is True
         node._continuous_table_stop = {'target': dict(target)}
         return 0.4
 
@@ -3299,6 +3300,7 @@ def test_live_table_corridor_uses_frozen_map_conversion_and_runtime_footprint(mo
         with pytest.raises(RuntimeError, match='static corridor blocked'):
             validate((0.0, 0.0, 0.1), (0.5, 0.0), (-1.0, 0.0), 0.08)
     assert box_service.face_approach_waypoints.call_args.kwargs['command_heading_rad'] == 0.08
+    assert box_service.face_approach_waypoints.call_args.kwargs['continuous_table'] is True
     assert check.call_args.args[0] == [(10.0, -1.0, 0.4), (10.1, -0.99, 0.3)]
     assert factory.call_args.args[2] == node._footprint_outline.return_value
 
