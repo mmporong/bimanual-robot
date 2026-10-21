@@ -451,3 +451,30 @@ def test_runtime_deceleration_must_match_direct_motion(monkeypatch):
     with pytest.raises(RuntimeError, match='does not match'):
         with module.rear_collision_profile(route):
             pass
+
+
+@pytest.mark.parametrize('angular', [-.3, .3])
+@pytest.mark.parametrize('remembered', [False, True])
+def test_rotation_watch_covers_single_live_or_blind_leg_without_cm_override(
+        monkeypatch, angular, remembered):
+    point = ((.06, math.copysign(.232, angular)) if remembered else
+             (-.29, math.copysign(.20, angular)))
+    route, monitor, _clock = node(
+        monkeypatch, points=() if remembered else (point,),
+        memory=(point,) if remembered else ())
+    route.last_scan.range_min = .28
+    watch = module.rotation_collision_watch(route)
+    assert watch(command(angular=angular)) == 'rotation swept footprint occupied'
+    assert monitor.sets == []
+    assert monitor.values['FootprintApproach.enabled'] is True
+    assert monitor.values['StopZone.enabled'] is True
+
+
+def test_rotation_watch_stops_on_stale_scan_but_passes_zero_and_clear_turn(monkeypatch):
+    route, monitor, clock = node(monkeypatch, points=((2., 0.),))
+    watch = module.rotation_collision_watch(route)
+    assert watch(command(angular=.3)) is None
+    clock['mono'] = clock['ros'] = 11.
+    assert watch(command(angular=.3)) == 'rotation scan stale or future-dated'
+    assert watch(command()) is None
+    assert monitor.sets == []

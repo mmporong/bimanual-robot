@@ -84,14 +84,16 @@ def test_frozen_path_still_rejects_missing_map_to_odom():
 
 
 @pytest.mark.parametrize('requested_deg', [-159., 159.])
-def test_large_staging_turn_cruises_then_brakes_without_reversing(requested_deg):
+def test_large_staging_turn_cruises_then_brakes_without_reversing(requested_deg, monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     yaw, elapsed, rates = [0.0], [0.0], []
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
         transform=SimpleNamespace(rotation=SimpleNamespace(
             x=0., y=0., z=math.sin(yaw[0] / 2), w=math.cos(yaw[0] / 2)))))
 
-    def direct(command, done, measure, deadline, event):
+    def direct(command, done, measure, deadline, event, watch=None):
         while not done(measure()):
             rates.append(command.angular.z)
             yaw[0] += command.angular.z * .02
@@ -3695,6 +3697,8 @@ def test_dock_return_needs_only_the_running_battery_cutoff():
 
 def test_in_place_trim_commands_no_translation_and_stops_early_by_the_overshoot(monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     published = []
     node.escape_velocity = SimpleNamespace(publish=lambda m: published.append(
         (m.linear.x, m.angular.z)))
@@ -3879,6 +3883,8 @@ def test_direct_motion_stops_on_a_failed_input(monkeypatch):
 
 def test_in_place_trim_counts_a_turn_across_pi(monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     node.escape_velocity = SimpleNamespace(publish=lambda m: None)
     yaws = iter([math.pi - 0.05 + 0.002 * k for k in range(400)])
 
@@ -4004,6 +4010,8 @@ def test_paused_straight_drive_stops_when_someone_steps_in_front(monkeypatch):
 def test_a_trim_just_over_the_minimum_still_turns(monkeypatch):
     """Review 2026-10-06: an early stop larger than a 0.32 deg trim skipped it."""
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     published = []
     node.escape_velocity = SimpleNamespace(publish=lambda m: published.append(m.angular.z))
     yaws = iter([0.0002 * k for k in range(400)])
@@ -4102,12 +4110,14 @@ def test_transit_variants_pick_their_trees(monkeypatch, variant, planners, contr
 
 
 @pytest.mark.parametrize('requested_deg', [0.32, 0.59, 0.87, 1.2, -0.32, -0.59, -0.87, -1.2])
-def test_default_tiny_trim_stays_within_tolerance_without_reversing(requested_deg):
+def test_default_tiny_trim_stays_within_tolerance_without_reversing(requested_deg, monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
         transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
     commands = []
-    def direct(command, done, measure, deadline, event):
+    def direct(command, done, measure, deadline, event, watch=None):
         commands.append((command.linear.x, command.angular.z))
         turned = 0.0
         while not done(turned):
@@ -4125,15 +4135,17 @@ def test_default_tiny_trim_stays_within_tolerance_without_reversing(requested_de
 
 
 @pytest.mark.parametrize('requested_deg', [-1.2, 1.2])
-def test_dock_trim_uses_same_damped_turn_without_an_opt_in(requested_deg):
+def test_dock_trim_uses_same_damped_turn_without_an_opt_in(requested_deg, monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     yaw = [0.0]
     rates = []
     node._odom_pose = lambda: (0.0, 0.0, yaw[0])
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
         transform=SimpleNamespace(rotation=SimpleNamespace(
             x=0., y=0., z=math.sin(yaw[0] / 2), w=math.cos(yaw[0] / 2)))))
-    def direct(command, done, measure, deadline, event):
+    def direct(command, done, measure, deadline, event, watch=None):
         rates.append(command.angular.z)
         turned = 0.0
         while not done(turned):
@@ -4324,3 +4336,34 @@ def test_rear_recovery_checks_valid_arrival_before_another_motion_preview(
         assert len(watch_calls) == 1
     else:
         assert result is None
+
+
+def test_odom_rotation_installs_live_sweep_before_any_nonzero_command(monkeypatch):
+    node = route()
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
+        transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    guard = Mock(return_value='rotation swept footprint occupied')
+    factory = Mock(return_value=guard)
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch', factory, raising=False)
+    def direct(command, done, measure, deadline, event, watch=None):
+        assert callable(watch)
+        assert watch() == 'rotation swept footprint occupied'
+        node._last_direct_motion_failure = 'rotation swept footprint occupied'
+        return 0.
+    node._direct_motion = direct
+    assert node._rotate_in_place(math.radians(57.)) is None
+    factory.assert_called_once_with(node)
+    assert guard.call_args.args[0].linear.x == 0.
+    assert guard.call_args.args[0].angular.z != 0.
+
+
+def test_rotation_without_valid_scan_never_starts_motion(monkeypatch):
+    node = route()
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
+        transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        Mock(side_effect=RuntimeError('rotation scan unavailable')))
+    node._direct_motion = Mock()
+    assert node._rotate_in_place(.3) is None
+    node._direct_motion.assert_not_called()
+    assert node._last_direct_motion_failure == 'rotation scan unavailable'

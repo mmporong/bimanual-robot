@@ -243,9 +243,11 @@ class _RearCollisionWatch:
 
 
 def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
+    scan_context = state.get('scan_context', 'rear box')
+    collision_context = state.get('collision_context', 'rear collision')
     requested = (float(command.linear.x), float(command.angular.z))
     if not all(math.isfinite(value) for value in requested):
-        return 'rear collision command invalid'
+        return f'{collision_context} command invalid'
     # A zero command must always pass so _direct_motion can stop in finally.
     if abs(requested[0]) <= 1e-12 and abs(requested[1]) <= 1e-12:
         return None
@@ -253,27 +255,27 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
     scan = getattr(node, 'last_scan', None)
     received_s = (getattr(node, 'samples', None) or {}).get('scan')
     if scan is None or received_s is None:
-        return 'rear box scan unavailable'
+        return f'{scan_context} scan unavailable'
     now_s = time.monotonic()
     receive_age_s = now_s - received_s
     try:
         stamp_s = _stamp_s(scan)
         ros_age_s = node.get_clock().now().nanoseconds * 1e-9 - stamp_s
     except (AttributeError, TypeError, ValueError, OverflowError):
-        return 'rear collision scan timestamp invalid'
+        return f'{collision_context} scan timestamp invalid'
     if (not all(math.isfinite(value) for value in (receive_age_s, ros_age_s))
             or not 0.0 <= receive_age_s <= SCAN_MAX_AGE_S
             or not 0.0 <= ros_age_s <= SCAN_MAX_AGE_S):
-        return 'rear box scan stale or future-dated'
+        return f'{scan_context} scan stale or future-dated'
     if scan.header.frame_id != state['frame_id']:
-        return 'rear collision scan frame changed'
+        return f'{collision_context} scan frame changed'
 
     scan_key = (id(scan), stamp_s)
     if scan_key != state['scan_key']:
         try:
             state['memory'] = tuple(node._remembered_blind_points(state['laser'], scan))
         except (AttributeError, RuntimeError, ValueError):
-            return 'rear collision blind-range memory unavailable'
+            return f'{collision_context} blind-range memory unavailable'
         state['scan_key'] = scan_key
         state['filtered_memory_key'] = None
     try:
@@ -306,44 +308,19 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
         poses = _prediction_poses(linear_mps, angular_radps, horizon_s)
         if path_sweep_hit(
                 points, state['outline'], poses, push_tolerance_m=0.0):
-            return 'rear docking swept footprint occupied'
+            return state.get('collision_reason', 'rear docking swept footprint occupied')
     except (AttributeError, TypeError, ValueError, OverflowError):
-        return 'rear collision scan geometry invalid'
+        return f'{collision_context} scan geometry invalid'
     return None
 
 
-@contextmanager
-def rear_collision_profile(node):
-    """Disable only FootprintApproach while preserving an equivalent live guard."""
-    snapshot = node._scan_in_base()
-    if snapshot is None:
-        raise RuntimeError('rear box scan unavailable')
+def _motion_collision_watch(node, snapshot, *, rotation=False):
     scan, laser, outline, memory = snapshot
     if not outline:
-        raise RuntimeError('rear collision footprint unavailable')
-
-    monitor = _parameter_client(
-        node, 'precision_parameters', 'collision_monitor')
+        raise RuntimeError('rotation collision footprint unavailable' if rotation
+                           else 'rear collision footprint unavailable')
     smoother = _parameter_client(
         node, 'rear_collision_smoother_parameters', 'velocity_smoother')
-    enabled = _read_parameters(
-        node, monitor, ('StopZone.enabled', 'FootprintApproach.enabled'))
-    if enabled['StopZone.enabled'] is not True:
-        raise RuntimeError('rear collision profile requires StopZone enabled')
-    if type(enabled['FootprintApproach.enabled']) is not bool:
-        raise RuntimeError('FootprintApproach enabled state is invalid')
-    if enabled['FootprintApproach.enabled'] is not True:
-        try:
-            _set_footprint_approach(node, monitor, True)
-        except RuntimeError:
-            _fail_closed(
-                node, 'FootprintApproach could not be restored before rear docking')
-            raise
-        node.emit('rear_collision_profile_recovered',
-                  footprint_approach_enabled=True, stop_zone_enabled=True)
-    if getattr(node, 'stop_requested', False):
-        raise RuntimeError('operator_stop')
-
     max_decel = _read_parameters(node, smoother, ('max_decel',))['max_decel']
     if (not isinstance(max_decel, (list, tuple)) or len(max_decel) < 3
             or any(isinstance(value, bool) or not isinstance(value, (int, float))
@@ -362,8 +339,51 @@ def rear_collision_profile(node):
         'target': None,
         'filtered_memory': (), 'filtered_memory_key': None,
     }
-    watch = _RearCollisionWatch(
-        node, state, linear_decel_mps2, angular_decel_radps2)
+    if rotation:
+        state.update(scan_context='rotation', collision_context='rotation collision',
+                     collision_reason='rotation swept footprint occupied')
+    return _RearCollisionWatch(node, state, linear_decel_mps2, angular_decel_radps2)
+
+
+def rotation_collision_watch(node):
+    """Watch live and remembered blind-range points without changing CM settings."""
+    snapshot = node._scan_in_base()
+    if snapshot is None:
+        raise RuntimeError('rotation scan unavailable')
+    return _motion_collision_watch(node, snapshot, rotation=True)
+
+
+@contextmanager
+def rear_collision_profile(node):
+    """Disable only FootprintApproach while preserving an equivalent live guard."""
+    snapshot = node._scan_in_base()
+    if snapshot is None:
+        raise RuntimeError('rear box scan unavailable')
+    scan, laser, outline, memory = snapshot
+    if not outline:
+        raise RuntimeError('rear collision footprint unavailable')
+
+    monitor = _parameter_client(
+        node, 'precision_parameters', 'collision_monitor')
+    enabled = _read_parameters(
+        node, monitor, ('StopZone.enabled', 'FootprintApproach.enabled'))
+    if enabled['StopZone.enabled'] is not True:
+        raise RuntimeError('rear collision profile requires StopZone enabled')
+    if type(enabled['FootprintApproach.enabled']) is not bool:
+        raise RuntimeError('FootprintApproach enabled state is invalid')
+    if enabled['FootprintApproach.enabled'] is not True:
+        try:
+            _set_footprint_approach(node, monitor, True)
+        except RuntimeError:
+            _fail_closed(
+                node, 'FootprintApproach could not be restored before rear docking')
+            raise
+        node.emit('rear_collision_profile_recovered',
+                  footprint_approach_enabled=True, stop_zone_enabled=True)
+    if getattr(node, 'stop_requested', False):
+        raise RuntimeError('operator_stop')
+
+    watch = _motion_collision_watch(node, snapshot)
     try:
         _set_footprint_approach(node, monitor, False)
         yield watch

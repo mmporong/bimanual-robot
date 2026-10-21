@@ -23,6 +23,7 @@ from jdamr_cube_navigation.parking import (
     MAXIMUM_CONTRACT_VALUES, ParkingHold,
     pose_errors,
 )
+from jdamr_cube_navigation.rear_collision_profile import rotation_collision_watch
 from jdamr_cube_navigation.reverse_parking import (
     outline_intrusion, path_sweep_hit, rear_swing_clearance, remembered_blind_points,
     reverse_curve_waypoints, reverse_waypoints, scan_points, SERVICE_TRANSIT_MAX_MPS,
@@ -1305,6 +1306,12 @@ class ServiceRoute(CorridorRoute):
             start = odom_yaw()
         except TransformException:
             return None
+        try:
+            collision_watch = rotation_collision_watch(self)
+        except (RuntimeError, ValueError, TransformException) as error:
+            self._last_direct_motion_failure = str(error)
+            self.emit('trim_rotation_stopped', reason=str(error))
+            return None
         cruise = abs(delta_rad) > STAGING_CRUISE_THRESHOLD_RAD
         command = Twist()
         # Unwrapped, so a turn of any size is counted.
@@ -1339,7 +1346,7 @@ class ServiceRoute(CorridorRoute):
         deadline_s = time.monotonic() + abs(delta_rad) / speed_radps + TRIM_EXTRA_S
         turned_rad = self._direct_motion(
             command, lambda turned: abs(turned) >= abs(delta_rad) - early_rad, measure,
-            deadline_s, 'trim_rotation_stopped')
+            deadline_s, 'trim_rotation_stopped', watch=lambda: collision_watch(command))
         return None if getattr(self, '_last_direct_motion_failure', None) else turned_rad
 
     def _drive_zero_turn(self, distance_m, watch=None, precision=False,

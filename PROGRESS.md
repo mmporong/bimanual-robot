@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-10-21 | 도크 맞은편 의자 다리 충돌 보고·회전 사각지대 감시 연결
+
+- 사용자는 `table_01_20261021_184007_d1467858` 복귀 중 도크 맞은편 의자 다리와 충돌했다고 보고했다. 이 실행은 충돌 포함 실패 주행이다. 로그상 급수대·1번 테이블 최종 gap 확인 후 18:42:34 도크 앞 도착, 약 57° odom 회전, 18:42:39 후진 명령 전 `rear box coarse static corridor blocked` 종료가 있었다. 충돌 순간이 이동/회전 중 어느 쪽인지는 미확정이며, 마지막 지도 차단이 앞선 충돌을 막았다고 해석하지 않는다. 정지를 재전송했고 추가 이동은 하지 않았다.
+- `_rotate_in_place`에는 CM 경로만 있고 기존 `scan_memory`/실제 외곽 sweep callback이 연결되지 않았다. 현행 scan의 최소 유효거리는 약 0.28 m다. 후면 fine에서 쓰던 live scan·blind-range memory·실제 외곽·cmd/odom 중 큰 속도·실제 max_decel 기반 예측을 공용화해 기존 회전 `_direct_motion` watch에 연결했다. CM 설정/지도/footprint/속도는 바꾸지 않고 목표면 예외도 적용하지 않는다. 이는 확인된 감시 공백 보완이며 실제 충돌의 근본 원인 확정과는 구분한다.
+- 관련 4스위트 561 PASS(5.82초), 물리 최소거리 안/밖의 단일 점·좌우 회전·stale/0명령·watch 연결/입력 부재를 강화한 7회귀 PASS(0.54초), fatal lint·compile·diff PASS와 독립 리뷰 APPROVE다. 순수 회전 단위 테스트의 기존 각도/속도 동작은 유지했다. RPP 이동 중 모든 장애물 문제나 실제 의자 충돌의 재현 성공을 주장하지 않는다.
+- Pi rear_collision_profile/restaurant_service source/install 4경로 SHA·compile/import 일치, idle executor PID83287 active, base31767·Nav2 47789 유지, pending/running0·배포 뒤 fresh odom3표본 v/w0이다. 새 주행·위치초기화·자동 회피 없음. PC 근거 `$HOME/.local/state/bimanual-robot/chair_collision_20261021/`, Pi 복원본 `$HOME/.local/state/jdamr/rotation-blind-leg-watch/20261021_185720/`. 다음 요청을 위해 base/Nav2/idle executor만 유지하며 전체 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. 도크 coarse 지도 차단은 별도 미해결이며 출발 준비 완료로 보고하지 않는다. 브랜치 로컬 커밋만 남긴다.
+
 ## 2026-10-21 | 근접 후 재전진 반복 제거·후면 도착과 추가 이동 판정 분리
 
 - 전체 실행 `table_01_20261021_175440_87661747`는 급수대·1번 테이블 뒤 도크로 돌아왔으나 중앙 보정 후 횡오차 +0.057698 m가 5 cm를 넘어 다시 clearance 0.788528 m를 요청했다. 앞선 1 m handoff 수정만으로 단일 후진이 해결되지 않았다. 근접 중앙 보정 반복과 fine의 20 cm 전진/terminal 재주차를 제거하고, 중앙 곡선의 odom 종점 인계를 5 cm에서 2.5 cm로 좁혔다. 기존 position-only checker는 유지한다. 실제 횡오차가 여전히 5 cm 밖이면 성공으로 바꾸지 않고 남은 오차를 기록하며, 또 크게 전진하지 않는다.
