@@ -24,7 +24,8 @@ from jdamr_cube_navigation.restaurant_service import (
     LIVE_APPROACH_MAX_M, STRAIGHT_ESCAPE_TOLERANCE_M,
 )
 from jdamr_cube_navigation.reverse_parking import (
-    CachedStaticCorridorValidator, MAX_REVERSE_DISTANCE_M, reverse_waypoints,
+    CachedStaticCorridorValidator, MAX_REVERSE_DISTANCE_M, reverse_curve_waypoints,
+    reverse_waypoints,
 )
 from jdamr_cube_navigation.surface_approach import (
     FACE_APPROACH_TIME_S, FACE_HEADING_FILTER_S, filtered_face_heading,
@@ -48,6 +49,23 @@ REAR_FACE_OBSERVATION_WIDTHS_M = (0.6, 0.9, REAR_FACE_OBSERVATION_HALF_WIDTH_M)
 
 def _angle(value):
     return math.atan2(math.sin(value), math.cos(value))
+
+
+def _rear_center_target(observed, extent):
+    normal, midpoint = observed['normal_odom'], observed['midpoint_odom']
+    return (*(midpoint[i] + (extent + REAR_FACE_REOBSERVE_GAP_M) * normal[i]
+              for i in (0, 1)), math.atan2(normal[1], normal[0]))
+
+
+def _rear_center_curve_available(observed, extent):
+    try:
+        reverse_curve_waypoints(observed['base_pose_odom'], _rear_center_target(observed, extent))
+    except ValueError as error:
+        if str(error) in ('reverse curve is tighter than min_radius_m',
+                          'start_pose must be in front of target_pose'):
+            return False
+        raise
+    return True
 
 
 def _observe_rear_face_roi(scan, geometry, extent, half_width, expected_span_m=None):
@@ -217,6 +235,9 @@ class RearBoxParkingMixin:
                        for i, direction in enumerate((math.cos(angle), math.sin(angle))))
         if distance <= 0.0:
             raise RuntimeError('rear dock reference has no forward departure')
+        # Reach alignment room in forward transit, before turning into reverse.
+        # This avoids closing to the fine handoff and then driving out again.
+        distance = max(distance, REAR_CENTER_HANDOFF_M)
         # Preserve the outbound origin's tangent position; use the observed
         # box normal for the reverse axis instead of a separate map heading.
         return {**stage, 'x': start[0] + distance * math.cos(angle),
@@ -311,9 +332,7 @@ class RearBoxParkingMixin:
         if (not after_clearance and abs(lateral) <= REAR_CENTER_TOLERANCE_M
                 and observed['gap_m'] <= REAR_COARSE_HANDOFF_M):
             return True
-        target_odom = (
-            *(midpoint[i] + (extent + REAR_FACE_REOBSERVE_GAP_M) * normal[i]
-              for i in (0, 1)), math.atan2(normal[1], normal[0]))
+        target_odom = _rear_center_target(observed, extent)
         _path, to_odom = self._frozen_in_odom(RosPath())
         anchor = to_odom(0., 0., 0.)
         cosine, sine = math.cos(anchor[2]), math.sin(anchor[2])
@@ -729,7 +748,7 @@ class RearBoxParkingMixin:
             return False
         self._confirm_collision_monitor_on()
         if not self._approach_rear_corridor(
-                geometry, extent, half_width):
+                geometry, extent, half_width, handoff_m=REAR_CENTER_HANDOFF_M):
             return False
         initial = self._observe_rear_box_recovering(
             geometry, extent, half_width, allow_range_reapproach=True)
@@ -746,7 +765,8 @@ class RearBoxParkingMixin:
                           for i in (0, 1))
             after_clearance = False
             if (abs(lateral) > REAR_CENTER_TOLERANCE_M
-                    and initial['gap_m'] < REAR_CENTER_MIN_GAP_M):
+                    and initial['gap_m'] < REAR_CENTER_MIN_GAP_M
+                    and not _rear_center_curve_available(initial, extent)):
                 # A near-range retry needs room for a curve, rather than a sideways
                 # target at the same range which a differential drive cannot reach.
                 self.config = load_route(route_path)

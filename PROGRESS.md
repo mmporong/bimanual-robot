@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-21 | 도크 정렬을 앞당겨 근접 후 큰 전진 재접근 줄이기
+
+- 실행 `table_01_20261021_164729_07911177`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀·후면 접근을 같은 실행에서 수행했다. 사용자는 도킹이 잘됐다고 확인했지만 크게 전진했다 다시 후진하는 동작을 지적했다. 추가 보정은 중지했으며 소프트웨어는 마지막 `rear docking swept footprint occupied` 대기 뒤 정지 요청에 따라 `rear_box_parking_not_confirmed`로 종료했다. 사용자 확인과 자동 최종 확인은 구분한다.
+- 로그상 coarse handoff gap 0.484132 m 뒤 중앙 오차 -0.078844 m에서 전진 clearance 0.489206 m를 요청했다. 중앙 정렬 후 오차는 -0.031471 m였다. 기존 구조는 0.5 m까지 후진한 뒤 중앙 오차가 5 cm를 넘고 gap이 0.9 m 미만이면 곡선 가능 여부와 무관하게 1 m 정렬 공간으로 다시 전진했다.
+- 출발 때 얻은 reference의 원점·normal 축은 유지하면서 복귀 stage의 축상 거리를 최소 기존 center handoff 1 m로 잡고, coarse도 1 m에서 면 관측·중앙 정렬로 인계한다. 기존 reverse curve의 최소반경 0.3 m 조건을 현재 pose에서 만족하면 전진을 생략한다. 원래 중앙 20 cm 목표 계산을 공용화해 사전 가능 판정과 실제 경로가 같은 목표를 쓴다. 정적 map/keepout·CM·동일면·stop/deadline·중앙 5 cm·최종 1 cm는 유지한다.
+- 기존 곡선의 합성 기하 확인에서 좌우 23 cm는 gap 0.5 m에서 불가능하고 0.85 m에서는 가능했다. 양쪽 부호의 0.85 m/23 cm 회귀에서 추가 전진 없이 중앙 곡선→fine이 이어진다. 이는 실측 정밀도나 단일 후진 실차 성공 증명이 아니다. full-face 근접 복구, 실제 곡선이 불가능할 때의 공간 확보, fine 20 cm clearance는 남아 있으므로 모든 배치의 단일 후진을 보장하지 않는다.
+- 관련 3스위트 505 PASS(5.60초), 독립 reviewer도 505 PASS(5.54초)·APPROVE, fatal lint·compile·diff PASS다. 파이 rear_box_service.py source/install SHA 일치 및 compile/import 확인 뒤 idle executor PID74615만 재기동했고 base31767·Nav2 47789는 유지했다. pending/running0, fresh odom3표본 v/w0, 새 이동 없음이다. 수정본 실차 확인은 다음 요청 때 수행한다.
+- PC receipt는 `$HOME/.local/state/bimanual-robot/rear_reverse_entry_20261021/deployment.json`, Pi 복원본은 `$HOME/.local/state/jdamr/rear-dock-reverse-entry/20261021_170158/`다. 기존 base/Nav2/idle executor는 다음 실행을 위해 유지하며 전체 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. 현재 브랜치 로컬 커밋만 남긴다.
+
 ## 2026-10-21 | 도착 보정과 출발 계약 분리·중앙 잔차를 같은 도킹 실행에서 처리
 
 - 전체 실행 `table_01_20261021_161945_ca889276`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀를 마쳤다. 도착 뒤 중앙 보정 공간 확보가 출발 전용 `_depart_dock_straight`를 호출해 복귀 경로의 첫 점에 `home_exit`가 없다는 예외로 종료됐다. 실제 새 출발 요청이나 NavFn/Lattice 문제는 아니다.

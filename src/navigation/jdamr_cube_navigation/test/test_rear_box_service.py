@@ -58,7 +58,8 @@ def test_centering_without_departure_reference_precedes_fine_profile(monkeypatch
         GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01) is center_ok
     assert events == (['coarse', 'center', 'profile_enter', 'fine', 'profile_exit']
                       if center_ok else ['coarse', 'center'])
-    assert node._approach_rear_corridor.call_args.kwargs == {}
+    assert node._approach_rear_corridor.call_args.kwargs == {
+        'handoff_m': module.REAR_CENTER_HANDOFF_M}
     if not center_ok:
         node._park_rear_face.assert_not_called()
 
@@ -91,6 +92,45 @@ def test_near_off_center_box_gets_curve_clearance_before_fine(monkeypatch, clear
     else:
         node._center_rear_box.assert_not_called()
         node._park_rear_face.assert_not_called()
+
+
+@pytest.mark.parametrize('lateral', [-.23, .23])
+def test_visible_face_is_centered_by_reverse_without_unnecessary_forward(lateral):
+    node = route_node()
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    initial, centered = face(.85), face(.2)
+    for observation in (initial, centered):
+        observation.update(face_odom=(-1.125, 0.), midpoint_odom=(-1.125, lateral))
+    centered['base_pose_odom'] = (-.65, lateral, 0.)
+    node._observe_rear_box_recovering = Mock(side_effect=[initial, centered])
+    node._odom_pose = Mock(return_value=(-.65, lateral, 0.))
+    def center(*_a, **_k):
+        node._rear_center_moved = True
+        return True
+    node._center_rear_box = Mock(side_effect=center)
+    node._clear_rear_dock_straight = Mock(side_effect=AssertionError('unnecessary forward'))
+    node._park_rear_face = Mock(return_value=True)
+    node.emit = Mock()
+    assert node.park_rear_box(
+        GEOMETRY, 'return-route', execute=True, timeout_s=90, target_gap_m=.01)
+    node._approach_rear_corridor.assert_called_once_with(
+        GEOMETRY, pytest.approx(.275), pytest.approx(.225),
+        handoff_m=module.REAR_CENTER_HANDOFF_M)
+    node._clear_rear_dock_straight.assert_not_called()
+    node._center_rear_box.assert_called_once_with(initial, pytest.approx(.275))
+    node._park_rear_face.assert_called_once()
+
+
+@pytest.mark.parametrize('invalid', [math.nan, 3.])
+def test_invalid_or_excessive_center_curve_does_not_request_forward(invalid):
+    observed = face(.85)
+    observed['midpoint_odom'] = (invalid, .23)
+    with pytest.raises(ValueError):
+        module._rear_center_curve_available(observed, .275)
 
 
 def test_clearance_carries_accepted_odom_face_and_reconfirms_after_centering(monkeypatch):

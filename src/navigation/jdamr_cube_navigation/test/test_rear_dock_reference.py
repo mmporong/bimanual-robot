@@ -54,7 +54,7 @@ def node_with_reference(*, start=(0., 0., 0.), exit_pose=(.7, 0., 0.), normal_ya
     return node
 
 
-def test_stage_retains_outbound_origin_tangent_and_observed_face_normal():
+def test_stage_keeps_origin_axis_and_leaves_room_for_reverse_centering():
     node = node_with_reference(start=(.1, -.08, .2), exit_pose=(.8, -.08, .2),
                                normal_yaw=.1)
     stage = node._rear_reference_stage({'id': 'home_approach', 'x': 9., 'y': 9., 'yaw': 2.})
@@ -62,7 +62,7 @@ def test_stage_retains_outbound_origin_tangent_and_observed_face_normal():
     tangent = -normal[1], normal[0]
     displacement = stage['x'] - .1, stage['y'] + .08
     assert sum(displacement[i] * tangent[i] for i in (0, 1)) == pytest.approx(0.)
-    assert math.hypot(*displacement) == pytest.approx(.7 * math.cos(.1))
+    assert math.hypot(*displacement) == pytest.approx(module.REAR_CENTER_HANDOFF_M)
     assert stage['yaw'] == pytest.approx(.1)
 
 
@@ -196,7 +196,8 @@ def test_return_drift_corrects_measured_pose_then_replans_same_stage(monkeypatch
     # The inferred robot pose is not replaced with the registered dock origin.
     assert seed['x_m'] != 0.
     goal = node._plan_with_input_recovery.call_args.args[0]
-    assert (goal['x_m'], goal['y_m'], goal['yaw_rad']) == pytest.approx((.7, 0., 0.))
+    assert (goal['x_m'], goal['y_m'], goal['yaw_rad']) == pytest.approx(
+        (stage['x'], stage['y'], stage['yaw']))
     node._center_rear_box.assert_not_called()
 
 
