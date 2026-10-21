@@ -71,11 +71,9 @@ def test_near_off_center_box_gets_curve_clearance_before_fine(monkeypatch, clear
     node._reverse_smoother_ready = Mock(return_value=True)
     node._parking_parameters_ready = Mock(return_value=True)
     node._confirm_collision_monitor_on = Mock()
-    initial, cleared = face(.01), face(1.)
-    for observation in (initial, cleared):
-        observation.update(face_odom=(-.285, 0.), midpoint_odom=(-.285, .225))
-    cleared['base_pose_odom'] = (.99, 0., 0.)
-    node._observe_rear_box_recovering = Mock(side_effect=[initial, cleared])
+    initial = face(.01)
+    initial.update(face_odom=(-.285, 0.), midpoint_odom=(-.285, .225))
+    node._observe_rear_box_recovering = Mock(return_value=initial)
     node._depart_dock_straight = Mock(return_value=clearance_ok)
     node._park_rear_face = Mock(return_value=True)
     node.emit = Mock()
@@ -87,10 +85,52 @@ def test_near_off_center_box_gets_curve_clearance_before_fine(monkeypatch, clear
     node._depart_dock_straight.assert_called_once_with(.99)
     assert 'dock_departure_distance_m' not in node.config
     if clearance_ok:
-        node._center_rear_box.assert_called_once_with(cleared, pytest.approx(.275))
+        node._center_rear_box.assert_called_once_with(
+            initial, pytest.approx(.275), after_clearance=True)
+        node._observe_rear_box_recovering.assert_called_once()
     else:
         node._center_rear_box.assert_not_called()
         node._park_rear_face.assert_not_called()
+
+
+def test_clearance_carries_accepted_odom_face_and_reconfirms_after_centering(monkeypatch):
+    node = route_node()
+    initial, centered = face(.4), face(.2)
+    for observation in (initial, centered):
+        observation.update(face_odom=(-.675, 0.), midpoint_odom=(-.675, .225))
+    order = []
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    node._rear_dock_reference = {'recorded': True}
+    node._rear_reference_stage = Mock(return_value={})
+    node.registry = {'home': {}}
+    node._localization_bound = lambda *_a: nullcontext()
+    node._align_rear_reference = Mock(side_effect=lambda *_a, **_k: order.append('align') or True)
+    observations = iter([initial, centered])
+    def observe(*_a, **_k):
+        order.append('observe')
+        return next(observations)
+    node._observe_rear_box_recovering = Mock(side_effect=observe)
+    node._depart_dock_straight = Mock(side_effect=lambda *_a: order.append('clearance') or True)
+    def center(observation, _extent, *, after_clearance):
+        assert observation is initial and after_clearance
+        order.append('center')
+        node._rear_center_moved = True
+        return True
+    node._center_rear_box = Mock(side_effect=center)
+    node._odom_pose = Mock(return_value=(0., .225, 0.))
+    node._park_rear_face = Mock(side_effect=lambda *_a: order.append('fine') or True)
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'load_route', lambda _p: {
+        'waypoints': [{'id': 'exit'}, {'id': 'observation'}]})
+    assert node.park_rear_box(
+        GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01)
+    assert order == ['observe', 'align', 'clearance', 'center', 'observe', 'fine']
+    assert node._align_rear_reference.call_args.kwargs['observed'] is initial
+    assert node._park_rear_face.call_args.args[0] is centered
 
 
 def test_rear_readiness_failure_records_battery_cause_without_motion():
@@ -245,7 +285,7 @@ def test_terminal_corner_miss_gets_one_clearance_and_same_target_reapproach(monk
     assert len(observations) == 4
     assert len(observations[0].args) == 3  # Coarse/centering uses the normal CM profile.
     assert all(call.args[3] is command_watch for call in observations[1:])
-    assert observations[0].kwargs == {'allow_range_reapproach': True, 'range_handoff_m': .9}
+    assert observations[0].kwargs == {'allow_range_reapproach': True}
     assert all(not call.kwargs for call in observations[1:])
     assert node._rear_box_update.call_args_list[1].kwargs['reference'] is initial
     assert node.confirmation == {
@@ -462,8 +502,76 @@ def test_missing_face_never_advances_past_live_range_reobserve_gap():
     node._rear_coarse_step.assert_not_called()
 
 
+def test_logged_handoff_keeps_approaching_until_the_box_face_is_visible():
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    observed = face(.2)
+    missing = RuntimeError('rear box observation unavailable: rear box face unavailable')
+    node._observe_rear_box = Mock(side_effect=[missing, missing, missing, observed])
+    node._rear_corridor_observation = Mock(side_effect=[
+        {'gap_m': .654145928792223}, {'gap_m': .454145928792223},
+        {'gap_m': .254145928792223}])
+    node._rear_coarse_step = Mock(return_value=True)
+    node.emit = Mock()
+    assert node._observe_rear_box_recovering(
+        GEOMETRY, .275, .225, allow_range_reapproach=True) is observed
+    assert [call.args[3] for call in node._rear_coarse_step.call_args_list] == pytest.approx(
+        [.2, .2, .054145928792223])
+    assert all(call.kwargs['handoff_m'] == .2
+               for call in node._rear_coarse_step.call_args_list)
+    assert all(call.kwargs['timeout_s'] == 1.
+               for call in node._observe_rear_box.call_args_list)
+    assert not any(call.args[0] == 'rear_box_waiting_for_observation'
+                   for call in node.emit.call_args_list)
+
+
+def test_blocked_range_reapproach_does_not_repeat_or_start_fine():
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    node._observe_rear_box = Mock(side_effect=RuntimeError(
+        'rear box observation unavailable: rear box face unavailable'))
+    node._rear_corridor_observation = Mock(return_value={'gap_m': .65})
+    node._rear_coarse_step = Mock(return_value=False)
+    node.emit = Mock()
+    with pytest.raises(RuntimeError, match='rear box range reobservation blocked'):
+        node._observe_rear_box_recovering(
+            GEOMETRY, .275, .225, allow_range_reapproach=True)
+    node._rear_coarse_step.assert_called_once()
+
+
+@pytest.mark.parametrize('reason', [
+    'operator_stop', 'operator_link_lost', 'rear box scan unavailable',
+    'rear docking swept footprint occupied'])
+def test_range_reapproach_preserves_the_reason_for_stopping(reason):
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node._operator_link_ready = Mock(return_value=True)
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    node._observe_rear_box = Mock(side_effect=RuntimeError(
+        'rear box observation unavailable: rear box face unavailable'))
+    node._rear_corridor_observation = Mock(return_value={'gap_m': .65})
+    def interrupted(*_args, **_kwargs):
+        if reason == 'operator_stop':
+            node.stop_requested = True
+        elif reason == 'operator_link_lost':
+            node._operator_link_ready.return_value = False
+        else:
+            node._last_direct_motion_failure = reason
+        return False
+    node._rear_coarse_step = Mock(side_effect=interrupted)
+    node.emit = Mock()
+    with pytest.raises(RuntimeError, match=reason):
+        node._observe_rear_box_recovering(
+            GEOMETRY, .275, .225, allow_range_reapproach=True)
+    node._rear_coarse_step.assert_called_once()
+
+
 @pytest.mark.parametrize('range_gap', [.85, 1.0])
-def test_pre_center_range_recovery_preserves_curve_room(range_gap):
+def test_explicit_range_recovery_handoff_is_respected(range_gap):
     node = route_node()
     node.run_deadline_s = time.monotonic() + 10.
     node._operator_link_ready = Mock(return_value=True)
@@ -489,7 +597,7 @@ def test_operator_stop_during_face_wait_never_starts_range_reapproach():
     node.run_deadline_s = time.monotonic() + 10.
     node._operator_link_ready = Mock(return_value=True)
 
-    def stopped(*_args):
+    def stopped(*_args, **_kwargs):
         node.stop_requested = True
         raise RuntimeError('rear box observation unavailable: rear box face unavailable')
     node._observe_rear_box = Mock(side_effect=stopped)

@@ -38,6 +38,7 @@ REAR_COARSE_HANDOFF_M = 0.5
 REAR_CENTER_HANDOFF_M = 1.0
 REAR_CENTER_MIN_GAP_M = 0.9
 REAR_COARSE_SEGMENT_M = 0.5
+REAR_REOBSERVE_SEGMENT_M = 0.2
 REAR_FACE_REOBSERVE_GAP_M = 0.2
 # Observation only: the swept footprint and gap calculation retain the chassis width.
 REAR_FACE_OBSERVATION_HALF_WIDTH_M = 1.2
@@ -286,7 +287,7 @@ class RearBoxParkingMixin:
             self._rear_reference_pose(observed, actual_pose_map=actual)
         return True
 
-    def _center_rear_box(self, observed, extent):
+    def _center_rear_box(self, observed, extent, *, after_clearance=False):
         """Use one guarded reverse curve while there is room to remove lateral error."""
         self._rear_center_moved = False
         if observed.get('observation_roi_clipped', True):
@@ -298,7 +299,8 @@ class RearBoxParkingMixin:
         lateral = sum((odom[i] - midpoint[i]) * tangent[i] for i in (0, 1))
         self.emit('rear_dock_center_observed', lateral_error_m=lateral,
                   angle_rad=observed['normal_yaw_error_rad'], basis='live_rear_face_midpoint')
-        if abs(lateral) <= .02 and observed['gap_m'] <= REAR_COARSE_HANDOFF_M:
+        if (not after_clearance and abs(lateral) <= .02
+                and observed['gap_m'] <= REAR_COARSE_HANDOFF_M):
             return True
         target_odom = (
             *(midpoint[i] + (extent + REAR_FACE_REOBSERVE_GAP_M) * normal[i]
@@ -521,12 +523,12 @@ class RearBoxParkingMixin:
             return True
         return False
 
-    def _observe_rear_box(self, geometry, extent, half_width):
+    def _observe_rear_box(self, geometry, extent, half_width, *, timeout_s=5.0):
         tracker = RearBoxFaceTracker(required_frames=8)
         observations = []
         last_stamp = None
         failure = 'rear box unstable'
-        deadline = min(self.run_deadline_s, time.monotonic() + 5.0)
+        deadline = min(self.run_deadline_s, time.monotonic() + timeout_s)
         while not self.stop_requested and time.monotonic() < deadline:
             spin_node(self, timeout_sec=0.02)
             if not self._operator_link_ready():
@@ -560,26 +562,27 @@ class RearBoxParkingMixin:
                                      *, allow_range_reapproach=False,
                                      range_handoff_m=REAR_FACE_REOBSERVE_GAP_M):
         """Keep a temporary perception gap inside the current return task."""
-        range_reapproached = False
+        range_budget_m = MAX_REVERSE_DISTANCE_M
         while not self.stop_requested and time.monotonic() < self.run_deadline_s:
             if not self._operator_link_ready():
                 raise RuntimeError('operator_link_lost')
             try:
-                return self._observe_rear_box(geometry, extent, half_width)
+                return self._observe_rear_box(
+                    geometry, extent, half_width,
+                    **({'timeout_s': 1.0} if allow_range_reapproach else {}))
             except RuntimeError as error:
                 if not str(error).startswith('rear box observation unavailable:'):
                     raise
                 if self.stop_requested or time.monotonic() >= self.run_deadline_s:
                     break
-                if (allow_range_reapproach and not range_reapproached
+                if (allow_range_reapproach and range_budget_m > 0.0
                         and str(error).endswith('rear box face unavailable')):
                     # The raw range handoff does not prove a transverse box face.
                     # Reobserve closer on the same axis, bounded by every live return.
-                    range_reapproached = True
                     outline = self._footprint_outline()
                     corridor_width = max(half_width, *(abs(p[1]) for p in outline))
                     observed = self._rear_corridor_observation(geometry, extent, corridor_width)
-                    distance_m = min(REAR_COARSE_SEGMENT_M,
+                    distance_m = min(REAR_REOBSERVE_SEGMENT_M, range_budget_m,
                                      observed['gap_m'] - range_handoff_m)
                     if distance_m > 0:
                         self.emit('rear_box_range_reobserve', distance_m=distance_m,
@@ -588,7 +591,13 @@ class RearBoxParkingMixin:
                         if not self._rear_coarse_step(
                                 geometry, extent, corridor_width, distance_m, command_watch,
                                 handoff_m=range_handoff_m):
-                            raise RuntimeError('rear box range reobservation blocked')
+                            reason = ('operator_stop' if self.stop_requested else
+                                      'operator_link_lost' if not self._operator_link_ready() else
+                                      getattr(self, '_last_direct_motion_failure', None)
+                                      or 'rear box range reobservation blocked')
+                            raise RuntimeError(reason)
+                        range_budget_m -= distance_m
+                        continue
                 self.emit('rear_box_waiting_for_observation', reason=str(error),
                           remaining_s=max(0., self.run_deadline_s - time.monotonic()))
         raise RuntimeError('operator_stop' if self.stop_requested
@@ -688,11 +697,17 @@ class RearBoxParkingMixin:
                 geometry, extent, half_width, handoff_m=REAR_CENTER_HANDOFF_M):
             return False
         initial = self._observe_rear_box_recovering(
-            geometry, extent, half_width, allow_range_reapproach=True,
-            range_handoff_m=REAR_CENTER_MIN_GAP_M)
+            geometry, extent, half_width, allow_range_reapproach=True)
+        if getattr(self, '_rear_dock_reference', None) is not None:
+            with self._localization_bound(True):
+                if not self._align_rear_reference(
+                        self._rear_reference_stage({'id': 'home_dock_approach'}),
+                        self.registry['home'], observed=initial, return_to_stage=False):
+                    return False
         tangent = -initial['normal_odom'][1], initial['normal_odom'][0]
         lateral = sum((initial['base_pose_odom'][i] - initial['midpoint_odom'][i]) * tangent[i]
                       for i in (0, 1))
+        after_clearance = False
         if abs(lateral) > .02 and initial['gap_m'] < REAR_CENTER_MIN_GAP_M:
             # A near-range retry needs room for a curve, rather than a sideways
             # target at the same range which a differential drive cannot reach.
@@ -705,18 +720,15 @@ class RearBoxParkingMixin:
                       lateral_error_m=lateral)
             if not self._depart_dock_straight(clearance):
                 return False
-            cleared = self._observe_rear_box_recovering(
-                geometry, extent, half_width, allow_range_reapproach=True,
-                range_handoff_m=REAR_CENTER_MIN_GAP_M)
-            _same_target(initial, cleared)
-            initial = cleared
-        if getattr(self, '_rear_dock_reference', None) is not None:
-            with self._localization_bound(True):
-                if not self._align_rear_reference(
-                        self._rear_reference_stage({'id': 'home_dock_approach'}),
-                        self.registry['home'], observed=initial, return_to_stage=False):
-                    return False
-        if not self._center_rear_box(initial, extent):
+            after_clearance = True
+            # The accepted plane is fixed in odom. The guarded straight exit
+            # provides curve room; it need not rediscover the face from farther
+            # away. Reconfirm it with fresh scans after the centering curve.
+            self.emit('rear_dock_center_reference_carried',
+                      observation_stamp_s=initial['stamp_s'],
+                      basis='accepted_face_fixed_in_odom_during_guarded_clearance')
+        if not self._center_rear_box(
+                initial, extent, **({'after_clearance': True} if after_clearance else {})):
             return False
         if getattr(self, '_rear_center_moved', False):
             centered = self._observe_rear_box_recovering(geometry, extent, half_width)

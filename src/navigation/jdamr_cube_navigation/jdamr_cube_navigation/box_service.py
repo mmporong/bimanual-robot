@@ -1351,6 +1351,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         corrections = 0
         reverse_correction_error_m = None
         realignment_reapproached = False
+        near_alignment_attempted = False
         previous_gap_m = None
         frozen_target_odom = None
         if not fine_table:
@@ -1539,6 +1540,37 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and nearest_gap_m <= FINAL_PLAN_GAP_M
                 and (yaw_error > allowed_yaw_error_rad
                      or corner_spread_m > 2.0 * gap_tolerance_m))
+            if close_table_misalignment and near_alignment_attempted:
+                self.emit('failed', phase='final_approach',
+                          reason='final_table_alignment_unconfirmed',
+                          near_alignment_attempted=True,
+                          estimated_front_corner_gaps_m=corner_gaps)
+                return False
+            if (close_table_misalignment and final_depth_measurement
+                    and nearest_gap_m > target_gap_m
+                    and yaw_error < min(FINAL_TRIM_MAX_RAD,
+                                        math.atan2(half_width_m, front_extent_m))):
+                if (self.stop_requested or not self._operator_link_ready()
+                        or not self._navigation_ready(require_fresh_amcl=False)):
+                    return False
+                near_alignment_attempted = True
+                self.emit('table_near_alignment_correction',
+                          estimated_front_corner_gaps_m=corner_gaps,
+                          estimated_face_yaw_error_rad=yaw_error,
+                          target_front_gap_m=target_gap_m)
+                self.incomplete_gap_stop = False
+                self._final_failure_reported = False
+                approached, straight_to_odom = self._straight_final_approach(
+                    target, front_extent_m)
+                if not approached:
+                    if not self._final_failure_reported:
+                        reason = ('operator_stop' if self.stop_requested else
+                                  getattr(self, '_last_direct_motion_failure', None)
+                                  or 'nav2_or_stop_confirmation')
+                        self.emit('failed', phase='final_approach', reason=reason)
+                    return False
+                previous_gap_m = None
+                continue
             if close_table_misalignment and not realignment_reapproached:
                 if (self.stop_requested or not self._operator_link_ready()
                         or not self._navigation_ready(require_fresh_amcl=False)):
