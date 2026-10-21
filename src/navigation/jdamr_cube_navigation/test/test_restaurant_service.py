@@ -246,6 +246,41 @@ def test_dock_departure_finishes_straight_before_transit_can_turn(dock_departure
     node._frozen_in_odom.assert_called_once_with(path)
 
 
+def test_return_clearance_uses_guarded_motion_without_a_departure_waypoint(
+        dock_departure_static_corridor):
+    node = dock_departure_route()
+    node.emit = Mock()
+    node.waypoints = [{'id': 'home_dock_approach', 'x': 0.1, 'y': 0.0}]
+    node.config = {**node.config, 'waypoints': node.waypoints}
+    saved_config, saved_waypoints = node.config, node.waypoints
+    assert node._clear_rear_dock_straight(.2)
+    assert node.config is saved_config and node.waypoints is saved_waypoints
+    dock_departure_static_corridor.assert_called_once()
+    assert node._execute_reverse_once.call_args.kwargs['motion'] == 'rear_dock_clearance'
+    names = [call.args[0] for call in node.emit.call_args_list]
+    assert 'rear_dock_clearance_finished' in names
+    assert 'dock_departure_started' not in names
+    with pytest.raises(ValueError, match='first home_exit'):
+        node._depart_dock_straight(.2)
+
+
+@pytest.mark.parametrize('blocked,stopped,failed', [
+    (True, False, False), (False, True, False), (False, False, True)])
+def test_return_clearance_preserves_obstacle_stop_and_action_failure(
+        dock_departure_static_corridor, blocked, stopped, failed):
+    node = dock_departure_route()
+    node.waypoints = [{'id': 'home_dock_approach', 'x': 0.1, 'y': 0.0}]
+    node.config = {**node.config, 'waypoints': node.waypoints}
+    original = node._dock_departure = {'saved_departure': True}
+    node.stop_requested = stopped
+    node._execute_reverse_once.return_value = not failed
+    dock_departure_static_corridor.return_value = not blocked
+    assert not node._clear_rear_dock_straight(.2)
+    assert node._dock_departure is original
+    if blocked or stopped:
+        node._execute_reverse_once.assert_not_called()
+
+
 @pytest.mark.parametrize('blocked,stopped,failed', [(True, False, False),
                                                   (False, True, False),
                                                   (False, False, True)])

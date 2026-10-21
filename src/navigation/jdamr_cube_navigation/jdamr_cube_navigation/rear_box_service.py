@@ -739,49 +739,61 @@ class RearBoxParkingMixin:
                         self._rear_reference_stage({'id': 'home_dock_approach'}),
                         self.registry['home'], observed=initial, return_to_stage=False):
                     return False
-        initial = self._align_rear_face_before_clearance(initial, geometry, extent, half_width)
-        tangent = -initial['normal_odom'][1], initial['normal_odom'][0]
-        lateral = sum((initial['base_pose_odom'][i] - initial['midpoint_odom'][i]) * tangent[i]
-                      for i in (0, 1))
-        after_clearance = False
-        if (abs(lateral) > REAR_CENTER_TOLERANCE_M
-                and initial['gap_m'] < REAR_CENTER_MIN_GAP_M):
-            # A near-range retry needs room for a curve, rather than a sideways
-            # target at the same range which a differential drive cannot reach.
-            self.config = load_route(route_path)
-            self.config.pop('dock_departure_distance_m', None)
-            self.waypoints = self.config['waypoints']
-            self._dock_departure = None
-            clearance = min(REAR_CENTER_HANDOFF_M, REAR_CENTER_HANDOFF_M - initial['gap_m'])
-            self.emit('rear_dock_center_clearance', distance_m=clearance,
-                      lateral_error_m=lateral)
-            if not self._depart_dock_straight(clearance):
-                return False
-            after_clearance = True
-            # The accepted plane is fixed in odom. The guarded straight exit
-            # provides curve room; it need not rediscover the face from farther
-            # away. Reconfirm it with fresh scans after the centering curve.
-            self.emit('rear_dock_center_reference_carried',
-                      observation_stamp_s=initial['stamp_s'],
-                      basis='accepted_face_fixed_in_odom_during_guarded_clearance')
-        if not self._center_rear_box(
-                initial, extent, **({'after_clearance': True} if after_clearance else {})):
-            return False
-        if getattr(self, '_rear_center_moved', False):
-            centered = self._observe_rear_box_recovering(geometry, extent, half_width)
-            _same_target(initial, centered)
-            tangent = -centered['normal_odom'][1], centered['normal_odom'][0]
-            actual = self._odom_pose()
-            lateral = sum((actual[i] - centered['midpoint_odom'][i]) * tangent[i]
+        while not self.stop_requested and time.monotonic() < self.run_deadline_s:
+            initial = self._align_rear_face_before_clearance(initial, geometry, extent, half_width)
+            tangent = -initial['normal_odom'][1], initial['normal_odom'][0]
+            lateral = sum((initial['base_pose_odom'][i] - initial['midpoint_odom'][i]) * tangent[i]
                           for i in (0, 1))
-            self.emit('rear_dock_centering_finished', lateral_error_m=lateral,
-                      observation=centered)
-            if abs(lateral) > REAR_CENTER_TOLERANCE_M:
-                self.emit('failed', phase='rear_box_centering',
-                          reason='rear_box_center_not_reached', lateral_error_m=lateral)
+            after_clearance = False
+            if (abs(lateral) > REAR_CENTER_TOLERANCE_M
+                    and initial['gap_m'] < REAR_CENTER_MIN_GAP_M):
+                # A near-range retry needs room for a curve, rather than a sideways
+                # target at the same range which a differential drive cannot reach.
+                self.config = load_route(route_path)
+                self.config.pop('dock_departure_distance_m', None)
+                self.waypoints = self.config['waypoints']
+                self._dock_departure = None
+                clearance = min(REAR_CENTER_HANDOFF_M, REAR_CENTER_HANDOFF_M - initial['gap_m'])
+                self.emit('rear_dock_center_clearance', distance_m=clearance,
+                          lateral_error_m=lateral)
+                if not self._clear_rear_dock_straight(clearance):
+                    return False
+                after_clearance = True
+                # The accepted plane is fixed in odom. The guarded straight exit
+                # provides curve room; it need not rediscover the face from farther
+                # away. Reconfirm it with fresh scans after the centering curve.
+                self.emit('rear_dock_center_reference_carried',
+                          observation_stamp_s=initial['stamp_s'],
+                          basis='accepted_face_fixed_in_odom_during_guarded_clearance')
+            if not self._center_rear_box(
+                    initial, extent, **({'after_clearance': True} if after_clearance else {})):
                 return False
-            initial = self._align_rear_face_before_clearance(
-                centered, geometry, extent, half_width)
+            if self.stop_requested:
+                return False
+            if time.monotonic() >= self.run_deadline_s:
+                continue
+            if getattr(self, '_rear_center_moved', False):
+                centered = self._observe_rear_box_recovering(geometry, extent, half_width)
+                _same_target(initial, centered)
+                tangent = -centered['normal_odom'][1], centered['normal_odom'][0]
+                actual = self._odom_pose()
+                lateral = sum((actual[i] - centered['midpoint_odom'][i]) * tangent[i]
+                              for i in (0, 1))
+                self.emit('rear_dock_centering_finished', lateral_error_m=lateral,
+                          observation=centered)
+                initial = centered
+                if abs(lateral) > REAR_CENTER_TOLERANCE_M:
+                    self.emit('rear_dock_centering_retry', lateral_error_m=lateral)
+                    continue
+                initial = self._align_rear_face_before_clearance(
+                    centered, geometry, extent, half_width)
+            break
+        else:
+            self.emit('failed', phase='rear_box_centering', reason=(
+                'operator_stop' if self.stop_requested else 'rear box centering deadline exceeded'))
+            return False
+        if self.stop_requested:
+            return False
         with rear_collision_profile(self) as command_watch:
             self.emit('rear_box_observed', observation=initial, target_gap_m=target_gap)
             # Landmark localization needs visible endpoints. After latching the
@@ -852,7 +864,7 @@ class RearBoxParkingMixin:
             self.config = load_route(route_path)
             self.waypoints = self.config['waypoints']
             self._dock_departure = None
-            if not self._depart_dock_straight(0.2):
+            if not self._clear_rear_dock_straight(0.2):
                 return None
             reobserved = self._observe_rear_box_recovering(
                 geometry, extent, half_width, command_watch)

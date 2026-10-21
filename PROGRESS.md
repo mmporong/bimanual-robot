@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-21 | 도착 보정과 출발 계약 분리·중앙 잔차를 같은 도킹 실행에서 처리
+
+- 전체 실행 `table_01_20261021_161945_ca889276`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀를 마쳤다. 도착 뒤 중앙 보정 공간 확보가 출발 전용 `_depart_dock_straight`를 호출해 복귀 경로의 첫 점에 `home_exit`가 없다는 예외로 종료됐다. 실제 새 출발 요청이나 NavFn/Lattice 문제는 아니다.
+- 후면 재개 `162345_6715a304`는 횡오차 약 23 cm를 11.349 cm까지 줄였으나 `rear_box_center_not_reached`로 종료했다. 다음 재개 `162525_a5bcf9c2`는 횡오차 3.820 cm로 정렬하고 최종 접근했다. 사용자가 도킹이 잘됐다고 확인해 추가 보정을 중지했다. 소프트웨어 `rear_box_parking_finished.confirmed`는 false였으며 종료 정리에는 `camera_stop_failed`도 남았다. 사용자 확인을 자동 1 cm 판정 통과로 바꾸지 않는다.
+- 공통 guarded 직진 구동을 분리하고 rear clearance는 출발 경유점·출발 landmark 기록을 호출하지 않는 전용 래퍼와 `rear_dock_clearance_*` 로그를 사용한다. 출발 전용 `home_exit` 계약, 전체 외곽 static map/keepout 검사, CM·action 종료 확인은 유지한다. 중앙 보정 후 5 cm 밖이면 fresh 동일면으로 기존 task deadline 안에서 다시 보정하며 최종 접근은 같은 실행 안에서 이어간다. operator stop/deadline에서는 fine으로 진입하지 않는다.
+- 관련 3스위트 501 PASS(5.73초), fatal flake8·compile·diff PASS, 독립 code-reviewer APPROVE다. 파이 두 모듈 source/install 4경로 SHA 확인 후 기존 기동 함수로 idle executor를 PID71361로 복구했다. 임시 systemd 유닛에 일반 start를 사용한 첫 반영은 실패해 파일을 원복했고, 이후 저장소 `start_executor()`로 재기동했다. base PID31767·Nav2 PID47789 유지, pending/running 0, 새 이동 명령 없음이다.
+- 근거는 PC `$HOME/.local/state/bimanual-robot/dock_clearance_20261021/`의 `run_evidence_and_before_deploy.json`, `deployment.json`과 Pi 원본 run JSONL이다. Pi 복원본은 `$HOME/.local/state/jdamr/rear-dock-clearance/20261021_163844/`다. 수정 후 단일 실행 완주는 아직 실차 미확인이다. 다음 출발 요청까지 재주행하지 않으며 현재 브랜치 로컬 커밋만 남긴다.
+
 ## 2026-10-21 | 후면 위치 보정 차단 제거·중앙 5cm 허용·기울어진 이탈 수정
 
 - 전체 실행 `table_01_20261021_133245_3e51a829`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀를 수행했다. 1번 테이블은 새 근접 보정으로 마쳤고 정밀 접근 중 전체 후진 재접근은 재발하지 않았다. 도크에서는 0.2 m 추가 접근 2회로 면을 찾았지만 terminal AMCL 재초기화 뒤 `rear dock landmark localization not retained`로 끝났다. 후면만 재개한 `133614_efdae838`도 중앙 곡선에서 105(진행 부족)로 종료해 도킹은 미완료다.

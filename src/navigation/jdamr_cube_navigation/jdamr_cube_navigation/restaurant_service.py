@@ -1839,6 +1839,24 @@ class ServiceRoute(CorridorRoute):
                 or not math.isfinite(distance_m) or distance_m <= 0.0
                 or len(self.waypoints) < 2 or self.waypoints[0]['id'] != 'home_exit'):
             raise ValueError('dock departure requires a positive distance and first home_exit')
+        return self._advance_dock_straight(distance_m)
+
+    def _clear_rear_dock_straight(self, distance_m):
+        """Create alignment room without departure waypoints or landmark teaching."""
+        saved = getattr(self, '_dock_departure', None)
+        self._dock_departure = None
+        try:
+            return self._advance_dock_straight(distance_m, motion='rear_dock_clearance')
+        finally:
+            self._dock_departure = saved
+
+    def _advance_dock_straight(self, distance_m, *, motion='dock_departure'):
+        """Share the frozen straight path and collision checks for forward dock moves."""
+        if self.stop_requested:
+            return False
+        if (isinstance(distance_m, bool) or not isinstance(distance_m, (float, int))
+                or not math.isfinite(distance_m) or distance_m <= 0.0 or not self.waypoints):
+            raise ValueError('forward dock motion requires a positive distance and waypoint')
         if self._dock_departure is None:
             actual, _ = self.capture_stationary_pose(intermediate=True)
             x_m, y_m, yaw_rad = actual
@@ -1857,12 +1875,12 @@ class ServiceRoute(CorridorRoute):
                     Path(self.registry['map']['yaml_path']),
                     Path(self.registry['keepout']['yaml_path']), points,
                     self._reverse_footprint(), allow_rear_keepout_escape=True):
-                self.emit('dock_departure_path_checked', valid=False,
+                self.emit(f'{motion}_path_checked', valid=False,
                           reason='static_obstacle_unknown_keepout_or_map_boundary')
                 return False
             frozen, _ = self._frozen_in_odom(path)
             self._dock_departure = {'path': frozen, 'start': actual, 'motion_complete': False}
-            self.emit('dock_departure_started', distance_m=distance_m,
+            self.emit(f'{motion}_started', distance_m=distance_m,
                       start_pose_map=list(actual), tracking_frame='odom')
         departure = self._dock_departure
         frozen, start = departure['path'], departure['start']
@@ -1876,10 +1894,10 @@ class ServiceRoute(CorridorRoute):
                         and not departure.get('rear_release_complete', False)):
                     found = self._scan_in_base()
                     if found is None:
-                        self.emit('dock_departure_release_failed', reason='no fresh scan')
+                        self.emit(f'{motion}_release_failed', reason='no fresh scan')
                         return False
                     if self._footprint_intrusion(found=found) in ('front', 'both'):
-                        self.emit('dock_departure_release_failed',
+                        self.emit(f'{motion}_release_failed',
                                   reason='front footprint occupied')
                         return False
                     # A close rear face can hold StopZone during the speed ramp.
@@ -1887,16 +1905,16 @@ class ServiceRoute(CorridorRoute):
                     # restores the monitor, then follows the original frozen goal.
                     if self._rear_swing_need(found=found) > 0.0:
                         if not self._escape_forward(found, pause_monitor=True):
-                            self.emit('dock_departure_release_failed',
+                            self.emit(f'{motion}_release_failed',
                                       reason='guarded_forward_escape_failed')
                             return False
                     departure['rear_release_complete'] = True
                 reached = self._execute_reverse_once(
                     frozen, goal_checker_id='dock_position_checker', final=False,
-                    controller_id='Parking', motion='dock_departure')
+                    controller_id='Parking', motion=motion)
                 if reached:
                     departure['motion_complete'] = True
-                    self.emit('dock_departure_motion_complete', distance_m=distance_m)
+                    self.emit(f'{motion}_motion_complete', distance_m=distance_m)
         finally:
             self.config, self.waypoints = saved_config, saved_waypoints
         if not departure['motion_complete'] or self.stop_requested:
@@ -1905,7 +1923,7 @@ class ServiceRoute(CorridorRoute):
         if self.stop_requested:
             return False
         departure['end'] = after
-        self.emit('dock_departure_finished', distance_m=distance_m,
+        self.emit(f'{motion}_finished', distance_m=distance_m,
                   start_pose_map=list(start), stopped_pose_map=list(after),
                   tracking_frame='odom')
         return True
