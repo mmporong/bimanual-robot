@@ -2708,6 +2708,51 @@ def test_skewed_near_corner_reapproaches_once_without_ending_the_visit(mission, 
         assert mission.emit.call_args.args == ('box_approach_finished',)
 
 
+def test_logged_close_skew_reapproaches_once_and_never_advances_after_budget(mission):
+    """Reproduce the close skew from table_01_20261020_164220_05cd09c4.
+
+    The water stop recorded 14.800/30.461 mm at 1.994 degrees.
+    """
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    skewed = _table_edge_pose_for_corner_gaps(
+        .014800294039719174, .030461438817617405)
+    mission.capture_stationary_pose.side_effect = [
+        ((0., 0., 0.), {}), (skewed, {}), (skewed, {})]
+    order = []
+
+    def approach(*_args):
+        order.append('approach')
+        return True, None
+
+    def escape(*_args, **_kwargs):
+        order.append('escape')
+        return True
+
+    mission._straight_final_approach.side_effect = approach
+    mission._leave_parked_pose = Mock(side_effect=escape)
+
+    assert not mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540},
+                      'frame_width': {'value': .450}},
+        'table_01', (1., 0.), .6, execute=True, candidate_trial=True)
+    assert order == ['approach', 'escape', 'approach']
+    assert mission._straight_final_approach.call_count == 2
+    assert mission._leave_parked_pose.call_count == 1
+    measured = [call.kwargs['estimated_front_corner_gaps_m']
+                for call in mission.emit.call_args_list
+                if call.args == ('box_gap_not_confirmed',)]
+    assert len(measured) == 2
+    assert measured[0] == pytest.approx(
+        [.030461438817617405, .014800294039719174]), measured
+    assert measured[1] == pytest.approx(
+        [.030461438817617405, .014800294039719174]), measured
+    assert mission.emit.call_args.args == ('failed',)
+    assert mission.emit.call_args.kwargs['reason'] == 'final_table_alignment_unconfirmed'
+    assert mission.emit.call_args.kwargs['realignment_reapproach_consumed'] is True
+
+
 def test_one_centimetre_table_correction_has_a_bounded_iteration_count(mission):
     mission.surface_mode = 'table_edge'
     mission.final_gap_override_m = 0.01
