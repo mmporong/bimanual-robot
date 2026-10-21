@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import math
+from pathlib import Path
 
 from jdamr_cube_navigation.table_edge_target import (
     compute_table_edge_docking_target,
@@ -9,6 +10,7 @@ from jdamr_cube_navigation.table_edge_target import (
 )
 
 import pytest
+import yaml
 
 
 def mount():
@@ -210,3 +212,106 @@ def test_rejects_observations_below_minimum_edge_quality(
     observed[field] = value
     with pytest.raises(ValueError, match=message):
         target(observed=observed)
+
+
+def calibrated_mount(yaw=0.10, bias=0.02):
+    mounted = mount()
+    mounted['camera_mount']['table_edge_calibration'] = {
+        'enabled': True, 'status': 'derived',
+        'yaw_offset_rad': yaw, 'plane_offset_bias_m': bias,
+        'reference_transform': deepcopy(mounted['camera_mount']['transform']),
+    }
+    return mounted
+
+
+def test_task_calibration_rotates_and_offsets_one_face_before_map_projection():
+    mounted = calibrated_mount()
+    unchanged = deepcopy(mounted)
+    robot = {'x_m': 2.0, 'y_m': -1.0, 'yaw_rad': 0.7}
+    result = target(mounted=mounted, robot=robot)
+    angle = robot['yaw_rad'] + 0.10
+    normal = (math.cos(angle), math.sin(angle))
+    face = (2.0 - 1.02 * normal[0], -1.0 - 1.02 * normal[1])
+    assert result['outward_normal_map_xy'] == pytest.approx(normal)
+    assert result['face_center_map_xy_m'] == pytest.approx(face)
+    assert (result['x_m'], result['y_m']) == pytest.approx((
+        face[0] + 0.30 * normal[0], face[1] + 0.30 * normal[1]))
+    assert result['yaw_rad'] == pytest.approx(angle - math.pi)
+    tangent = result['edge_basis_map_xy']
+    assert sum(a * b for a, b in zip(normal, tangent)) == pytest.approx(0.0)
+    calibration = result['table_edge_calibration']
+    assert calibration['raw_plane_offset_m'] == pytest.approx(1.0)
+    assert calibration['corrected_plane_offset_m'] == pytest.approx(1.02)
+    # Observation calibration must not rewrite physical extrinsics or top height.
+    assert mounted == unchanged
+    assert result['table_height_m'] == pytest.approx(0.75)
+
+
+def test_disabled_task_calibration_leaves_target_unchanged():
+    mounted = calibrated_mount()
+    mounted['camera_mount']['table_edge_calibration']['enabled'] = False
+    assert target(mounted=mounted) == target()
+
+
+@pytest.mark.parametrize('field', (
+    'x_m', 'y_m', 'z_m', 'roll_rad', 'pitch_rad', 'yaw_rad'))
+def test_task_calibration_rejects_changed_physical_mount(field):
+    mounted = calibrated_mount()
+    mounted['camera_mount']['transform'][field] += 0.001
+    with pytest.raises(ValueError, match='mount has changed'):
+        target(mounted=mounted)
+
+
+@pytest.mark.parametrize('calibration, message', [
+    (None, 'mapping'),
+    ({'enabled': 1, 'status': 'derived'}, 'enabled'),
+    ({'enabled': True, 'status': 'candidate'}, 'derived or measured'),
+    ({'enabled': True, 'status': 'derived', 'yaw_offset_rad': math.nan,
+      'plane_offset_bias_m': 0.0}, 'finite'),
+])
+def test_task_calibration_rejects_malformed_input(calibration, message):
+    mounted = mount()
+    mounted['camera_mount']['table_edge_calibration'] = calibration
+    with pytest.raises(ValueError, match=message):
+        target(mounted=mounted)
+
+
+def test_current_task_calibration_replays_its_reference_faces():
+    """Replay recorded fit/reference geometry; this is not new physical evidence."""
+    mounted = yaml.safe_load((Path(__file__).resolve().parents[1]
+                              / 'config/camera_mount_current.yaml').read_text())
+    transform = mounted['camera_mount']['transform']
+    provenance = mounted['camera_mount']['table_edge_calibration']['provenance']
+    rotation = tuple(transform[key] for key in (
+        'roll_rad', 'pitch_rad', 'yaw_rad'))
+    front = provenance['reference_front_extent_m']
+    half_width = provenance['reference_width_m'] / 2.0
+    for view in provenance['reference_views']:
+        normal = view['raw_normal_xy']
+        center = tuple(-view['raw_offset_m'] * value for value in normal)
+        tangent = (-normal[1], normal[0])
+        observed = observation(mounted)
+        observed['table_height_m'] = 0.78
+        observed['edge_endpoints_optical_m'] = [
+            _base_to_optical((
+                center[0] + side * tangent[0] - transform['x_m'],
+                center[1] + side * tangent[1] - transform['y_m'],
+                observed['table_height_m'] - transform['z_m']), *rotation)
+            for side in (-0.20, 0.20)]
+        result = target(observed=observed, mounted=mounted, gap=0.01, extent=front)
+        actual_normal = result['outward_normal_map_xy']
+        actual_face = result['face_center_map_xy_m']
+        actual_offset = -sum(a * b for a, b in zip(actual_normal, actual_face))
+        for side in (-half_width, half_width):
+            actual_gap = actual_normal[0] * front + actual_normal[1] * side + actual_offset
+            expected_gap = (view['reference_normal_xy'][0] * front
+                            + view['reference_normal_xy'][1] * side
+                            + view['reference_offset_m'])
+            assert actual_gap == pytest.approx(expected_gap, abs=0.002)
+        # At the generated final pose, both front corners have the requested gap.
+        heading = result['yaw_rad']
+        for side in (-half_width, half_width):
+            corner = (result['x_m'] + front * math.cos(heading) - side * math.sin(heading),
+                      result['y_m'] + front * math.sin(heading) + side * math.cos(heading))
+            assert sum(a * b for a, b in zip(actual_normal, corner)) + actual_offset == (
+                pytest.approx(0.01))

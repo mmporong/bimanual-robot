@@ -14,7 +14,8 @@ from jdamr_cube_navigation.corridor_route import (
     CorridorRoute,
     load_route,
 )
-from jdamr_cube_navigation.keepout_mask import build_mask, validate_mask
+from jdamr_cube_navigation.keepout_mask import (
+    _read_pgm, build_mask, overlay_occupied_surfaces, validate_mask)
 from jdamr_cube_navigation.keepout_zone_capture import (
     order_polygon_points,
     zone_document,
@@ -87,6 +88,30 @@ def _write_source_map(root):
         encoding='utf-8',
     )
     return map_yaml
+
+
+def test_occupied_surface_overlay_preserves_base_and_front_approach(tmp_path):
+    source = _write_source_map(tmp_path)
+    base = tmp_path / 'base.yaml'
+    meta = yaml.safe_load(source.read_text())
+    meta['image'] = 'base.pgm'
+    pixels = bytes([0]) + bytes([254]) * 899
+    (tmp_path / 'base.pgm').write_bytes(b'P5\n30 30\n255\n' + pixels)
+    base.write_text(yaml.safe_dump(meta))
+    zones = tmp_path / 'surfaces.yaml'
+    zones.write_text(yaml.safe_dump({
+        'schema_version': 1, 'frame_id': 'map',
+        'zones': [{'id': 'table', 'polygon': [[1, 1], [2, 1], [2, 2], [1, 2]]}]}))
+    output = tmp_path / 'combined'
+    overlay_occupied_surfaces(source, base, zones, output)
+    _width, height, result = _read_pgm(output.with_suffix('.pgm'))
+    assert result[0] == 0
+    assert result[(height - 1 - 15) * 30 + 15] == 0
+    assert result[(height - 1 - 15) * 30 + 9] == 254
+    assert sum(pixel == 0 for pixel in result) == 101
+    assert _read_pgm(tmp_path / 'base.pgm')[2] == pixels
+    with pytest.raises(ValueError, match='preserve the base'):
+        overlay_occupied_surfaces(source, base, zones, tmp_path / 'base')
 
 
 def _write_zones(

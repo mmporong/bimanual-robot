@@ -8,12 +8,12 @@ index 41790b46..e3d002ab 100644
  import threading
 +import time
  from pathlib import Path
- 
+
  import numpy as np
 @@ -125,15 +126,20 @@ def save_kwargs_for_path(fpath: Path, compress_level: int) -> dict:
          raise ValueError(f"Unsupported image file extension: {suffix}")
- 
- 
+
+
 -def write_image(image: np.ndarray | PIL.Image.Image, fpath: Path, compress_level: int = 1):
 +def write_image(
 +    image: np.ndarray | PIL.Image.Image,
@@ -24,7 +24,7 @@ index 41790b46..e3d002ab 100644
 +):
      """
      Saves a NumPy array or PIL Image to a file.
- 
+
      This function handles both NumPy arrays and PIL Image objects, converting
 -    the former to a PIL Image before saving. It includes error handling for
 -    the save operation. The output format is inferred from the *fpath*
@@ -33,7 +33,7 @@ index 41790b46..e3d002ab 100644
 +    the former to a PIL Image before saving. The output format is inferred
 +    from the *fpath* extension: ``.png`` → PNG with ``compress_level``,
 +    ``.tiff`` / ``.tif`` → lossless raw depth maps (TIFF).
- 
+
      Args:
          image (np.ndarray | PIL.Image.Image): The image data to save.
 @@ -142,41 +148,63 @@ def write_image(image: np.ndarray | PIL.Image.Image, fpath: Path, compress_level
@@ -44,7 +44,7 @@ index 41790b46..e3d002ab 100644
 +            hiccups (disk contention, AV scan lock, etc.) are common enough
 +            during a long recording session that a short retry is worth it.
 +        retry_delay_s: Delay between retries.
- 
+
      Raises:
          TypeError: If the input 'image' is not a NumPy array or a
              PIL.Image.Image object.
@@ -89,8 +89,8 @@ index 41790b46..e3d002ab 100644
 +                time.sleep(retry_delay_s)
 +    logger.error("Error writing image %s after %d attempts: %s", fpath, max_retries, last_exc)
 +    raise last_exc
- 
- 
+
+
 -def worker_thread_loop(queue: queue.Queue):
 +def worker_thread_loop(queue: queue.Queue, failures: list | None = None):
      while True:
@@ -106,8 +106,8 @@ index 41790b46..e3d002ab 100644
 +            if failures is not None:
 +                failures.append((str(fpath), str(e)))
          queue.task_done()
- 
- 
+
+
 -def worker_process(queue: queue.Queue, num_threads: int):
 +def worker_process(queue: queue.Queue, num_threads: int, failures=None):
      threads = []
@@ -126,10 +126,10 @@ index 41790b46..e3d002ab 100644
 +        # silently swallowed, so wait_until_done() can raise instead of letting
 +        # save_episode() proceed to video-encode a directory with a missing frame.
 +        self._manager = None
- 
+
          if num_threads <= 0 and num_processes <= 0:
              raise ValueError("Number of threads and processes must be greater than zero.")
- 
+
          if self.num_processes == 0:
 -            # Use threading
 +            # Use threading - plain list append is atomic under the GIL, safe enough here.
@@ -156,7 +156,7 @@ index 41790b46..e3d002ab 100644
                  p.start()
                  self.processes.append(p)
 @@ -237,6 +275,17 @@ class AsyncImageWriter:
- 
+
      def wait_until_done(self):
          self.queue.join()
 +        # (bimanual-robot local patch, 2026-10-20: see write_image() docstring)
@@ -170,7 +170,7 @@ index 41790b46..e3d002ab 100644
 +            raise RuntimeError(
 +                f"{len(failed)}개 프레임 이미지 저장 실패(재시도 후에도): {preview}{more}"
 +            )
- 
+
      def stop(self):
          if self._stopped:
 @@ -257,5 +306,8 @@ class AsyncImageWriter:
@@ -180,5 +180,5 @@ index 41790b46..e3d002ab 100644
 +            if self._manager is not None:
 +                self._manager.shutdown()
 +                self._manager = None
- 
+
          self._stopped = True

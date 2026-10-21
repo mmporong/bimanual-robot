@@ -2,20 +2,20 @@ schema_version: 1
 frame_id: map
 map_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/map.yaml
 keepout_mask_yaml: /home/lim/jdamr_data/map_20260930_manual/aligned/keepout.yaml
-expected_mask_sha256: 616c0caf306980111eec95ca940a94c9bf30409ff1c179a61103a68ceb37e191
+expected_mask_sha256: 334370d62965730df807a1a2a42a9145429551c95947b0b369bd877e01cb7283
 start_pose:
-  x: 0.127
-  y: 0.057
+  x: 0.12
+  y: 0.165
 max_route_start_distance_m: 0.3
 waypoints:
 - id: home_exit
-  x: 0.823
-  y: 0.135
+  x: 0.814
+  y: 0.259
 - id: water_station_pre
   x: 1.06
   y: -1.27
 - id: water_station_observation
-  x: 0.64
+  x: 0.43
   y: -1.27
   yaw: -3.1416
 purpose: water_station box observation approach; not a final parking goal
@@ -25,3 +25,5 @@ target_basis: 'destinations.json 2026-10-06 re-measured after the box was put ba
   0.050/0.097, depth 0.068/0.099 vary with AMCL x). Before: depth-camera face from
   run table_02_20260930_150238 (0.06, -1.21)'
 start_basis: registry home taught at the operator placement (start = dock)
+camera_observation_base_offset_m: 0.37
+dock_departure_distance_m: 0.7

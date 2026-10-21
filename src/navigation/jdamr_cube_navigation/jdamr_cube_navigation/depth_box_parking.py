@@ -210,11 +210,14 @@ class DepthBoxParkingNode(Node):
                     successful=False, reason='table_edge depth window is empty')
         common_updates = {name: value for name, value in updates.items()
                           if name in BoxTopConfig.__dataclass_fields__}
+        changed = (candidate_table != table_config
+                   or mode != getattr(self, '_surface_mode', 'front'))
         if parameters:
             self._config = replace(self._config, **common_updates)
             self._table_config = candidate_table
             self._surface_mode = mode
-            self._stability.update(None)
+            if changed:
+                self._stability.update(None)
         return SetParametersResult(successful=True)
 
     def _on_camera_info(self, message: CameraInfo) -> None:

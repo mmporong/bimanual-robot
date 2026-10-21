@@ -21,9 +21,16 @@
  ],
  "basis": "user: \"지금 마지막 차량의 자리 부근을 충전소로 지정\" (14:23); dock scan matched on the wall-aligned map",
  "dock_target": [
+  0.12002282933008113,
+  0.16495971131874898,
+  0.13404527824949672
+ ],
+ "dock_target_basis": "사용자 확인: 현재 차체는 도크 테이블과 평행하고 뒤쪽 간격 약 3cm. 비이동 초기화 후 native teach-home reverse",
+ "historical_dock_target": [
   -0.18490568701115598,
   0.19137407553043168,
   0.0
  ],
- "dock_target_basis": "user: \"dock의 각도도 바꿔야하고\" (2026-09-30): heading snapped to the wall axis 0 deg; position from the scan match (robot stood at 6.7 deg)"
+ "parking_direction": "reverse",
+ "current_registration_run": "$HOME/jdamr_data/map_20260930_manual/aligned/runs/dock_table_fit_20261016_121145"
 }

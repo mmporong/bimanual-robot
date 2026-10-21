@@ -1,0 +1,225 @@
+schema_version: 1
+frame_id: map
+source_scan: $HOME/jdamr_data/map_20260930_manual/aligned/runs/table_dock_cycle_20261016_111038/scan.json
+source_pose_map:
+- 0.13
+- 0.14
+- 0.08726646259971647
+scan_count: 40
+persistent_grid:
+  resolution_m: 0.05
+  minimum_distinct_scans: 24
+  cell_count: 179
+interpretation: 박스 앞면과 같은 방향의 상판을 가정해 지속 다리·기존 지도 구조 사이를 채운 추정 점유 영역. 정면 접근쪽으로 추가
+  여유를 넣지 않음
+limits:
+- single stationary dock viewpoint
+- LiDAR sees first returns, not tabletop outline
+- legs do not prove tabletop ends
+- table2 is partly occluded/shared with other station neighborhoods
+- polygons are finite candidates, not deployment approval
+zones:
+- id: water_station
+  enabled: true
+  confidence: medium
+  polygon:
+  - - 0.0
+    - -0.6
+  - - -0.75
+    - -0.6
+  - - -0.75
+    - -2.15
+  - - -0.7
+    - -2.2
+  - - -0.1
+    - -2.3
+  - - -0.05
+    - -2.3
+  - - 0.0
+    - -2.2
+  leg_evidence:
+  - center_map_xy_m:
+    - -0.168
+    - -0.702
+    local_uv_m:
+    - -0.228
+    - 0.568
+    support_scans_range:
+    - 24
+    - 39
+  - center_map_xy_m:
+    - -0.101
+    - -2.126
+    local_uv_m:
+    - -0.161
+    - -0.856
+    support_scans_range:
+    - 28
+    - 28
+  black_cell_count: 34
+  boundary_basis: 급수대 앞·뒤 다리 및 기존 지도 구조를 포함하는 영역의 검은 셀(pixel=0) 바깥선 연결. 회색 경계와 추가
+    여유 없음
+  basis_before_black_boundary: persistent scan clusters at v≈-0.86,+0.57, padded 0.10m;
+    mapped obstacle support near both sides
+  interior_fill: 같은 책상의 다리 사이는 상판이 있다고 보고 채움(사용자 지시). 실측 상판 외곽 아님
+  black_cell_search_bounds_m:
+  - -0.8
+  - 0.06
+  - -2.3
+  - -0.6
+- operator_layout: 왼쪽 테이블이 도크 옆까지 이어지며 도크는 후진으로 테이블에 가깝게 붙음
+  operator_dock_relation: 차체 전체가 상판 바깥에서 붙음(사용자 확인). 도크 상판 아래 진입으로 해석하지 않음
+  id: dock_table
+  enabled: true
+  confidence: operator_gap_and_parallel_alignment
+  polygon:
+  - &id001
+    - -0.75
+    - -0.6
+  - - -0.2863905120508253
+    - -0.6
+  - - -0.4665915467516807
+    - 0.7362682348479284
+  - &id002
+    - -0.7
+    - 0.7
+  prior_extension_polygon:
+  - *id001
+  - - 0
+    - -0.6
+  - - -0.05
+    - 0.75
+  - - -0.1
+    - 0.75
+  - *id002
+  prior_geometry_conflict:
+    blocked_cell_centers_inside_dock_footprint: 21
+    footprint_overlap_area_m2: 0.0568545
+    max_rear_overlap_m: 0.136087
+    interpretation: 동일 폭 연장 추정과 고정 도크의 실제 배치가 불일치. 테이블 외곽 또는 지도 정합 재확인 필요
+  boundary_basis: 도크 접근 구간은 사용자 지시로 기존 추정 경계를 법선 방향 0.20m 후퇴. 정지 후면 관측과 최신 map/odom의
+    명목 1cm 전체 차체 경로로 검증. 원본 지도 점유와 다른 테이블 영역은 유지
+  provenance:
+    source_run: $HOME/jdamr_data/map_20260930_manual/aligned/runs/dock_table_fit_20261016_121145
+    operator_report:
+      rear_gap_m: 0.03
+      parallel_to_table: true
+      precision: approximate_operator_measurement
+    dock_pose_map:
+    - 0.12002282933008113
+    - 0.16495971131874898
+    - 0.13404527824949672
+    rear_extent_m: 0.275
+    rear_extent_source: jdamr_cube_description/urdf/new_base_real.urdf lower_rear_rail_joint
+      x=-0.265 plus half rail length 0.010
+    normal_map:
+    - 0.9910293758822663
+    - 0.13364421475846186
+    line_offset_m: -0.1640079392714092
+    formula: normal dot point <= normal dot dock - rear_extent - rear_gap
+    limits:
+    - single placement; heading and gap not independently instrumented
+    - map resolution 0.05m; keepout is transit geometry, not a 3cm range sensor
+    - old upper front black cell may belong to a different object; original static
+      map occupancy preserved
+  prior_black_cell_count: 4
+  black_cell_search_bounds_m_before_operator_measurement:
+  - -0.8
+  - 0.06
+  - -0.6
+  - 0.8
+  boundary_before_retreat_20261020:
+  - - -0.75
+    - -0.6
+  - - -0.08458014712400408
+    - -0.6
+  - - -0.2647811818248595
+    - 0.7362682348479284
+  - - -0.7
+    - 0.7
+  precision_dock_corridor:
+    retreat_m: 0.2
+    unit: m
+    derived_at: '2026-10-20'
+    source: operator_requested_dock_priority_and_stopped_rear_approach_replay
+    evidence: test/fixtures/rear_dock_keepout_20261020.json
+    method: 元 boundary normal retreat; 0.15m passes alignment preview, 0.20m also
+      clears the nominal 1cm endpoint with the full footprint on 5cm grid
+    original_map_occupancy_preserved: true
+    other_table_zones_unchanged: true
+    physical_table_outline_measured: false
+    raster_method: 기존 마스크에서 후퇴로 해제되는 도크 셀만 복원. 다른 영역의 기존 수동 조정과 base mask는 보존
+- id: table_01
+  enabled: true
+  confidence: medium
+  polygon:
+  - - 2.35
+    - -0.7
+  - - 2.25
+    - -0.65
+  - - 2.2
+    - -0.65
+  - - 1.55
+    - -0.7
+  - - 1.55
+    - -0.9
+  - - 1.6
+    - -2.25
+  - - 2.25
+    - -2.3
+  - - 2.3
+    - -2.3
+  - - 2.35
+    - -1.3
+  leg_evidence:
+  - center_map_xy_m:
+    - 1.672
+    - -0.733
+    local_uv_m:
+    - -0.234
+    - -1.084
+    support_scans_range:
+    - 33
+    - 40
+  - center_map_xy_m:
+    - 1.673
+    - -2.221
+    local_uv_m:
+    - -0.235
+    - 0.404
+    support_scans_range:
+    - 35
+    - 35
+  - center_map_xy_m:
+    - 2.056
+    - -1.835
+    local_uv_m:
+    - -0.618
+    - 0.018
+    support_scans_range:
+    - 25
+    - 40
+  black_cell_count: 41
+  boundary_basis: 기존 다리 후보 영역 안의 검은 원본 지도 셀(pixel=0) 바깥선의 convex hull. 회색 셀과 추가 padding은
+    경계 근거에서 제외
+  basis_before_black_boundary: persistent scan clusters at v≈-1.08,+0.40 and rear
+    cluster u≈-0.62; extended to mapped occupied cells
+  interior_fill: 같은 책상의 다리 사이는 상판이 있다고 보고 채움(사용자 지시). 실측 상판 외곽 아님
+- id: table_02
+  enabled: false
+  confidence: low_non_deployable_without_review
+  polygon:
+  - - 2.189
+    - -3.441
+  - - 2.189
+    - -2.591
+  - - -0.511
+    - -2.591
+  - - -0.511
+    - -3.441
+  basis: mapped occupied groups plausibly bracket both sides; dock scan has no station-unique
+    persistent behind-face pair
+  leg_evidence: []
+  disabled_reason: 도크 시야에서 고유 다리 쌍 미분리. 급수대·1번 경로 수정에 사용하지 않음
+deployment_status: operator_aligned_validated
+base_mask_yaml: $HOME/jdamr_data/map_20260930_manual/aligned/keepout_base_unknown.yaml

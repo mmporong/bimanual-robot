@@ -58,15 +58,21 @@
     <origin xyz="0 -0.255 0.0329" rpy="0 0 0"/><axis xyz="0 1 0"/>
   </joint>
 
-  <link name="rear_left_caster_contact_projection"/>
-  <joint name="rear_left_caster_contact_joint" type="fixed">
-    <parent link="base_link"/><child link="rear_left_caster_contact_projection"/>
-    <origin xyz="-0.215 0.215 0" rpy="0 0 0"/>
+  <link name="rear_left_wheel_link">
+    <visual><origin rpy="1.5707963268 0 0"/><geometry><cylinder radius="0.0329" length="0.030"/></geometry></visual>
+    <collision><origin rpy="1.5707963268 0 0"/><geometry><cylinder radius="0.0329" length="0.030"/></geometry></collision>
+  </link>
+  <joint name="rear_left_wheel_joint" type="continuous">
+    <parent link="base_link"/><child link="rear_left_wheel_link"/>
+    <origin xyz="-0.210 0.255 0.0329" rpy="0 0 0"/><axis xyz="0 1 0"/>
   </joint>
-  <link name="rear_right_caster_contact_projection"/>
-  <joint name="rear_right_caster_contact_joint" type="fixed">
-    <parent link="base_link"/><child link="rear_right_caster_contact_projection"/>
-    <origin xyz="-0.215 -0.215 0" rpy="0 0 0"/>
+  <link name="rear_right_wheel_link">
+    <visual><origin rpy="1.5707963268 0 0"/><geometry><cylinder radius="0.0329" length="0.030"/></geometry></visual>
+    <collision><origin rpy="1.5707963268 0 0"/><geometry><cylinder radius="0.0329" length="0.030"/></geometry></collision>
+  </link>
+  <joint name="rear_right_wheel_joint" type="continuous">
+    <parent link="base_link"/><child link="rear_right_wheel_link"/>
+    <origin xyz="-0.210 -0.255 0.0329" rpy="0 0 0"/><axis xyz="0 1 0"/>
   </joint>
 
   <link name="laser_link"/>
@@ -92,7 +98,7 @@
   </link>
   <joint name="camera_mount_joint" type="fixed">
     <parent link="upper_tabletop_surface_frame"/><child link="camera_link"/>
-    <origin xyz="-0.275 0 0.540" rpy="0.011934068034722573 0.41246669799099545 -0.0007507445375463481"/>
+    <origin xyz="-0.275 0 0.540" rpy="-0.039023134986489794 0.9171698002732518 -0.0007507445375463481"/>
   </joint>
   <!-- camera_link 하위 광학 프레임은 Astra 드라이버가 발행한다. -->
 </robot>

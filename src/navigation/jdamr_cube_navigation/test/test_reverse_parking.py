@@ -1,13 +1,15 @@
 """Tests for pure reverse-parking path and controller helpers."""
 
+import json
 import math
 from copy import deepcopy  # noqa: I100
 from pathlib import Path
 
 from jdamr_cube_navigation.reverse_parking import (  # noqa: I101
-    RPP_PLUGIN, reverse_controller_overrides, reverse_curve_waypoints, reverse_waypoints,
-    static_corridor_clear,
+    CachedStaticCorridorValidator, RPP_PLUGIN, reverse_controller_overrides,
+    reverse_curve_waypoints, reverse_waypoints, static_corridor_clear,
 )
+from jdamr_cube_navigation.surface_approach import face_approach_waypoints
 
 import pytest
 
@@ -48,6 +50,57 @@ def _write_grid(
         'free_thresh': 0.196,
     }), encoding='utf-8')
     return metadata
+
+
+@pytest.mark.parametrize('case,expected', [
+    ('target_alias', True), ('source_obstacle', False), ('other_keepout', False),
+    ('outside_span', False), ('crosses_face', False), ('unknown_keepout', False),
+])
+def test_observed_table_only_resolves_its_own_keepout_grid_alias(tmp_path, case, expected):
+    width, height = 20, 20
+    source_pixels, mask_pixels = [254] * 400, [254] * 400
+    for row in range(7, 13):
+        mask_pixels[row * width + 9] = 0
+    if case == 'source_obstacle':
+        source_pixels[10 * width + 9] = 0
+    elif case == 'other_keepout':
+        mask_pixels[10 * width + 6] = 0
+    elif case == 'unknown_keepout':
+        mask_pixels[10 * width + 9] = 100
+    source = _write_grid(tmp_path, 'source', source_pixels, width=width,
+                         height=height, resolution=.05, origin=(-.5, -.5, 0.))
+    mask = _write_grid(tmp_path, 'mask', mask_pixels, width=width,
+                       height=height, resolution=.05, origin=(-.5, -.5, 0.))
+    footprint = ((.05, .05), (-.05, .05), (-.05, -.05), (.05, -.05))
+    path = [(-.25, 0., 0.), (-.02 if case == 'crosses_face' else -.08, 0., 0.)]
+    surface = {'point_xy_m': (0., 0.), 'normal_xy': (-1., 0.),
+               'half_span_m': .02 if case == 'outside_span' else .3}
+    assert not static_corridor_clear(source, mask, path, footprint)
+    check = CachedStaticCorridorValidator(source, mask, footprint)
+    assert check(path, target_surface=surface) is expected
+
+
+@pytest.mark.parametrize('case_index', [0, 1])
+def test_recorded_water_near_turn_and_reapproach_clear_target_alias(tmp_path, case_index):
+    fixture = json.loads((Path(__file__).parent / 'fixtures'
+                          / 'water_parking_failure_20261019.json').read_text())
+    grid, case = fixture['map_fixture'], fixture['cases'][case_index]
+    width, height = grid['width'], grid['height']
+    source_pixels, mask_pixels = [254] * (width * height), [254] * (width * height)
+    for row in range(height):
+        for column in range(width):
+            if grid['origin'][0] + column * grid['resolution'] < 0.:
+                mask_pixels[row * width + column] = 0
+    kwargs = {key: grid[key] for key in ('width', 'height', 'resolution', 'origin')}
+    source = _write_grid(tmp_path, 'source', source_pixels, **kwargs)
+    mask = _write_grid(tmp_path, 'mask', mask_pixels, **kwargs)
+    poses = face_approach_waypoints(case['pose'], case['face'], case['normal'], .065, .225,
+                                    allow_near_alignment=True)
+    check = CachedStaticCorridorValidator(source, mask, fixture['footprint'])
+    assert not check(poses)
+    surface = {'point_xy_m': case['face'], 'normal_xy': case['normal'],
+               'half_span_m': case['span_m'] / 2.}
+    assert check(poses, target_surface=surface)
 
 
 @pytest.mark.parametrize('yaw', [0.0, math.pi / 2.0, math.pi])
@@ -188,6 +241,41 @@ def test_static_corridor_accepts_only_clear_map_and_keepout_cells(tmp_path):
          (-0.04, 0.02)])
 
 
+@pytest.mark.parametrize('case,allowed', [
+    ('rear', True), ('front', False), ('unknown', False), ('map', False),
+    ('turn', False), ('reverse', False), ('new_cell', False), ('still_overlapping', False),
+])
+def test_dock_escape_leaves_only_existing_rear_black_keepout_cells(tmp_path, case, allowed):
+    width, height = 15, 9
+    source_pixels = [254] * (width * height)
+    mask_pixels = list(source_pixels)
+    rear_index = (height - 1 - 4) * width + 3
+    mask_pixels[rear_index] = 0
+    if case == 'front':
+        mask_pixels[rear_index] = 254
+        mask_pixels[(height - 1 - 4) * width + 6] = 0
+    elif case == 'unknown':
+        mask_pixels[rear_index] = 205
+    elif case == 'map':
+        source_pixels[rear_index] = 0
+    elif case == 'new_cell':
+        mask_pixels[(height - 1 - 4) * width + 8] = 0
+    source = _write_grid(tmp_path, 'map', source_pixels, width=width, height=height)
+    keepout = _write_grid(tmp_path, 'keepout', mask_pixels, width=width, height=height)
+    end = (1.0, 0.45, 0.0)
+    if case == 'turn':
+        end = (1.0, 0.45, 0.1)
+    elif case == 'reverse':
+        end = (0.5, 0.45, 0.0)
+    elif case == 'still_overlapping':
+        end = (0.61, 0.45, 0.0)
+    footprint = [(-0.28, -0.04), (0.07, -0.04), (0.07, 0.04), (-0.28, 0.04)]
+    poses = [(0.6, 0.45, 0.0), end]
+    assert not static_corridor_clear(source, keepout, poses, footprint)
+    assert static_corridor_clear(
+        source, keepout, poses, footprint, allow_rear_keepout_escape=True) is allowed
+
+
 @pytest.mark.parametrize('grid_name,pixel', [
     ('map', 205),
     ('map', 0),
@@ -298,6 +386,202 @@ def test_static_corridor_rejects_rotated_grid_origins(tmp_path):
             source, keepout, [(0.45, 0.35, 0.0)],
             [(-0.04, -0.04), (0.04, -0.04), (0.04, 0.04),
              (-0.04, 0.04)])
+
+
+def test_cached_static_corridor_loads_grids_once(tmp_path, monkeypatch):
+    """Cache map pixels and the verified footprint across control-loop calls."""
+    free = [254] * (15 * 9)
+    source = _write_grid(tmp_path, 'map', free, width=15, height=9)
+    keepout = _write_grid(tmp_path, 'keepout', free, width=15, height=9)
+    footprint = [
+        (-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)]
+    from jdamr_cube_navigation import reverse_parking
+    original = reverse_parking._map_metadata
+    loaded = []
+
+    def record(path):
+        loaded.append(path)
+        return original(path)
+
+    monkeypatch.setattr(reverse_parking, '_map_metadata', record)
+    validate = CachedStaticCorridorValidator(source, keepout, footprint)
+
+    assert validate([(0.45, 0.45, 0.0), (0.65, 0.45, 0.0)])
+    assert validate([(0.45, 0.45, 0.0), (0.55, 0.45, 0.0)])
+    assert len(loaded) == 2
+
+
+def test_cached_static_corridor_bounds_swept_polygon_axes(tmp_path, monkeypatch):
+    """Keep SAT work bounded when a curved preview contains hundreds of poses."""
+    free = [254] * (25 * 17)
+    source = _write_grid(tmp_path, 'map', free, width=25, height=17)
+    keepout = _write_grid(tmp_path, 'keepout', free, width=25, height=17)
+    validate = CachedStaticCorridorValidator(
+        source, keepout,
+        [(-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+    from jdamr_cube_navigation import reverse_parking
+    original = reverse_parking._corridor_blockage
+    vertex_counts = []
+
+    def record(source_metadata, keepout_metadata, pieces, *args, **kwargs):
+        vertex_counts.extend(len(polygon) for polygon, _padding in pieces)
+        return original(
+            source_metadata, keepout_metadata, pieces, *args, **kwargs)
+
+    monkeypatch.setattr(reverse_parking, '_corridor_blockage', record)
+    poses = [
+        (0.65 + 0.45 * index / 399,
+         0.75 + 0.08 * math.sin(math.pi * index / 399),
+         math.radians(30.0) * math.sin(math.pi * index / 399))
+        for index in range(400)]
+
+    assert validate(poses)
+    assert vertex_counts and max(vertex_counts) <= 16
+
+
+def test_cached_static_corridor_uses_body_edge_axes_at_rotated_pose(tmp_path):
+    """Avoid a fixed-world support corner touching keepout beside the body."""
+    width = height = 80
+    source_pixels = [254] * (width * height)
+    keepout_pixels = list(source_pixels)
+    keepout_pixels[(height - 1 - 23) * width + 31] = 0
+    source = _write_grid(
+        tmp_path, 'map', source_pixels, width=width, height=height,
+        resolution=0.02)
+    keepout = _write_grid(
+        tmp_path, 'keepout', keepout_pixels, width=width, height=height,
+        resolution=0.02)
+    footprint = [
+        (-0.28, -0.275), (0.07, -0.275),
+        (0.07, 0.275), (-0.28, 0.275)]
+    pose = (0.8, 0.8, math.radians(11.25))
+    from jdamr_cube_navigation import reverse_parking
+    metadata = reverse_parking._map_metadata(source)
+    mask = reverse_parking._map_metadata(keepout)
+    fixed_world_support = reverse_parking._circumscribed_support_polygon(
+        reverse_parking._world_footprint(pose, footprint))
+
+    assert reverse_parking._corridor_blockage(
+        metadata, mask, [(fixed_world_support, 0.0)],
+        skip_clearly_free_cells=True) is not None
+    assert static_corridor_clear(source, keepout, [pose], footprint)
+    assert CachedStaticCorridorValidator(
+        source, keepout, footprint)([pose])
+
+
+@pytest.mark.parametrize('poses', [
+    [],
+    [(math.nan, 0.45, 0.0)],
+    [(0.45, True, 0.0)],
+    [(0.45, 0.45)],
+])
+def test_cached_static_corridor_rejects_invalid_poses(tmp_path, poses):
+    free = [254] * (15 * 9)
+    source = _write_grid(tmp_path, 'map', free, width=15, height=9)
+    keepout = _write_grid(tmp_path, 'keepout', free, width=15, height=9)
+    validate = CachedStaticCorridorValidator(
+        source, keepout,
+        [(-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+
+    with pytest.raises(ValueError):
+        validate(poses)
+
+
+def test_cached_static_corridor_rejects_invalid_footprint(tmp_path):
+    free = [254] * (15 * 9)
+    source = _write_grid(tmp_path, 'map', free, width=15, height=9)
+    keepout = _write_grid(tmp_path, 'keepout', free, width=15, height=9)
+
+    with pytest.raises(ValueError, match='footprint'):
+        CachedStaticCorridorValidator(
+            source, keepout, [(0.0, 0.0), (math.inf, 0.0), (0.0, 0.1)])
+
+
+@pytest.mark.parametrize('grid_name,pixel', [
+    ('map', 205), ('map', 0), ('keepout', 205), ('keepout', 0),
+])
+def test_cached_static_corridor_rejects_unknown_and_blocked_cells(
+        tmp_path, grid_name, pixel):
+    width, height = 15, 9
+    grids = {
+        'map': [254] * (width * height),
+        'keepout': [254] * (width * height),
+    }
+    grids[grid_name][(height - 1 - 4) * width + 6] = pixel
+    source = _write_grid(
+        tmp_path, 'map', grids['map'], width=width, height=height)
+    keepout = _write_grid(
+        tmp_path, 'keepout', grids['keepout'], width=width, height=height)
+    validate = CachedStaticCorridorValidator(
+        source, keepout,
+        [(-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+
+    assert not validate([(0.65, 0.45, 0.0)])
+
+
+def test_cached_static_corridor_rejects_outside_grid(tmp_path):
+    free = [254] * (15 * 9)
+    source = _write_grid(tmp_path, 'map', free, width=15, height=9)
+    keepout = _write_grid(tmp_path, 'keepout', free, width=15, height=9)
+    validate = CachedStaticCorridorValidator(
+        source, keepout,
+        [(-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+
+    assert not validate([(0.02, 0.45, 0.0)])
+
+
+def test_cached_static_corridor_rejects_curved_path_collision(tmp_path):
+    """Detect a blocked cell swept by a curved preview between its endpoints."""
+    width, height = 19, 15
+    source_pixels = [254] * (width * height)
+    source_pixels[(height - 1 - 7) * width + 9] = 0
+    source = _write_grid(
+        tmp_path, 'map', source_pixels, width=width, height=height)
+    keepout = _write_grid(
+        tmp_path, 'keepout', [254] * (width * height),
+        width=width, height=height)
+    validate = CachedStaticCorridorValidator(
+        source, keepout,
+        [(-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+    poses = [
+        (0.55, 0.55, 0.0),
+        (0.75, 0.65, math.radians(25.0)),
+        (1.05, 0.75, math.radians(40.0)),
+    ]
+
+    assert not static_corridor_clear(source, keepout, poses, [
+        (-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+    assert not validate(poses)
+
+
+@pytest.mark.parametrize('blocked_column,blocked_map_row', [
+    (5, 4), (7, 4), (9, 5), (11, 6), (13, 6), (15, 7),
+])
+def test_cached_static_corridor_never_frees_an_exact_blockage(
+        tmp_path, blocked_column, blocked_map_row):
+    """The aggregate hull may reject more cells, but never omit an exact piece."""
+    width, height = 21, 13
+    source_pixels = [254] * (width * height)
+    source_pixels[
+        (height - 1 - blocked_map_row) * width + blocked_column] = 0
+    source = _write_grid(
+        tmp_path, 'map', source_pixels, width=width, height=height)
+    keepout = _write_grid(
+        tmp_path, 'keepout', [254] * (width * height),
+        width=width, height=height)
+    footprint = [
+        (-0.06, -0.04), (0.06, -0.04), (0.06, 0.04), (-0.06, 0.04)]
+    poses = [
+        (0.55, 0.45, 0.0),
+        (0.75, 0.45, math.radians(8.0)),
+        (0.95, 0.55, math.radians(18.0)),
+        (1.15, 0.65, math.radians(25.0)),
+        (1.55, 0.75, math.radians(30.0)),
+    ]
+    exact = static_corridor_clear(source, keepout, poses, footprint)
+    cached = CachedStaticCorridorValidator(source, keepout, footprint)(poses)
+
+    assert exact or not cached
 
 
 def test_reverse_curve_takes_out_a_staging_offset_while_backing_up():
