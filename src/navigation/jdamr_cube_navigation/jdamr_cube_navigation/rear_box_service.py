@@ -37,6 +37,7 @@ from tf2_ros import TransformException
 REAR_COARSE_HANDOFF_M = 0.5
 REAR_CENTER_HANDOFF_M = 1.0
 REAR_CENTER_MIN_GAP_M = 0.9
+REAR_CENTER_TOLERANCE_M = 0.05
 REAR_COARSE_SEGMENT_M = 0.5
 REAR_REOBSERVE_SEGMENT_M = 0.2
 REAR_FACE_REOBSERVE_GAP_M = 0.2
@@ -250,6 +251,14 @@ class RearBoxParkingMixin:
         half_width = geometry['frame_width']['value'] / 2.
         if observed is None:
             observed = self._observe_rear_box(geometry, extent, half_width)
+        if not return_to_stage:
+            # Validate the observed face identity; terminal control uses its
+            # relative odom geometry and does not need another AMCL reset.
+            measured = self._rear_reference_pose(observed)
+            self.emit('rear_dock_landmark_relative_control',
+                      observed_pose_map=[measured[k] for k in ('x_m', 'y_m', 'yaw_rad')],
+                      control_frame='odom', localization_reset_requested=False)
+            return True
         actual, _ = self.capture_stationary_pose(intermediate=True)
         measured = self._rear_reference_pose(observed, actual_pose_map=actual)
         inferred = tuple(measured[k] for k in ('x_m', 'y_m', 'yaw_rad'))
@@ -299,7 +308,7 @@ class RearBoxParkingMixin:
         lateral = sum((odom[i] - midpoint[i]) * tangent[i] for i in (0, 1))
         self.emit('rear_dock_center_observed', lateral_error_m=lateral,
                   angle_rad=observed['normal_yaw_error_rad'], basis='live_rear_face_midpoint')
-        if (not after_clearance and abs(lateral) <= .02
+        if (not after_clearance and abs(lateral) <= REAR_CENTER_TOLERANCE_M
                 and observed['gap_m'] <= REAR_COARSE_HANDOFF_M):
             return True
         target_odom = (
@@ -330,10 +339,36 @@ class RearBoxParkingMixin:
         self.emit('rear_dock_centering_started', target_odom=list(target_odom),
                   lateral_error_m=lateral, target_gap_m=REAR_FACE_REOBSERVE_GAP_M)
         completed = self._execute_reverse_once(
-            frozen, goal_checker_id='parking_goal_checker', final=False,
+            frozen, goal_checker_id='dock_position_checker', final=False,
+            position_handoff_m=REAR_CENTER_TOLERANCE_M,
             motion='rear_dock_centering')
         self._rear_center_moved = bool(completed)
         return completed
+
+    def _align_rear_face_before_clearance(self, observed, geometry, extent, half_width):
+        """Remove large heading error before a straight clearance can add lateral drift."""
+        initial = observed
+        if observed['gap_m'] < 0.05:
+            return observed
+        for _attempt in range(2):
+            error = observed['normal_yaw_error_rad']
+            if abs(error) <= math.radians(3.):
+                return observed
+            reason = ('operator_stop' if self.stop_requested else
+                      'operator_link_lost' if not self._operator_link_ready() else
+                      self._guard_failure(False))
+            if reason:
+                raise RuntimeError(reason)
+            self.emit('rear_dock_face_heading_alignment', angle_rad=error,
+                      translation_requested=False)
+            if self._rotate_in_place(error) is None:
+                raise RuntimeError(getattr(self, '_last_direct_motion_failure', None)
+                                   or 'rear dock heading alignment incomplete')
+            observed = self._observe_rear_box_recovering(geometry, extent, half_width)
+            _same_target(initial, observed)
+        if abs(observed['normal_yaw_error_rad']) > math.radians(3.):
+            raise RuntimeError('rear dock face heading alignment not converged')
+        return observed
 
     def _rear_box_scan(self):
         scan = self.last_scan
@@ -694,7 +729,7 @@ class RearBoxParkingMixin:
             return False
         self._confirm_collision_monitor_on()
         if not self._approach_rear_corridor(
-                geometry, extent, half_width, handoff_m=REAR_CENTER_HANDOFF_M):
+                geometry, extent, half_width):
             return False
         initial = self._observe_rear_box_recovering(
             geometry, extent, half_width, allow_range_reapproach=True)
@@ -704,11 +739,13 @@ class RearBoxParkingMixin:
                         self._rear_reference_stage({'id': 'home_dock_approach'}),
                         self.registry['home'], observed=initial, return_to_stage=False):
                     return False
+        initial = self._align_rear_face_before_clearance(initial, geometry, extent, half_width)
         tangent = -initial['normal_odom'][1], initial['normal_odom'][0]
         lateral = sum((initial['base_pose_odom'][i] - initial['midpoint_odom'][i]) * tangent[i]
                       for i in (0, 1))
         after_clearance = False
-        if abs(lateral) > .02 and initial['gap_m'] < REAR_CENTER_MIN_GAP_M:
+        if (abs(lateral) > REAR_CENTER_TOLERANCE_M
+                and initial['gap_m'] < REAR_CENTER_MIN_GAP_M):
             # A near-range retry needs room for a curve, rather than a sideways
             # target at the same range which a differential drive cannot reach.
             self.config = load_route(route_path)
@@ -739,11 +776,12 @@ class RearBoxParkingMixin:
                           for i in (0, 1))
             self.emit('rear_dock_centering_finished', lateral_error_m=lateral,
                       observation=centered)
-            if abs(lateral) > .02:
+            if abs(lateral) > REAR_CENTER_TOLERANCE_M:
                 self.emit('failed', phase='rear_box_centering',
                           reason='rear_box_center_not_reached', lateral_error_m=lateral)
                 return False
-            initial = centered
+            initial = self._align_rear_face_before_clearance(
+                centered, geometry, extent, half_width)
         with rear_collision_profile(self) as command_watch:
             self.emit('rear_box_observed', observation=initial, target_gap_m=target_gap)
             # Landmark localization needs visible endpoints. After latching the

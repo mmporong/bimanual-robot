@@ -3014,10 +3014,22 @@ class ServiceRoute(CorridorRoute):
 
     def _execute_reverse_once(self, path, goal_checker_id='parking_goal_checker',
                               verify_contract=None, final=True, verify_waypoint=None,
-                              controller_id='ParkingReverse', motion='reverse'):
+                              controller_id='ParkingReverse', motion='reverse',
+                              position_handoff_m=None):
         """Keep reverse motion in controller → smoother → monitor → base."""
         if not self.waypoints:
             raise ValueError('reverse execution requires a target waypoint')
+        handoff_target = None
+        if position_handoff_m is not None:
+            if (final or isinstance(position_handoff_m, bool)
+                    or not math.isfinite(position_handoff_m)
+                    or not 0.0 < position_handoff_m <= .05
+                    or path.header.frame_id != 'odom' or not path.poses):
+                raise ValueError('invalid intermediate reverse position handoff')
+            endpoint = path.poses[-1].pose.position
+            handoff_target = (endpoint.x, endpoint.y)
+            if not all(math.isfinite(value) for value in handoff_target):
+                raise ValueError('nonfinite intermediate reverse handoff target')
         target_index = len(self.waypoints) - 1
         if self.stop_requested or not self._navigation_ready(require_fresh_amcl=False):
             reason = self._guard_failure(False)
@@ -3054,6 +3066,15 @@ class ServiceRoute(CorridorRoute):
                     if not self.stop_requested and self._input_gap_recoverable(reason):
                         self._retry_guard_reason = reason
                     return False
+                if handoff_target is not None and not self._operator_link_ready():
+                    self.emit('reverse_interrupted', reason='operator_link_lost')
+                    return False
+                if (handoff_target is not None and not self.stop_requested
+                        and math.dist(self._odom_pose()[:2], handoff_target) <= position_handoff_m):
+                    self.emit('reverse_position_handoff', motion=motion,
+                              tolerance_m=position_handoff_m, target_odom=list(handoff_target),
+                              final_parking=False)
+                    return True
             wrapped = self.navigation_result.result()
             self._route_event('result', target_index, handle, motion=motion,
                               terminal_status_code=int(wrapped.status),

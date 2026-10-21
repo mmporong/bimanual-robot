@@ -217,7 +217,7 @@ def test_other_same_width_face_after_replanning_cannot_start_centering(monkeypat
     node._execute_reverse_once.assert_not_called()
 
 
-def test_near_landmark_localizes_and_centers_without_backtracking_to_far_stage(monkeypatch):
+def test_near_landmark_uses_relative_face_without_resetting_amcl_or_backtracking(monkeypatch):
     node = node_with_reference()
     physical = (.4, -.08, math.radians(4.))
     observed = observed_at(physical)
@@ -231,8 +231,9 @@ def test_near_landmark_localizes_and_centers_without_backtracking_to_far_stage(m
     assert node._align_rear_reference(
         node._rear_reference_stage({'id': 'home_approach'}), {'id': 'home'},
         observed=observed, return_to_stage=False)
-    seed = initialize.call_args.args[1]
-    assert tuple(seed[k] for k in ('x_m', 'y_m', 'yaw_rad')) == pytest.approx(physical)
+    initialize.assert_not_called()
+    node.capture_stationary_pose.assert_not_called()
+    assert node.emit.call_args.kwargs['localization_reset_requested'] is False
     node._plan_with_input_recovery.assert_not_called()
     node._reach_staging.assert_not_called()
     node._observe_rear_box.assert_not_called()
@@ -287,7 +288,8 @@ def test_lateral_drift_uses_one_static_checked_curve_to_twenty_cm_handoff(
     assert frozen_points[-1] == pytest.approx((.19, .02, 0.))
     node._execute_reverse_once.assert_called_once()
     assert node._execute_reverse_once.call_args.kwargs['final'] is False
-    assert node._execute_reverse_once.call_args.kwargs['goal_checker_id'] == 'parking_goal_checker'
+    assert node._execute_reverse_once.call_args.kwargs['goal_checker_id'] == 'dock_position_checker'
+    assert node._execute_reverse_once.call_args.kwargs['position_handoff_m'] == .05
 
 
 @pytest.mark.parametrize('gap_m', [.85, .89, .9, .99, 1.])
@@ -320,6 +322,16 @@ def test_already_centered_return_does_not_add_reverse_or_turn():
     node._make_reverse_path = Mock()
     node._odom_pose = Mock(return_value=(.3, 0., 0.))
     assert node._center_rear_box(observed_at((.3, 0., 0.), face_map=(-.285, 0.)), .275)
+    node._make_reverse_path.assert_not_called()
+
+
+@pytest.mark.parametrize('lateral_m', [-.049, .049])
+def test_center_within_operator_five_cm_tolerance_skips_curve(lateral_m):
+    node = node_with_reference()
+    pose = (.15, lateral_m, 0.)
+    node._odom_pose = Mock(return_value=pose)
+    node._make_reverse_path = Mock(side_effect=AssertionError('unnecessary curve'))
+    assert node._center_rear_box(observed_at(pose, face_map=(-.285, 0.)), .275)
     node._make_reverse_path.assert_not_called()
 
 

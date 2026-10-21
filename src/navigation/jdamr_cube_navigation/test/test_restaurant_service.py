@@ -953,6 +953,50 @@ def test_reverse_follow_path_preserves_verifier_and_terminal_outcome(status, con
     assert node._verify_parking_stop.called is (status == GoalStatus.STATUS_SUCCEEDED)
 
 
+@pytest.mark.parametrize('case', ['handoff', 'outside', 'stop', 'link', 'nav', 'cancel_failed'])
+def test_intermediate_reverse_position_handoff_keeps_abort_and_cancel_checks(monkeypatch, case):
+    node = reverse_route()
+    running = SimpleNamespace(done=Mock(side_effect=[False, True]), result=Mock(
+        return_value=SimpleNamespace(status=GoalStatus.STATUS_ABORTED,
+                                     result=SimpleNamespace(error_code=105))))
+    accepted = handle(future=running)
+    node.follow_reverse = Mock()
+    node.follow_reverse.send_goal_async.return_value = done(accepted)
+    node._departure_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node._operator_link_ready = Mock(return_value=True)
+    node._odom_pose = Mock(return_value=((.9, 0., 1.2) if case == 'outside'
+                                       else (.96, .01, 1.2)))
+    node.finish_navigation = Mock(return_value=case != 'cancel_failed')
+    node.emit = Mock()
+    node._route_event = Mock()
+    node._verify_parking_stop = Mock(side_effect=AssertionError('intermediate is not final'))
+    def spin(*_args, **_kwargs):
+        if case == 'stop':
+            node.stop_requested = True
+        if case == 'link':
+            node._operator_link_ready.return_value = False
+        if case == 'nav':
+            node._navigation_ready.return_value = False
+    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    path = RosPath()
+    path.header.frame_id = 'odom'
+    endpoint = PoseStamped()
+    endpoint.pose.position.x = 1.
+    path.poses = [endpoint]
+    kwargs = dict(goal_checker_id='dock_position_checker', final=False,
+                  position_handoff_m=.05)
+    if case == 'cancel_failed':
+        with pytest.raises(RuntimeError, match='cancellation unconfirmed'):
+            node._execute_reverse_once(path, **kwargs)
+    else:
+        assert node._execute_reverse_once(path, **kwargs) is (case == 'handoff')
+    node.finish_navigation.assert_called_once()
+    node._verify_parking_stop.assert_not_called()
+    if case == 'handoff':
+        assert node.emit.call_args.args == ('reverse_position_handoff',)
+
+
 def test_reverse_lost_acceptance_uses_follow_path_cancel_and_query(monkeypatch):
     monkeypatch.setattr('jdamr_cube_navigation.restaurant_service.rclpy.spin_once',
                         lambda *args, **kwargs: None)

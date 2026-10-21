@@ -58,7 +58,7 @@ def test_centering_without_departure_reference_precedes_fine_profile(monkeypatch
         GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01) is center_ok
     assert events == (['coarse', 'center', 'profile_enter', 'fine', 'profile_exit']
                       if center_ok else ['coarse', 'center'])
-    assert node._approach_rear_corridor.call_args.kwargs['handoff_m'] == 1.
+    assert node._approach_rear_corridor.call_args.kwargs == {}
     if not center_ok:
         node._park_rear_face.assert_not_called()
 
@@ -144,6 +144,30 @@ def test_rear_readiness_failure_records_battery_cause_without_motion():
     node.emit.assert_called_once_with(
         'failed', phase='rear_box_readiness', reason=node.last_readiness_failure)
     node._approach_rear_corridor.assert_not_called()
+
+
+@pytest.mark.parametrize('interrupted', [False, True])
+def test_face_heading_is_corrected_before_a_large_straight_clearance(interrupted):
+    node = route_node()
+    initial, aligned = face(.4, math.radians(35.)), face(.4)
+    for observation in (initial, aligned):
+        observation.update(normal_odom=(1., 0.), face_odom=(-.675, 0.))
+    node.stop_requested = interrupted
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node._rotate_in_place = Mock(return_value=math.radians(35.))
+    node._observe_rear_box_recovering = Mock(return_value=aligned)
+    node._depart_dock_straight = Mock(side_effect=AssertionError('translation before alignment'))
+    node.emit = Mock()
+    if interrupted:
+        with pytest.raises(RuntimeError, match='operator_stop'):
+            node._align_rear_face_before_clearance(initial, GEOMETRY, .275, .225)
+        node._rotate_in_place.assert_not_called()
+    else:
+        assert node._align_rear_face_before_clearance(
+            initial, GEOMETRY, .275, .225) is aligned
+        node._rotate_in_place.assert_called_once_with(math.radians(35.))
+    node._depart_dock_straight.assert_not_called()
 
 
 def face(gap=0.01, angle=0.0, stamp=5.0):
