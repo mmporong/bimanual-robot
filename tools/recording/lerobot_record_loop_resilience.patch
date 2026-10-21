@@ -1,0 +1,80 @@
+diff --git a/src/lerobot/scripts/lerobot_record.py b/src/lerobot/scripts/lerobot_record.py
+index 532a8c60..08493b19 100644
+--- a/src/lerobot/scripts/lerobot_record.py
++++ b/src/lerobot/scripts/lerobot_record.py
+@@ -279,20 +279,62 @@ def record_loop(
+     no_action_count = 0
+     timestamp = 0
+     start_episode_t = time.perf_counter()
++    # (bimanual-robot local patch, 2026-10-16: 경과 시간 로그)
++    # 붓기처럼 일부러 몇 초 정지하는 구간이 있는 시연에서는, 지금 몇 초째인지
++    # 콘솔로 바로 보여야 매 에피소드 타이밍을 일관되게 맞추기 쉽다. 5초마다
++    # "elapsed/control_time_s"를 한 줄 찍는다 - 제어 루프·녹화 로직에는 손대지 않는다.
++    _last_logged_elapsed_s = -1
++    _consecutive_obs_failures = 0
++    _max_consecutive_obs_failures = int(5.0 / control_interval) if control_interval > 0 else 150
++    _last_good_obs = None
+     while timestamp < control_time_s:
+         start_loop_t = time.perf_counter()
++        _elapsed_bucket = int(timestamp) // 5 * 5
++        if control_time_s and _elapsed_bucket != _last_logged_elapsed_s and _elapsed_bucket > 0:
++            _last_logged_elapsed_s = _elapsed_bucket
++            logging.info(f"[elapsed] {_elapsed_bucket}s / {control_time_s}s")
+
+         if events["exit_early"]:
+             events["exit_early"] = False
+             break
+
+-        # Get robot observation
+-        obs = robot.get_observation()
++        # (bimanual-robot local patch, 2026-10-16: 녹화 중 카메라 타임아웃 방어)
++        # rollout 쪽(tools/rollout/lerobot_rollout_camera_timeout_resilience.patch)과
++        # 같은 이유다 - 카메라 한 틱이 잠깐 늦어서 TimeoutError가 나면, 이게 안 잡히고
++        # 그대로 record()까지 전파돼 녹화 전체가 죽는다. 그 비정상 종료 도중
++        # teardown의 disconnect()가 토크를 끄다가 실패하는 사고(Overload error)로
++        # 이어진 적이 있다.
++        #
++        # 처음엔 이 틱을 통째로 건너뛰었는데(teleop.get_action()/send_action()도 같이
++        # 건너뜀), 그러면 카메라가 멈춰있는 동안 팔로워가 리더 추종을 멈추고, 복구되는
++        # 순간 그동안 쌓인 차이를 한 번에 따라잡으려고 급하게 점프하는 새 문제가
++        # 생겼다(실물로 확인됨 - "안 따라가다 갑자기 휙"). 그래서 카메라가 멈춰도
++        # 텔레옵 추종(리더→팔로워 전달)은 계속하고, **녹화(데이터셋 기록)만** 이 틱을
++        # 건너뛰도록 분리했다 - 신선한 이미지가 없는 프레임은 데이터셋에 안 쓴다.
++        _obs_is_fresh = True
++        try:
++            obs = robot.get_observation()
++            _last_good_obs = obs
++            _consecutive_obs_failures = 0
++        except TimeoutError as exc:
++            _consecutive_obs_failures += 1
++            logging.warning(f"get_observation() timeout ({exc}); 이 틱은 녹화만 건너뜀 (연속 {_consecutive_obs_failures}회)")
++            if _consecutive_obs_failures >= _max_consecutive_obs_failures:
++                logging.error("카메라가 5초 넘게 연속으로 응답 없음 - 녹화를 멈춘다.")
++                raise
++            if _last_good_obs is None:
++                # 아직 한 번도 성공한 적이 없으면 대체할 obs가 없으니 이 틱은 완전히
++                # 건너뛴다(최초 연결 직후가 아니면 거의 발생하지 않는다).
++                precise_sleep(control_interval)
++                timestamp = time.perf_counter() - start_episode_t
++                continue
++            obs = _last_good_obs
++            _obs_is_fresh = False
+
+         # Applies a pipeline to the raw robot observation, default is IdentityProcessor
+         obs_processed = robot_observation_processor(obs)
+
+-        if dataset is not None:
++        if dataset is not None and _obs_is_fresh:
+             observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix=OBS_STR)
+
+         # Get action from teleop
+@@ -332,7 +374,8 @@ def record_loop(
+         _sent_action = robot.send_action(robot_action_to_send)
+
+         # Write to dataset
+-        if dataset is not None:
++        # (bimanual-robot local patch, 2026-10-16: 신선한 이미지가 없는 틱은 기록 안 함 - 위 참고)
++        if dataset is not None and _obs_is_fresh:
+             action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
+             frame = {**observation_frame, **action_frame, "task": single_task}
+             dataset.add_frame(frame)
