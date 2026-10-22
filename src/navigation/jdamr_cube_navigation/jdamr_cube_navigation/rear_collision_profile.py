@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import math
 import time
 
+from jdamr_cube_navigation.box_lidar_witness import MAXIMUM_RESIDUAL_RMS_M
 from jdamr_cube_navigation.corridor_route import spin_node
 from jdamr_cube_navigation.reverse_parking import path_sweep_hit, scan_points
 from rclpy.parameter import Parameter, parameter_value_to_python
@@ -25,6 +26,7 @@ PREDICTION_STEP_S = 0.05
 DIRECT_GUARD_PERIOD_S = 0.1
 DIRECT_STOP_LATENCY_S = 0.05
 EXPECTED_LINEAR_DECEL_MPS2 = 0.5
+TARGET_GAP_TOLERANCE_M = 0.003
 
 
 def _wait_future(node, future, timeout_s=PARAMETER_TIMEOUT_S):
@@ -137,10 +139,115 @@ def _larger_live_velocity(command, latest_motion, now_s):
     return linear, angular
 
 
+def _target_context(observation, target_gap_m, current_gap_m,
+                    source_point_filter=None):
+    """Freeze one verified raw rear-face fit for the current scan only."""
+    if not isinstance(observation, dict):
+        raise ValueError('rear collision target observation must be a mapping')
+    try:
+        normal = tuple(float(value) for value in observation['normal_base_xy'])
+        tangent = tuple(float(value) for value in observation['tangent_base_xy'])
+        bounds = tuple(float(value) for value in observation['tangent_bounds_m'])
+        offset_m = float(observation['line_offset_m'])
+        residual_rms_m = float(observation['residual_rms_m'])
+        stamp_s = float(observation['stamp_s'])
+        target_gap_m = float(target_gap_m)
+        current_gap_m = float(current_gap_m)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError('rear collision target geometry is incomplete') from error
+    values = (*normal, *tangent, *bounds, offset_m, residual_rms_m,
+              stamp_s, target_gap_m, current_gap_m)
+    if (len(normal) != 2 or len(tangent) != 2 or len(bounds) != 2
+            or not all(math.isfinite(value) for value in values)
+            or not math.isclose(math.hypot(*normal), 1.0, abs_tol=1e-3)
+            or not math.isclose(math.hypot(*tangent), 1.0, abs_tol=1e-3)
+            or abs(normal[0] * tangent[0] + normal[1] * tangent[1]) > 1e-3
+            or bounds[0] > bounds[1]
+            or not 0.0 <= residual_rms_m <= MAXIMUM_RESIDUAL_RMS_M
+            or target_gap_m < 0.0):
+        raise ValueError('rear collision target geometry is invalid')
+    return {
+        'normal': normal,
+        'tangent': tangent,
+        'tangent_bounds_m': bounds,
+        'line_offset_m': offset_m,
+        'residual_limit_m': min(
+            4.0 * residual_rms_m, MAXIMUM_RESIDUAL_RMS_M),
+        # Near-side returns cannot consume more than the existing final-gap
+        # tolerance, even when a rough face has an accepted larger fit RMS.
+        'near_residual_limit_m': min(
+            4.0 * residual_rms_m, TARGET_GAP_TOLERANCE_M),
+        'stamp_s': stamp_s,
+        'target_gap_m': target_gap_m,
+        'current_gap_m': current_gap_m,
+        'source_point_filter': source_point_filter,
+    }
+
+
+def _may_ignore_target(command, target, stamp_s):
+    if target is None or not math.isclose(
+            target['stamp_s'], stamp_s, rel_tol=0.0, abs_tol=1e-9):
+        return False
+    linear_mps = float(command.linear.x)
+    angular_radps = float(command.angular.z)
+    if linear_mps < -1e-12:
+        return target['current_gap_m'] >= (
+            target['target_gap_m'] - TARGET_GAP_TOLERANCE_M)
+    # At contact the already-supported straight departure is allowed only
+    # while its translation increases distance from the rear target.
+    return (linear_mps > 1e-12 and abs(angular_radps) <= 1e-12
+            and linear_mps * target['normal'][0] > 0.0)
+
+
+def _is_target_face_point(point, target):
+    normal = target['normal']
+    tangent = target['tangent']
+    residual_m = (
+        point[0] * normal[0] + point[1] * normal[1]
+        - target['line_offset_m'])
+    tangent_m = point[0] * tangent[0] + point[1] * tangent[1]
+    lower_m, upper_m = target['tangent_bounds_m']
+    return (-target['residual_limit_m'] <= residual_m
+            <= target['near_residual_limit_m']
+            and lower_m <= tangent_m <= upper_m)
+
+
+class _RearCollisionWatch:
+    """Callable direct-motion guard with a scoped fine-target exception."""
+
+    def __init__(self, node, state, linear_decel_mps2, angular_decel_radps2):
+        self._node = node
+        self._state = state
+        self._linear_decel_mps2 = linear_decel_mps2
+        self._angular_decel_radps2 = angular_decel_radps2
+
+    def __call__(self, command):
+        return _watch(
+            self._node, command, self._state, self._linear_decel_mps2,
+            self._angular_decel_radps2)
+
+    def set_target(self, observation, target_gap_m, current_gap_m,
+                   source_point_filter=None):
+        self._state['target'] = _target_context(
+            observation, target_gap_m, current_gap_m, source_point_filter)
+        self._state['filtered_memory_key'] = None
+
+    def clear_target(self):
+        self._state['target'] = None
+        self._state['filtered_memory'] = ()
+        self._state['filtered_memory_key'] = None
+
+    @property
+    def target_active(self):
+        return self._state['target'] is not None
+
+
 def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
+    scan_context = state.get('scan_context', 'rear box')
+    collision_context = state.get('collision_context', 'rear collision')
     requested = (float(command.linear.x), float(command.angular.z))
     if not all(math.isfinite(value) for value in requested):
-        return 'rear collision command invalid'
+        return f'{collision_context} command invalid'
     # A zero command must always pass so _direct_motion can stop in finally.
     if abs(requested[0]) <= 1e-12 and abs(requested[1]) <= 1e-12:
         return None
@@ -148,28 +255,29 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
     scan = getattr(node, 'last_scan', None)
     received_s = (getattr(node, 'samples', None) or {}).get('scan')
     if scan is None or received_s is None:
-        return 'rear box scan unavailable'
+        return f'{scan_context} scan unavailable'
     now_s = time.monotonic()
     receive_age_s = now_s - received_s
     try:
         stamp_s = _stamp_s(scan)
         ros_age_s = node.get_clock().now().nanoseconds * 1e-9 - stamp_s
     except (AttributeError, TypeError, ValueError, OverflowError):
-        return 'rear collision scan timestamp invalid'
+        return f'{collision_context} scan timestamp invalid'
     if (not all(math.isfinite(value) for value in (receive_age_s, ros_age_s))
             or not 0.0 <= receive_age_s <= SCAN_MAX_AGE_S
             or not 0.0 <= ros_age_s <= SCAN_MAX_AGE_S):
-        return 'rear box scan stale or future-dated'
+        return f'{scan_context} scan stale or future-dated'
     if scan.header.frame_id != state['frame_id']:
-        return 'rear collision scan frame changed'
+        return f'{collision_context} scan frame changed'
 
     scan_key = (id(scan), stamp_s)
     if scan_key != state['scan_key']:
         try:
             state['memory'] = tuple(node._remembered_blind_points(state['laser'], scan))
         except (AttributeError, RuntimeError, ValueError):
-            return 'rear collision blind-range memory unavailable'
+            return f'{collision_context} blind-range memory unavailable'
         state['scan_key'] = scan_key
+        state['filtered_memory_key'] = None
     try:
         linear_mps, angular_radps = _larger_live_velocity(
             command, getattr(node, 'latest_motion', None), now_s)
@@ -178,14 +286,71 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
         horizon_s = reaction_s + max(
             abs(linear_mps) / linear_decel_mps2,
             abs(angular_radps) / angular_decel_radps2)
-        points = [*scan_points(scan, state['laser']), *state['memory']]
+        live_points = scan_points(scan, state['laser'])
+        remembered_points = state['memory']
+        target = state.get('target')
+        if _may_ignore_target(command, target, stamp_s):
+            live_points = [point for point in live_points
+                           if not _is_target_face_point(point, target)]
+            source_filter = target.get('source_point_filter')
+            filtered_memory_key = (scan_key, id(source_filter))
+            if state['filtered_memory_key'] != filtered_memory_key:
+                filtered_memory = remembered_points
+                if callable(source_filter):
+                    filtered_memory = tuple(node._remembered_blind_points(
+                        state['laser'], scan,
+                        source_point_filter=lambda pose, source_scan, point: not
+                        source_filter(pose, source_scan, point)))
+                state['filtered_memory'] = filtered_memory
+                state['filtered_memory_key'] = filtered_memory_key
+            remembered_points = state['filtered_memory']
+        points = [*live_points, *remembered_points]
         poses = _prediction_poses(linear_mps, angular_radps, horizon_s)
         if path_sweep_hit(
                 points, state['outline'], poses, push_tolerance_m=0.0):
-            return 'rear docking swept footprint occupied'
+            return state.get('collision_reason', 'rear docking swept footprint occupied')
     except (AttributeError, TypeError, ValueError, OverflowError):
-        return 'rear collision scan geometry invalid'
+        return f'{collision_context} scan geometry invalid'
     return None
+
+
+def _motion_collision_watch(node, snapshot, *, rotation=False):
+    scan, laser, outline, memory = snapshot
+    if not outline:
+        raise RuntimeError('rotation collision footprint unavailable' if rotation
+                           else 'rear collision footprint unavailable')
+    smoother = _parameter_client(
+        node, 'rear_collision_smoother_parameters', 'velocity_smoother')
+    max_decel = _read_parameters(node, smoother, ('max_decel',))['max_decel']
+    if (not isinstance(max_decel, (list, tuple)) or len(max_decel) < 3
+            or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                   or not math.isfinite(value) for value in (max_decel[0], max_decel[2]))):
+        raise RuntimeError('velocity_smoother max_decel is invalid')
+    linear_decel_mps2, angular_decel_radps2 = abs(max_decel[0]), abs(max_decel[2])
+    if (not math.isclose(linear_decel_mps2, EXPECTED_LINEAR_DECEL_MPS2,
+                         rel_tol=0.0, abs_tol=1e-9)
+            or angular_decel_radps2 <= 0.0):
+        raise RuntimeError('velocity_smoother deceleration does not match direct motion')
+
+    state = {
+        'laser': tuple(laser), 'outline': tuple(tuple(point) for point in outline),
+        'memory': tuple(memory), 'frame_id': scan.header.frame_id,
+        'scan_key': (id(scan), _stamp_s(scan)),
+        'target': None,
+        'filtered_memory': (), 'filtered_memory_key': None,
+    }
+    if rotation:
+        state.update(scan_context='rotation', collision_context='rotation collision',
+                     collision_reason='rotation swept footprint occupied')
+    return _RearCollisionWatch(node, state, linear_decel_mps2, angular_decel_radps2)
+
+
+def rotation_collision_watch(node):
+    """Watch live and remembered blind-range points without changing CM settings."""
+    snapshot = node._scan_in_base()
+    if snapshot is None:
+        raise RuntimeError('rotation scan unavailable')
+    return _motion_collision_watch(node, snapshot, rotation=True)
 
 
 @contextmanager
@@ -200,8 +365,6 @@ def rear_collision_profile(node):
 
     monitor = _parameter_client(
         node, 'precision_parameters', 'collision_monitor')
-    smoother = _parameter_client(
-        node, 'rear_collision_smoother_parameters', 'velocity_smoother')
     enabled = _read_parameters(
         node, monitor, ('StopZone.enabled', 'FootprintApproach.enabled'))
     if enabled['StopZone.enabled'] is not True:
@@ -220,27 +383,12 @@ def rear_collision_profile(node):
     if getattr(node, 'stop_requested', False):
         raise RuntimeError('operator_stop')
 
-    max_decel = _read_parameters(node, smoother, ('max_decel',))['max_decel']
-    if (not isinstance(max_decel, (list, tuple)) or len(max_decel) < 3
-            or any(isinstance(value, bool) or not isinstance(value, (int, float))
-                   or not math.isfinite(value) for value in (max_decel[0], max_decel[2]))):
-        raise RuntimeError('velocity_smoother max_decel is invalid')
-    linear_decel_mps2, angular_decel_radps2 = abs(max_decel[0]), abs(max_decel[2])
-    if (not math.isclose(linear_decel_mps2, EXPECTED_LINEAR_DECEL_MPS2,
-                         rel_tol=0.0, abs_tol=1e-9)
-            or angular_decel_radps2 <= 0.0):
-        raise RuntimeError('velocity_smoother deceleration does not match direct motion')
-
-    state = {
-        'laser': tuple(laser), 'outline': tuple(tuple(point) for point in outline),
-        'memory': tuple(memory), 'frame_id': scan.header.frame_id,
-        'scan_key': (id(scan), _stamp_s(scan)),
-    }
+    watch = _motion_collision_watch(node, snapshot)
     try:
         _set_footprint_approach(node, monitor, False)
-        yield lambda command: _watch(
-            node, command, state, linear_decel_mps2, angular_decel_radps2)
+        yield watch
     finally:
+        watch.clear_target()
         try:
             _set_footprint_approach(node, monitor, True)
         except RuntimeError:

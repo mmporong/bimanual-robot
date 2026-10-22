@@ -92,6 +92,65 @@ def test_command_tapers_only_inside_the_final_approach_band():
     assert face_approach_command(0.005, 0.0) == (0.01, 0.0)
 
 
+@pytest.mark.parametrize('angle_deg', [-3., 0., 3.])
+def test_continuous_table_uses_cruise_instead_of_heading_crawl(angle_deg):
+    linear, angular = face_approach_command(
+        .3, math.radians(angle_deg), continuous_table=True)
+    assert linear == .1
+    assert abs(angular) <= .08
+
+
+def test_large_table_error_aligns_once_without_slow_translation():
+    linear, angular = face_approach_command(.3, math.radians(12.), continuous_table=True)
+    assert linear == 0.
+    assert angular == .08
+    assert face_approach_command(.1, 0., continuous_table=True) == (.1, 0.)
+    assert face_approach_command(.025, 0., continuous_table=True) == (.025, 0.)
+    assert face_approach_command(.005, 0., continuous_table=True) == (.01, 0.)
+    # The rear/default profile retains its earlier alignment law.
+    assert 0. < face_approach_command(.3, math.radians(12.))[0] < .05
+
+
+@pytest.mark.parametrize('filtered_deg', [3., 12., 30.])
+def test_continuous_table_preserves_near_rate_with_raw_filtered_heading_difference(filtered_deg):
+    gap = .049
+    remaining = (gap - .01) / math.cos(math.radians(30.))
+    linear, angular = face_approach_command(
+        remaining, math.radians(filtered_deg), continuous_table=True,
+        surface_gap_m=gap, allow_near_alignment=True)
+    assert linear == 0.
+    assert abs(angular) <= .02
+
+
+def test_near_table_preview_matches_command_with_filtered_heading():
+    yaw = math.radians(30.)
+    gap = .049
+    plane_x = .065*math.cos(yaw) + .225*math.sin(yaw) + gap
+    remaining = (gap-.01) / math.cos(yaw)
+    filtered_heading = yaw-math.radians(3.)
+    linear, angular = face_approach_command(
+        remaining, filtered_heading-yaw, continuous_table=True,
+        surface_gap_m=gap, allow_near_alignment=True)
+    poses = face_approach_waypoints(
+        (0.,0.,yaw), (plane_x,0.), (-1.,0.), .065, .225,
+        continuous_table=True, allow_near_alignment=True,
+        command_heading_rad=filtered_heading)
+    assert linear == 0.
+    assert poses[1] == pytest.approx((0.,0.,yaw+angular*.05))
+
+
+@pytest.mark.parametrize('angle_deg', [-30., -12., -3., 3., 12., 30.])
+@pytest.mark.parametrize('distance_m', [.25, .5])
+def test_continuous_table_rollout_aligns_without_crossing_surface(angle_deg, distance_m):
+    poses = face_approach_waypoints(
+        (0., 0., math.radians(angle_deg)), (distance_m, 0.), (-1., 0.), .065, .225,
+        allow_near_alignment=True, continuous_table=True)
+    for x_m, _y_m, yaw_rad in poses:
+        nearest_m = distance_m - x_m - .065*math.cos(yaw_rad) - .225*abs(math.sin(yaw_rad))
+        assert nearest_m > 0.
+    assert abs(poses[-1][2]) <= math.radians(.3)
+
+
 def test_heading_filter_crosses_pi_along_shortest_arc():
     filtered = filtered_face_heading(math.pi - 0.01, -math.pi + 0.01, 0.35)
     assert filtered == pytest.approx(math.pi - 0.01 + (1.0 - math.exp(-1.0)) * 0.02)

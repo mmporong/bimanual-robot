@@ -1,6 +1,7 @@
 """Approach a mapped table region, then park using a fresh observed surface."""
 
 import argparse
+import hashlib
 from collections import deque
 import fcntl
 from itertools import islice
@@ -30,7 +31,9 @@ from jdamr_cube_navigation.restaurant_service import (
     ServiceRoute, TRANSIT_VARIANTS)
 from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
-from jdamr_cube_navigation.surface_approach import face_approach_waypoints
+from jdamr_cube_navigation.surface_approach import (
+    FACE_APPROACH_TIME_S, face_approach_waypoints,
+)
 from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
 from nav2_msgs.action import Spin
 from nav_msgs.msg import Path as RosPath
@@ -638,13 +641,26 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 self.observer_parameters = client
             if not client.wait_for_services(timeout_sec=1.0):
                 raise RuntimeError('observer parameter service unavailable')
-            response = self._wait(client.set_parameters_atomically([
+            observer_parameters = [
                 Parameter('maximum_depth_m', value=float(window_m)),
                 Parameter('surface_mode', value=surface_mode),
                 Parameter('camera_height_m', value=height_m),
                 Parameter('camera_roll_rad', value=roll_rad),
                 Parameter('camera_pitch_rad', value=pitch_rad),
-            ]), 2.0).result
+            ]
+            if surface_mode == 'table_edge':
+                enabled = bool(getattr(self, 'pointcloud_perception', False))
+                region = getattr(self, '_pointcloud_target_region_map', None) if enabled else None
+                if enabled and region is None:
+                    raise RuntimeError('pointcloud target region has not been selected')
+                observer_parameters.extend([
+                    Parameter('table_request_enabled', value=enabled),
+                    Parameter('table_target_region_map', value=json.dumps(region) if enabled else ''),
+                    Parameter('table_calibration_id', value=hashlib.sha256(
+                        json.dumps(camera_mount, sort_keys=True).encode()).hexdigest()
+                              if enabled else ''),
+                ])
+            response = self._wait(client.set_parameters_atomically(observer_parameters), 2.0).result
             if response.successful is not True:
                 raise RuntimeError(response.reason or 'observer parameters rejected')
         except Exception as error:
@@ -676,6 +692,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         robot_pose, _ = self.capture_stationary_pose(intermediate=True)
         self._observation_pose_diagnostic(robot_pose, camera_mount, region_xy)
         self._observer_camera_mount = camera_mount
+        if getattr(self, 'pointcloud_perception', False):
+            selected_region = [float(region_xy[0]), float(region_xy[1]), float(region_radius_m)]
+            if selected_region != getattr(self, '_pointcloud_target_region_map', None):
+                reuse_configuration = False
+            self._pointcloud_target_region_map = selected_region
         if (not reuse_configuration and not self._set_depth_window(region_radius_m)
                 and (getattr(self, 'surface_mode', 'front') == 'table_edge'
                      or getattr(self, 'require_observer_configuration', False))):
@@ -1024,7 +1045,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                   start_pose_map=list(actual), target_pose_map=list(end),
                   final_parking_confirmed=False)
         travelled_m = self._drive_zero_turn(
-            distance_m, precision=True, hold_heading=True)
+            distance_m, precision=True, hold_heading=True,
+            approach_time_s=FACE_APPROACH_TIME_S)
         reached = (travelled_m is not None and travelled_m >= distance_m - .01
                    and not self.stop_requested and self._operator_link_ready()
                    and getattr(self, '_last_direct_motion_failure', None) is None)
@@ -1127,7 +1149,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.verify_live_maps()
         with self._localization_bound(True):
             if not self.wait_until_ready(timeout=10.0):
-                raise RuntimeError('localization or sensor data unavailable')
+                raise RuntimeError(self.readiness_failure_reason())
             actual, _ = self.capture_stationary_pose(intermediate=True)
         end = route['waypoints'][-1]
         return math.dist(actual[:2], (end['x'], end['y'])) <= limit_m
@@ -1186,10 +1208,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         # covariance of its last transit update; a fresh start is judged strictly.
         with self._localization_bound(resume_at_observation):
             if not self.wait_until_ready(timeout=10.0):
-                raise RuntimeError('localization or sensor data unavailable')
+                raise RuntimeError(self.readiness_failure_reason())
             # Normal starts validate this in preflight; observation resumes skip it.
             if resume_at_observation and not self._parking_parameters_ready():
-                raise RuntimeError('parking controller parameters unavailable')
+                raise RuntimeError(getattr(self, 'last_parking_parameters_failure', None)
+                                   or 'parking controller parameters unavailable')
             if execute and not self._precision_collision_ready(geometry):
                 raise RuntimeError('precision collision-monitor profile unavailable')
             # The starting place is an explicit route contract, not a guessed pose.
@@ -1212,6 +1235,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                   physical_accuracy='NOT_EXTERNALLY_MEASURED')
         if not resume_at_observation and not self.preflight():
             self.emit('failed', phase='preflight',
+                      reason=getattr(self, 'last_preflight_failure', None),
                       end_error_m=getattr(self, 'preflight_end_error_m', None))
             return False
         if not execute:
@@ -1346,6 +1370,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         corrections = 0
         reverse_correction_error_m = None
         realignment_reapproached = False
+        near_alignment_attempted = False
         previous_gap_m = None
         frozen_target_odom = None
         if not fine_table:
@@ -1534,6 +1559,37 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and nearest_gap_m <= FINAL_PLAN_GAP_M
                 and (yaw_error > allowed_yaw_error_rad
                      or corner_spread_m > 2.0 * gap_tolerance_m))
+            if close_table_misalignment and near_alignment_attempted:
+                self.emit('failed', phase='final_approach',
+                          reason='final_table_alignment_unconfirmed',
+                          near_alignment_attempted=True,
+                          estimated_front_corner_gaps_m=corner_gaps)
+                return False
+            if (close_table_misalignment and final_depth_measurement
+                    and nearest_gap_m > target_gap_m
+                    and yaw_error < min(FINAL_TRIM_MAX_RAD,
+                                        math.atan2(half_width_m, front_extent_m))):
+                if (self.stop_requested or not self._operator_link_ready()
+                        or not self._navigation_ready(require_fresh_amcl=False)):
+                    return False
+                near_alignment_attempted = True
+                self.emit('table_near_alignment_correction',
+                          estimated_front_corner_gaps_m=corner_gaps,
+                          estimated_face_yaw_error_rad=yaw_error,
+                          target_front_gap_m=target_gap_m)
+                self.incomplete_gap_stop = False
+                self._final_failure_reported = False
+                approached, straight_to_odom = self._straight_final_approach(
+                    target, front_extent_m)
+                if not approached:
+                    if not self._final_failure_reported:
+                        reason = ('operator_stop' if self.stop_requested else
+                                  getattr(self, '_last_direct_motion_failure', None)
+                                  or 'nav2_or_stop_confirmation')
+                        self.emit('failed', phase='final_approach', reason=reason)
+                    return False
+                previous_gap_m = None
+                continue
             if close_table_misalignment and not realignment_reapproached:
                 if (self.stop_requested or not self._operator_link_ready()
                         or not self._navigation_ready(require_fresh_amcl=False)):
@@ -1753,7 +1809,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 preview = face_approach_waypoints(
                     actual, face, normal, front_extent_m, self.box_front_half_width_m,
                     self._final_gap_m(), command_heading_rad=command_heading_rad,
-                    allow_near_alignment=True)
+                    allow_near_alignment=True, continuous_table=True)
             except ValueError as error:
                 raise RuntimeError(str(error)) from error
             if len(preview) == 1:
@@ -1933,6 +1989,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                            'y_m': face_map[1] + normal_map[1] * offset},
                 'basis': state['basis'], 'observation_stamp_s': state['stamp']}
             return {'remaining_m': remaining, 'heading_rad': heading, 'basis': state['basis'],
+                    'surface_gap_m': gap,
                     'allow_near_alignment': (gap > 0. and abs(residual) < math.atan2(
                         self.box_front_half_width_m, front_extent_m)),
                     'validate_control': validate_control}
@@ -2092,7 +2149,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.emit('table_continuous_approach_started', travel_m=travel_m,
                       target_front_gap_m=requested_gap_m)
             travelled_m = self._drive_zero_turn(
-                travel_m, precision=True, hold_heading=True, target_update=update)
+                travel_m, precision=True, hold_heading=True, target_update=update,
+                continuous_table=True)
             stopped = getattr(self, '_continuous_table_stop', None)
             if stopped is not None:
                 target.update(stopped['target'])
@@ -2429,6 +2487,8 @@ def parse_args(argv=None):
     parser.add_argument('--zero-turn-final', action='store_true',
                         help='final box approach: turn the residual to the face out in '
                              'place, then close the gap at zero turn rate (precision trial)')
+    parser.add_argument('--pointcloud-perception', action='store_true',
+                        help='send the selected table region to the optional pointcloud observer')
     parser.add_argument('--rpp-transit', action='store_true',
                         help='follow the transit and dock staging legs with RPP on NavFn '
                              'paths (the default; kept for older commands)')
@@ -2463,6 +2523,9 @@ def parse_args(argv=None):
     parser.add_argument('--dwell-s', type=float, default=STOP_DWELL_S,
                         help='held stop at each box (longer for an external gap measurement)')
     args = parser.parse_args(argv)
+    if args.pointcloud_perception and (
+            args.surface_mode != 'table_edge' or args.home_only or args.rear_box_only):
+        parser.error('--pointcloud-perception requires a table_edge approach task')
     if args.final_gap_m is not None and not (
             math.isfinite(args.final_gap_m)
             and MINIMUM_FRONT_GAP_M <= args.final_gap_m <= MAXIMUM_FRONT_GAP_M):
@@ -2573,6 +2636,7 @@ def run_attempt(args, active=None):
                 node.use_transit(args.transit)
             node.camera_on_demand = not args.camera_always_on
             node.surface_mode = args.surface_mode
+            node.pointcloud_perception = getattr(args, 'pointcloud_perception', False)
             node.require_observer_configuration = True
             node.zero_turn_final = args.zero_turn_final
             node.operator_heartbeat = args.operator_heartbeat
@@ -2590,7 +2654,7 @@ def run_attempt(args, active=None):
                 node.home_return = True
                 node.verify_live_maps()
                 if not node.wait_until_ready(timeout=10.0):
-                    raise RuntimeError('localization or sensor data unavailable')
+                    raise RuntimeError(node.readiness_failure_reason())
                 ok = node.go_home(execute=True, timeout_s=args.return_timeout_s)
                 return _attempt_code(node, ok)
             if args.resume_parked_from_log is not None:
@@ -2598,7 +2662,7 @@ def run_attempt(args, active=None):
                 face = last_logged_face(args.resume_parked_from_log)
                 node.verify_live_maps()
                 if not node.wait_until_ready(timeout=10.0):
-                    raise RuntimeError('localization or sensor data unavailable')
+                    raise RuntimeError(node.readiness_failure_reason())
                 ok = node.resume_parked(face, args.dwell_s)
                 if args.via_id is None:
                     # The parked stop was the table: its escape leads straight home.

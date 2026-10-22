@@ -450,3 +450,148 @@ def test_table_edge_json_carries_endpoints_and_calibration_without_velocity(monk
     assert document['camera_height_m'] == 1.0
     assert document['camera_pitch_rad'] == 0.5
     assert document['stable'] and document['control_ready'] is False
+
+
+def test_component_tracking_adapter_preserves_measurement_time_and_odom_identity(monkeypatch):
+    from jdamr_cube_navigation.table_surface_tracking import TableSurfaceTracker, TrackConfig
+    from test_table_edge_detection import INTRINSICS, config
+    node = object.__new__(DepthBoxParkingNode)
+    node._table_components = True
+    node._table_request_enabled = True
+    node._table_config = config()
+    node._table_tracker = TableSurfaceTracker(TrackConfig(required_frames=2))
+    transform = np.eye(4)
+    node._table_tf = SimpleNamespace(
+        lookup_transform=lambda *a, **kw: SimpleNamespace(transform=None))
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.transform_matrix',
+                        lambda value: transform.copy())
+    world = np.array([[-.4, 1., .75], [.4, 1., .75]])
+    candidates = [SimpleNamespace(edge_endpoints_optical_m=world)]
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
+                        lambda *a: SimpleNamespace(
+                            candidates=tuple(candidates), component_sizes=(200,),
+                            evaluated_components=1))
+    image = np.ones((240, 320), dtype=np.uint16)
+    _, first, stable = node._table_observation(image, INTRINSICS, 10., OPTICAL_FRAME)
+    assert stable is False
+    transform[1, 3] = .02
+    candidates[:] = [SimpleNamespace(edge_endpoints_optical_m=world - transform[:3, 3])]
+    detection, second, stable = node._table_observation(image, INTRINSICS, 10.1, OPTICAL_FRAME)
+    assert stable is True and detection is candidates[0]
+    assert first['table_track_id'] == second['table_track_id']
+    assert second['table_track_frame_count'] == 2
+    candidates.clear()
+    detection, predicted, stable = node._table_observation(image, INTRINSICS, 10.2, OPTICAL_FRAME)
+    assert detection is None and stable is False
+    assert predicted['table_track_state'] == 'predicted'
+    assert predicted['table_measurement_stamp_s'] == 10.1
+
+
+def test_an_ambiguous_scene_is_not_forwarded_as_a_parking_target(monkeypatch):
+    from test_table_edge_detection import INTRINSICS, config
+    node = object.__new__(DepthBoxParkingNode)
+    node._table_components, node._table_tracker = True, None
+    node._table_request_enabled = True
+    node._table_config = config()
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
+                        lambda *a: SimpleNamespace(
+                            candidates=(object(), object()), component_sizes=(200, 200),
+                            evaluated_components=2))
+    detection, fields, _ = node._table_observation(None, INTRINSICS, 10., OPTICAL_FRAME)
+    assert detection is None and fields['table_candidate_count'] == 2
+
+
+def test_selected_region_is_frozen_in_odom_across_map_localization_jumps(monkeypatch):
+    from jdamr_cube_navigation.table_surface_tracking import TableSurfaceTracker, TrackConfig
+    from test_table_edge_detection import INTRINSICS, config
+    node = _surface_parameter_node()
+    node._table_components, node._table_config = True, config()
+    node._table_request_enabled = True
+    node._table_calibration_id = 'mount-a'
+    node._table_tracker = TableSurfaceTracker(TrackConfig(required_frames=2))
+    node._table_region_map, node._table_region_odom = (0., 1., .2), None
+    calls = []
+    shifted_map = np.eye(4)
+
+    def lookup(target, source, *args, **kwargs):
+        calls.append((target, source))
+        return SimpleNamespace(transform=shifted_map.copy() if source == 'map' else np.eye(4))
+
+    node._table_tf = SimpleNamespace(lookup_transform=lookup)
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.transform_matrix',
+                        lambda value: value)
+    candidate = SimpleNamespace(edge_endpoints_optical_m=np.array([
+        [-.4, 1., .75], [.4, 1., .75]]))
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
+                        lambda *a: SimpleNamespace(candidates=(candidate,),
+                                                   component_sizes=(200,), evaluated_components=1))
+    _, first, stable = node._table_observation(None, INTRINSICS, 10., OPTICAL_FRAME)
+    assert not stable
+    shifted_map[0, 3] = 1.
+    detection, second, stable = node._table_observation(None, INTRINSICS, 10.1, OPTICAL_FRAME)
+    assert detection is candidate and stable
+    assert second['table_track_id'] == first['table_track_id']
+    assert calls.count(('odom', 'map')) == 1
+    anchored_region = node._table_region_odom
+    assert node._on_parameters(_parameters(maximum_depth_m=1.9)).successful
+    assert node._table_region_odom is anchored_region
+    detection, _, _ = node._table_observation(None, INTRINSICS, 10.2, OPTICAL_FRAME)
+    assert detection is candidate
+    assert calls.count(('odom', 'map')) == 1
+
+
+def test_runtime_region_and_full_mount_revision_update_atomically():
+    node = _surface_parameter_node()
+    node._table_components = True
+    values = {'table_request_enabled': True,
+              'table_target_region_map': '[1.0,2.0,0.3]', 'table_calibration_id': 'mount-a'}
+    assert node._on_parameters(_parameters(**values)).successful
+    assert node._table_region_map == (1., 2., .3)
+    assert node._table_calibration_id == 'mount-a'
+    node.resets.clear()
+    assert node._on_parameters(_parameters(**values)).successful
+    assert not node.resets
+    assert not node._on_parameters(_parameters(
+        table_target_region_map='[true,2.0,0.3]', table_calibration_id='mount-b')).successful
+    assert node._table_calibration_id == 'mount-a'
+
+
+def test_explicit_pointcloud_request_does_not_silently_run_the_legacy_observer():
+    node = _surface_parameter_node()
+    assert not node._on_parameters(_parameters(table_target_region_map='[1,2,0.3]')).successful
+
+
+@pytest.mark.parametrize('values', [
+    {'table_request_enabled': True},
+    {'table_request_enabled': True, 'table_target_region_map': '[1,2,0.3]'},
+    {'table_request_enabled': True, 'table_calibration_id': 'mount-a'},
+    {'table_request_enabled': True, 'table_target_region_map': '[1,2,0.3]',
+     'table_calibration_id': ' '},
+])
+def test_pointcloud_enable_needs_a_complete_selection_and_calibration(values):
+    node = _surface_parameter_node()
+    node._table_components = True
+    assert not node._on_parameters(_parameters(**values)).successful
+    assert not getattr(node, '_table_request_enabled', False)
+
+
+def test_disabling_pointcloud_request_clears_selection_and_uses_legacy_detector(monkeypatch):
+    node = _surface_parameter_node()
+    node._table_components = True
+    assert node._on_parameters(_parameters(
+        table_request_enabled=True, table_target_region_map='[1,2,0.3]',
+        table_calibration_id='mount-a')).successful
+    node._table_region_odom = object()
+    node.resets.clear()
+    assert node._on_parameters(_parameters(
+        table_request_enabled=False, table_target_region_map='',
+        table_calibration_id='')).successful
+    assert node._table_region_map is None and node._table_region_odom is None
+    assert node._table_calibration_id == '' and node.resets
+    legacy = object()
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_edge',
+                        lambda *a: legacy)
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
+                        lambda *a: pytest.fail('disabled request used experimental detection'))
+    result, fields, stable = node._table_observation(None, None, 10., OPTICAL_FRAME)
+    assert result is legacy and fields == {} and stable is None

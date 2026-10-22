@@ -536,6 +536,31 @@ def test_go_passes_the_rpp_transit_switch_only_when_asked(env, monkeypatch):
     assert '--rpp-transit' in seen[1]
 
 
+def test_go_passes_the_pointcloud_switch_only_when_asked(env, monkeypatch):
+    seen = []
+    for second, extra in enumerate(({}, {'pointcloud_perception': True})):
+        monkeypatch.setattr(d.time, 'strftime', lambda _fmt, s=second: f'20261002_11000{s}')
+        pi = ExecutorPi()
+        monkeypatch.setattr(d, 'pi', pi)
+        monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
+        d.run_cycle(go_args(**extra), d.load_state(), 'table_02')
+        seen.append(json.loads(next(s for s in pi.stdins if s))['argv'])
+    assert '--pointcloud-perception' not in seen[0]
+    assert '--pointcloud-perception' in seen[1]
+
+
+@pytest.mark.parametrize('extra', [
+    ['--surface-mode', 'front'], ['--dock-only'], ['--rear-box-only'],
+])
+def test_pointcloud_cli_rejects_tasks_that_do_not_use_table_observation(env, monkeypatch, extra):
+    monkeypatch.setattr(d.sys, 'argv', ['jdamr_depart.py', 'go', 'table_01',
+                                      '--pointcloud-perception', *extra])
+    monkeypatch.setattr(d, 'cmd_go', lambda _args: pytest.fail('invalid task was dispatched'))
+    with pytest.raises(SystemExit) as error:
+        d.main()
+    assert error.value.code == 2
+
+
 def test_go_passes_the_transit_variant(env, monkeypatch):
     monkeypatch.setattr(d.time, 'strftime', lambda _fmt: '20261006_110000')
     pi = ExecutorPi()
@@ -1244,3 +1269,93 @@ def test_dock_reference_still_requires_activation_and_amcl_agreement(
         d.cmd_init(args)
     assert caught.value.code == 1
     assert d.load_state()['localized'] is False
+
+
+CONTROLLER_FAIL = [
+    {'event': 'observation_route_selected'},
+    {'event': 'failed', 'phase': 'preflight',
+     'reason': 'controller_server parameter service unavailable'},
+    {'event': 'box_camera', 'action': 'stop', 'ok': True},
+    {'event': 'executor_failed', 'code': 1, 'reason': 'executor_exit_nonzero'},
+]
+
+
+def test_controller_preflight_read_failure_recovers_once_from_registered_dock(env, monkeypatch):
+    monkeypatch.setattr(d, 'pi', Pi())
+    state=d.load_state();state['init_pose_source']='anchored_dock_scan';d.save_state(state)
+    calls=[]
+    results=iter([CONTROLLER_FAIL, HOME_EVENTS.copy()])
+    monkeypatch.setattr(d,'run_cycle',lambda *a: calls.append('run') or next(results))
+    monkeypatch.setattr(d,'recover_controller_before_departure',lambda start: calls.append('recover'))
+    d.cmd_go(go_args())
+    assert calls==['run','recover','run']
+
+
+@pytest.mark.parametrize('extra,events', [
+    ({'resume_at_observation':True},CONTROLLER_FAIL),
+    ({'dock_only':True},CONTROLLER_FAIL),
+    ({},[*CONTROLLER_FAIL,{'event':'box_escape_finished'}]),
+])
+def test_controller_recovery_never_resets_a_resume_or_moved_cycle(env, monkeypatch, extra, events):
+    monkeypatch.setattr(d,'pi',Pi())
+    state=d.load_state();state['init_pose_source']='anchored_dock_scan';d.save_state(state)
+    monkeypatch.setattr(d,'run_cycle',lambda *a:events)
+    monkeypatch.setattr(d,'recover_controller_before_departure',lambda *a:pytest.fail('unsafe reset'))
+    with pytest.raises(SystemExit):d.cmd_go(go_args(**extra))
+
+
+def test_controller_recovery_is_bounded_to_one_attempt(env,monkeypatch):
+    monkeypatch.setattr(d,'pi',Pi())
+    state=d.load_state();state['init_pose_source']='anchored_dock_scan';d.save_state(state)
+    calls=[]
+    monkeypatch.setattr(d,'run_cycle',lambda *a:calls.append('run') or CONTROLLER_FAIL)
+    monkeypatch.setattr(d,'recover_controller_before_departure',lambda *a:calls.append('recover'))
+    with pytest.raises(SystemExit):d.cmd_go(go_args())
+    assert calls==['run','recover','run']
+
+
+def test_controller_recovery_stop_before_restart_never_starts_services(env,monkeypatch):
+    state=d.load_state();state['stop_unix']=100.;d.save_state(state)
+    monkeypatch.setattr(d,'cmd_session_stop',lambda *a:pytest.fail('restart after stop'))
+    with pytest.raises(SystemExit):d.recover_controller_before_departure(99.)
+
+
+def test_controller_recovery_orders_stop_start_init_without_motion(env,monkeypatch):
+    calls=[]
+    monkeypatch.setattr(d,'refuse_during_cycle',lambda *a:None)
+    monkeypatch.setattr(d,'cmd_session_stop',lambda *a:calls.append('stop'))
+    monkeypatch.setattr(d,'cmd_session_start',lambda *a:calls.append('start'))
+    def init(args):
+        assert args.keep_home and not args.seed_from_state and not args.click
+        calls.append('init')
+    monkeypatch.setattr(d,'cmd_init',init)
+    d.recover_controller_before_departure(1.)
+    assert calls==['stop','start','init']
+
+
+@pytest.mark.parametrize('stage', ['stop', 'start', 'init'])
+def test_controller_recovery_stop_between_steps_prevents_remaining_work(env, monkeypatch, stage):
+    calls = []
+    monkeypatch.setattr(d, 'refuse_during_cycle', lambda *a: None)
+    def step(name):
+        def run(*args):
+            calls.append(name)
+            if name == stage:
+                state = d.load_state()
+                state['stop_unix'] = 100.
+                d.save_state(state)
+        return run
+    for name in ('stop', 'start', 'init'):
+        monkeypatch.setattr(d, 'cmd_session_' + name if name != 'init' else 'cmd_init',
+                            step(name))
+    with pytest.raises(SystemExit):
+        d.recover_controller_before_departure(99.)
+    assert calls == ['stop', 'start', 'init'][:['stop', 'start', 'init'].index(stage) + 1]
+
+
+@pytest.mark.parametrize('extra', [
+    {'event': 'box_camera', 'action': 'start', 'ok': True},
+    {'event': 'navigation_result'}, {'event': 'precision_straight_finished'},
+])
+def test_controller_recovery_rejects_motion_or_unknown_execution_evidence(extra):
+    assert not d.controller_wait_failed([*CONTROLLER_FAIL, extra])

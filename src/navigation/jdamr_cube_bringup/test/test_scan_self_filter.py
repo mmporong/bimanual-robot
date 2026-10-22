@@ -1,7 +1,10 @@
 """Self-filter for the bimanual frame columns in the LiDAR plane (2026-10-05)."""
 
+import base64
 import importlib.util
+import json
 import math
+import numpy as np
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +18,7 @@ import pytest
 import rclpy
 from rclpy.qos import QoSHistoryPolicy, QoSReliabilityPolicy
 import yaml
+import zlib
 
 PACKAGE = Path(__file__).resolve().parents[1]
 MODEL = PACKAGE / 'config/self_filter_hold_flow_model.yaml'
@@ -96,6 +100,60 @@ def test_launch_inserts_the_filter_between_scan_raw_and_scan():
     filtered = nodes[1].parameters[0]
     assert (filtered['input_topic'], filtered['output_topic']) == ('scan_raw', 'scan')
     assert len(load_boxes(filtered['self_boxes_json'])) == 4
+
+
+def test_launch_preserves_the_configured_self_return_coordinate_frame():
+    document = PACKAGE / 'config/self_filter_columns_20261012.yaml'
+    nodes = _lidar_nodes(str(document))
+    assert nodes[1].parameters[0]['base_frame'] == 'laser_link'
+
+
+def test_sensor_frame_columns_preserve_the_original_empirical_beam_mask():
+    document = yaml.safe_load((PACKAGE / 'config/self_filter_columns_20261012.yaml').read_text())
+    source = document['provenance']['coordinate_reframe']
+    previous = load_boxes(json.dumps(source['previous_self_boxes']))
+    current = load_boxes(json.dumps(document['self_boxes']))
+    # A dense set of ray endpoints exercises both near ROI boundaries and
+    # distant returns; neither yaw calibration nor frame labels widen the ROI.
+    total = 0
+    for radius in (.32, .33, .34, .35, 5.):
+        ranges = np.full(72001, radius)
+        for angle_min, increment in [(-math.pi, 2*math.pi/len(ranges)),
+                                     (.9, -2*math.pi/len(ranges))]:
+            old, old_count = filter_ranges(
+                ranges, angle_min, increment, (-.01, 0., math.pi),
+                previous, document['margin_m'])
+            new, new_count = filter_ranges(
+                ranges, angle_min, increment, (0., 0., 0.),
+                current, document['margin_m'])
+            total += old_count
+            assert old_count == new_count
+            np.testing.assert_array_equal(new, old)
+    assert total > 0
+
+
+def test_recorded_post_yaw_self_returns_are_removed_and_rear_box_stays():
+    fixture = PACKAGE.parent / 'jdamr_cube_navigation/test/fixtures/rear_laser_yaw_20261020.json'
+    evidence = json.loads(fixture.read_text())['self_filter_replay']
+    metadata = evidence['scan_metadata']
+    raw = json.loads(zlib.decompress(base64.b64decode(evidence['ranges_zlib_base64'])))
+    ranges = [math.inf if value is None else value for value in raw]
+    document = yaml.safe_load((PACKAGE / 'config/self_filter_columns_20261012.yaml').read_text())
+    out, dropped = filter_ranges(ranges, metadata['angle_min'], metadata['angle_increment'],
+                                 (0., 0., 0.), load_boxes(json.dumps(document['self_boxes'])),
+                                 document['margin_m'])
+    lx, ly, yaw = evidence['laser_pose_m_rad']
+    points = [(lx+r*math.cos(yaw+metadata['angle_min']+i*metadata['angle_increment']),
+               ly+r*math.sin(yaw+metadata['angle_min']+i*metadata['angle_increment']))
+              if math.isfinite(r) else (math.inf, math.inf)
+              for i, r in enumerate(ranges)]
+    for hit in evidence['observed_blocking_points_base_xy_m']:
+        index = min(range(len(points)), key=lambda i: math.dist(points[i], hit))
+        assert math.dist(points[index], hit) < 1e-9
+        assert math.isinf(out[index])
+    rear = [i for i, (x, _y) in enumerate(points) if math.isfinite(x) and x < -.4]
+    assert rear and dropped >= len(evidence['observed_blocking_points_base_xy_m'])
+    assert all(out[i] == ranges[i] for i in rear)
 
 
 def test_launch_refuses_bad_boxes_with_a_clear_message(tmp_path):

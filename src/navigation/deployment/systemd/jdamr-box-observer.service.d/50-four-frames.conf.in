@@ -1,3 +1,3 @@
 [Service]
 ExecStart=
-ExecStart=/bin/bash -c "set +u; source /opt/ros/jazzy/setup.bash; source @JDAMR_WS@/install/setup.bash; exec ros2 run jdamr_cube_navigation depth_box_parking --ros-args --params-file @JDAMR_WS@/install/jdamr_cube_navigation/share/jdamr_cube_navigation/config/depth_box_parking.yaml -p stable_frames:=4"
+ExecStart=/bin/bash -c "set +u; source /opt/ros/jazzy/setup.bash; source @JDAMR_WS@/install/setup.bash; exec ros2 run jdamr_cube_navigation depth_box_parking --ros-args --params-file @JDAMR_WS@/install/jdamr_cube_navigation/share/jdamr_cube_navigation/config/depth_box_parking.yaml -p stable_frames:=4 -p table_components:=${JDAMR_TABLE_COMPONENTS} -p table_tracking:=${JDAMR_TABLE_TRACKING}"

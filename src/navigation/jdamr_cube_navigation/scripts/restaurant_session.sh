@@ -193,6 +193,55 @@ reuse_active_navigation() {
   printf '%s\n' "이는 주행 준비 완료 판정이 아니다. 초기 위치나 이동 명령을 보내지 않았다."
 }
 
+reuse_inactive_navigation() {
+  local identity="$1" snapshot line load_state="" active_state="" sub_state=""
+  local fragment_path="" environment="" expected
+  snapshot=$(systemctl show "$UNIT" --property=LoadState --property=ActiveState \
+    --property=SubState --property=FragmentPath --property=Environment) || \
+    die "$UNIT 중지 설정 조회 실패"
+  while IFS= read -r line; do
+    case "$line" in
+      LoadState=*) load_state="${line#LoadState=}" ;;
+      ActiveState=*) active_state="${line#ActiveState=}" ;;
+      SubState=*) sub_state="${line#SubState=}" ;;
+      FragmentPath=*) fragment_path="${line#FragmentPath=}" ;;
+      Environment=*) environment="${line#Environment=}" ;;
+    esac
+  done <<<"$snapshot"
+  [ "$load_state" != not-found ] || return 1
+  [ "$load_state" = loaded ] || \
+    die "$UNIT load 상태를 확인할 수 없다: ${load_state:-상태 미수신}"
+  [ "$active_state" = inactive ] && [ "$sub_state" = dead ] || \
+    die "$UNIT가 재사용 가능한 inactive/dead 상태가 아니다: ${active_state:-?}/${sub_state:-?}"
+  [ "$fragment_path" = "/run/systemd/transient/$UNIT" ] || \
+    die "$UNIT가 이 스크립트가 만든 transient unit인지 확인할 수 없다; 기존 unit을 변경하지 않았다"
+  expected="JDAMR_RESTAURANT_SESSION_ID=$identity"
+  if [[ " $environment " != *" $expected "* ]]; then
+    die "$UNIT 중지 설정이 요청과 다르다; 기존 unit을 변경하지 않았다"
+  fi
+
+  check_ros_graph_and_sensors
+  sudo -n systemctl start "$UNIT" || die "$UNIT 재기동 요청 실패"
+  snapshot=$(systemctl show "$UNIT" --property=ActiveState --property=Environment) || \
+    die "$UNIT 재기동 결과 조회 실패"
+  active_state=""
+  environment=""
+  while IFS= read -r line; do
+    case "$line" in
+      ActiveState=*) active_state="${line#ActiveState=}" ;;
+      Environment=*) environment="${line#Environment=}" ;;
+    esac
+  done <<<"$snapshot"
+  [ "$active_state" = active ] || \
+    die "$UNIT 재기동 뒤 active가 아니다: ${active_state:-상태 미수신}"
+  if [[ " $environment " != *" $expected "* ]]; then
+    die "$UNIT 재기동 뒤 실행 설정을 확인할 수 없거나 요청과 다르다"
+  fi
+  printf '%s\n' "$UNIT의 같은 설정의 중지된 transient unit을 다시 시작했다."
+  printf '%s\n' "이는 주행 준비 완료 판정이 아니다. 초기 위치나 이동 명령을 보내지 않았다."
+  return 0
+}
+
 run_navigation() {
   local parking_contract
   local coordinated=true navigation_autostart=true
@@ -230,6 +279,9 @@ start_navigation() {
   reject_conflicting_services
   if system_service_state "$UNIT"; then
     reuse_active_navigation "$identity"
+    return
+  fi
+  if reuse_inactive_navigation "$identity"; then
     return
   fi
   check_ros_graph_and_sensors
