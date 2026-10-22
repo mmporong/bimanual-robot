@@ -1,6 +1,7 @@
 """Approach a mapped table region, then park using a fresh observed surface."""
 
 import argparse
+import hashlib
 from collections import deque
 import fcntl
 from itertools import islice
@@ -640,13 +641,26 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 self.observer_parameters = client
             if not client.wait_for_services(timeout_sec=1.0):
                 raise RuntimeError('observer parameter service unavailable')
-            response = self._wait(client.set_parameters_atomically([
+            observer_parameters = [
                 Parameter('maximum_depth_m', value=float(window_m)),
                 Parameter('surface_mode', value=surface_mode),
                 Parameter('camera_height_m', value=height_m),
                 Parameter('camera_roll_rad', value=roll_rad),
                 Parameter('camera_pitch_rad', value=pitch_rad),
-            ]), 2.0).result
+            ]
+            if surface_mode == 'table_edge':
+                enabled = bool(getattr(self, 'pointcloud_perception', False))
+                region = getattr(self, '_pointcloud_target_region_map', None) if enabled else None
+                if enabled and region is None:
+                    raise RuntimeError('pointcloud target region has not been selected')
+                observer_parameters.extend([
+                    Parameter('table_request_enabled', value=enabled),
+                    Parameter('table_target_region_map', value=json.dumps(region) if enabled else ''),
+                    Parameter('table_calibration_id', value=hashlib.sha256(
+                        json.dumps(camera_mount, sort_keys=True).encode()).hexdigest()
+                              if enabled else ''),
+                ])
+            response = self._wait(client.set_parameters_atomically(observer_parameters), 2.0).result
             if response.successful is not True:
                 raise RuntimeError(response.reason or 'observer parameters rejected')
         except Exception as error:
@@ -678,6 +692,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         robot_pose, _ = self.capture_stationary_pose(intermediate=True)
         self._observation_pose_diagnostic(robot_pose, camera_mount, region_xy)
         self._observer_camera_mount = camera_mount
+        if getattr(self, 'pointcloud_perception', False):
+            selected_region = [float(region_xy[0]), float(region_xy[1]), float(region_radius_m)]
+            if selected_region != getattr(self, '_pointcloud_target_region_map', None):
+                reuse_configuration = False
+            self._pointcloud_target_region_map = selected_region
         if (not reuse_configuration and not self._set_depth_window(region_radius_m)
                 and (getattr(self, 'surface_mode', 'front') == 'table_edge'
                      or getattr(self, 'require_observer_configuration', False))):
@@ -2468,6 +2487,8 @@ def parse_args(argv=None):
     parser.add_argument('--zero-turn-final', action='store_true',
                         help='final box approach: turn the residual to the face out in '
                              'place, then close the gap at zero turn rate (precision trial)')
+    parser.add_argument('--pointcloud-perception', action='store_true',
+                        help='send the selected table region to the optional pointcloud observer')
     parser.add_argument('--rpp-transit', action='store_true',
                         help='follow the transit and dock staging legs with RPP on NavFn '
                              'paths (the default; kept for older commands)')
@@ -2502,6 +2523,9 @@ def parse_args(argv=None):
     parser.add_argument('--dwell-s', type=float, default=STOP_DWELL_S,
                         help='held stop at each box (longer for an external gap measurement)')
     args = parser.parse_args(argv)
+    if args.pointcloud_perception and (
+            args.surface_mode != 'table_edge' or args.home_only or args.rear_box_only):
+        parser.error('--pointcloud-perception requires a table_edge approach task')
     if args.final_gap_m is not None and not (
             math.isfinite(args.final_gap_m)
             and MINIMUM_FRONT_GAP_M <= args.final_gap_m <= MAXIMUM_FRONT_GAP_M):
@@ -2612,6 +2636,7 @@ def run_attempt(args, active=None):
                 node.use_transit(args.transit)
             node.camera_on_demand = not args.camera_always_on
             node.surface_mode = args.surface_mode
+            node.pointcloud_perception = getattr(args, 'pointcloud_perception', False)
             node.require_observer_configuration = True
             node.zero_turn_final = args.zero_turn_final
             node.operator_heartbeat = args.operator_heartbeat

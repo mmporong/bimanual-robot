@@ -1,6 +1,7 @@
 """Publish perception-only box-parking observations from Astra depth."""
 
-from dataclasses import replace
+from dataclasses import asdict, replace
+import hashlib
 import json
 import math
 import time
@@ -13,12 +14,17 @@ from jdamr_cube_navigation.box_top_detection import (
     DetectionStability,
 )
 from jdamr_cube_navigation.depth_obstacle_core import _depth_view
-from jdamr_cube_navigation.depth_obstacle_filter import camera_intrinsics
+from jdamr_cube_navigation.depth_obstacle_filter import camera_intrinsics, transform_matrix
 from jdamr_cube_navigation.table_edge_detection import detect_table_edge, TableEdgeConfig
+from jdamr_cube_navigation.table_surface_model import detect_table_scene
+from jdamr_cube_navigation.table_surface_tracking import (
+    candidates_in_region, TableSurfaceTracker, TargetRegion, TrackConfig,
+)
 import numpy as np
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
+from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
@@ -27,8 +33,10 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
+from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
+from tf2_ros import Buffer, TransformException, TransformListener
 
 
 LATEST_SENSOR_QOS = QoSProfile(
@@ -104,6 +112,11 @@ class DepthBoxParkingNode(Node):
             ('stable_lateral_m', 0.03),
             ('stable_angle_deg', 3.0),
             ('surface_mode', 'front'),
+            ('table_components', False),
+            ('table_tracking', False),
+            ('table_request_enabled', False),
+            ('table_target_region_map', ''),
+            ('table_calibration_id', ''),
         ):
             self.declare_parameter(name, value)
         table_defaults = TableEdgeConfig()
@@ -121,6 +134,28 @@ class DepthBoxParkingNode(Node):
         table_values['minimum_normal_y'] = max(
             self._config.minimum_normal_y, table_defaults.minimum_normal_y)
         self._table_config = TableEdgeConfig(**table_values)
+        self._table_components = bool(self.get_parameter('table_components').value)
+        self._table_tracking = bool(self.get_parameter('table_tracking').value)
+        self._table_request_enabled = bool(self.get_parameter('table_request_enabled').value)
+        if self._table_tracking and not self._table_components:
+            raise ValueError('table_tracking requires table_components')
+        if self._table_request_enabled and not self._table_components:
+            raise ValueError('table_request_enabled requires table_components')
+        self._table_tracker = None
+        self._table_region_map = self._parse_table_region(
+            str(self.get_parameter('table_target_region_map').value))
+        self._table_region_odom = None
+        self._table_calibration_id = str(self.get_parameter('table_calibration_id').value)
+        if self._table_request_enabled and (
+                self._table_region_map is None or not self._table_calibration_id.strip()):
+            raise ValueError(
+                'pointcloud request requires a selected region and calibration identity')
+        if self._table_components:
+            self._table_tf = Buffer()
+            self._table_tf_listener = TransformListener(self._table_tf, self)
+        if self._table_tracking:
+            self._table_tracker = TableSurfaceTracker(TrackConfig(
+                required_frames=int(self.get_parameter('stable_frames').value)))
         # The configured range is the ceiling; the executor narrows it per table.
         self._depth_ceiling_m = float(self._config.maximum_depth_m)
         self._stability = DetectionStability(
@@ -168,9 +203,37 @@ class DepthBoxParkingNode(Node):
         """Apply a bounded depth window or a complete camera/surface update."""
         updates = {}
         mode = getattr(self, '_surface_mode', 'front')
+        region = getattr(self, '_table_region_map', None)
+        calibration_id = getattr(self, '_table_calibration_id', '')
+        request_enabled = getattr(self, '_table_request_enabled', False)
         for parameter in parameters:
             value = parameter.value
             name = parameter.name
+            if name == 'table_request_enabled':
+                if not isinstance(value, bool):
+                    return SetParametersResult(
+                        successful=False, reason='request flag must be bool')
+                if value and not getattr(self, '_table_components', False):
+                    return SetParametersResult(
+                        successful=False, reason='table components must be enabled at startup')
+                request_enabled = value
+                continue
+            if name == 'table_target_region_map':
+                if value and not getattr(self, '_table_components', False):
+                    return SetParametersResult(
+                        successful=False, reason='table components must be enabled at startup')
+                try:
+                    region = self._parse_table_region(value)
+                except (ValueError, TypeError):
+                    return SetParametersResult(
+                        successful=False, reason='invalid table target region')
+                continue
+            if name == 'table_calibration_id':
+                if not isinstance(value, str):
+                    return SetParametersResult(
+                        successful=False, reason='invalid calibration identity')
+                calibration_id = value
+                continue
             if name == 'surface_mode':
                 if not isinstance(value, str) or value not in {'front', 'top', 'table_edge'}:
                     return SetParametersResult(successful=False, reason='invalid surface_mode')
@@ -192,6 +255,11 @@ class DepthBoxParkingNode(Node):
                 return SetParametersResult(
                     successful=False, reason='camera_height_m must be positive')
             updates[name] = float(value)
+        if not request_enabled:
+            region, calibration_id = None, ''
+        elif region is None or not calibration_id.strip():
+            return SetParametersResult(
+                successful=False, reason='pointcloud request needs region and calibration ID')
         table_config = getattr(self, '_table_config', None)
         if table_config is None:
             table_values = {
@@ -210,15 +278,42 @@ class DepthBoxParkingNode(Node):
                     successful=False, reason='table_edge depth window is empty')
         common_updates = {name: value for name, value in updates.items()
                           if name in BoxTopConfig.__dataclass_fields__}
-        changed = (candidate_table != table_config
-                   or mode != getattr(self, '_surface_mode', 'front'))
+        reference_changed = (
+            mode != getattr(self, '_surface_mode', 'front')
+            or region != getattr(self, '_table_region_map', None)
+            or request_enabled != getattr(self, '_table_request_enabled', False)
+            or calibration_id != getattr(self, '_table_calibration_id', '')
+            or any(getattr(candidate_table, name) != getattr(table_config, name)
+                   for name in ('camera_height_m', 'camera_roll_rad', 'camera_pitch_rad')))
+        changed = candidate_table != table_config or reference_changed
         if parameters:
             self._config = replace(self._config, **common_updates)
             self._table_config = candidate_table
             self._surface_mode = mode
+            self._table_region_map = region
+            self._table_request_enabled = request_enabled
+            self._table_calibration_id = calibration_id
+            if reference_changed:
+                self._table_region_odom = None
             if changed:
                 self._stability.update(None)
+                if getattr(self, '_table_tracker', None) is not None:
+                    self._table_tracker.reset()
         return SetParametersResult(successful=True)
+
+    @staticmethod
+    def _parse_table_region(value):
+        """Decode an explicit map-frame center and radius, or no selection prior."""
+        if not isinstance(value, str):
+            raise ValueError('table region must be JSON text')
+        if not value:
+            return None
+        region = json.loads(value)
+        if (not isinstance(region, list) or len(region) != 3
+                or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                       or not math.isfinite(v) for v in region) or region[2] <= 0.):
+            raise ValueError('table region must be finite [map_x, map_y, radius]')
+        return tuple(float(v) for v in region)
 
     def _on_camera_info(self, message: CameraInfo) -> None:
         self._camera_info = message
@@ -237,6 +332,8 @@ class DepthBoxParkingNode(Node):
     def _reject(self, reason: str, **details) -> None:
         """Clear consecutive stability after any unusable observation."""
         self._stability.update(None)
+        if getattr(self, '_table_tracker', None) is not None:
+            self._table_tracker.reset()
         self._publish({
             'detected': False,
             'stable': False,
@@ -244,6 +341,53 @@ class DepthBoxParkingNode(Node):
             'reason': reason,
             **details,
         })
+
+    def _table_observation(self, depth_mm, intrinsics, stamp_s, frame_id):
+        """Adapt optional component/tracking output to the existing observer contract."""
+        if (not getattr(self, '_table_components', False)
+                or not getattr(self, '_table_request_enabled', False)):
+            return detect_table_edge(depth_mm, intrinsics, self._table_config), {}, None
+        scene = detect_table_scene(depth_mm, intrinsics, self._table_config)
+        fields = {
+            'table_component_count': len(scene.component_sizes),
+            'table_candidate_count': len(scene.candidates),
+            'table_evaluated_components': scene.evaluated_components,
+        }
+        region_map = getattr(self, '_table_region_map', None)
+        if self._table_tracker is None and region_map is None:
+            return (scene.candidates[0] if len(scene.candidates) == 1 else None), fields, None
+        stamped = self._table_tf.lookup_transform(
+            'odom', frame_id, Time(seconds=stamp_s), timeout=Duration(seconds=.05))
+        transform = transform_matrix(stamped.transform)
+        if region_map is not None and getattr(self, '_table_region_odom', None) is None:
+            map_tf = self._table_tf.lookup_transform(
+                'odom', 'map', Time(seconds=stamp_s), timeout=Duration(seconds=.05))
+            map_to_odom = transform_matrix(map_tf.transform)
+            center = map_to_odom @ np.array([*region_map[:2], 0., 1.])
+            self._table_region_odom = TargetRegion(tuple(center[:2]), region_map[2])
+        region = getattr(self, '_table_region_odom', None)
+        if self._table_tracker is None:
+            selected = candidates_in_region(scene.candidates, transform, region)
+            return (selected[0] if len(selected) == 1 else None), fields, None
+        calibration_id = hashlib.sha256(json.dumps({
+            'table_config': asdict(self._table_config),
+            'intrinsics': asdict(intrinsics), 'frame_id': frame_id,
+            'mount_revision': getattr(self, '_table_calibration_id', ''),
+        }, sort_keys=True).encode()).hexdigest()
+        track = self._table_tracker.update(
+            scene.candidates, stamp_s, transform, calibration_id, region)
+        fields.update({
+            'table_track_state': track.state,
+            'table_track_id': track.track_id,
+            'table_measurement_stamp_s': track.measurement_stamp_s,
+            'table_track_frame_count': track.stable_frames,
+            'table_edge_endpoints_odom_m': track.endpoints_odom_m,
+        })
+        # Predicted geometry is diagnostic only. It must not become a fresh
+        # detected/stable observation consumed by the current parking executor.
+        stable = (track.state == 'observed'
+                  and track.stable_frames >= self._table_tracker.config.required_frames)
+        return track.detection, fields, stable
 
     def _on_depth(self, message: Image) -> None:
         now_s = time.monotonic()
@@ -254,13 +398,15 @@ class DepthBoxParkingNode(Node):
             self._reject('camera_info_missing')
             return
         try:
+            table_fields, table_stable = {}, None
             ros_now_s = self.get_clock().now().nanoseconds * 1e-9
             depth_mm, intrinsics, stamp_s, age_s = decode_depth_observation(
                 self._camera_info, message, self._optical_frame,
                 self._calibration_model, ros_now_s,
                 self._max_image_age_s)
             if self._surface_mode == 'table_edge':
-                detection = detect_table_edge(depth_mm, intrinsics, self._table_config)
+                detection, table_fields, table_stable = self._table_observation(
+                    depth_mm, intrinsics, stamp_s, message.header.frame_id)
             else:
                 detector = detect_box_front if self._surface_mode == 'front' else detect_box_top
                 detection = detector(depth_mm, intrinsics, self._config)
@@ -271,6 +417,9 @@ class DepthBoxParkingNode(Node):
         except np.linalg.LinAlgError as error:
             self._reject(f'numerical_detection_failure:{error}')
             return
+        except TransformException as error:
+            self._reject(f'table_tracking_transform_unavailable:{error}')
+            return
         input_age_s = age_s
         age_s = self.get_clock().now().nanoseconds * 1e-9 - stamp_s
         timing = {
@@ -278,15 +427,20 @@ class DepthBoxParkingNode(Node):
             'processing_duration_s': time.monotonic() - now_s,
         }
         stable = self._stability.update(detection)
+        if table_stable is not None:
+            stable = table_stable
+        stable_frame_count = table_fields.get(
+            'table_track_frame_count', self._stability.frame_count)
         if detection is None:
             self._publish({
                 'stamp_s': stamp_s,
                 'age_s': age_s,
                 **timing,
+                **table_fields,
                 'frame_id': message.header.frame_id,
                 'detected': False,
                 'stable': False,
-                'stable_frame_count': self._stability.frame_count,
+                'stable_frame_count': stable_frame_count,
                 'reason': ('no_table_edge_candidate' if self._surface_mode == 'table_edge'
                            else 'no_box_surface_candidate'),
                 'control_ready': False,
@@ -307,10 +461,11 @@ class DepthBoxParkingNode(Node):
             'stamp_s': stamp_s,
             'age_s': age_s,
             **timing,
+            **table_fields,
             'frame_id': message.header.frame_id,
             'detected': True,
             'stable': stable,
-            'stable_frame_count': self._stability.frame_count,
+            'stable_frame_count': stable_frame_count,
             'surface_kind': detection.surface_kind,
             **edge_fields,
             'front_distance_m': detection.front_distance_m,

@@ -962,6 +962,8 @@ def run_cycle(args, state, table_id):
                    + (' --home-only ' if args.dock_only else '')
                    + (' --graceful-final ' if args.graceful_final else '')
                    + (' --rpp-transit ' if getattr(args, 'rpp_transit', False) else '')
+                   + (' --pointcloud-perception '
+                      if getattr(args, 'pointcloud_perception', False) else '')
                    + (f' --transit {args.transit} ' if getattr(args, 'transit', None) else '')
                    + (f' --final-gap-m {args.final_gap_m} '
                       if getattr(args, 'final_gap_m', None) is not None else '')
@@ -1531,6 +1533,8 @@ def main():
                     help='Graceful box approach and dock leg instead of RPP (default)')
     go.add_argument('--zero-turn-final', action='store_true',
                     help='final box approach: trim the residual in place, then zero-turn straight')
+    go.add_argument('--pointcloud-perception', action='store_true',
+                    help='use the optional depth pointcloud observer and selected table region')
     go.add_argument('--rpp-transit', action='store_true',
                     help='RPP on NavFn paths for the transit and staging legs (the default)')
     go.add_argument('--transit', choices=('lattice-mppi', 'navfn-mppi', 'navfn-rpp'),
@@ -1560,6 +1564,9 @@ def main():
     routes.add_argument('--start', nargs=3, type=float, required=True,
                         metavar=('X', 'Y', 'YAW_RAD'))
     args = parser.parse_args()
+    if args.command == 'go' and args.pointcloud_perception and (
+            args.surface_mode != 'table_edge' or args.dock_only or args.rear_box_only):
+        parser.error('--pointcloud-perception requires a table_edge approach task')
     handlers = {'sync': cmd_sync, 'display-start': cmd_display_start,
                 'display-stop': cmd_display_stop, 'session-start': cmd_session_start,
                 'session-stop': cmd_session_stop, 'init': cmd_init, 'go': cmd_go,

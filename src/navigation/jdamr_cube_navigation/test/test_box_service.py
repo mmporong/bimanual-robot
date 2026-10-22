@@ -838,6 +838,22 @@ def test_parser_does_not_enable_execution_by_default():
     assert args.candidate_trial is False
 
 
+def test_pointcloud_parser_accepts_only_table_edge_approach_tasks():
+    base = [
+        '--registry', '/r', '--approach-route', '/a', '--camera-mount', '/c',
+        '--geometry', '/g', '--log', '/l', '--parking-contract', '/p',
+        '--table-id', 'table_01', '--region-xy', '1.896', '0.303',
+        '--pointcloud-perception',
+    ]
+    assert parse_args([*base, '--surface-mode', 'table_edge']).pointcloud_perception
+    for extra in (['--surface-mode', 'front'],
+                  ['--surface-mode', 'table_edge', '--home-only'],
+                  ['--surface-mode', 'table_edge', '--rear-box-only']):
+        with pytest.raises(SystemExit) as error:
+            parse_args([*base, *extra])
+        assert error.value.code == 2
+
+
 def test_parser_requires_explicit_candidate_trial_for_execution():
     base = [
         '--registry', '/r', '--approach-route', '/a', '--camera-mount', '/c',
@@ -2088,6 +2104,29 @@ class _ParameterClientStub:
             successful=self.successful, reason='' if self.successful else 'rejected'))
 
 
+def test_pointcloud_mode_passes_the_selected_region_and_complete_mount_revision():
+    node = object.__new__(BoxServiceRoute)
+    node.emit = lambda *args, **kwargs: None
+    node._wait = lambda future, timeout_s: future
+    node.observer_parameters = _ParameterClientStub()
+    node.pointcloud_perception, node.surface_mode = True, 'table_edge'
+    node._pointcloud_target_region_map = [1., 2., .3]
+    mount = yaml.safe_load(CAMERA_MOUNT.read_text())
+    assert node._configure_observer(mount, .3)
+    requested = dict(node.observer_parameters.requests[0])
+    assert requested['table_request_enabled'] is True
+    assert json.loads(requested['table_target_region_map']) == [1., 2., .3]
+    first = requested['table_calibration_id']
+    mount['camera_mount']['transform']['yaw_rad'] += .01
+    assert node._configure_observer(mount, .3)
+    assert dict(node.observer_parameters.requests[1])['table_calibration_id'] != first
+    node.pointcloud_perception = False
+    assert node._configure_observer(mount, .3)
+    disabled = dict(node.observer_parameters.requests[2])
+    assert disabled['table_request_enabled'] is False
+    assert disabled['table_target_region_map'] == disabled['table_calibration_id'] == ''
+
+
 @pytest.mark.parametrize('distance_m, radius_m, expected_m', [
     (0.746, 0.4, 1.146),     # table_01 15:37: the 1.33 m wall is left out
     (1.9, 0.4, 2.0),         # never wider than the configured observer range
@@ -2107,6 +2146,8 @@ def test_observation_atomically_configures_mode_mount_and_depth(
     requested = dict(node.observer_parameters.requests[0])
     transform = mount['camera_mount']['transform']
     assert requested.pop('surface_mode') == 'table_edge'
+    assert requested.pop('table_request_enabled') is False
+    assert requested.pop('table_target_region_map') == requested.pop('table_calibration_id') == ''
     assert requested == pytest.approx({
         'maximum_depth_m': expected_m,
         'camera_height_m': transform['z_m'],

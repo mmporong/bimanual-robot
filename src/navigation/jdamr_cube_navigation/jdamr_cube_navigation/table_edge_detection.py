@@ -271,6 +271,13 @@ def detect_table_edge(
     _validate_table_config(config)
     points_optical, columns, rows = depth_points(
         depth_mm, intrinsics, config)
+    return _detect_table_edge_points(
+        depth_mm, intrinsics, config, points_optical, columns, rows)
+
+
+def _detect_table_edge_points(depth_mm, intrinsics, config,
+                              points_optical, columns, rows):
+    """Fit one component while retaining the original background evidence."""
     if len(points_optical) < config.minimum_inliers:
         return None
 

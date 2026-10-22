@@ -536,6 +536,31 @@ def test_go_passes_the_rpp_transit_switch_only_when_asked(env, monkeypatch):
     assert '--rpp-transit' in seen[1]
 
 
+def test_go_passes_the_pointcloud_switch_only_when_asked(env, monkeypatch):
+    seen = []
+    for second, extra in enumerate(({}, {'pointcloud_perception': True})):
+        monkeypatch.setattr(d.time, 'strftime', lambda _fmt, s=second: f'20261002_11000{s}')
+        pi = ExecutorPi()
+        monkeypatch.setattr(d, 'pi', pi)
+        monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
+        d.run_cycle(go_args(**extra), d.load_state(), 'table_02')
+        seen.append(json.loads(next(s for s in pi.stdins if s))['argv'])
+    assert '--pointcloud-perception' not in seen[0]
+    assert '--pointcloud-perception' in seen[1]
+
+
+@pytest.mark.parametrize('extra', [
+    ['--surface-mode', 'front'], ['--dock-only'], ['--rear-box-only'],
+])
+def test_pointcloud_cli_rejects_tasks_that_do_not_use_table_observation(env, monkeypatch, extra):
+    monkeypatch.setattr(d.sys, 'argv', ['jdamr_depart.py', 'go', 'table_01',
+                                      '--pointcloud-perception', *extra])
+    monkeypatch.setattr(d, 'cmd_go', lambda _args: pytest.fail('invalid task was dispatched'))
+    with pytest.raises(SystemExit) as error:
+        d.main()
+    assert error.value.code == 2
+
+
 def test_go_passes_the_transit_variant(env, monkeypatch):
     monkeypatch.setattr(d.time, 'strftime', lambda _fmt: '20261006_110000')
     pi = ExecutorPi()
