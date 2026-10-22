@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-23 | 점군 개발판 Pi 배포·무이동 입력과 부분 부하 확인
+
+- 사용자 요청으로 `5c29ac1`을 Pi stage에 전송하고 9개 패키지 빌드(3분 1초)·설치 경로/모듈 SHA 확인 뒤 source/install/tools를 승격했다. 지도·목적지·keepout·장착값은 보존했다. stage 82 MiB·백업 88 MiB, 디스크 여유 15 GiB다. 원래 주행 worktree는 변경하지 않았다.
+- rsync SSH transport 끝의 `--` 뒤로 rsync가 `-l 사용자`를 삽입해 `hostname contains invalid characters`로 전송 실패하던 원인을 수정했다. 독립 ssh와 rsync 파일 경계의 `--`·호스트/경로 검증은 유지한다. 실제 rsync+연결 없는 `ssh -G` 회귀가 수정 전 실패·수정 후 통과했고 관련 17건·fatal lint·compile·diff와 독립 리뷰를 통과했다.
+- 기존 센서 유닛·DDS 설정·stable 8프레임을 보존하고 선택형 capability만 설치했다. 도크에서 통로를 보는 정지 장면에서 같은 개발판의 요청 OFF/ON을 각 20초 비교했다. observer CPU는 한 코어 기준 55.63→69.39%, 프로세스 트리 peak RSS 100.96→101.50 MiB, Pi 전체 CPU 39.78→42.08%, 최소 가용 RAM 약 2.7 GiB·최고 65.24℃였다. 새 경로는 TF 연결 실패 후 반환하므로 정상 추적·최악 부하 측정이 아니다.
+- 기존 LOCALHOST DDS에서 새 노드 생성 hang이 재현됐다. 임시 UDP loopback 설정에서 깊이·odom 입력은 수신했으나 차체와 카메라의 TF 트리가 연결되지 않아 추적은 `table_tracking_transform_unavailable` 94회로 미검증이다. 물체 정답 없는 통로 장면이며 바닥·의자 가림 가능성을 기록했다. 새 깊이 90장 오프라인 재생은 기존/성분별 각 0검출·성분 p95 112.44 ms였고 동기 odom·독립 정확도는 없다. 이 재생 시간을 Pi live 지연으로 해석하지 않는다. 통신/좌표 통합 문제와 검출 정확도를 혼동하지 않는다.
+- 시험 뒤 요청 false·센서 inactive·임시 DDS override/진단 프로세스 제거를 확인했다. base PID99657·Nav2 PID99423 유지, executor PID104674는 idle serve, spool request/running0이다. 새 속도 명령·action·위치초기화는 없었다. 기존 Nav2 identity 불일치는 건드리지 않았으며 주행 준비 완료를 주장하지 않는다. 유지 서비스 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다.
+- 결과·근거·남은 문제는 [개발판 안내](docs/guides/AMR_POINTCLOUD_DOCKING.md)에 정리했다. PC 근거는 `$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/`, Pi 백업은 `$HOME/jdamr_deploy/bimanual_backup_pointcloud_5c29ac1_20261023_073244/`다. 이번 수정과 기록은 목적 브랜치의 로컬 커밋 범위이며 추가 push/main 병합은 하지 않는다.
+
 ## 2026-10-22 | 뎁스 포인트클라우드 분리·odom 추적·선택형 관측 연결
 
 - 기준선 `1626d47` 위에 organized XYZ 인접 성분 분리, 성분별 기존 상판 경계 맞춤, 취득 시각 odom 보상 추적과 재생 CLI를 구현했다. ICP·PCL·새 옆면 평면 맞춤·상판 점유 모델은 추가하지 않았다. 기존 AMCL·NavFn·RPP·장애물 입력·최종 1 cm 판정을 유지한다.

@@ -2,7 +2,7 @@
 
 깊이 영상에서 복원한 XYZ 점군을 책상별 후보로 나누고, 로봇 이동을 보상해 같은 접근면을 추적하는 선택형 관측 경로다. 기존 주차 제어기·1 cm 목표·AMCL·NavFn·RPP는 유지한다. 기존 장애물용 PointCloud2·VoxelLayer 경로와 이번 정밀 관측 경로는 용도가 다르다.
 
-현재는 로컬 구현·합성 회귀·보존 영상 재생 단계다. Pi 배포, 이동 중 실측, 상판 점유 통합, 반복 주차 성능은 확인 전이다. 전체 개발 목표와 판정 기준은 [개발 계획](../plans/AMR_POINTCLOUD_DOCKING_PLAN.md)에 있다.
+현재는 구현·합성 회귀·영상 재생과 Pi 무이동 배포 시험 단계다. Pi에서 깊이 입력과 부분 부하는 측정했으나 카메라와 차체의 TF 연결을 수신하지 못해 추적 통합은 확인 전이다. 이동 중 실측, 상판 점유 통합, 반복 주차 성능도 남아 있다. 전체 개발 목표와 판정 기준은 [개발 계획](../plans/AMR_POINTCLOUD_DOCKING_PLAN.md)에 있다.
 
 ## 구현과 경계
 
@@ -42,7 +42,7 @@
 
 관측기만 띄우는 launch에는 capability인 `table_components`, `table_tracking`이 있으며 기본값은 모두 `false`다. `table_tracking=true`에는 `table_components=true`가 필요하다. 실행별 요청·유효한 대상 영역·비어 있지 않은 보정 ID는 실행기가 동적으로 함께 설정한다. 관측 범위만 바꿀 때는 추적 안정성을 새로 채우지만, 이미 고정한 odom 대상 영역을 map에서 다시 변환하지 않는다.
 
-이번 개발에서는 env 파일 설치·서비스 재시작·파이 배포·실물 이동을 실행하지 않았다. 기존 운영 worktree도 변경하지 않았다.
+2026-10-23 사용자 요청으로 Pi에 capability와 개발판을 설치하고 센서만 켜 시험했다. 실행별 요청은 시험 뒤 false로 복원했다. 실물 이동과 기존 운영 worktree 수정은 없으며 상세는 아래 정지 시험 기록에 있다.
 
 ## 오프라인 재생
 
@@ -84,9 +84,46 @@ npz에는 uint16 mm `depth`와 `intrinsics=[fx,fy,cx,cy]` 또는 유효한 recti
 
 최종 재생 근거는 위 명령의 `replay_final/000`과 `replay_final/001`이다. 기록에는 이 PC의 오프라인 처리 시간만 있으며 Pi CPU·RSS·DDS·제동 지연의 근거로 쓰지 않는다.
 
+## 2026-10-23 Pi 배포와 정지 시험
+
+### 배포 범위와 보존
+
+- 소스 `5c29ac1`의 9개 패키지를 Pi에서 2개 병렬 작업으로 빌드했다(3분 1초). 모듈 설치 경로와 점군 4개 모듈의 PC/Pi SHA 일치를 확인하고 source/install/tools 슬롯을 승격했다.
+- Pi stage는 `$HOME/jdamr_deploy/bimanual_stage_pointcloud_5c29ac1_20261023_073244`(82 MiB), 이전 슬롯은 `$HOME/jdamr_deploy/bimanual_backup_pointcloud_5c29ac1_20261023_073244`(88 MiB)에 보존했다. 지도·목적지·keepout·장착 설정은 교체하지 않았다. 최종 디스크 여유는 15 GiB였다. 백업은 복원용 파일이며 실행 중 서비스를 둔 채 슬롯만 바꾸는 복원은 검증하지 않았다.
+- 기존 observer 유닛·`90-local-dds.conf`의 SHA와 stable 8프레임을 보존하고 `85-pointcloud-capability.conf`와 `$HOME/jdamr_deploy/pointcloud_observer.env`만 추가했다. capability는 true, 실행별 요청은 시험 전후 false다. `50-four-frames`는 설치하지 않았다.
+- 기존 base PID99657·Nav2 PID99423은 재시작하지 않았다. idle executor만 교체해 최종 PID104674의 `box_service --serve`를 확인했다. 센서 두 서비스는 시험 뒤 inactive/MainPID0이며 임시 진단 프로세스와 UDP override를 제거했다. 요청/실행 spool은 모두 0이다. 속도 발행·action·위치초기화는 수행하지 않았다.
+
+### 실제 입력과 자원
+
+배치는 사용자가 확인한 도크→통로 방향이다. 의자가 책상면을 가리거나 바닥만 보일 수 있고 물체 정답 주석은 없다. 실제 `16UC1` 깊이·rectified P·광학 프레임 이름·취득 시각을 저장했다. 장착 모델 투영에서는 낮은 높이의 넓은 점군과 검색 높이 일부 점이 보이지만 책상임을 확인한 것은 아니다. 물체·거리 정확도나 미검출 원인의 근거로 쓰지 않는다.
+
+같은 capability 활성화 binary·같은 PID·정지 장면에서 요청 OFF/ON을 각 20초 비교했다. CPU는 한 코어 100% 기준이며 전체 Pi CPU만 4코어 합계 100% 기준이다. RSS는 프로세스 트리 합산으로 공유 페이지가 중복될 수 있다.
+
+| 항목 | 기존 요청 OFF | 점군 요청 ON |
+|---|---:|---:|
+| 깊이 수신 / 상태 메시지 | 525 / 94 | 526 / 94 |
+| observer CPU / peak RSS | 55.63% / 100.96 MiB | 69.39% / 101.50 MiB |
+| 카메라 CPU / peak RSS | 22.94% / 147.50 MiB | 21.60% / 147.50 MiB |
+| Pi 전체 CPU | 39.78% | 42.08% |
+| 최소 가용 RAM | 2,806.80 MiB | 2,802.80 MiB |
+| 최고 온도 / 최소 배터리 | 63.78℃ / 12.392 V | 65.24℃ / 12.384 V |
+| 검출 / stable | 0 / 0 | 0 / 0 |
+
+새 경로는 성분 처리 뒤 `table_tracking_transform_unavailable`로 94회 반환됐다. 정상 추적의 처리 지연은 측정되지 않았으며 위 수치를 성공 경로·최악 부하·주행 성능으로 일반화하지 않는다. 기존 요청 OFF도 새 binary이므로 구버전 설치본 대비 메모리 절감 비교가 아니다. 속도 명령 수신은 전 구간 0건, odom의 한 구간 최대 XY 변화는 약 0.025 mm였으며 외부 이동 실측은 아니다.
+
+저장한 새 깊이 90장을 ROS 노드 없이 오프라인 재생했다. 기존/성분별 모두 90장 중 0장 검출했고, 성분 처리 p50 109.30 ms·p95 112.44 ms다. 실행 호스트를 이 summary만으로 확정하지 않으며 위 Pi live 자원 표와 합쳐 성능을 해석하지 않는다. live DDS·추적·제어 전체 지연도 아니다. 동기 odom 변환이 없어 추적 평가와 독립 정확도 평가는 수행하지 못했다.
+
+### 남은 통합 문제
+
+1. 기존 LOCALHOST DDS 환경에서 새 노드가 `rclpy.Node` 생성 중 멈췄다. 정리 후에도 재현됐고 메모리 고갈 원인은 확인되지 않았다. 기존 base/Nav2는 유지했다. 저장소의 UDP loopback XML을 센서·진단에만 임시 적용했을 때 새 노드와 실제 입력 수신이 가능했다. 이 우회는 시험 뒤 제거했으며 영구 해결이 아니다.
+2. 임시 UDP 경로에서 `odom→base_footprint`와 `camera_link→camera_color_optical_frame`은 각각 수신했으나 두 트리를 잇는 차체 정적 TF와 `map→odom`은 수신하지 못했다. 취득 시각 odom←optical 기록은 0개다. URDF 오류로 확정하지 않으며 기존 정적 TF의 late join/DDS 수신을 구분해야 한다. 임의 static TF나 pose를 만들지 않았다.
+3. active Nav2 identity와 현재 registry 입력의 불일치는 배포 전부터 있었다. 관련 입력 4개 SHA가 전후 같음을 확인했고 이번 작업에서 identity 갱신·Nav2 재시작은 하지 않았다. 서비스 active만으로 주행 준비 완료라고 판정하지 않는다.
+
+근거 원본은 Pi `$HOME/jdamr_deploy/pointcloud_check_20261023_073244/`, 회수본은 PC `$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/pi/`다. 주요 파일은 `promotion_and_service_receipt.json`, `cleanup_receipt.json`, `measurements/summary.json`, `measurements/*_raw.npz`, `replay_manifest.json`, `replay/summary.json`과 `replay/frames.csv`다. PC 상위 폴더의 `motion_before_bounded.txt`, `join_after_cleanup.txt`, `stationary_probe_live.log`, `pi_replay_run.txt`에 통신·실행 기록을 보존했다. `depth_pointcloud_preview.png`는 대표 깊이와 장착 모델 투영이며 독립 보정·물체 정답 그림이 아니다. 임시 수집기 자체의 초기 실패 기록은 최종 비교와 혼용하지 않는다.
+
 ## 다음 실증에 필요한 입력
 
-1. 현재 장착의 깊이·CameraInfo·취득 시각 TF/odom을 같은 기록에 보존한다. 정지/이동, 인접 책상, 경계 가림을 구분한다.
+1. DDS 합류·차체 정적 TF 수신 문제를 분리한 뒤 현재 장착의 깊이·CameraInfo·취득 시각 TF/odom을 같은 기록에 보존한다. 정지/이동, 인접 책상, 경계 가림을 구분한다.
 2. 보정용과 겹치지 않는 장면의 거리·각도 외부 기준을 확보한다. 같은 프레임에서 유도한 장착값을 그 프레임의 거리 정답으로 쓰지 않는다.
 3. S1 정확도를 확인한 뒤 추적 인계와 상판 점유를 평가한다. Pi 성능·실차 반복 주차·전체 왕복은 각각 별도 지표로 남긴다.
 

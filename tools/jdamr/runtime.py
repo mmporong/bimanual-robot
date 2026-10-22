@@ -11,7 +11,6 @@ from pathlib import PurePosixPath
 import re
 import shlex
 import subprocess
-import sys
 import time
 
 from _common import (
@@ -95,7 +94,7 @@ def ssh_script(host: str, script: str) -> list[str]:
 def rsync_argv(source: str, host: str, destination: str, *options: str) -> list[str]:
     return [
         "rsync", "-a", "--protect-args", *options,
-        "-e", "ssh -o BatchMode=yes -o ConnectTimeout=8 --", "--",
+        "-e", "ssh -o BatchMode=yes -o ConnectTimeout=8", "--",
         source, f"{host}:{destination}",
     ]
 
