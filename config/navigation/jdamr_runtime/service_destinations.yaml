@@ -8,13 +8,13 @@ map:
 keepout:
   yaml_path: /home/lim/jdamr_data/map_20260930_manual/aligned/keepout.yaml
   yaml_sha256: 41889c8a8d16fa94ad2e5c0fe730d2227676adf54b4ea93a8c2b267d54939344
-  image_sha256: 334370d62965730df807a1a2a42a9145429551c95947b0b369bd877e01cb7283
+  image_sha256: 834b0823b6796334527390f843f5a26d9b9d3336a5ed1417f4cd7c7d21cb2af8
 home:
   id: home_dock
   priority: 1
-  x_m: 0.12002282933008113
-  y_m: 0.16495971131874898
-  yaw_rad: 0.13404527824949672
+  x_m: 0.12008615097933663
+  y_m: 0.1643492138603425
+  yaw_rad: 0.07265838222390375
   approach_offset_m: 0.6
   target_front_gap_m: null
   teaching:
@@ -49,4 +49,20 @@ home:
   parking_direction: reverse
   rear_parking_reference: lidar_box
   target_rear_gap_m: 0.01
+  laser_extrinsic_reframe:
+    method: H_new=H_old*L_old*inverse(L_new)
+    previous_pose_map:
+    - 0.12002282933008113
+    - 0.16495971131874898
+    - 0.13404527824949672
+    previous_laser:
+    - -0.01
+    - 0.0
+    - 3.141592653589793
+    new_laser:
+    - -0.01
+    - 0.0
+    - 3.202979549615386
+    physical_home_changed: false
+    status: provisional_single_pose_same_surface_not_repeatability_validated
 tables: []

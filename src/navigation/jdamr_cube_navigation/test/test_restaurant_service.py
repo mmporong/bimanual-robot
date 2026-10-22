@@ -84,14 +84,16 @@ def test_frozen_path_still_rejects_missing_map_to_odom():
 
 
 @pytest.mark.parametrize('requested_deg', [-159., 159.])
-def test_large_staging_turn_cruises_then_brakes_without_reversing(requested_deg):
+def test_large_staging_turn_cruises_then_brakes_without_reversing(requested_deg, monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     yaw, elapsed, rates = [0.0], [0.0], []
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
         transform=SimpleNamespace(rotation=SimpleNamespace(
             x=0., y=0., z=math.sin(yaw[0] / 2), w=math.cos(yaw[0] / 2)))))
 
-    def direct(command, done, measure, deadline, event):
+    def direct(command, done, measure, deadline, event, watch=None):
         while not done(measure()):
             rates.append(command.angular.z)
             yaw[0] += command.angular.z * .02
@@ -244,6 +246,41 @@ def test_dock_departure_finishes_straight_before_transit_can_turn(dock_departure
     assert kwargs['controller_id'] == 'Parking'
     assert kwargs['final'] is False
     node._frozen_in_odom.assert_called_once_with(path)
+
+
+def test_return_clearance_uses_guarded_motion_without_a_departure_waypoint(
+        dock_departure_static_corridor):
+    node = dock_departure_route()
+    node.emit = Mock()
+    node.waypoints = [{'id': 'home_dock_approach', 'x': 0.1, 'y': 0.0}]
+    node.config = {**node.config, 'waypoints': node.waypoints}
+    saved_config, saved_waypoints = node.config, node.waypoints
+    assert node._clear_rear_dock_straight(.2)
+    assert node.config is saved_config and node.waypoints is saved_waypoints
+    dock_departure_static_corridor.assert_called_once()
+    assert node._execute_reverse_once.call_args.kwargs['motion'] == 'rear_dock_clearance'
+    names = [call.args[0] for call in node.emit.call_args_list]
+    assert 'rear_dock_clearance_finished' in names
+    assert 'dock_departure_started' not in names
+    with pytest.raises(ValueError, match='first home_exit'):
+        node._depart_dock_straight(.2)
+
+
+@pytest.mark.parametrize('blocked,stopped,failed', [
+    (True, False, False), (False, True, False), (False, False, True)])
+def test_return_clearance_preserves_obstacle_stop_and_action_failure(
+        dock_departure_static_corridor, blocked, stopped, failed):
+    node = dock_departure_route()
+    node.waypoints = [{'id': 'home_dock_approach', 'x': 0.1, 'y': 0.0}]
+    node.config = {**node.config, 'waypoints': node.waypoints}
+    original = node._dock_departure = {'saved_departure': True}
+    node.stop_requested = stopped
+    node._execute_reverse_once.return_value = not failed
+    dock_departure_static_corridor.return_value = not blocked
+    assert not node._clear_rear_dock_straight(.2)
+    assert node._dock_departure is original
+    if blocked or stopped:
+        node._execute_reverse_once.assert_not_called()
 
 
 @pytest.mark.parametrize('blocked,stopped,failed', [(True, False, False),
@@ -953,6 +990,50 @@ def test_reverse_follow_path_preserves_verifier_and_terminal_outcome(status, con
     assert node._verify_parking_stop.called is (status == GoalStatus.STATUS_SUCCEEDED)
 
 
+@pytest.mark.parametrize('case', ['handoff', 'outside', 'stop', 'link', 'nav', 'cancel_failed'])
+def test_intermediate_reverse_position_handoff_keeps_abort_and_cancel_checks(monkeypatch, case):
+    node = reverse_route()
+    running = SimpleNamespace(done=Mock(side_effect=[False, True]), result=Mock(
+        return_value=SimpleNamespace(status=GoalStatus.STATUS_ABORTED,
+                                     result=SimpleNamespace(error_code=105))))
+    accepted = handle(future=running)
+    node.follow_reverse = Mock()
+    node.follow_reverse.send_goal_async.return_value = done(accepted)
+    node._departure_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node._operator_link_ready = Mock(return_value=True)
+    node._odom_pose = Mock(return_value=((.9, 0., 1.2) if case == 'outside'
+                                       else (.96, .01, 1.2)))
+    node.finish_navigation = Mock(return_value=case != 'cancel_failed')
+    node.emit = Mock()
+    node._route_event = Mock()
+    node._verify_parking_stop = Mock(side_effect=AssertionError('intermediate is not final'))
+    def spin(*_args, **_kwargs):
+        if case == 'stop':
+            node.stop_requested = True
+        if case == 'link':
+            node._operator_link_ready.return_value = False
+        if case == 'nav':
+            node._navigation_ready.return_value = False
+    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    path = RosPath()
+    path.header.frame_id = 'odom'
+    endpoint = PoseStamped()
+    endpoint.pose.position.x = 1.
+    path.poses = [endpoint]
+    kwargs = dict(goal_checker_id='dock_position_checker', final=False,
+                  position_handoff_m=.05)
+    if case == 'cancel_failed':
+        with pytest.raises(RuntimeError, match='cancellation unconfirmed'):
+            node._execute_reverse_once(path, **kwargs)
+    else:
+        assert node._execute_reverse_once(path, **kwargs) is (case == 'handoff')
+    node.finish_navigation.assert_called_once()
+    node._verify_parking_stop.assert_not_called()
+    if case == 'handoff':
+        assert node.emit.call_args.args == ('reverse_position_handoff',)
+
+
 def test_reverse_lost_acceptance_uses_follow_path_cancel_and_query(monkeypatch):
     monkeypatch.setattr('jdamr_cube_navigation.restaurant_service.rclpy.spin_once',
                         lambda *args, **kwargs: None)
@@ -1268,7 +1349,7 @@ def test_parameter_reader_discards_pending_request_on_interruption(monkeypatch):
         clock['now'] += timeout_sec
         node.stop_requested = True
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', interrupt)
+    monkeypatch.setattr(corridor_route, 'spin_node', interrupt)
     with pytest.raises(RuntimeError, match='map_server parameter read interrupted'):
         node._read_parameters('map_server', ['yaml_filename'])
     client.remove_pending_request.assert_called_once_with(pending)
@@ -1303,7 +1384,7 @@ def test_parameter_reader_resends_two_lost_reads_then_uses_fresh_third(monkeypat
     def spin(_node, timeout_sec):
         clock['now'] += timeout_sec
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     assert node._read_parameters('map_server', ['yaml_filename']) is response
     assert client.remove_pending_request.call_args_list == [
         ((lost_first,),), ((lost_second,),)]
@@ -1329,7 +1410,7 @@ def test_parameter_reader_accepts_first_response_after_second_request(monkeypatc
         if clock['now'] >= 1.2 and not first.done():
             first.set_result(response)
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     assert node._read_parameters('map_server', ['yaml_filename']) is response
     assert client.call_async.call_count == 2
     client.remove_pending_request.assert_called_once_with(second)
@@ -1349,7 +1430,7 @@ def test_parameter_reader_timeout_stays_inside_five_second_budget(monkeypatch):
     def spin(_node, timeout_sec):
         clock['now'] += timeout_sec
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     with pytest.raises(RuntimeError, match=(
             r'keepout_filter_mask_server parameter read timed out: '
             r'total_budget=5\.0 s attempts=5 resend_interval=1\.0 s')):
@@ -1373,7 +1454,7 @@ def test_parameter_reader_never_sends_after_deadline(monkeypatch):
         assert timeout_sec <= 0.05
         clock['now'] = 5.1
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', overrun)
+    monkeypatch.setattr(corridor_route, 'spin_node', overrun)
     with pytest.raises(RuntimeError, match='total_budget=5.0 s attempts=1'):
         node._read_parameters('map_server', ['yaml_filename'])
     client.call_async.assert_called_once()
@@ -1425,7 +1506,7 @@ def test_parameter_reader_uses_real_read_only_service_and_fresh_responses(monkey
     def spin(_node, timeout_sec):
         executor.spin_once(timeout_sec=timeout_sec)
 
-    monkeypatch.setattr(restaurant_service, 'spin_node', spin)
+    monkeypatch.setattr(corridor_route, 'spin_node', spin)
     try:
         first = ServiceRoute._read_parameters(node, 'read_only_peer', ['revision'])
         second = ServiceRoute._read_parameters(node, 'read_only_peer', ['revision'])
@@ -2468,12 +2549,9 @@ def test_t15_precision_params_match_box_contract_only(monkeypatch):
             flat[prefix[:-1]] = value
 
     flatten('', controller)
-    client = Mock()
-    client.wait_for_services.return_value = True
-    client.get_parameters.side_effect = lambda names: done(SimpleNamespace(values=[
-        Parameter('value', value=flat.get(name)).get_parameter_value() for name in names]))
     node = route()
-    node.parking_parameters = client
+    node._read_parameters = Mock(side_effect=lambda remote, names: SimpleNamespace(values=[
+        Parameter('value', value=flat.get(name)).get_parameter_value() for name in names]))
     node.parking_contract = load_parking_contract(
         PACKAGE / 'config/box_parking_contract.yaml')
     assert node._parking_parameters_ready(reverse=True)
@@ -2884,12 +2962,13 @@ def test_zero_turn_drive_commands_no_rotation_and_stops_at_the_distance(monkeypa
     assert published[-5:] == [(0.0, 0.0)] * 5
 
 
-@pytest.mark.parametrize('distance_m, expected_speed', [
-    (0.022, 0.01), (0.08, 0.02), (0.30, 0.05),
+@pytest.mark.parametrize('distance_m, expected_speed, approach_time_s', [
+    (0.022, 0.01, None), (0.08, 0.02, None), (0.30, 0.05, None),
+    (0.09990421312116261, 0.05, 0.5),
 ])
 @pytest.mark.parametrize('setup_delay_s', [0.0, 11.0])
 def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
-        monkeypatch, distance_m, expected_speed, setup_delay_s):
+        monkeypatch, distance_m, expected_speed, approach_time_s, setup_delay_s):
     node = route()
     clock = [0.0]
     position = [0.0]
@@ -2926,7 +3005,8 @@ def test_precision_zero_turn_uses_live_motion_and_returns_settled_distance(
     monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
 
-    travelled = node._drive_zero_turn(distance_m, precision=True)
+    approach_options = {} if approach_time_s is None else {'approach_time_s': approach_time_s}
+    travelled = node._drive_zero_turn(distance_m, precision=True, **approach_options)
 
     assert {round(v, 6) for v, _w in published if v} == {round(expected_speed, 6)}
     assert published[-5:] == [(0.0, 0.0)] * 5
@@ -3093,9 +3173,9 @@ def test_live_control_validates_filtered_heading_and_uses_shared_speed_law(monke
     (math.pi - 0.03, 0.15, 8.0, False), (-math.pi + 0.03, 0.45, -8.0, False),
     (0.0, .033676181083231255, .80565973, True), (0.0, .014, -.80565973, True),
 ])
-@pytest.mark.parametrize('direction', [-1.0, 1.0])
+@pytest.mark.parametrize('direction,continuous_table', [(-1., False), (1., False), (1., True)])
 def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
-        monkeypatch, heading, gap_m, offset_deg, allow_near, direction):
+        monkeypatch, heading, gap_m, offset_deg, allow_near, direction, continuous_table):
     node = route()
     clock, commands, velocity = [0.0], [], [0.0, 0.0]
     pose = [0.0, 0.0, heading + math.radians(offset_deg)]
@@ -3125,7 +3205,8 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
         lead = front * math.cos(residual) + half_width * abs(math.sin(residual))
         nearest = sum((actual[i] - face[i]) * normal[i] for i in (0, 1)) - lead
         return {'remaining_m': (nearest - 0.01) / math.cos(residual),
-                'heading_rad': heading, 'allow_near_alignment': allow_near}
+                'heading_rad': heading, 'allow_near_alignment': allow_near,
+                'surface_gap_m': nearest}
 
     node.escape_velocity = SimpleNamespace(publish=publish)
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
@@ -3138,7 +3219,7 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
 
     assert node._drive_zero_turn(
         direction * (gap_m - 0.01), precision=True,
-        hold_heading=True, target_update=update) is not None
+        hold_heading=True, target_update=update, continuous_table=continuous_table) is not None
     error = math.atan2(math.sin(pose[2] - heading), math.cos(pose[2] - heading))
     front_center = (pose[0] + direction * front * math.cos(pose[2]),
                     pose[1] + direction * front * math.sin(pose[2]))
@@ -3149,9 +3230,10 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
     assert abs(error) <= math.radians(0.3)
     moving = [command for command in commands if command != (0.0, 0.0)]
     assert moving and any(direction * linear > 0.0 for linear, _angular in moving)
-    assert all(direction * linear >= 0.0 if allow_near else direction * linear > 0.0
+    assert all(direction * linear >= 0.0 if allow_near or continuous_table
+               else direction * linear > 0.0
                for linear, _angular in moving)
-    assert max(abs(linear) for linear, _angular in moving) <= 0.05
+    assert max(abs(linear) for linear, _angular in moving) <= (0.1 if continuous_table else 0.05)
     angular = [w for _v, w in moving if w]
     assert all(w * offset_deg < 0.0 for w in angular)
     first_zero = commands.index((0.0, 0.0))
@@ -3187,7 +3269,8 @@ def test_near_face_flip_holds_motion_until_heading_filter_agrees(monkeypatch):
                                  target_update=update) is None
 
 
-def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch):
+@pytest.mark.parametrize('continuous_table', [False, True])
+def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch, continuous_table):
     node = route()
     clock, position = [0.0], [0.0]
     requested, velocity = [0.0], [0.0]
@@ -3219,10 +3302,12 @@ def test_live_face_approach_tapers_before_slow_base_coast(monkeypatch):
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
 
     def update(actual):
-        return {'remaining_m': target_m - actual[0], 'heading_rad': 0.0}
+        return {'remaining_m': target_m - actual[0], 'heading_rad': 0.0,
+                'surface_gap_m': target_m - actual[0] + .01}
 
     assert node._drive_zero_turn(
-        target_m, precision=True, hold_heading=True, target_update=update) is not None
+        target_m, precision=True, hold_heading=True, target_update=update,
+        continuous_table=continuous_table) is not None
     assert target_m - 0.003 <= position[0] <= target_m + 0.003
 
 
@@ -3612,6 +3697,8 @@ def test_dock_return_needs_only_the_running_battery_cutoff():
 
 def test_in_place_trim_commands_no_translation_and_stops_early_by_the_overshoot(monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     published = []
     node.escape_velocity = SimpleNamespace(publish=lambda m: published.append(
         (m.linear.x, m.angular.z)))
@@ -3656,6 +3743,24 @@ def test_returns_the_base_drove_into_the_blind_range_are_remembered():
     assert len(found) == 1 and found[0] == pytest.approx((0.19, 0.0))
     # Still visible from where the keyframe was taken: the live scan decides.
     assert remembered_blind_points([((0.0, 0.0, 0.0), scan)], (0.0, 0.0, 0.0), laser, 0.28) == []
+
+
+def test_filtered_blind_memory_uses_one_current_pose_snapshot(monkeypatch):
+    node = route()
+    laser = (-0.01, 0.0, math.pi)
+    scan = SimpleNamespace(
+        ranges=[math.inf, 1.0, .40, math.inf], angle_min=0.0,
+        angle_increment=math.pi / 2, range_min=.28, range_max=12.0)
+    node.scan_memory = [(9.0, (0.0, 0.0, 0.0), scan)]
+    node._odom_pose = Mock(return_value=(.20, 0.0, 0.0))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: 10.0)
+
+    found = node._remembered_blind_points(
+        laser, scan,
+        source_point_filter=lambda _pose, _scan, _point: True)
+
+    assert len(found) == 1 and found[0] == pytest.approx((.19, 0.0))
+    node._odom_pose.assert_called_once_with()
 
 
 def test_escape_snapshot_needs_a_fresh_scan_and_carries_the_blind_memory(monkeypatch):
@@ -3778,6 +3883,8 @@ def test_direct_motion_stops_on_a_failed_input(monkeypatch):
 
 def test_in_place_trim_counts_a_turn_across_pi(monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     node.escape_velocity = SimpleNamespace(publish=lambda m: None)
     yaws = iter([math.pi - 0.05 + 0.002 * k for k in range(400)])
 
@@ -3903,6 +4010,8 @@ def test_paused_straight_drive_stops_when_someone_steps_in_front(monkeypatch):
 def test_a_trim_just_over_the_minimum_still_turns(monkeypatch):
     """Review 2026-10-06: an early stop larger than a 0.32 deg trim skipped it."""
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     published = []
     node.escape_velocity = SimpleNamespace(publish=lambda m: published.append(m.angular.z))
     yaws = iter([0.0002 * k for k in range(400)])
@@ -4001,12 +4110,14 @@ def test_transit_variants_pick_their_trees(monkeypatch, variant, planners, contr
 
 
 @pytest.mark.parametrize('requested_deg', [0.32, 0.59, 0.87, 1.2, -0.32, -0.59, -0.87, -1.2])
-def test_default_tiny_trim_stays_within_tolerance_without_reversing(requested_deg):
+def test_default_tiny_trim_stays_within_tolerance_without_reversing(requested_deg, monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
         transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
     commands = []
-    def direct(command, done, measure, deadline, event):
+    def direct(command, done, measure, deadline, event, watch=None):
         commands.append((command.linear.x, command.angular.z))
         turned = 0.0
         while not done(turned):
@@ -4024,15 +4135,17 @@ def test_default_tiny_trim_stays_within_tolerance_without_reversing(requested_de
 
 
 @pytest.mark.parametrize('requested_deg', [-1.2, 1.2])
-def test_dock_trim_uses_same_damped_turn_without_an_opt_in(requested_deg):
+def test_dock_trim_uses_same_damped_turn_without_an_opt_in(requested_deg, monkeypatch):
     node = route()
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        lambda _node: lambda _command: None)
     yaw = [0.0]
     rates = []
     node._odom_pose = lambda: (0.0, 0.0, yaw[0])
     node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
         transform=SimpleNamespace(rotation=SimpleNamespace(
             x=0., y=0., z=math.sin(yaw[0] / 2), w=math.cos(yaw[0] / 2)))))
-    def direct(command, done, measure, deadline, event):
+    def direct(command, done, measure, deadline, event, watch=None):
         rates.append(command.angular.z)
         turned = 0.0
         while not done(turned):
@@ -4167,3 +4280,90 @@ def test_intermediate_stationary_capture_uses_short_hold_without_relaxing_inputs
     assert 0.08 <= clock[0]-10.0 < (.3 if intermediate else 1.3)
     if not intermediate:
         assert clock[0]-10.0 >= node.parking_contract['hold_s']
+
+
+@pytest.mark.parametrize('failure', [None, RuntimeError('controller_server parameter read timed out')])
+def test_parking_read_failure_retains_controller_cause(failure):
+    node = route()
+    node.parking_contract = load_parking_contract(PACKAGE / 'config/box_parking_contract.yaml')
+    node._read_parameters = Mock(return_value=None, side_effect=failure)
+    assert not node._parking_parameters_ready()
+    assert node.last_parking_parameters_failure == (
+        str(failure) if failure else 'controller_server parameter service unavailable')
+    assert node._read_parameters.call_args.args[0] == 'controller_server'
+
+
+@pytest.mark.parametrize('reached,invalid', [(True, False), (False, False), (True, True)])
+def test_rear_recovery_checks_valid_arrival_before_another_motion_preview(
+        monkeypatch, reached, invalid):
+    node = route()
+    clock, position, velocity = [10.], [0.], [0.]
+    commands, watch_calls = [], []
+    node.run_deadline_s = 12.
+    node._operator_link_ready = lambda: True
+    node._guard_failure = lambda *_a: None
+    node.latest_motion = (clock[0], 0., 0.)
+    def publish(message):
+        velocity[0] = message.linear.x
+        commands.append(message.linear.x)
+    def spin(*_a, **_k):
+        clock[0] += .02
+        position[0] += velocity[0] * .02
+        node.latest_motion = (clock[0], velocity[0], 0.)
+    def update(actual):
+        if len(watch_calls) >= 1:
+            if invalid:
+                raise RuntimeError('rear box face unavailable')
+            if reached:
+                return {'remaining_m': 0., 'heading_rad': math.radians(.7),
+                        'allow_near_alignment': True, 'target_confirmed': True}
+        return {'remaining_m': .2 + actual[0]}
+    def watch(command):
+        watch_calls.append(command.linear.x)
+        return 'rear docking swept footprint occupied'
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=position[0], y=0., z=0.),
+            rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    result = node._drive_zero_turn(-.2, precision=True, hold_heading=True,
+                                  target_update=update, command_watch=watch)
+    assert all(value == 0. for value in commands)
+    if reached and not invalid:
+        assert result == pytest.approx(0.)
+        assert len(watch_calls) == 1
+    else:
+        assert result is None
+
+
+def test_odom_rotation_installs_live_sweep_before_any_nonzero_command(monkeypatch):
+    node = route()
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
+        transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    guard = Mock(return_value='rotation swept footprint occupied')
+    factory = Mock(return_value=guard)
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch', factory, raising=False)
+    def direct(command, done, measure, deadline, event, watch=None):
+        assert callable(watch)
+        assert watch() == 'rotation swept footprint occupied'
+        node._last_direct_motion_failure = 'rotation swept footprint occupied'
+        return 0.
+    node._direct_motion = direct
+    assert node._rotate_in_place(math.radians(57.)) is None
+    factory.assert_called_once_with(node)
+    assert guard.call_args.args[0].linear.x == 0.
+    assert guard.call_args.args[0].angular.z != 0.
+
+
+def test_rotation_without_valid_scan_never_starts_motion(monkeypatch):
+    node = route()
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k: SimpleNamespace(
+        transform=SimpleNamespace(rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service, 'rotation_collision_watch',
+                        Mock(side_effect=RuntimeError('rotation scan unavailable')))
+    node._direct_motion = Mock()
+    assert node._rotate_in_place(.3) is None
+    node._direct_motion.assert_not_called()
+    assert node._last_direct_motion_failure == 'rotation scan unavailable'

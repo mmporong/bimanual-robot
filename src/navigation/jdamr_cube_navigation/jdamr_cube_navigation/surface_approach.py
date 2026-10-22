@@ -6,8 +6,11 @@ import math
 FACE_HEADING_TOLERANCE_RAD = math.radians(0.3)
 FACE_HEADING_DEADBAND_RAD = math.radians(0.1)
 FACE_ALIGNMENT_GAP_M = 0.05
+FACE_ALIGNMENT_ENTRY_MARGIN_M = 0.0005
 FACE_HEADING_FILTER_S = 0.35
 FACE_APPROACH_TIME_S = 0.5
+TABLE_APPROACH_SPEED_MPS = 0.1
+TABLE_ALIGNMENT_MAX_RADPS = 0.08
 
 
 def filtered_face_heading(previous, observed, elapsed_s):
@@ -23,15 +26,30 @@ def filtered_face_heading(previous, observed, elapsed_s):
 
 
 def face_approach_command(remaining_m, error_rad, target_gap_m=0.01, *,
-                          approach_time_s=FACE_APPROACH_TIME_S, allow_near_alignment=False):
+                          approach_time_s=FACE_APPROACH_TIME_S, allow_near_alignment=False,
+                          continuous_table=False, surface_gap_m=None):
     """Reduce heading error before entering the existing final precision band."""
     if not all(math.isfinite(v) for v in (
             remaining_m, error_rad, target_gap_m, approach_time_s)) or approach_time_s <= 0.0:
         raise ValueError('nonfinite table approach command')
-    angular = max(-0.02, min(0.02, error_rad))
+    if surface_gap_m is None:
+        surface_gap_m = remaining_m * math.cos(error_rad) + target_gap_m
+    if isinstance(surface_gap_m, bool) or not math.isfinite(surface_gap_m):
+        raise ValueError('invalid surface gap')
+    early_alignment = continuous_table and surface_gap_m > (
+        max(FACE_ALIGNMENT_GAP_M, target_gap_m) + FACE_ALIGNMENT_ENTRY_MARGIN_M)
+    limit = TABLE_ALIGNMENT_MAX_RADPS if early_alignment else 0.02
+    angular = max(-limit, min(limit, (3.0 if early_alignment else 1.0) * error_rad))
     if abs(error_rad) <= FACE_HEADING_DEADBAND_RAD:
         angular = 0.0
-    linear = min(0.05, max(0.01, remaining_m / approach_time_s)) if remaining_m > 0.0 else 0.0
+    cruise = TABLE_APPROACH_SPEED_MPS if continuous_table else 0.05
+    # Scale the taper time with cruise speed so doubling cruise does not double
+    # the demanded deceleration. The default/rear taper is unchanged.
+    taper_time_s = approach_time_s * cruise / .05
+    terminal_speed = max(0.01, remaining_m / taper_time_s)
+    linear = min(cruise, terminal_speed)
+    if remaining_m <= 0.0:
+        linear = 0.0
     if abs(error_rad) > FACE_HEADING_TOLERANCE_RAD:
         clearance = remaining_m - max(0.0, FACE_ALIGNMENT_GAP_M - target_gap_m)
         if clearance <= 0.0:
@@ -40,14 +58,21 @@ def face_approach_command(remaining_m, error_rad, target_gap_m=0.01, *,
             raise ValueError('table alignment requires more clearance')
         # [unit-mismatch: paradigmatic] angle [rad] / rate [rad/s] gives time [s].
         # Remaining alignment distance [m] / time [s] bounds linear speed [m/s].
-        linear = min(linear, clearance / max(
-            approach_time_s, 2.0 * abs(error_rad) / abs(angular)))
+        alignment_s = max(approach_time_s, 2.0 * abs(error_rad) / abs(angular))
+        if continuous_table:
+            # Rotate once when alignment cannot finish before the precision band;
+            # do not stretch the whole approach into a millimetres-per-second crawl.
+            if clearance < linear * alignment_s:
+                linear = 0.0
+        else:
+            linear = min(linear, clearance / alignment_s)
     return linear, angular
 
 
 def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
                             target_gap_m=0.01, *, command_heading_rad=None,
-                            approach_time_s=FACE_APPROACH_TIME_S, allow_near_alignment=False):
+                            approach_time_s=FACE_APPROACH_TIME_S, allow_near_alignment=False,
+                            continuous_table=False):
     """Preview the same command law up to the existing final precision band.
 
     This ideal odometry rollout is for static corridor validation, not evidence
@@ -75,7 +100,7 @@ def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
             raise ValueError('table approach preview crosses surface')
         command_error = math.atan2(math.sin(command_heading - pose[2]),
                                    math.cos(command_heading - pose[2]))
-        if gap <= max(FACE_ALIGNMENT_GAP_M, target_gap_m) + 0.0005:
+        if gap <= max(FACE_ALIGNMENT_GAP_M, target_gap_m) + FACE_ALIGNMENT_ENTRY_MARGIN_M:
             if (target_gap_m <= FACE_ALIGNMENT_GAP_M and
                     max(abs(error), abs(command_error)) > FACE_HEADING_TOLERANCE_RAD):
                 # Turning toward the normal retracts the leading front corner
@@ -95,7 +120,8 @@ def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
         if math.dist(start[:2], pose[:2]) + remaining > 0.6 + 1e-9:
             raise ValueError('table approach preview exceeds bounded travel')
         linear, angular = face_approach_command(
-            remaining, command_error, target_gap_m, approach_time_s=approach_time_s)
+            remaining, command_error, target_gap_m, approach_time_s=approach_time_s,
+            continuous_table=continuous_table, surface_gap_m=gap)
         closing_speed_bound = linear + abs(angular) * (front_extent_m + half_width_m)
         step_s = min(0.05, (gap - max(FACE_ALIGNMENT_GAP_M, target_gap_m))
                      / max(closing_speed_bound, 1e-9))

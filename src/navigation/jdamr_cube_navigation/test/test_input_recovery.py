@@ -2553,7 +2553,7 @@ def test_t33_home_staging_bound_follows_session(monkeypatch, tmp_path, precision
 def test_t34a_fresh_start_stays_strict(monkeypatch, tmp_path):
     """Refuse a fresh observation route start at E1 before any motion."""
     node, world, _observations = _latched_box_visit(monkeypatch, tmp_path)
-    with pytest.raises(RuntimeError, match='localization or sensor data unavailable'):
+    with pytest.raises(RuntimeError, match='AMCL x covariance high'):
         node.visit_observed_box(
             'route', MOUNT, GEOMETRY, 'table_01', REGION_XY, 0.6, execute=True,
             candidate_trial=True, resume_at_observation=False)
@@ -2639,7 +2639,7 @@ def test_t35_unconverged_localization_never_moves(monkeypatch, tmp_path, state):
     resume_path.mkdir()
     visit_node, visit_world, _observations = _latched_box_visit(
         monkeypatch, resume_path, latched=UNCONVERGED[state])
-    with pytest.raises(RuntimeError, match='localization or sensor data unavailable'):
+    with pytest.raises(RuntimeError, match='AMCL .*covariance high'):
         _visit(visit_node)
     assert not visit_world.motions
 

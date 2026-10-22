@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-10-22 | 점군 개발의 기존 주행 기준선 통합
+
+- 점군 개발 브랜치에 기존 운영 tip `b4500a9`를 로컬 병합했다. 충돌한 주행 소스·회귀는 운영 tip의 blob과 일치시키고 계획·팀 작업·실패 기록은 모두 보존했다. 원래 주행 worktree와 Pi는 변경하지 않았다.
+- 별도 검토에서 navigation 소스·테스트·bringup·description·runtime 설정의 동일성과 기록 보존을 확인해 APPROVE를 받았다. ROS/ament 설치 환경을 맞춘 뒤 주행 관련 5스위트 841 PASS(5.92초)다. 앞선 실행은 새 worktree의 ROS/ament 경로 누락으로 수집·패키지 탐색에 실패했으며 소스 결함 수정으로 처리하지 않았다.
+- 이 병합 커밋은 기존 주행 기준선이며 새 점군 구현은 다음 커밋으로 분리한다. push·main 병합·배포·실물 이동은 수행하지 않았다.
+
 ## 2026-10-22 | 뎁스 포인트클라우드 명칭과 로직 변경 범위 명시
 
 - 사용자 요청에 따라 프로젝트 명칭을 「뎁스 포인트클라우드·2D LiDAR 기반 테이블 인식과 정밀주차」로 정리했다. 뎁스 포인트클라우드는 깊이 카메라 영상에서 생성한 3차원 XYZ 점군으로 정의했다.
@@ -17,6 +23,105 @@
 - B0 고정, 단계별 구현 위치·완료 기준, 보정/평가 데이터 분리, 외부 간격 측정, 구성당 30회 주차와 5회 왕복의 평가 설계를 명시했다. 모든 수치는 향후 목표이며 달성 성과가 아니다. 새 출발 절차는 추가하지 않는다.
 - 이번 범위는 계획·참조 검증과 로컬 커밋이다. 새 알고리즘 구현, 원격 push, main 병합, Pi 배포·서비스 변경·실물 이동은 수행하지 않았다. 다음 구현은 계획의 S0에서 시작한다.
 - 계획서 224줄의 참조·형식·정책 충돌 검사를 통과했고 별도 검토에서 APPROVE를 받았다. 내부 자동 완료와 외부 간격 확인을 분리하고 둘 다 충족해야 전체 성공으로 집계한다. 이는 계획 검수이며 코드 테스트·실차 검증 결과가 아니다.
+
+## 2026-10-21 | 도크 맞은편 의자 다리 충돌 보고·회전 사각지대 감시 연결
+
+- 사용자는 `table_01_20261021_184007_d1467858` 복귀 중 도크 맞은편 의자 다리와 충돌했다고 보고했다. 이 실행은 충돌 포함 실패 주행이다. 로그상 급수대·1번 테이블 최종 gap 확인 후 18:42:34 도크 앞 도착, 약 57° odom 회전, 18:42:39 후진 명령 전 `rear box coarse static corridor blocked` 종료가 있었다. 충돌 순간이 이동/회전 중 어느 쪽인지는 미확정이며, 마지막 지도 차단이 앞선 충돌을 막았다고 해석하지 않는다. 정지를 재전송했고 추가 이동은 하지 않았다.
+- `_rotate_in_place`에는 CM 경로만 있고 기존 `scan_memory`/실제 외곽 sweep callback이 연결되지 않았다. 현행 scan의 최소 유효거리는 약 0.28 m다. 후면 fine에서 쓰던 live scan·blind-range memory·실제 외곽·cmd/odom 중 큰 속도·실제 max_decel 기반 예측을 공용화해 기존 회전 `_direct_motion` watch에 연결했다. CM 설정/지도/footprint/속도는 바꾸지 않고 목표면 예외도 적용하지 않는다. 이는 확인된 감시 공백 보완이며 실제 충돌의 근본 원인 확정과는 구분한다.
+- 관련 4스위트 561 PASS(5.82초), 물리 최소거리 안/밖의 단일 점·좌우 회전·stale/0명령·watch 연결/입력 부재를 강화한 7회귀 PASS(0.54초), fatal lint·compile·diff PASS와 독립 리뷰 APPROVE다. 순수 회전 단위 테스트의 기존 각도/속도 동작은 유지했다. RPP 이동 중 모든 장애물 문제나 실제 의자 충돌의 재현 성공을 주장하지 않는다.
+- Pi rear_collision_profile/restaurant_service source/install 4경로 SHA·compile/import 일치, idle executor PID83287 active, base31767·Nav2 47789 유지, pending/running0·배포 뒤 fresh odom3표본 v/w0이다. 새 주행·위치초기화·자동 회피 없음. PC 근거 `$HOME/.local/state/bimanual-robot/chair_collision_20261021/`, Pi 복원본 `$HOME/.local/state/jdamr/rotation-blind-leg-watch/20261021_185720/`. 다음 요청을 위해 base/Nav2/idle executor만 유지하며 전체 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. 도크 coarse 지도 차단은 별도 미해결이며 출발 준비 완료로 보고하지 않는다. 브랜치 로컬 커밋만 남긴다.
+
+## 2026-10-21 | 근접 후 재전진 반복 제거·후면 도착과 추가 이동 판정 분리
+
+- 전체 실행 `table_01_20261021_175440_87661747`는 급수대·1번 테이블 뒤 도크로 돌아왔으나 중앙 보정 후 횡오차 +0.057698 m가 5 cm를 넘어 다시 clearance 0.788528 m를 요청했다. 앞선 1 m handoff 수정만으로 단일 후진이 해결되지 않았다. 근접 중앙 보정 반복과 fine의 20 cm 전진/terminal 재주차를 제거하고, 중앙 곡선의 odom 종점 인계를 5 cm에서 2.5 cm로 좁혔다. 기존 position-only checker는 유지한다. 실제 횡오차가 여전히 5 cm 밖이면 성공으로 바꾸지 않고 남은 오차를 기록하며, 또 크게 전진하지 않는다.
+- 후면 재개 `table_01_20261021_180116_f1b5f0ea`는 약 0.214025 m 후진했다. 마지막 raw gap 0.011634 m·각도 -0.000785 rad인데 추가 이동의 swept-footprint 판정을 기다리다 recovery deadline으로 끝났다. 이 실행을 미이동으로 해석하면 틀린다. 별도 정지 스캔 40프레임 재생의 최소 간격은 10.985–11.888 mm, 마지막 양끝은 11.729/11.780 mm였다. 모두 라이다 내부 추정이며 외부 실측/자동 완료 기록으로 대체하지 않는다.
+- 같은 면의 fresh raw 관측을 현재 odom에 투영해 기존 양끝 1 cm±3 mm 완료 조건을 충족하면, 필터 잔차·작은 정렬 상태보다 도착을 우선하고 속도 0으로 마친다. recovery도 유효 입력·guard/link 확인 후 도착이면 새 이동 예측을 재요청하지 않는다. 이후 정지 스캔으로 동일 면과 최종 간격을 다시 확인한다. CM·제원·scan/TF/link·stop·기존 0.6 m 접근 한도는 유지한다.
+- 관련 3스위트 512 PASS(5.74초), fatal lint·compile·diff PASS. 도착 허용범위 안의 비영 각도(7 mm/0.7°)와 영구 이동-preview 차단도 회귀로 확인했다. 초기 pose에서 후진 곡선 공간이 부족할 때 최초 clearance는 남아 있으므로 모든 배치의 단일 후진이나 실차 재현 성공은 아직 주장하지 않는다. 현재 정지 유지, 새 실물 실행 없음이다.
+- 독립 code-reviewer 최종 APPROVE와 별도 512 PASS(5.49초)를 받았다. Pi 두 모듈 source/install 4경로의 PC SHA 일치·compile/import를 확인하고 idle executor만 PID80464로 재기동했다. base31767·Nav2 47789는 유지했고 pending/running0, 배포 뒤 fresh odom 3표본은 기존 정지 허용 안이다. 새 실물 실행은 없었다.
+- 원본 로그는 Pi `$HOME/jdamr_data/map_20260930_manual/aligned/runs/`의 두 run `cycle_events.jsonl`이며 PC 근거는 `$HOME/.local/state/bimanual-robot/rear_no_terminal_replay_20261021/`다. 복원본·유지 서비스/종료 명령은 실패 기록 §22.33에 남겼다. 브랜치 로컬 커밋만 수행한다.
+
+## 2026-10-21 | 도크 정렬을 앞당겨 근접 후 큰 전진 재접근 줄이기
+
+- 실행 `table_01_20261021_164729_07911177`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀·후면 접근을 같은 실행에서 수행했다. 사용자는 도킹이 잘됐다고 확인했지만 크게 전진했다 다시 후진하는 동작을 지적했다. 추가 보정은 중지했으며 소프트웨어는 마지막 `rear docking swept footprint occupied` 대기 뒤 정지 요청에 따라 `rear_box_parking_not_confirmed`로 종료했다. 사용자 확인과 자동 최종 확인은 구분한다.
+- 로그상 coarse handoff gap 0.484132 m 뒤 중앙 오차 -0.078844 m에서 전진 clearance 0.489206 m를 요청했다. 중앙 정렬 후 오차는 -0.031471 m였다. 기존 구조는 0.5 m까지 후진한 뒤 중앙 오차가 5 cm를 넘고 gap이 0.9 m 미만이면 곡선 가능 여부와 무관하게 1 m 정렬 공간으로 다시 전진했다.
+- 출발 때 얻은 reference의 원점·normal 축은 유지하면서 복귀 stage의 축상 거리를 최소 기존 center handoff 1 m로 잡고, coarse도 1 m에서 면 관측·중앙 정렬로 인계한다. 기존 reverse curve의 최소반경 0.3 m 조건을 현재 pose에서 만족하면 전진을 생략한다. 원래 중앙 20 cm 목표 계산을 공용화해 사전 가능 판정과 실제 경로가 같은 목표를 쓴다. 정적 map/keepout·CM·동일면·stop/deadline·중앙 5 cm·최종 1 cm는 유지한다.
+- 기존 곡선의 합성 기하 확인에서 좌우 23 cm는 gap 0.5 m에서 불가능하고 0.85 m에서는 가능했다. 양쪽 부호의 0.85 m/23 cm 회귀에서 추가 전진 없이 중앙 곡선→fine이 이어진다. 이는 실측 정밀도나 단일 후진 실차 성공 증명이 아니다. full-face 근접 복구, 실제 곡선이 불가능할 때의 공간 확보, fine 20 cm clearance는 남아 있으므로 모든 배치의 단일 후진을 보장하지 않는다.
+- 관련 3스위트 505 PASS(5.60초), 독립 reviewer도 505 PASS(5.54초)·APPROVE, fatal lint·compile·diff PASS다. 파이 rear_box_service.py source/install SHA 일치 및 compile/import 확인 뒤 idle executor PID74615만 재기동했고 base31767·Nav2 47789는 유지했다. pending/running0, fresh odom3표본 v/w0, 새 이동 없음이다. 수정본 실차 확인은 다음 요청 때 수행한다.
+- PC receipt는 `$HOME/.local/state/bimanual-robot/rear_reverse_entry_20261021/deployment.json`, Pi 복원본은 `$HOME/.local/state/jdamr/rear-dock-reverse-entry/20261021_170158/`다. 기존 base/Nav2/idle executor는 다음 실행을 위해 유지하며 전체 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. 현재 브랜치 로컬 커밋만 남긴다.
+
+## 2026-10-21 | 도착 보정과 출발 계약 분리·중앙 잔차를 같은 도킹 실행에서 처리
+
+- 전체 실행 `table_01_20261021_161945_ca889276`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀를 마쳤다. 도착 뒤 중앙 보정 공간 확보가 출발 전용 `_depart_dock_straight`를 호출해 복귀 경로의 첫 점에 `home_exit`가 없다는 예외로 종료됐다. 실제 새 출발 요청이나 NavFn/Lattice 문제는 아니다.
+- 후면 재개 `162345_6715a304`는 횡오차 약 23 cm를 11.349 cm까지 줄였으나 `rear_box_center_not_reached`로 종료했다. 다음 재개 `162525_a5bcf9c2`는 횡오차 3.820 cm로 정렬하고 최종 접근했다. 사용자가 도킹이 잘됐다고 확인해 추가 보정을 중지했다. 소프트웨어 `rear_box_parking_finished.confirmed`는 false였으며 종료 정리에는 `camera_stop_failed`도 남았다. 사용자 확인을 자동 1 cm 판정 통과로 바꾸지 않는다.
+- 공통 guarded 직진 구동을 분리하고 rear clearance는 출발 경유점·출발 landmark 기록을 호출하지 않는 전용 래퍼와 `rear_dock_clearance_*` 로그를 사용한다. 출발 전용 `home_exit` 계약, 전체 외곽 static map/keepout 검사, CM·action 종료 확인은 유지한다. 중앙 보정 후 5 cm 밖이면 fresh 동일면으로 기존 task deadline 안에서 다시 보정하며 최종 접근은 같은 실행 안에서 이어간다. operator stop/deadline에서는 fine으로 진입하지 않는다.
+- 관련 3스위트 501 PASS(5.73초), fatal flake8·compile·diff PASS, 독립 code-reviewer APPROVE다. 파이 두 모듈 source/install 4경로 SHA 확인 후 기존 기동 함수로 idle executor를 PID71361로 복구했다. 임시 systemd 유닛에 일반 start를 사용한 첫 반영은 실패해 파일을 원복했고, 이후 저장소 `start_executor()`로 재기동했다. base PID31767·Nav2 PID47789 유지, pending/running 0, 새 이동 명령 없음이다.
+- 근거는 PC `$HOME/.local/state/bimanual-robot/dock_clearance_20261021/`의 `run_evidence_and_before_deploy.json`, `deployment.json`과 Pi 원본 run JSONL이다. Pi 복원본은 `$HOME/.local/state/jdamr/rear-dock-clearance/20261021_163844/`다. 수정 후 단일 실행 완주는 아직 실차 미확인이다. 다음 출발 요청까지 재주행하지 않으며 현재 브랜치 로컬 커밋만 남긴다.
+
+## 2026-10-21 | 후면 위치 보정 차단 제거·중앙 5cm 허용·기울어진 이탈 수정
+
+- 전체 실행 `table_01_20261021_133245_3e51a829`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀를 수행했다. 1번 테이블은 새 근접 보정으로 마쳤고 정밀 접근 중 전체 후진 재접근은 재발하지 않았다. 도크에서는 0.2 m 추가 접근 2회로 면을 찾았지만 terminal AMCL 재초기화 뒤 `rear dock landmark localization not retained`로 끝났다. 후면만 재개한 `133614_efdae838`도 중앙 곡선에서 105(진행 부족)로 종료해 도킹은 미완료다.
+- 사용자 요청에 따라 정확한 면 중앙 대신 우선 좌우 5 cm를 운영 허용값으로 삼는다. 이내면 추가 중앙 곡선과 그 공간 확보 이탈을 생략한다. 곡선의 중간 도착에도 최종 yaw/위치 정밀도를 요구하지 않으며 odom 종점 5 cm 이내에서 취소 완료를 확인한 뒤 fresh 면 확인·최종 1 cm 접근으로 인계한다. 최종 간격과 양쪽 모서리 확인은 유지한다.
+- 후면 terminal은 이미 확보한 live 면/odom 제어에 필요하지 않은 AMCL 재초기화·보정 유지 검사를 제거했다. 출발 초기화와 기존 지도 주행·비terminal 위치 보정은 유지하며 같은 reference 면의 폭·가림 검증은 남긴다. AMCL journal의 약 4.3 ms future TF 경고는 확인했지만 이것만으로 보정 유지 실패의 단독 원인을 확정하지 않는다.
+- 재개 때 약 35° 기울어진 상태로 0.589 m 전진해 내부 횡오차가 +0.171→-0.163 m로 반전됐다. 기하 계산 약 0.337 m와 관측 변화 약 0.335 m가 일치한다. 이제 긴 직선 이탈 전에 live 면 방향으로 정렬하고 fresh 동일면을 확인한다. 곡선 후에도 큰 잔여각은 그 자리에서 정렬해 전진/후진으로 키우지 않는다.
+- 테이블 후퇴 이탈과 도크 앞 174.4° 방향 전환은 각각 1회였다. 복귀에 급수대 waypoint를 다시 실행하는 경로는 없으며 174.4°는 전진 복귀에서 후면 진입으로 바꾸는 동작이다. 복귀 중 모든 조향/전후 명령의 실측 trace는 없어 이 두 동작만으로 사용자가 보고한 모든 움직임을 설명했다고 주장하지 않는다. 이번에는 위 로그로 재현한 terminal·clearance 원인을 수정했다.
+- 관련 8스위트 **881 PASS(6.36초)**, fatal lint·compile·diff PASS, 독립 code-reviewer APPROVE다. 위치 인계는 비최종 odom 경로·최대 5 cm에만 적용하고 stop/nav/link와 취소 확인을 유지한다. Pi 배포·복원 및 미완료 상태는 실패 기록 §22.30에 남긴다. 수정 중 새 이동 없이 정지를 유지하며 실차 재주행은 남아 있다. 브랜치 로컬 커밋만 수행하고 push/main 병합은 하지 않는다.
+
+## 2026-10-21 | 도크 원거리 검출 대기와 1번 테이블 후진 재접근 수정
+
+- `table_01_20261021_120603_ce541cf6`는 급수대·1번 테이블 접근/이탈과 도크 앞 복귀를 수행했으나 후면 도킹은 끝내지 못했다. full face 검출의 `no majority support`가 반복되던 중 사용자 정지로 종료했다. handoff의 실제 raw rear gap은 0.654146 m인데, 앞선 수정의 range 재접근 하한이 0.9 m여서 추가 접근이 0회였다. handoff 뒤 약 134초 동안 같은 위치에서 검출만 반복한 확정된 제어 흐름 오류다.
+- 면 검출이 안 되면 기존 fresh LiDAR 거리·전체 외곽·정상 CM 감시가 있는 후진 접근을 0.2 m 이하 구간으로 이어간다. 기존 0.2 m 관측 하한까지 매 구간 면을 다시 확인하며 원거리 관측 시도는 1초로 둔다. 검출 뒤 큰 중앙 오차 때문에 곡선 공간이 필요하면 이미 얻은 odom 면을 유지해 중앙 곡선을 만들고, 곡선 뒤 가까운 위치에서 fresh 동일면을 확인한다. 먼 위치에서 같은 면을 다시 찾느라 기다리는 조건을 제거했고 landmark 초기화는 이탈 전에 수행한다.
+- 1번 테이블의 첫 정지 내부 간격은 30.942/22.965 mm, yaw 1.015677°였다. 1°·간격차 6 mm 기준을 조금 넘으면 근접 정렬 가능성을 보지 않고 전체 후진 재관측으로 보내는 기존 분기가 실행됐다. fresh 면·양쪽 양수 간격·목표보다 남은 거리·기존 회전 기하 범위가 확보되면 같은 위치에서 각도를 보정하고 1 cm 접근으로 이어지게 했다. 이 근접 보정 뒤 full-back으로 다시 내려가지 않으며 사용자 정지·입력/CM 실패의 실제 사유를 보존한다.
+- 관련 8스위트 **871 PASS(6.68초)**, fatal lint·compile·diff PASS, 독립 code-reviewer APPROVE다. 실제 handoff 거리에서의 연속 추가 접근, 근접 중앙 곡선 전후 fresh 관측 순서, 실제 1번 정지 수치의 0회 full-back과 성공/미수렴/중단을 검증했다. 원 실패 순간의 raw scan이 없어 RANSAC의 비다수 점 구성을 복원한 것은 아니다. 사용자 재배치 후 정지 scan은 별도 근거로 보존하고 과거 실패 scan으로 쓰지 않는다.
+- Pi 반영·복원 및 정지 상태는 실패 기록 §22.29에 기록한다. 이번 수정 중 로봇 이동은 없으며 실차 재주행 검증은 남아 있다. 목적 브랜치 로컬 커밋까지만 수행하고 push/main 병합은 하지 않는다.
+
+## 2026-10-21 | 도크 박스 면 중앙 정렬과 전면 접근의 불필요한 저속 구간 수정
+
+- `table_01_20261021_112230_3b93c93f`에서 사용자가 **도킹 간격은 맞았지만 박스 면의 좌우 중앙에서 벗어났다**고 확인했다. 실행기는 마지막 외곽/각도 확인 뒤 code 1로 끝났으므로 물리 간격 성공과 내부 종료 결과를 구분한다. 후면 초기 관측의 면 중앙은 로봇 기준 접선 방향으로 약 22.5 cm 벗어났고, 출발 후 reference 취득 실패 때문에 기존 중앙 정렬 경로가 생략됐다.
+- 후면은 출발 reference 유무와 관계없이 현재 관측한 박스 면의 midpoint를 목표로 한다. coarse handoff를 1.0 m로 두고 중앙 곡선을 만든 뒤 20 cm 지점에서 같은 면을 다시 확인해 fine으로 잇는다. 이미 근접한 off-center 재시도는 기존 감시가 있는 전진 이탈로 곡선 공간을 확보한다. 중앙 정렬은 정상 CM profile과 전체 외곽 지도 검사를 사용하며 마지막 면 상대 fine만 기존 전용 profile을 쓴다. 출발 후 관측이 불충분하면 같은 실행의 유효한 출발 전 면을 fallback으로 보존한다.
+- 1번 테이블의 continuous 접근도 기존 공통 0.05 m/s 상한과 각도 오차에 비례한 crawl이 적용되고 있었다. 전면 live 면 접근을 0.1 m/s 순항으로 분리하고 작은 각도는 주행 중 보정한다. 남은 공간으로 큰 각도 정렬을 끝낼 수 없을 때만 제자리 각도를 수렴시킨다. 최종 제동은 속도 증가에 맞춰 연속 taper로 연결하며, 기본·후면 0.05 m/s 제어는 유지한다. 이 변경으로 전체 주행의 모든 감속 원인이 제거됐다고 주장하지 않는다.
+- 관련 7개 스위트 **829건(6.21초)**, 치명 lint·compile·diff 검사 PASS, 독립 code-reviewer APPROVE다. 느린 제동 합성 조건에서 전면 순항 2배에 기존 25 mm 제동 구간을 재사용하면 정지 확인이 실패함을 확인해 수정했다. 수정 후 양 프로필의 정지 완료·목표 ±3 mm와 현재 지도/전체 외곽의 중앙 곡선 재생을 검증했다. 합성 결과는 실차 거리·중앙 정렬 정확도나 완주 개선의 실측이 아니다.
+- Pi 반영·현재 정지 상태·복원 경로는 실패 기록 §22.28에 남긴다. 새 이동 없이 사용자 정지를 유지하고 목적 브랜치 로컬 커밋까지만 수행한다. 수정본의 실차 중앙 정렬·전면 접근 시간은 아직 미검증이다.
+
+## 2026-10-21 | 도크 킵아웃 전체 해제와 후면 fine의 면 상대 제어
+
+- `table_01_20261021_105628_0deeaf19`는 급수대·1번 테이블 접근과 각 이탈, 도크 앞 복귀 및 후면 coarse를 수행했다. 출발 controller 오류는 이번 실행에서 재발하지 않았다. 후면 면을 약 0.489 m에서 관측했지만 남은 fine 경로가 도크 keepout 셀과 겹쳐 끝났다. 전체 왕복·후면 도킹 성공으로 기록하지 않는다.
+- 사용자 요청으로 `dock_table` zone을 비활성화하고 실제 mask의 도크 셀 119개만 base mask로 복원했다. 다른 zone·기존 수동 조정·원본 지도·HOME은 유지하며 registry/5개 route의 mask SHA를 함께 갱신했다. 새 SHA는 `834b0823b6796334527390f843f5a26d9b9d3336a5ed1417f4cd7c7d21cb2af8`이다. 최신 재생은 keepout-only에서 통과하지만 원본 지도 점유 셀과도 겹친다는 별도 사실을 보존했다.
+- 사용자가 도크 앞쪽은 박스라고 재확인해 마지막 `_rear_box_update`만 map 변환·정적 지도/keepout preview 차단을 제거했다. 등록 도크의 후면 fine은 기존 live LiDAR 면/odom 제어로 잇는다. coarse·centering·일반 경로의 지도 검사, 동일 목표면·scan/clock·heading·이동 한도·실시간 외곽 감시·사용자 정지는 유지한다.
+- 관련 7개 스위트 630건, 치명 lint·compile·diff 검사를 통과했다. 과거 2건의 마스크/재생 증거를 복원해 유지하고, 새 119셀 범위 및 fine의 지도 독립성·입력/각도/거리 실패를 확인했다. 독립 리뷰에서 active unit identity 변경 계획을 거부해 해당 조작을 제거했고, 최종 코드·배포 계획은 APPROVE를 받았다.
+- Pi mask의 LoadMap 성공과 실제 발행 grid 일치를 확인했다. fine source/install SHA·import 검증 후 idle executor만 PID52030으로 재기동했다. base PID31767·Nav2 PID47789·active unit identity와 기존 위치추정은 유지했고 새 이동 명령은 없다. 배포 뒤 odom은 기존 정지 검사 범위(v 0.002 m/s, w 0.01 rad/s 이내)를 통과했으며 완전한 0 표본이라고 기록하지 않는다. 현재는 도크 미도착 상태로 후면 fine만 남았고 새 실행 요청을 기다린다. 복원/receipt와 다음 정지 세션의 identity 이행 주의는 실패 기록 §22.27에 남겼다. 브랜치 로컬 커밋만 수행한다.
+
+## 2026-10-21 | 출발 전 controller 응답 장애·세션 재기동·오류 전달 수정
+
+- `table_01_20261021_102400_3bc45058`는 급수대 관측 경로 선택 뒤 `controller_server` 파라미터 서비스 발견 실패로 이동 전에 끝났다. Nav2 journal의 10:22:39 controller graph 소실, 10:28 종료 중 local_costmap cleanup 정체와 SIGKILL을 확인했다. 프로세스 active만으로 정상이라고 판단할 수 없는 실제 hang이었다. native C++ 내부 선행 원인은 backtrace가 없어 미확정이며 카메라 부하·배터리·SHM 메시지 하나로 원인을 단정하지 않는다.
+- 기존 읽기 전용 GetParameters endpoint·응답 재전송 함수를 CorridorRoute로 옮겨 주차 파라미터 검사에서도 재사용한다. 사용하지 않는 설정 쓰기 등 6개 서비스 전체에 대한 의존을 제거했다. 실제 서비스 부재·응답 timeout·불완전 응답·설정 불일치를 보존해 `failed(reason=...)`와 PC 최종 오류에 전달한다. 준비 완료 이벤트도 실제 controller 응답·값 검증 뒤에만 발생한다.
+- 새 일반 출발이 등록 도크의 anchored scan 초기화 상태이고, 이동 전 controller preflight 실패라는 로그 근거가 있을 때만 Nav2/executor stop/start·기존 도크 init·재제출을 한 번 수행한다. 이동/카메라 시작/미지 이벤트, 재개·후면/복귀 단독·사용자 경로·local init은 제외한다. 단계마다 stop timestamp를 확인하고 두 번째 실패는 실제 원인을 보존한다. 정상 `go`에 새 준비 작업을 추가하지 않았고, C++ hang 자체를 고쳤다고 주장하지 않는다.
+- 종료된 transient unit이 `loaded/inactive/dead`로 남아 systemd-run과 충돌한 복구 문제도 수정했다. 동일 identity·정확한 transient 경로·정지 상태일 때만 기존 unit을 start하며 다른 identity·persistent unit·불명확 상태는 거부한다. 배포 때 script hash 변경으로 필요한 fingerprint 이행은 별도 정지·argv/User 검증과 runtime drop-in으로 수행하고 전후 값을 확인했다.
+- 관련 Python 875건, parking/session 98건, PC 출발 흐름 144건으로 합계 1,117건 통과. 독립 리뷰가 찾은 기존 parking mock 31건을 get-only fake client로 갱신해 지연·불일치·불완전 응답 검증을 보존했다. 추가 복구도 정지 우선·1회 한도·재개 거부 회귀와 독립 리뷰를 통과했고 치명 flake8·구문·bash/diff 검사도 통과했다.
+- Pi Python source/install 4쌍과 shell source/share 2경로를 SHA·import·구문 확인 후 반영했다. 새 Nav2 PID47789·idle executor PID48133으로 복구했고 base PID31767은 유지했다. 기존 도크 scan seed를 재사용한 무이동 activation에서 실제 controller 조회를 통과했으며 최종 fresh odom 3개 모두 선속도·각속도 0, spool request/running 0이다. RGB-D/관측기는 비활성이다. 사용자 정지 유지, 새 주행 없음. 근거·복원·종료 경로는 실패 기록 §22.26에 기록한다. 현재 목적 브랜치에 로컬 커밋하며 push/main 병합은 하지 않는다.
+
+## 2026-10-20 | 배터리·센서 출발 실패 원인 전달 수정 및 정지 상태 Pi 반영
+
+- `wait_until_ready()`의 실제 실패 사유를 보존하고, 일반 테이블 접근·관측점 재개·도크 복귀·단독 후면 주차·수동 이탈·무이동 위치초기화 경로가 이를 예외 또는 `failed` 이벤트에 전달하도록 수정했다. 배터리 부족은 실제 전압·적용 기준을 유지하며, 예비전압 부족·센서/AMCL 누락·operator link 상실·사용자 정지를 구분한다. 매 준비 시도에서 이전 사유를 초기화한다. 기존 배터리 기준·guard·대기시간·이동 제어는 변경하지 않았다.
+- 관련 5개 스위트 873건과 activation 58건, 치명 flake8·구문·diff 검사를 통과했다. 독립 리뷰가 지적한 activation의 고정 오류 문구도 수정한 뒤 최종 APPROVE를 받았다. ROS 검증은 기존 `$HOME/jdamr_rgbd_ws/install/setup.bash` overlay를 함께 source해야 ament 패키지 조회가 된다.
+- Pi source/install 5개 모듈 10경로와 운영용 이탈 스크립트 1경로의 SHA·import를 확인했다. 설치 코드에서 10.192 V/10.5 V 부족, 10.6 V/10.8 V 예비전압 부족, 12.2 V 통과를 이동 없는 모의 입력으로 확인했다. 실물 배터리는 별도 새 표본 12.200–12.228 V였으며 정지 odom 3개가 모두 0이었다.
+- idle 실행기만 PID39453으로 재시작했다. base PID31767·Nav2 PID32377은 유지했고 RGB-D/관측기는 비활성이다. 배포 전후 fresh 정지 odom·대기 요청 0을 확인했다. 사용자 정지는 유지하며 이번 수정본의 실차 재주행은 하지 않았다. 배포 receipt/복원 경로는 실패 기록 §22.25에 남겼다. 현재 브랜치 로컬 커밋만 수행하고 push/main 병합은 하지 않는다.
+
+## 2026-10-20 | 출발 실패 재발 시 배터리부터 확인하도록 기록
+
+- `table_01_20261020_184412_2ee8a0b2`의 실제 출발 거부 원인은 실행기 journal의 배터리 `10.192 V < 주행 하한 10.5 V`였다. 상위 오류는 `localization or sensor data unavailable`였으며 별도 DDS health는 정상이었다. 신규 출발 예비 기준 10.8 V와 주행 하한을 구분한다.
+- 사용자 요청에 따라 같은 출발 실패가 재발하면 현재 run의 배터리 사유·새 전압부터 확인하도록 `src/navigation/AGENTS.md`에 저장했다. 서비스 active·정지 odom만으로 준비 완료를 보고하지 않는다. 이후에도 배터리가 충분하면 실제 센서·위치·통신 사유를 확인한다.
+- 사용자 정지 요청을 유지한다. 충전·교체 완료는 미확인이며 새 이동·서비스 조작은 하지 않았다. 실패 메시지 전달 코드 수정은 아직 미반영이다. 상세는 기존 실패 기록 §22.24에 남겼으며 이번 변경은 브랜치 로컬 커밋 범위다.
+
+## 2026-10-20 | 후면 박스 실물 평행 정렬·라이다 방향 보정·근접 기억점 수정
+
+- 후면 오른쪽은 거의 접촉·왼쪽은 28 mm라는 실측과 정지 LiDAR 법선 약 0°가 불일치했다. 사용자가 같은 박스 면 기준이며 박스가 테이블보다 약 60 mm 앞에 있다고 확인해, 차체 폭 450 mm와 정지 8프레임으로 방향차 +3.5172°를 계산했다. geometry YAML·URDF의 laser yaw를 3.202979550 rad로 시험 반영했고, 최종 정지 후 사용자가 “거의 평행 훌륭하다”라고 실물을 확인했다. 우측 정확한 간격·측정 해상도·외부 각도 수치는 없어 임시 보정이며 반복 정밀도 증명은 아니다.
+- HOME·저장 scan anchor는 map←laser가 유지되도록 함께 이행했다. HOME 표현은 `(0.120086,0.164349,0.072658 rad)`이며 물리 도크·원 지도는 유지했다. 원 raw anchor를 보존하고 파생 TF anchor를 만들었다. 낮은 전역 map scan 지지율은 통과로 꾸미지 않고 기존 같은 박스 landmark 위치 변환과 무이동 activation으로 현재 자세를 복원했다.
+- 보정 직후 20 cm 이탈은 완료됐으나 기존 yaw=π에서 만든 경험적 기둥 필터를 함께 이행하지 않아 후면 자기반사 8점이 남았다. 기존 영역을 `laser_link`에 정확히 역변환하고 launch에서 YAML 좌표계를 전달하도록 수정해, 같은 raw 빔만 제거하고 뒤쪽 박스 반사를 보존했다. Pi 수정 후 정지 scan 8개 모두 해당 sweep 충돌점 0개를 확인했다.
+- 도크 keepout은 추가 12 cm 후퇴해 62셀만 해제했다. 목표 박스 자체가 예측 장애물로 걸리던 점도 동일 scan·검증된 면·관측 횡범위에서 구분했다. 실제 G4 최소거리 280 mm와 센서~뒤끝 거리 265 mm 때문에 gap 15 mm부터 면 중앙이 blind range에 들어간다. 양 끝의 현재 면은 보이는 상태에서, 취득 시점에 같은 목표면으로 검증된 기억점만 제외하도록 수정했다. 다른 물체·4 mm 이상 돌출·불명확한 면·일반/coarse 감시는 유지한다.
+- 실차 `182157_dfa8b654`는 약 191 mm 후진하며 내부 각도를 약 4.2°에서 0.1° 안팎으로 줄였으나 근접 감시 deadline으로 끝났다. `182421_80d30c2f`의 미세 후진 3.457 mm는 완료됐고, 내부 9.834/13.318 mm 판정 뒤 기존 이탈·재접근이 일어났다. 이 재접근도 실패했으며 지난 실행을 성공으로 바꾸지 않았다. 마지막 기억점 수정은 사용자 평행 확인 후 **추가 이동 없이** 배포했으므로 수정본의 실차 재검증과 외부 거리 정확도는 남아 있다. 현재 자세를 유지하고 자동 이동 대기는 없다.
+- 관측 전진 99.9 mm가 기본 4초 접근법 때문에 약 0.025 m/s로 움직였던 별도 지연은 기존 0.5초 면 접근법을 명시해 수정했다. 0.05 m/s 상한·제동·실제 충돌 감시는 유지했다. 전체 주행 감속과 전면 깊이 거리 오차까지 해결됐다고 주장하지 않는다.
+- 최종 관련 10개 스위트 **872건(6.41초)**, fatal lint·diff 검사를 통과했다. 독립 code-reviewer가 지적한 near-side 과대 예외와 scan 객체 ID 재사용을 수정한 뒤 APPROVE했다. 실제 분류기·다른 면·돌출·ID 충돌·같은 scan의 취득 자세 변경 및 움직이는 odom 경쟁 회귀를 포함한다. Python LSP는 제공되지 않아 LSP 진단은 실행하지 않았다.
+- Pi 최종 Python 4모듈 source/install 8경로 SHA·import와 idle executor PID36573, 전후 fresh odom 3표본씩 선속도/각속도0 및 pending/running0을 확인했다. base PID31767·Nav2 PID32377은 다음 명령을 위해 유지하고 RGB-D/관측기는 inactive다. 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다. 임시 관측 프로세스는 모두 종료했다. 복원본·범위별 receipt는 `$HOME/.local/state/bimanual-robot/rear_angle_20261020/`, 상세는 기존 실패 기록 §22.23에 있다. 이번 변경은 작업 브랜치 로컬 커밋까지만 남기고 push/main 병합은 하지 않는다.
 
 ## 2026-10-20 | 핸드오프 데이터 수집 인프라 — 통합 녹화·카메라 안정화·버그 수정·데이터 검증
 
@@ -54,6 +159,7 @@
 - 카메라 각도가 원인이라는 증거는 없다. 공장 intrinsics/extrinsics NaN과 기본 투영 사용, 한 실측 배치에서 얻은 +49.605 mm 면 거리 보정, 실제 근접 간격과 내부 추정의 불일치는 기존 미해결 항목이다. 이번 분기 수정이나 조향 복원으로 물리 1 cm 정확도·접촉 문제·전체 완주가 해결됐다고 주장하지 않는다.
 - 기록값을 재현한 회귀는 수정 전 이탈 없이 추가 접근해 실패했고 수정 후 이탈 1회·추가 세 번째 접근 없음·종료 사유를 확인했다. 관련 4개 스위트 699건(5.73초), 치명 lint·구문·diff 검사를 통과했고 별도 native `code-reviewer` 검수 PASS다. 상세 근거와 반영 상태는 기존 실패 기록 §22.22 및 `$HOME/.local/state/bimanual-robot/front_collision_20261020/`에 남긴다. 출발 검수 절차·새 물리 실행은 추가하지 않았다.
 - Pi 소스/설치 모듈 4개 SHA와 import를 대조하고 idle executor만 PID19080으로 반영했다. base PID1212·Nav2 PID2010·카메라/인식기 inactive 상태는 유지했다. 전후 fresh odom 3표본은 모두 v/w 0이며 pending/running도 0이다. 복원본은 Pi `$HOME/.local/state/jdamr/front-collision-repair/20261020_170148/`, receipt는 PC `$HOME/.local/state/bimanual-robot/front_collision_20261020/deployment.json`이다. 출발 대기 receipt를 무효화하고 현재 위치를 급수대 접근 중 정지로 맞췄으며 HOME·AMCL은 갱신하지 않았다.
+- 수정 커밋 `93b380b`는 작업 브랜치에 push됐으나, 이후 사용자가 매 작업의 main 반영을 중단하고 브랜치 커밋만 남기도록 변경했다. 자동 생성된 PR #79의 자동 병합을 해제하고 닫았으며 원격 main은 `ae15bc1` 그대로다. 주행 운영 규칙에도 검증 후 로컬 커밋까지만 수행하고 push/main은 별도 요청 시 진행하도록 반영했다. 이후 이 정책 변경은 로컬에만 커밋한다.
 
 ## 2026-10-20 | 후면 도킹 TF 시작 오류·킵아웃 경계·남은 조기 감속 수정
 

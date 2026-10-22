@@ -187,7 +187,9 @@ def test_runtime_parameter_check_rejects_missing_or_relaxed_configuration(
         flat[mismatch] = ['FollowPath']
     elif mismatch:
         flat[mismatch] = None
-    route.parking_parameters = Mock()
+    client = Mock(spec=['wait_for_service', 'call_async', 'remove_pending_request'])
+    client.wait_for_service.return_value = True
+    route._parameter_readers = {'controller_server': client}
     clock = {'now': 0.0}
     future = Future()
     responses = {}
@@ -205,7 +207,7 @@ def test_runtime_parameter_check_rejects_missing_or_relaxed_configuration(
         if clock['now'] >= response_delay_s and not future.done():
             future.set_result(responses['value'])
 
-    route.parking_parameters.get_parameters.side_effect = query
+    client.call_async.side_effect = lambda request: query(request.names)
     monkeypatch.setattr('jdamr_cube_navigation.corridor_route.time.monotonic',
                         lambda: clock['now'])
     monkeypatch.setattr('jdamr_cube_navigation.corridor_route.rclpy.spin_once', spin)
@@ -253,14 +255,11 @@ def test_parking_parameter_check_logs_missing_response_values():
     route = _route()
     logger = Mock()
     route.get_logger = lambda: logger
-    route.parking_parameters = Mock()
-    route.parking_parameters.wait_for_services.return_value = True
-    route.parking_parameters.get_parameters.return_value = _completed_future(
-        SimpleNamespace(values=[]))
+    route._read_parameters = Mock(return_value=SimpleNamespace(values=[]))
 
     assert not route._parking_parameters_ready(reverse=True)
     message = logger.error.call_args.args[0]
-    assert 'parking parameter response incomplete' in message
+    assert 'controller_server parameter response incomplete' in message
     assert 'expected=' in message and 'received=0' in message
     assert 'requested=controller_plugins,goal_checker_plugins' in message
 

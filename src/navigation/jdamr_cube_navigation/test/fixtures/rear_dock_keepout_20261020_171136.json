@@ -1,0 +1,33 @@
+{
+  "provenance": {
+    "source": "$HOME/jdamr_data/map_20260930_manual/aligned/runs/table_01_20261020_171136_1385519b/cycle_events.jsonl",
+    "sha256": "1a84456ce8e917f891ca617043b2dc2a81fe227ab41c41021fe111e973c6c223",
+    "scope": "stopped rear observation and logged blocked preview; no physical docking success claim",
+    "physical_accuracy": "NOT_EXTERNALLY_MEASURED"
+  },
+  "observation": {
+    "base_pose_odom": [1.031484533503212, -0.9628493569775981, -3.0877267678329354],
+    "face_odom": [1.9480404968586702, -0.6319054776547313],
+    "normal_odom": [-0.951207262021178, 0.30855266111018087]
+  },
+  "odom_to_map": {
+    "translation": [1.4592087199376997, -0.7594376430644995],
+    "angle_rad": -3.056434107559961,
+    "basis": "derived from the logged preview start; the logged end differs by 2.7 mm as map/odom changed during preview construction"
+  },
+  "logged_preview_start_map": [0.3495662951695271, 0.11218894914292243, -6.144160875392896],
+  "logged_preview_end_map": [-0.09489079240756043, 0.16270568800940263, -6.510032162109798],
+  "derived_nominal_one_centimetre_endpoint_map": [-0.1348125174746608, 0.1692852467578742, -0.22851252914139542],
+  "blocked_cell": {
+    "column": 66,
+    "image_row": 107,
+    "bounds_m": [-0.4, -0.1, -0.35, -0.05]
+  },
+  "rear_extent_m": 0.275,
+  "half_width_m": 0.225,
+  "target_gap_m": 0.01,
+  "additional_retreat_map_x_m": 0.12,
+  "previous_mask_image_sha256": "334370d62965730df807a1a2a42a9145429551c95947b0b369bd877e01cb7283",
+  "new_mask_image_sha256": "76bdb54527ab9b73aa658ff5decce5837d7af7e5c61393c270f47732a42673f2",
+  "restored_cells_column_image_row": [[62,92],[63,92],[64,92],[63,93],[64,93],[63,94],[64,94],[63,95],[64,95],[63,96],[64,96],[63,97],[64,97],[65,97],[63,98],[64,98],[65,98],[63,99],[64,99],[65,99],[64,100],[65,100],[64,101],[65,101],[64,102],[65,102],[64,103],[65,103],[64,104],[65,104],[64,105],[65,105],[66,105],[64,106],[65,106],[66,106],[64,107],[65,107],[66,107],[65,108],[66,108],[65,109],[66,109],[65,110],[66,110],[65,111],[66,111],[65,112],[66,112],[67,112],[65,113],[66,113],[67,113],[65,114],[66,114],[67,114],[66,115],[67,115],[66,116],[67,116],[66,117],[67,117]]
+}

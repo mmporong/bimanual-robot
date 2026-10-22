@@ -71,7 +71,7 @@ def main():
         try:
             node.verify_live_maps()
             if not node.wait_until_ready(timeout=10.0):
-                raise RuntimeError('localization or sensor data unavailable')
+                raise RuntimeError(node.readiness_failure_reason())
             (x, y, yaw), _ = node.capture_stationary_pose()
             if logged:
                 face, normal = logged_face, logged_normal

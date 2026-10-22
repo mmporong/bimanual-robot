@@ -77,6 +77,19 @@ def invoke(node, execute=True, *, search=False):
         candidate_trial=execute, search=search)
 
 
+@pytest.mark.parametrize('entrypoint', ['visit', 'observation'])
+def test_readiness_cause_reaches_box_caller_without_motion(mission, entrypoint):
+    mission.wait_until_ready.return_value = False
+    mission.last_readiness_failure = 'battery low: voltage=10.192V limit=10.500V'
+    with pytest.raises(RuntimeError, match=mission.last_readiness_failure):
+        if entrypoint == 'visit':
+            invoke(mission)
+        else:
+            mission.at_observation('route')
+    mission.execute.assert_not_called()
+    mission.capture_stationary_pose.assert_not_called()
+
+
 def _rear_home_node(monkeypatch, *, planned=True, parked=True):
     node = object.__new__(BoxServiceRoute)
     home = {'id': 'home_dock', 'x_m': .12, 'y_m': .165, 'yaw_rad': .134,
@@ -2708,7 +2721,7 @@ def test_skewed_near_corner_reapproaches_once_without_ending_the_visit(mission, 
         assert mission.emit.call_args.args == ('box_approach_finished',)
 
 
-def test_logged_close_skew_reapproaches_once_and_never_advances_after_budget(mission):
+def test_logged_close_skew_corrects_nearby_once_without_a_full_escape(mission):
     """Reproduce the close skew from table_01_20261020_164220_05cd09c4.
 
     The water stop recorded 14.800/30.461 mm at 1.994 degrees.
@@ -2737,9 +2750,9 @@ def test_logged_close_skew_reapproaches_once_and_never_advances_after_budget(mis
                       'wheel_outer_width': {'value': .540},
                       'frame_width': {'value': .450}},
         'table_01', (1., 0.), .6, execute=True, candidate_trial=True)
-    assert order == ['approach', 'escape', 'approach']
+    assert order == ['approach', 'approach']
     assert mission._straight_final_approach.call_count == 2
-    assert mission._leave_parked_pose.call_count == 1
+    mission._leave_parked_pose.assert_not_called()
     measured = [call.kwargs['estimated_front_corner_gaps_m']
                 for call in mission.emit.call_args_list
                 if call.args == ('box_gap_not_confirmed',)]
@@ -2750,7 +2763,59 @@ def test_logged_close_skew_reapproaches_once_and_never_advances_after_budget(mis
         [.030461438817617405, .014800294039719174]), measured
     assert mission.emit.call_args.args == ('failed',)
     assert mission.emit.call_args.kwargs['reason'] == 'final_table_alignment_unconfirmed'
-    assert mission.emit.call_args.kwargs['realignment_reapproach_consumed'] is True
+    assert mission.emit.call_args.kwargs['near_alignment_attempted'] is True
+
+
+@pytest.mark.parametrize('case', ['success', 'still_skewed', 'approach_failed'])
+def test_logged_table_stop_uses_near_alignment_instead_of_reverse_reapproach(mission, case):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    skewed = _table_edge_pose_for_corner_gaps(.02296500085977187, .030941691420788328)
+    final = skewed if case == 'still_skewed' else (.925, 0., 0.)
+    mission.capture_stationary_pose.side_effect = [((0., 0., 0.), {}), (skewed, {}), (final, {})]
+    mission._straight_final_approach.side_effect = [(True, None),
+                                                  (case != 'approach_failed', None)]
+    mission._leave_parked_pose = Mock(side_effect=AssertionError('unnecessary escape'))
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540},
+                      'frame_width': {'value': .450}},
+        'table_01', (1., 0.), .6, execute=True, candidate_trial=True) is (case == 'success')
+    mission._leave_parked_pose.assert_not_called()
+    assert mission._straight_final_approach.call_count == 2
+    assert sum(call.args[0] == 'table_near_alignment_correction'
+               for call in mission.emit.call_args_list) == 1
+    assert not any(call.args[0] == 'table_realignment_reapproach'
+                   for call in mission.emit.call_args_list)
+    if case == 'approach_failed':
+        assert mission.emit.call_args.args == ('failed',)
+        assert mission.emit.call_args.kwargs['reason'] == 'nav2_or_stop_confirmation'
+
+
+@pytest.mark.parametrize('interruption', ['stop', 'operator_link', 'navigation'])
+def test_near_alignment_never_dispatches_after_an_interruption(mission, interruption):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    skewed = _table_edge_pose_for_corner_gaps(.02296500085977187, .030941691420788328)
+    mission.capture_stationary_pose.side_effect = [((0., 0., 0.), {}), (skewed, {})]
+    mission._leave_parked_pose = Mock(side_effect=AssertionError('unexpected escape'))
+    def emitted(event, **_kwargs):
+        if event != 'box_gap_not_confirmed':
+            return
+        if interruption == 'stop':
+            mission.stop_requested = True
+        elif interruption == 'operator_link':
+            mission._operator_link_ready.return_value = False
+        else:
+            mission._navigation_ready.return_value = False
+    mission.emit.side_effect = emitted
+    assert not mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540},
+                      'frame_width': {'value': .450}},
+        'table_01', (1., 0.), .6, execute=True, candidate_trial=True)
+    assert mission._straight_final_approach.call_count == 1
+    mission._leave_parked_pose.assert_not_called()
 
 
 def test_one_centimetre_table_correction_has_a_bounded_iteration_count(mission):
@@ -2947,6 +3012,7 @@ def test_fine_table_starts_with_heading_error_without_a_stationary_trim():
 
     def drive(*_args, **kwargs):
         assert kwargs['target_update']((0.5, 0.0, 0.12))['heading_rad'] == 0.0
+        assert kwargs['continuous_table'] is True
         node._continuous_table_stop = {'target': dict(target)}
         return 0.4
 
@@ -3286,6 +3352,7 @@ def test_live_table_corridor_uses_frozen_map_conversion_and_runtime_footprint(mo
         with pytest.raises(RuntimeError, match='static corridor blocked'):
             validate((0.0, 0.0, 0.1), (0.5, 0.0), (-1.0, 0.0), 0.08)
     assert box_service.face_approach_waypoints.call_args.kwargs['command_heading_rad'] == 0.08
+    assert box_service.face_approach_waypoints.call_args.kwargs['continuous_table'] is True
     assert check.call_args.args[0] == [(10.0, -1.0, 0.4), (10.1, -0.99, 0.3)]
     assert factory.call_args.args[2] == node._footprint_outline.return_value
 
@@ -3371,7 +3438,8 @@ def test_recorded_table_views_advance_to_map_view_instead_of_reversing(monkeypat
         assert end[0] == pytest.approx(fixture['region_xy_m'][0] - .37)
         assert end[2] == pose[2]
         assert node._drive_zero_turn.call_args.kwargs == {
-            'precision': True, 'hold_heading': True}
+            'precision': True, 'hold_heading': True,
+            'approach_time_s': 0.5}
 
 
 @pytest.mark.parametrize('case', ['already_there', 'too_near', 'facing_away',
@@ -3555,3 +3623,13 @@ def test_zero_dwell_resume_has_one_short_capture_and_no_sleep():
     node.capture_stationary_pose.assert_called_once_with(intermediate=True)
     node._hold_still.assert_not_called()
     node._leave_parked_pose.assert_called_once()
+
+
+def test_failed_preflight_reports_controller_failure_without_motion(mission):
+    mission.preflight.return_value = False
+    mission.last_preflight_failure = 'controller_server parameter service unavailable'
+    assert not invoke(mission)
+    failure = next(call for call in mission.emit.call_args_list
+                   if call.args == ('failed',) and call.kwargs.get('phase') == 'preflight')
+    assert failure.kwargs['reason'] == mission.last_preflight_failure
+    mission.execute.assert_not_called()

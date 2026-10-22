@@ -47,9 +47,23 @@ def session_env(tmp_path):
 printf 'systemctl %s\n' "$*" >> "$MOCK_LOG"
 if [ "$1" = status ]; then exit "${MOCK_STATUS_RC:-0}"; fi
 if [ "$1" = stop ]; then exit 0; fi
+if [ "$1" = start ]; then
+  touch "$MOCK_LOG.started"
+  exit "${MOCK_START_RC:-0}"
+fi
 if [ "$1" = show ]; then
-  printf 'ActiveState=%s\nEnvironment=%s\n' \
-    "${MOCK_SHOW_ACTIVE_STATE:-active}" "${MOCK_UNIT_ENV:-}"
+  active_state="${MOCK_SHOW_ACTIVE_STATE:-active}"
+  sub_state="${MOCK_SHOW_SUB_STATE:-running}"
+  if [ -e "$MOCK_LOG.started" ]; then
+    active_state="${MOCK_SHOW_ACTIVE_STATE_AFTER_START:-active}"
+    sub_state="${MOCK_SHOW_SUB_STATE_AFTER_START:-running}"
+  fi
+  printf 'LoadState=%s\nActiveState=%s\nSubState=%s\nFragmentPath=%s\nEnvironment=%s\n' \
+    "${MOCK_SHOW_LOAD_STATE:-not-found}" \
+    "$active_state" \
+    "$sub_state" \
+    "${MOCK_SHOW_FRAGMENT_PATH:-}" \
+    "${MOCK_UNIT_ENV:-}"
   exit "${MOCK_SHOW_RC:-0}"
 fi
 if [ "$1" = is-active ]; then
@@ -262,6 +276,83 @@ def test_repeated_start_reuses_matching_active_session_without_restart(session_e
     assert 'systemd-run ' not in commands
     assert 'systemctl stop ' not in commands
     assert 'ros2 ' not in commands
+
+
+def test_repeated_start_reuses_matching_inactive_transient_unit(session_env):
+    identity = _started_identity(session_env)
+    result = _start(
+        session_env,
+        MOCK_SHOW_LOAD_STATE='loaded',
+        MOCK_SHOW_ACTIVE_STATE='inactive',
+        MOCK_SHOW_SUB_STATE='dead',
+        MOCK_SHOW_FRAGMENT_PATH=(
+            '/run/systemd/transient/jdamr-restaurant-navigation.service'),
+        MOCK_UNIT_ENV='HOME=/tmp ' + identity,
+    )
+    assert result.returncode == 0, result.stderr
+    assert '같은 설정의 중지된 transient unit을 다시 시작했다' in result.stdout
+    commands = session_env['log'].read_text(encoding='utf-8')
+    assert 'systemctl start jdamr-restaurant-navigation.service' in commands
+    assert 'systemd-run ' not in commands
+    assert 'systemctl stop ' not in commands
+
+
+def test_inactive_transient_unit_with_changed_identity_is_not_reused(session_env):
+    identity = _started_identity(session_env)
+    session_env['params'].write_text(
+        'controller_server: {changed: true}\n', encoding='utf-8')
+    result = _start(
+        session_env,
+        MOCK_SHOW_LOAD_STATE='loaded',
+        MOCK_SHOW_ACTIVE_STATE='inactive',
+        MOCK_SHOW_SUB_STATE='dead',
+        MOCK_SHOW_FRAGMENT_PATH=(
+            '/run/systemd/transient/jdamr-restaurant-navigation.service'),
+        MOCK_UNIT_ENV=identity,
+    )
+    assert result.returncode == 4
+    assert '요청과 다르다' in result.stderr
+    commands = session_env['log'].read_text(encoding='utf-8')
+    assert 'systemctl start ' not in commands
+    assert 'systemd-run ' not in commands
+    assert 'systemctl stop ' not in commands
+
+
+def test_matching_inactive_persistent_unit_is_not_reused(session_env):
+    identity = _started_identity(session_env)
+    result = _start(
+        session_env,
+        MOCK_SHOW_LOAD_STATE='loaded',
+        MOCK_SHOW_ACTIVE_STATE='inactive',
+        MOCK_SHOW_SUB_STATE='dead',
+        MOCK_SHOW_FRAGMENT_PATH=(
+            '/etc/systemd/system/jdamr-restaurant-navigation.service'),
+        MOCK_UNIT_ENV=identity,
+    )
+    assert result.returncode == 4
+    assert 'transient unit인지 확인할 수 없다' in result.stderr
+    commands = session_env['log'].read_text(encoding='utf-8')
+    assert 'systemctl start ' not in commands
+    assert 'systemd-run ' not in commands
+
+
+def test_matching_inactive_unit_still_requires_clean_ros_graph(session_env):
+    identity = _started_identity(session_env)
+    result = _start(
+        session_env,
+        MOCK_SHOW_LOAD_STATE='loaded',
+        MOCK_SHOW_ACTIVE_STATE='inactive',
+        MOCK_SHOW_SUB_STATE='dead',
+        MOCK_SHOW_FRAGMENT_PATH=(
+            '/run/systemd/transient/jdamr-restaurant-navigation.service'),
+        MOCK_UNIT_ENV=identity,
+        MOCK_NODES='/robot_state_publisher\n/controller_server\n',
+    )
+    assert result.returncode == 4
+    assert '기존 localization/Cartographer/Nav2 노드' in result.stderr
+    commands = session_env['log'].read_text(encoding='utf-8')
+    assert 'systemctl start ' not in commands
+    assert 'systemd-run ' not in commands
 
 
 def test_matching_active_session_does_not_bypass_conflicting_mapping_service(session_env):
