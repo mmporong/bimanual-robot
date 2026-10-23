@@ -46,32 +46,56 @@
 
 ## 오프라인 재생
 
-새 ROS 패키지를 빌드한 설치 환경을 source한 뒤 실행한다. 재생기는 센서 노드를 띄우지 않는다.
+저장소의 재생 모듈을 실행한다. 재생기는 센서 노드를 띄우지 않는다.
 
 ```bash
 cd "$HOME/bimanual-robot-pointcloud"
-source "$HOME/.cache/codex/pointcloud-install/setup.bash"
-ros2 run jdamr_cube_navigation pointcloud_replay \
-  --manifest "$HOME/.local/state/bimanual-robot/pointcloud_development_20261022/current_gap_manifest.json" \
-             "$HOME/.local/state/bimanual-robot/pointcloud_development_20261022/stationary_sequence_manifest.json" \
-  --output "$HOME/.local/state/bimanual-robot/pointcloud_development_20261022/replay_final"
+PYTHONPATH="$PWD/src/navigation/jdamr_cube_navigation" \
+  python3 -m jdamr_cube_navigation.pointcloud_replay \
+  --manifest "$HOME/.local/state/bimanual-robot/pointcloud_contract_20261023/current_gap_manifest.json" \
+             "$HOME/.local/state/bimanual-robot/pointcloud_contract_20261023/stationary_sequence_manifest.json" \
+             "$HOME/.local/state/bimanual-robot/pointcloud_contract_20261023/dock_corridor_manifest.json" \
+  --output "$HOME/.local/state/bimanual-robot/pointcloud_contract_20261023/replay"
 ```
 
 위 경로는 개발 기기에 보존한 원본과 manifest다. raw·실행 로그는 Git에 넣지 않는다. 다른 기기에서는 해당 원본과 보정 출처를 확보하고 manifest를 만든다.
 
 | manifest 키 | 계약 |
 |---|---|
-| `schema_version` | `1` |
+| `schema_version` | 새 기록은 `2`. 기존 `1`도 검출 재생 가능 |
 | `capture_group`, `split`, `frame_id` | 수집 단위, `calibration/development/evaluation`, 실제 광학 프레임 이름 |
 | `input.path`, `input.sha256`, `input.encoding` | npz 위치·원본 SHA-256·`16UC1_mm` 단위 선언 |
 | `calibration.id/status/source/source_sha256` | 보정 버전·`derived/measured`·출처 파일과 SHA-256 |
+| `calibration.configuration_map` | 높이·roll·pitch의 보정 원본 경로. v2 필수이며 실효 `table_config`와 수치 대조 |
 | `table_config` | 해당 기록에 적용할 `TableEdgeConfig` 필드. 현재 장착값을 과거 기록에 대입하지 않음 |
 | `scene_config`, `track_config` | 선택형 `SceneConfig`, `TrackConfig` 필드. 생략해도 실제 기본값을 결과에 남김 |
 | `target_region_odom` | 선택형 `center_xy_m: [x, y]`, `radius_m`. 취득 기록과 같은 odom 좌표계의 대상 근방 |
+| `odom_transform` | 추적용 `parent_frame: odom`, `child_frame: <광학 프레임>` 선언. 배열 생성 과정의 독립 검증을 뜻하지 않음 |
 
-npz에는 uint16 mm `depth`와 `intrinsics=[fx,fy,cx,cy]` 또는 유효한 rectified `p`가 필요하다. `p`가 있으면 그것을 사용하며 NaN `K`를 유효한 보정값으로 대신 쓰지 않는다. 시간은 실제 `stamps[N]`만 사용한다. 추적 재생에는 같은 취득 시각의 `odom_from_optical[N,4,4]`도 필요하다. 파일 수정 시각이나 별도로 조회한 현재 TF를 영상 취득 시각으로 대체하지 않는다.
+npz에는 uint16 mm `depth`와 `intrinsics=[fx,fy,cx,cy]` 또는 유효한 rectified `p`가 필요하다. `p`가 있으면 그것을 사용하며 NaN `K`를 유효한 보정값으로 대신 쓰지 않는다. 내장 `frame_id`가 있으면 manifest와 대조하고, 없으면 검출만 재생하며 누락을 기록한다. 시간은 실제 `stamps[N]`만 사용한다. 추적 재생에는 같은 취득 시각의 `odom_from_optical[N,4,4]`, 일치하는 내장 프레임, 변환 프레임 선언, 보정 원본과의 수치 대조가 필요하다. 파일 수정 시각이나 별도로 조회한 현재 TF를 영상 취득 시각으로 대체하지 않는다.
+
+현 장착 YAML의 `configuration_map`은 다음과 같다. JSON/YAML의 실제 키 경로를 지정하며, 각도는 `deg`도 지원한다. 과거 영상에는 당시 보정 원본의 경로를 연결한다.
+
+```json
+{
+  "camera_height_m": {"path": "camera_mount.transform.z_m", "unit": "m"},
+  "camera_roll_rad": {"path": "camera_mount.transform.roll_rad", "unit": "rad"},
+  "camera_pitch_rad": {"path": "camera_mount.transform.pitch_rad", "unit": "rad"}
+}
+```
+
+mapping 없는 v1 기록은 `calibration_binding_verified=false`로 검출 결과를 남긴다. mapping을 추가하면 원본과의 일치를 검사한다. 이 값이 true여도 보정 파일의 값이 외부 실측과 정확히 맞는다는 뜻은 아니다. `odom_transform_provenance`도 manifest 선언과 독립 검증을 구분한다. 보존 원본과 이전 manifest를 덮어쓰지 않고 새 v2 manifest에서 연결한다.
 
 출력 `frames.csv`에는 프레임별 검출·후보 수, 원본 광학 좌표계의 경계 선분, 추적 ID·odom 선분·측정 시각·처리 시간이 있다. `summary.json`에는 입력·manifest·보정 출처·실효 설정·구현 6파일의 SHA-256과 입력 가용성을 남긴다. 같은 수집 그룹이나 같은 raw를 서로 다른 split에 넣으면 실행을 거부한다. 독립 정답 평가기는 아직 없으므로 `accuracy_evaluated=false`다.
+
+## 2026-10-23 관측 진단·재생 근거 보완
+
+- TF 조회 실패 또는 무효 변환이 발생해도 이미 계산한 입력점·높이 통과점·성분·후보 수와 영상 시각·처리 시간을 상태에 남긴다. 추적 이력은 초기화하고 검출·stable·제어 가능 상태는 false로 유지한다. 검출 후보 부재와 TF 실패가 함께 발생했는지 확인할 수 있다.
+- 재생 v2는 보정 원본의 높이·roll·pitch 값과 실효 설정을 대조한다. 원본에 내장된 광학 프레임과 manifest의 불일치를 거부하며, 추적 자료의 부족한 근거는 `unavailable_*`로 구분한다. v1의 검출 재생은 보존한다.
+- 1장·20장·90장의 기존 실제 캡처를 새 v2 manifest로 재생했다. 기존/성분별 검출은 각각 1/1, 1/0, 0/0이고 모든 프레임의 검출 경계 좌표가 이전 재생과 일치했다. 원본 SHA도 같다. 세 기록 모두 동기 odom이 없어 추적 평가는 수행하지 않았다. 보정 원본과 설정의 일치는 실제 거리 정확도 개선을 뜻하지 않는다.
+- 관련 7개 스위트 172 PASS, fatal flake8·문법·diff 검사 PASS다. 독립 코드 리뷰에서 차단 이슈가 없었고 실제 재생 산출물도 대조했다. LSP 도구가 없어 해당 진단은 수행하지 못했다.
+- 새 manifest·재생·원본 대조 근거는 `$HOME/.local/state/bimanual-robot/pointcloud_contract_20261023/`에 있다. 원본 보정과 영상, 이전 manifest는 보존했다.
+- Pi SSH는 `No route to host`로 연결되지 않았다. 저장 TF 버퍼에서 Astra 내부 정적 변환은 있으나 차체 정적 변환 전체가 빠진 것을 확인했다. URDF에는 연결 joint가 있으므로 DDS의 신규 구독자 합류·정적 TF 전달 문제를 우선 조사한다. 현재 실행 중 RSP 상태를 재확인하지 못해 하위 원인은 확정하지 않았다. 이번에는 Pi 배포·서비스·운영 보정값·실물 이동을 변경하지 않았다.
 
 ## 2026-10-22 보존 영상 결과
 
@@ -82,7 +106,7 @@ npz에는 uint16 mm `depth`와 `intrinsics=[fx,fy,cx,cy]` 또는 유효한 recti
 
 두 기록 모두 외부 정답이 없고 과거 메타데이터에서 유도한 장착값을 사용했다. 위 수치는 검출 반환 횟수이며 정확도·주차 성공률이 아니다. 새 방식의 우수성이 확인되지 않았으므로 기본 활성화하지 않는다. 과거 영상의 미검출은 분리·높이 ROI·보정·영상의 실제 유효성을 구분해 후속 평가한다. 영상의 결과를 맞추려고 장착값을 재조정하지 않았다.
 
-최종 재생 근거는 위 명령의 `replay_final/000`과 `replay_final/001`이다. 기록에는 이 PC의 오프라인 처리 시간만 있으며 Pi CPU·RSS·DDS·제동 지연의 근거로 쓰지 않는다.
+당시 재생 근거는 `$HOME/.local/state/bimanual-robot/pointcloud_development_20261022/replay_final/000`과 `001`이다. 기록에는 이 PC의 오프라인 처리 시간만 있으며 Pi CPU·RSS·DDS·제동 지연의 근거로 쓰지 않는다.
 
 ## 2026-10-23 Pi 배포와 정지 시험
 

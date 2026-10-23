@@ -470,6 +470,7 @@ def test_component_tracking_adapter_preserves_measurement_time_and_odom_identity
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
                         lambda *a: SimpleNamespace(
                             candidates=tuple(candidates), component_sizes=(200,),
+                            input_point_count=240, height_point_count=200,
                             evaluated_components=1))
     image = np.ones((240, 320), dtype=np.uint16)
     _, first, stable = node._table_observation(image, INTRINSICS, 10., OPTICAL_FRAME)
@@ -496,9 +497,88 @@ def test_an_ambiguous_scene_is_not_forwarded_as_a_parking_target(monkeypatch):
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
                         lambda *a: SimpleNamespace(
                             candidates=(object(), object()), component_sizes=(200, 200),
+                            input_point_count=500, height_point_count=400,
                             evaluated_components=2))
     detection, fields, _ = node._table_observation(None, INTRINSICS, 10., OPTICAL_FRAME)
     assert detection is None and fields['table_candidate_count'] == 2
+
+
+@pytest.mark.parametrize('candidate_count', [0, 1])
+@pytest.mark.parametrize('missing_frame', [OPTICAL_FRAME, 'map'])
+@pytest.mark.parametrize('invalid_transform', [False, True])
+def test_tf_failure_keeps_scene_evidence_and_clears_stability(
+        monkeypatch, candidate_count, missing_frame, invalid_transform):
+    from jdamr_cube_navigation.box_top_detection import DetectionStability
+    from jdamr_cube_navigation.table_surface_model import TableScene
+    from jdamr_cube_navigation.table_surface_tracking import TableSurfaceTracker, TrackConfig
+    from test_table_edge_detection import config
+    from tf2_ros import TransformException
+
+    info, image = _messages(np.ones((2, 2), dtype='<u2') * 1000)
+    node = object.__new__(DepthBoxParkingNode)
+    node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
+    node._camera_info, node._optical_frame = info, OPTICAL_FRAME
+    node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
+    node._surface_mode, node._config = 'table_edge', BoxTopConfig()
+    node._table_components = node._table_request_enabled = True
+    node._table_config = config()
+    node._table_calibration_id = 'mount-a'
+    node._table_region_map, node._table_region_odom = (0., 1., .2), None
+    node._table_tracker = TableSurfaceTracker(TrackConfig(required_frames=2))
+    node._stability = DetectionStability()
+    candidate = SimpleNamespace(edge_endpoints_optical_m=np.array([
+        [-.4, 1., .75], [.4, 1., .75]]))
+    node._table_tracker.update((candidate,), 9.8, np.eye(4), 'previous')
+    node._table_tracker.update((candidate,), 9.9, np.eye(4), 'previous')
+    scene = TableScene((candidate,) if candidate_count else (), (200,), 500, 200, 1)
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
+                        lambda *args: scene)
+    def matrix(value):
+        if value is None:
+            raise ValueError('invalid_transform_quaternion')
+        return value
+
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.transform_matrix', matrix)
+
+    def lookup(target, source, *args, **kwargs):
+        if source == missing_frame:
+            if invalid_transform:
+                return SimpleNamespace(transform=None)
+            raise TransformException(f'missing {source}')
+        return SimpleNamespace(transform=np.eye(4))
+
+    node._table_tf = SimpleNamespace(lookup_transform=lookup)
+    node.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(nanoseconds=10_100_000_000))
+    messages = []
+    node._status = SimpleNamespace(publish=messages.append)
+    node._on_depth(image)
+    document = json.loads(messages[0].data)
+    assert document['table_candidate_count'] == candidate_count
+    assert document['table_component_count'] == 1
+    assert document['table_evaluated_components'] == 1
+    assert document['table_input_point_count'] == 500
+    assert document['table_height_point_count'] == 200
+    assert document['table_track_state'] == 'transform_unavailable'
+    assert document['reason'].startswith(
+        'table_tracking_transform_invalid:' if invalid_transform
+        else 'table_tracking_transform_unavailable:')
+    assert document['stamp_s'] == 10.
+    assert document['frame_id'] == OPTICAL_FRAME
+    assert document['processing_duration_s'] >= 0.
+    assert document['detected'] is document['stable'] is document['control_ready'] is False
+    assert document['stable_frame_count'] == 0
+    assert node._table_tracker._world is None
+
+    node._table_tf.lookup_transform = lambda *args, **kwargs: SimpleNamespace(
+        transform=np.eye(4))
+    _, fields, stable = node._table_observation(
+        np.ones((2, 2), dtype=np.uint16),
+        decode_depth_observation(info, image, OPTICAL_FRAME,
+                                 'rectified_projection', 10.1, .5)[1],
+        10.1, OPTICAL_FRAME)
+    assert fields['table_track_frame_count'] == candidate_count
+    assert stable is False
 
 
 def test_selected_region_is_frozen_in_odom_across_map_localization_jumps(monkeypatch):
@@ -524,6 +604,7 @@ def test_selected_region_is_frozen_in_odom_across_map_localization_jumps(monkeyp
         [-.4, 1., .75], [.4, 1., .75]]))
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
                         lambda *a: SimpleNamespace(candidates=(candidate,),
+                                                   input_point_count=240, height_point_count=200,
                                                    component_sizes=(200,), evaluated_components=1))
     _, first, stable = node._table_observation(None, INTRINSICS, 10., OPTICAL_FRAME)
     assert not stable

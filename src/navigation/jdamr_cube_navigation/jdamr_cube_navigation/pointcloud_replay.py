@@ -5,10 +5,12 @@ import csv
 from dataclasses import asdict
 import hashlib
 import json
+import math
 from pathlib import Path
 import time
 
 import numpy as np
+import yaml
 
 from .box_top_detection import CameraIntrinsics
 from .table_edge_detection import detect_table_edge, TableEdgeConfig
@@ -23,6 +25,19 @@ def file_sha256(path):
         for block in iter(lambda: stream.read(1024 * 1024), b''):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _scalar_text(value, field):
+    """Return a nonempty text scalar stored in an NPZ field."""
+    value = np.asarray(value)
+    if value.shape != ():
+        raise ValueError(f'{field} must be a scalar string')
+    item = value.item()
+    if isinstance(item, bytes):
+        item = item.decode('utf-8')
+    if not isinstance(item, str) or not item:
+        raise ValueError(f'{field} must be a nonempty string')
+    return item
 
 
 def load_depth_capture(path):
@@ -72,19 +87,84 @@ def load_depth_capture(path):
             if stamps is None or transforms.shape != (count, 4, 4):
                 raise ValueError('odom transforms need one exact timestamped transform per image')
             transforms = np.asarray([rigid_transform(item) for item in transforms])
+        capture_frame_id = (_scalar_text(capture['frame_id'], 'frame_id')
+                            if 'frame_id' in capture else None)
     return depth, CameraIntrinsics(width, height, fx, fy, cx, cy), stamps, transforms, {
         'intrinsics_source': intrinsics_source,
         'encoding_source': 'embedded' if encoding else 'manifest_uint16_millimetres',
         'timestamp_available': stamps is not None,
         'synchronized_odom_available': transforms is not None,
+        'capture_frame_id_available': capture_frame_id is not None,
+        'capture_frame_id': capture_frame_id,
     }
+
+
+def _load_structured_source(path):
+    """Load a JSON or YAML calibration record without format-specific assumptions."""
+    text = path.read_text()
+    if path.suffix.lower() == '.json':
+        document = json.loads(text)
+    else:
+        document = yaml.safe_load(text)
+    if not isinstance(document, dict):
+        raise ValueError('calibration source must contain a JSON/YAML object')
+    return document
+
+
+def _source_value(document, mapping, field):
+    """Resolve and normalize one explicitly mapped calibration value."""
+    if isinstance(mapping, str):
+        path, unit = mapping, None
+    elif isinstance(mapping, dict):
+        path, unit = mapping.get('path'), mapping.get('unit')
+    else:
+        raise ValueError(f'calibration mapping for {field} must be a path or object')
+    if not isinstance(path, str) or not path:
+        raise ValueError(f'calibration mapping path for {field} is required')
+    value = document
+    for part in path.split('.'):
+        if not isinstance(value, dict) or part not in value:
+            raise ValueError(f'calibration source path for {field} does not exist')
+        value = value[part]
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        raise ValueError(f'calibration source value for {field} must be finite numeric')
+    if unit is None:
+        return float(value)
+    expected = 'rad' if field.endswith('_rad') else 'm' if field.endswith('_m') else None
+    if unit == expected:
+        return float(value)
+    if unit == 'deg' and expected == 'rad':
+        return math.radians(value)
+    raise ValueError(f'unsupported calibration unit {unit!r} for {field}')
+
+
+def _validate_calibration_configuration(calibration, source, configured, *, required):
+    """Prove that mount values used by the detector came from the sealed source."""
+    mapping = calibration.get('configuration_map')
+    required_fields = {'camera_height_m', 'camera_roll_rad', 'camera_pitch_rad'}
+    if mapping is None and not required:
+        return False
+    if not isinstance(mapping, dict) or not required_fields.issubset(mapping):
+        raise ValueError('calibration configuration_map must map height, roll and pitch')
+    effective = asdict(configured)
+    document = _load_structured_source(source)
+    for field, source_mapping in mapping.items():
+        if field not in effective:
+            raise ValueError(f'calibration mapping targets unknown table_config field {field}')
+        source_value = _source_value(document, source_mapping, field)
+        configured_value = effective[field]
+        if (not isinstance(configured_value, (int, float))
+                or not math.isclose(source_value, configured_value, rel_tol=1e-12, abs_tol=1e-12)):
+            raise ValueError(f'calibration source value disagrees with table_config.{field}')
+    return True
 
 
 def load_manifest(path):
     """Require declared split, capture group and calibration provenance."""
     path = Path(path).resolve()
     manifest = json.loads(path.read_text())
-    if manifest.get('schema_version') != 1:
+    schema_version = manifest.get('schema_version')
+    if schema_version not in {1, 2}:
         raise ValueError('unsupported manifest schema_version')
     if manifest.get('split') not in {'calibration', 'development', 'evaluation'}:
         raise ValueError('declare calibration/development/evaluation split')
@@ -108,6 +188,8 @@ def load_manifest(path):
     if file_sha256(source) != manifest['input'].get('sha256'):
         raise ValueError('capture SHA-256 mismatch')
     configured = TableEdgeConfig(**manifest['table_config'])
+    _validate_calibration_configuration(
+        calibration, calibration_source, configured, required=schema_version >= 2)
     return manifest, source.resolve(), configured
 
 
@@ -126,6 +208,40 @@ def replay(manifest_path, output_directory):
     """Compare existing detection and component detection on the same frames."""
     manifest, source, configured = load_manifest(manifest_path)
     depth, intrinsics, stamps, transforms, availability = load_depth_capture(source)
+    calibration_binding_verified = isinstance(
+        manifest['calibration'].get('configuration_map'), dict)
+    availability['calibration_binding_verified'] = calibration_binding_verified
+    capture_frame_id = availability['capture_frame_id']
+    if capture_frame_id is not None and capture_frame_id != manifest['frame_id']:
+        raise ValueError('embedded frame_id disagrees with manifest frame_id')
+    availability['frame_id_verified'] = capture_frame_id is not None
+    availability['frame_id_provenance'] = (
+        'embedded_and_manifest_match' if capture_frame_id is not None
+        else 'missing_embedded_frame_id_manifest_only')
+    transform_contract = manifest.get('odom_transform')
+    if transform_contract is not None:
+        if not isinstance(transform_contract, dict):
+            raise ValueError('odom_transform frame contract must be an object')
+        if transform_contract.get('parent_frame') != 'odom':
+            raise ValueError('odom_transform parent_frame must be odom')
+        if transform_contract.get('child_frame') != manifest['frame_id']:
+            raise ValueError('odom_transform child_frame must match manifest frame_id')
+    odom_transform_provenance = (
+        'manifest_declared_not_independently_verified'
+        if transform_contract is not None else 'missing')
+    availability['odom_transform_provenance'] = odom_transform_provenance
+    if transforms is None:
+        tracking_reason = 'missing_stamped_odom'
+    elif capture_frame_id is None:
+        tracking_reason = 'missing_verified_capture_frame'
+    elif transform_contract is None:
+        tracking_reason = 'missing_odom_transform_frame_contract'
+    elif not calibration_binding_verified:
+        tracking_reason = 'missing_verified_calibration_binding'
+    else:
+        tracking_reason = None
+    availability['tracking_available'] = tracking_reason is None
+    availability['tracking_unavailable_reason'] = tracking_reason
     scene_config = SceneConfig(**manifest.get('scene_config', {}))
     track_config = TrackConfig(**manifest.get('track_config', {}))
     region_config = manifest.get('target_region_odom')
@@ -146,7 +262,7 @@ def replay(manifest_path, output_directory):
         scene = detect_table_scene(image, intrinsics, configured, **asdict(scene_config))
         scene_duration = time.perf_counter() - started
         track = None
-        if transforms is not None:
+        if tracking_reason is None:
             track = tracker.update(scene.candidates, float(stamps[index]), transforms[index],
                                    manifest['calibration']['id'], region)
         rows.append({
@@ -162,7 +278,7 @@ def replay(manifest_path, output_directory):
                 item.edge_endpoints_optical_m for item in scene.candidates]),
             'input_point_count': scene.input_point_count,
             'height_point_count': scene.height_point_count,
-            'track_state': track.state if track else 'unavailable_missing_stamped_odom',
+            'track_state': track.state if track else f'unavailable_{tracking_reason}',
             'track_id': track.track_id if track else None,
             'measurement_stamp_s': track.measurement_stamp_s if track else None,
             'tracked_edge_odom_m': json.dumps(track.endpoints_odom_m if track else None),
@@ -185,6 +301,8 @@ def replay(manifest_path, output_directory):
             'table_surface_model.py', 'table_surface_tracking.py', 'box_top_detection.py')},
         'capture_group': manifest['capture_group'], 'split': manifest['split'],
         'calibration': manifest['calibration'], 'availability': availability,
+        'calibration_binding_verified': calibration_binding_verified,
+        'odom_transform_provenance': odom_transform_provenance,
         'frame_count': len(rows),
         'baseline_detected_frames': sum(row['baseline_detected'] for row in rows),
         'component_detected_frames': sum(row['candidate_count'] > 0 for row in rows),

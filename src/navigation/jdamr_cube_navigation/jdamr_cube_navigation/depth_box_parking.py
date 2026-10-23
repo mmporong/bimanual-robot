@@ -352,19 +352,34 @@ class DepthBoxParkingNode(Node):
             'table_component_count': len(scene.component_sizes),
             'table_candidate_count': len(scene.candidates),
             'table_evaluated_components': scene.evaluated_components,
+            'table_input_point_count': scene.input_point_count,
+            'table_height_point_count': scene.height_point_count,
         }
         region_map = getattr(self, '_table_region_map', None)
         if self._table_tracker is None and region_map is None:
             return (scene.candidates[0] if len(scene.candidates) == 1 else None), fields, None
-        stamped = self._table_tf.lookup_transform(
-            'odom', frame_id, Time(seconds=stamp_s), timeout=Duration(seconds=.05))
-        transform = transform_matrix(stamped.transform)
-        if region_map is not None and getattr(self, '_table_region_odom', None) is None:
-            map_tf = self._table_tf.lookup_transform(
-                'odom', 'map', Time(seconds=stamp_s), timeout=Duration(seconds=.05))
-            map_to_odom = transform_matrix(map_tf.transform)
-            center = map_to_odom @ np.array([*region_map[:2], 0., 1.])
-            self._table_region_odom = TargetRegion(tuple(center[:2]), region_map[2])
+        try:
+            stamped = self._table_tf.lookup_transform(
+                'odom', frame_id, Time(seconds=stamp_s), timeout=Duration(seconds=.05))
+            transform = transform_matrix(stamped.transform)
+            if region_map is not None and getattr(self, '_table_region_odom', None) is None:
+                map_tf = self._table_tf.lookup_transform(
+                    'odom', 'map', Time(seconds=stamp_s), timeout=Duration(seconds=.05))
+                map_to_odom = transform_matrix(map_tf.transform)
+                center = map_to_odom @ np.array([*region_map[:2], 0., 1.])
+                self._table_region_odom = TargetRegion(tuple(center[:2]), region_map[2])
+        except (TransformException, ValueError) as error:
+            # Keep the completed detector evidence even when tracking cannot run.
+            if self._table_tracker is not None:
+                self._table_tracker.reset()
+            fields.update({
+                'table_track_state': 'transform_unavailable',
+                'table_track_frame_count': 0,
+                'reason': ('table_tracking_transform_unavailable:'
+                           if isinstance(error, TransformException)
+                           else 'table_tracking_transform_invalid:') + str(error),
+            })
+            return None, fields, False
         region = getattr(self, '_table_region_odom', None)
         if self._table_tracker is None:
             selected = candidates_in_region(scene.candidates, transform, region)
@@ -441,8 +456,9 @@ class DepthBoxParkingNode(Node):
                 'detected': False,
                 'stable': False,
                 'stable_frame_count': stable_frame_count,
-                'reason': ('no_table_edge_candidate' if self._surface_mode == 'table_edge'
-                           else 'no_box_surface_candidate'),
+                'reason': table_fields.get(
+                    'reason', 'no_table_edge_candidate' if self._surface_mode == 'table_edge'
+                    else 'no_box_surface_candidate'),
                 'control_ready': False,
             })
             return
