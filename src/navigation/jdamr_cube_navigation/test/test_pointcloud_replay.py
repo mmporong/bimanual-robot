@@ -82,6 +82,31 @@ def test_exact_timestamped_transforms_enable_tracking(tmp_path):
         row['candidate_edges_optical_m'])[0]
 
 
+@pytest.mark.parametrize('stamped', [False, True])
+def test_region_priority_uses_only_verified_capture_geometry(tmp_path, monkeypatch, stamped):
+    from jdamr_cube_navigation.table_surface_model import detect_table_scene
+
+    path, _, manifest = capture_manifest(
+        tmp_path, stamped=stamped, embedded_frame=True, transform_contract=True)
+    manifest['target_region_odom'] = {'center_xy_m': [0., .3], 'radius_m': .5}
+    path.write_text(json.dumps(manifest))
+    priorities = []
+
+    def detect(*args, **kwargs):
+        priorities.append(kwargs)
+        return detect_table_scene(*args, **kwargs)
+
+    monkeypatch.setattr('jdamr_cube_navigation.pointcloud_replay.detect_table_scene', detect)
+    replay(path, tmp_path / 'result')
+    assert ('target_region_odom' in priorities[0]) is stamped
+    if stamped:
+        assert tuple(priorities[0]['target_region_odom'].center_xy_m) == (0., .3)
+        np.testing.assert_array_equal(priorities[0]['odom_from_optical'], np.eye(4))
+    with (tmp_path / 'result/frames.csv').open() as stream:
+        row = next(csv.DictReader(stream))
+    assert 'region_prioritized_components' in row
+
+
 def test_raw_change_invalidates_the_sealed_input(tmp_path):
     path, raw, _ = capture_manifest(tmp_path)
     with raw.open('ab') as stream:

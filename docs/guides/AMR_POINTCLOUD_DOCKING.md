@@ -11,9 +11,11 @@
 | 모듈 | 동작 |
 |---|---|
 | `pointcloud_components.py` | 깊이 영상 격자의 상하좌우 인접점 사이 XYZ 거리가 연결 기준 이내일 때 묶는다. 가림이나 빈 픽셀을 건너 연결하지 않는다. 전체 공간의 모든 이웃을 찾는 Euclidean clustering과는 구별한다. |
-| `table_surface_model.py` | 높이 ROI의 연결 성분별로 기존 상판·앞 경계 검출기를 실행한다. 평가 후보 수에 상한을 둔다. 정밀 면 맞춤에는 원래 점을 사용하며 복셀 평균으로 바꾸지 않는다. |
+| `table_surface_model.py` | 높이 ROI의 연결 성분별로 기존 상판·앞 경계 검출기를 실행한다. 취득 시각 TF와 대상 근방이 있으면 odom XY 성분 외접 사각형이 근방 원과 겹치는 성분을 먼저 평가한다. 평가 수 상한과 원래 점을 유지하며 복셀 평균으로 바꾸지 않는다. |
 | `table_surface_tracking.py` | 취득 시각의 odom←optical 변환으로 선분을 비교한다. 방향·직선 거리·높이·실제 선분 겹침으로 연계한다. 잘린 선분 중점이나 양끝 순서 변화만으로 대상을 교체하지 않는다. |
 | `depth_box_parking.py` | 새 관측을 기존 상태 메시지로 변환한다. 예측은 `detected/stable` 관측으로 보내지 않는다. 속도 명령 발행은 없다. |
+| `camera_info_history.py` | 최대 8개의 시각별 보정 정보를 보관하고 영상보다 미래인 정보를 제외한다. 깊이 시각 역행 시 이전 이력을 버린다. |
+| `observer_camera_mount.py` | 단독 관측기 시작 시 현재 장착 YAML을 기존 장착 검증기로 읽어 높이·roll·pitch에 적용한다. |
 | `box_service.py` | 선택한 책상의 지도 영역과 장착 설정 해시를 기존 원자적 설정 요청에 넣는다. 최종 거리·각도 판정과 제어 경로는 유지한다. |
 | `pointcloud_replay.py` | raw·보정 출처·처리 설정·구현 해시를 남기며 같은 프레임에서 기존/새 검출을 비교한다. ROS 서비스나 로봇을 사용하지 않는다. |
 
@@ -41,6 +43,10 @@
 `--pointcloud-perception`은 `table_edge` 접근 태스크에만 사용할 수 있다. `front`, 도크 복귀만 수행하는 요청, 후면 박스 주차만 수행하는 요청과 조합하면 명령 해석 단계에서 거부한다.
 
 관측기만 띄우는 launch에는 capability인 `table_components`, `table_tracking`이 있으며 기본값은 모두 `false`다. `table_tracking=true`에는 `table_components=true`가 필요하다. 실행별 요청·유효한 대상 영역·비어 있지 않은 보정 ID는 실행기가 동적으로 함께 설정한다. 관측 범위만 바꿀 때는 추적 안정성을 새로 채우지만, 이미 고정한 odom 대상 영역을 map에서 다시 변환하지 않는다.
+
+기본 `config/depth_box_parking.yaml`의 `camera_mount_file`은 `camera_mount_current.yaml`이다. 상대경로는 설치 패키지의 `config/` 기준이며 절대경로와 `~`도 지원한다. 지정한 파일이 시작 높이·roll·pitch보다 우선한다. 개별 시작 파라미터를 쓰려면 `camera_mount_file`을 빈 문자열로 둔다. 파일 경로는 시작 시 고정되며 실행기의 기존 원자적 장착값 갱신은 계속 사용할 수 있다. 이 변경은 보정값 자체를 다시 추정하는 기능이 아니다.
+
+CameraInfo는 영상 시각 이하 중 가장 최신 값을 사용한다. timestamp 0만 수신하는 정적 보정도 지원하지만, 양수 timestamp를 받은 뒤에는 정적 값으로 되돌아가지 않는다. 사용할 값이 없으면 해당 영상만 미검출로 반환하고 다음 영상에서 다시 처리한다. 추가 대기는 없다. 선택된 유효 intrinsics가 바뀌거나 깊이 시각이 역행하면 이전 안정성·추적 이력을 버린다. `camera_info_stamp_s`, `camera_info_age_s`, `camera_info_mode`로 실제 사용한 정보의 시각·지연·정적 여부를 남긴다. 양수 timestamp 보정에는 기존 영상 신선도 설정 `max_image_age_s`를 같은 허용 시차로 사용한다. 이를 넘거나 새 보정 메시지의 timestamp가 잘못되면 오래된 캐시로 돌아가지 않는다. 정적 timestamp 0에는 시차 제한을 적용하지 않는다. ROS 시각이 계속 증가하는 카메라 재시작과 정적 보정의 세대 차이는 timestamp만으로 판별할 수 없다.
 
 2026-10-23 사용자 요청으로 Pi에 capability와 개발판을 설치하고 센서만 켜 시험했다. 실행별 요청은 시험 뒤 false로 복원했다. 실물 이동과 기존 운영 worktree 수정은 없으며 상세는 아래 정지 시험 기록에 있다.
 
@@ -86,7 +92,14 @@ npz에는 uint16 mm `depth`와 `intrinsics=[fx,fy,cx,cy]` 또는 유효한 recti
 
 mapping 없는 v1 기록은 `calibration_binding_verified=false`로 검출 결과를 남긴다. mapping을 추가하면 원본과의 일치를 검사한다. 이 값이 true여도 보정 파일의 값이 외부 실측과 정확히 맞는다는 뜻은 아니다. `odom_transform_provenance`도 manifest 선언과 독립 검증을 구분한다. 보존 원본과 이전 manifest를 덮어쓰지 않고 새 v2 manifest에서 연결한다.
 
-출력 `frames.csv`에는 프레임별 검출·후보 수, 원본 광학 좌표계의 경계 선분, 추적 ID·odom 선분·측정 시각·처리 시간이 있다. `summary.json`에는 입력·manifest·보정 출처·실효 설정·구현 6파일의 SHA-256과 입력 가용성을 남긴다. 같은 수집 그룹이나 같은 raw를 서로 다른 split에 넣으면 실행을 거부한다. 독립 정답 평가기는 아직 없으므로 `accuracy_evaluated=false`다.
+출력 `frames.csv`에는 프레임별 검출·후보 수, 원본 광학 좌표계의 경계 선분, 추적 ID·odom 선분·측정 시각·처리 시간이 있다. `region_prioritized_components`는 fit 예산 밖을 포함해 대상 근방과 겹친 전체 성분 수다. 대상 우선 평가는 추적용 좌표·보정 계약을 충족할 때만 적용하며, TF가 없으면 검출 진단만 남긴다. `summary.json`에는 입력·manifest·보정 출처·실효 설정·구현 6파일의 SHA-256과 입력 가용성을 남긴다. 같은 수집 그룹이나 같은 raw를 서로 다른 split에 넣으면 실행을 거부한다. 독립 정답 평가기는 아직 없으므로 `accuracy_evaluated=false`다.
+
+## 2026-10-23 대상 우선순위·입력 연관 보완
+
+- 큰 성분부터 정해진 수만 평가해 작은 목표 책상을 놓치는 경우를 수정했다. 대상 근방과 겹치는 성분부터 기존 크기순으로 평가하고, 남은 예산은 다른 성분으로 채운다. 마지막 선분 기반 영역 판정과 다중 후보의 모호성 처리는 유지한다. 회전·이동 TF와 큰 비목표/작은 목표를 넣은 합성 깊이로 확인했다.
+- 단독 실행의 오래된 각도 상수를 제거하고 현재 장착 파일에 연결했다. 실제 ROS 관측기에서 시작 파라미터·검출 설정의 일치와 이후 실행기 갱신을 확인했다. 영상 시각과 CameraInfo 연관, 유효 intrinsics 변경, 깊이 시각 역행의 이력 초기화도 검증했다.
+- 관련 9개 스위트 229 PASS, 변경 Python 10파일의 문법·fatal flake8와 diff 검사 PASS이며 독립 코드 리뷰 APPROVE를 받았다. 실제 111장 재생은 모든 기존 비시간 필드와 입력 SHA가 이전 결과와 같다. 동기 odom이 없어 목표 우선순위와 추적의 실물 성능은 미평가다.
+- 재생·대조 근거는 `$HOME/.local/state/bimanual-robot/pointcloud_input_selection_20261023/`에 보존했다. Pi SSH는 계속 `No route to host`여서 이번 변경은 미배포다. 이동·TF 연결·외부 거리 정확도는 확인하지 않았다.
 
 ## 2026-10-23 관측 진단·재생 근거 보완
 

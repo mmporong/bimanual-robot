@@ -79,7 +79,116 @@ def test_camera_info_callback_preserves_projection_message():
     info, _ = _messages(np.ones((2, 2), dtype='<u2'))
     node = object.__new__(DepthBoxParkingNode)
     node._on_camera_info(info)
-    assert node._camera_info is info
+    assert node._camera_info_history.select(
+        10_000_000_000, maximum_lag_ns=500_000_000) is info
+
+
+def _camera_sequence_node(monkeypatch):
+    from jdamr_cube_navigation.box_top_detection import DetectionStability
+    from jdamr_cube_navigation.camera_info_history import CameraInfoHistory
+
+    detection = SimpleNamespace(
+        surface_kind='front', front_distance_m=.8, center_x_m=.04, center_y_m=.23,
+        edge_angle_rad=0., width_m=.5, height_m=.25, depth_extent_m=.1,
+        plane_normal=(0., 0., -1.), plane_rms_m=.001, inlier_count=100,
+        candidate_count=120, confidence=.9)
+    node = object.__new__(DepthBoxParkingNode)
+    node._minimum_period_s, node._last_processed_s = 0., -math.inf
+    node._camera_info_history, node._camera_geometry = CameraInfoHistory(), None
+    node._optical_frame, node._calibration_model = OPTICAL_FRAME, 'rectified_projection'
+    node._max_image_age_s, node._surface_mode, node._config = .5, 'front', BoxTopConfig()
+    node._stability = DetectionStability(required_frames=2)
+    node.track_resets = []
+    node._table_tracker = SimpleNamespace(reset=lambda: node.track_resets.append(True))
+    node.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(nanoseconds=node.now_ns))
+    messages = []
+    node._status = SimpleNamespace(publish=messages.append)
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_box_front',
+                        lambda *args: detection)
+
+    def frame(stamp, focal=5., *, info_stamp=None, publish_info=True):
+        info, image = _messages(np.ones((2, 2), dtype='<u2') * 1000, stamp_s=stamp)
+        when = stamp if info_stamp is None else info_stamp
+        info.header.stamp.sec = int(when)
+        info.header.stamp.nanosec = int(round((when % 1.) * 1e9))
+        info.p[0] = focal
+        if publish_info:
+            node._on_camera_info(info)
+        node.now_ns = int((stamp + .1) * 1e9)
+        node._on_depth(image)
+        return json.loads(messages[-1].data)
+
+    return node, frame
+
+
+def test_camera_geometry_change_resets_both_histories_without_waiting(monkeypatch):
+    node, frame = _camera_sequence_node(monkeypatch)
+    assert frame(10.)['stable_frame_count'] == 1
+    assert frame(10.125)['stable']
+    # NaN factory K is unchanged; only the selected, validated P enters identity.
+    assert frame(10.25)['stable']
+    assert not node.track_resets
+    changed = frame(10.375, focal=6.)
+    assert changed['stable'] is False and changed['stable_frame_count'] == 1
+    assert len(node.track_resets) == 1
+    assert frame(10.5, focal=6.)['stable']
+
+
+def test_future_camera_info_does_not_overwrite_the_prior_geometry(monkeypatch):
+    node, frame = _camera_sequence_node(monkeypatch)
+    assert frame(10.)['stable_frame_count'] == 1
+    prior = frame(10.125, focal=7., info_stamp=11.)
+    assert prior['stable']
+    assert prior['camera_info_stamp_s'] == 10.
+    assert prior['camera_info_age_s'] == .125
+    assert not node.track_resets
+    current = frame(11., publish_info=False)
+    assert not current['stable'] and current['stable_frame_count'] == 1
+    assert len(node.track_resets) == 1
+
+
+def test_future_only_info_recovers_on_the_next_valid_frame(monkeypatch):
+    _, frame = _camera_sequence_node(monkeypatch)
+    assert frame(10., info_stamp=11.)['reason'] == 'camera_info_unavailable_for_depth_stamp'
+    result = frame(10.125)
+    assert result['detected'] and result['stable_frame_count'] == 1
+
+
+def test_depth_clock_rewind_starts_new_observation_history(monkeypatch):
+    node, frame = _camera_sequence_node(monkeypatch)
+    frame(10.)
+    assert frame(10.125)['stable']
+    result = frame(1.)
+    assert result['detected'] and result['stable_frame_count'] == 1
+    assert not result['stable'] and len(node.track_resets) == 1
+    assert frame(1.125)['stable']
+
+
+def test_stale_stamped_info_is_rejected_but_static_info_remains_timeless(monkeypatch):
+    node, frame = _camera_sequence_node(monkeypatch)
+    frame(10.)
+    result = frame(20., publish_info=False)
+    assert result['reason'] == 'camera_info_unavailable_for_depth_stamp'
+    assert not result['detected'] and not result['stable']
+    assert frame(20.125)['stable_frame_count'] == 1
+
+    _, static_frame = _camera_sequence_node(monkeypatch)
+    assert static_frame(10., info_stamp=0.)['camera_info_mode'] == 'static'
+    result = static_frame(20., publish_info=False)
+    assert result['stable'] and result['camera_info_age_s'] is None
+
+
+def test_invalid_info_cannot_be_bypassed_by_cached_valid_calibration(monkeypatch):
+    node, frame = _camera_sequence_node(monkeypatch)
+    frame(10.)
+    bad, _ = _messages(np.ones((2, 2), dtype='<u2'))
+    bad.header.stamp.sec = -1
+    node._on_camera_info(bad)
+    result = frame(10.125, publish_info=False)
+    assert result['reason'] == 'camera_info_unavailable_for_depth_stamp'
+    assert not result['detected']
+    assert frame(10.25)['stable_frame_count'] == 1
 
 
 def test_honors_big_endian_rows_with_padding():
@@ -164,7 +273,7 @@ def test_invalid_camera_info_is_rejected_by_depth_callback_without_raising():
     node = object.__new__(DepthBoxParkingNode)
     node._minimum_period_s = 0.0
     node._last_processed_s = -math.inf
-    node._camera_info = info
+    node._on_camera_info(info)
     node._optical_frame = OPTICAL_FRAME
     node._calibration_model = 'rectified_projection'
     node._max_image_age_s = 0.5
@@ -207,7 +316,8 @@ def test_age_includes_detection_processing_time(monkeypatch):
     info, image = _messages(np.ones((2, 2), dtype='<u2') * 1000)
     node = object.__new__(DepthBoxParkingNode)
     node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
-    node._camera_info, node._optical_frame = info, OPTICAL_FRAME
+    node._on_camera_info(info)
+    node._optical_frame = OPTICAL_FRAME
     node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
     node._surface_mode, node._config = 'front', BoxTopConfig()
     node._stability = SimpleNamespace(update=lambda detection: False, frame_count=0)
@@ -238,7 +348,8 @@ def test_front_observation_publishes_optical_vertical_position(monkeypatch):
         confidence=0.9)
     node = object.__new__(DepthBoxParkingNode)
     node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
-    node._camera_info, node._optical_frame = info, OPTICAL_FRAME
+    node._on_camera_info(info)
+    node._optical_frame = OPTICAL_FRAME
     node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
     node._surface_mode, node._config = 'front', BoxTopConfig()
     node._stability = SimpleNamespace(update=lambda item: True, frame_count=8)
@@ -359,6 +470,35 @@ def test_real_observer_keeps_table_bounds_when_switching_from_box_parameters():
         rclpy.shutdown()
 
 
+def test_standalone_observer_loads_current_mount_and_allows_runtime_updates(monkeypatch):
+    import rclpy
+    from rclpy.parameter import Parameter
+    from jdamr_cube_navigation.observer_camera_mount import load_observer_camera_mount
+
+    package = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.get_package_share_directory',
+                        lambda name: str(package))
+    expected = load_observer_camera_mount('camera_mount_current.yaml', package / 'config')
+    rclpy.init(args=['--ros-args', '--params-file',
+                    str(package / 'config/depth_box_parking.yaml')], domain_id=91)
+    node = None
+    try:
+        node = DepthBoxParkingNode()
+        for key, value in expected.items():
+            assert node.get_parameter(key).value == value
+            assert getattr(node._table_config, key) == value
+        assert node._config.camera_pitch_rad == expected['camera_pitch_rad']
+        assert node.set_parameters_atomically([
+            Parameter('camera_pitch_rad', value=.6)]).successful
+        assert node._table_config.camera_pitch_rad == .6
+        assert not node.set_parameters_atomically([
+            Parameter('camera_mount_file', value='another.yaml')]).successful
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.shutdown()
+
+
 @pytest.mark.parametrize('minimum_depth_m', [0.30, 0.50])
 def test_table_mode_inherits_configured_sensor_minimum(minimum_depth_m):
     """Switching surface modes must not impose another sensor range cutoff."""
@@ -425,7 +565,8 @@ def test_table_edge_json_carries_endpoints_and_calibration_without_velocity(monk
         table_height_m=0.75, edge_rms_m=0.002)
     node = object.__new__(DepthBoxParkingNode)
     node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
-    node._camera_info, node._optical_frame = info, OPTICAL_FRAME
+    node._on_camera_info(info)
+    node._optical_frame = OPTICAL_FRAME
     node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
     node._surface_mode, node._config = 'table_edge', BoxTopConfig()
     node._table_config = TableEdgeConfig(camera_height_m=1.0, camera_pitch_rad=0.5)
@@ -468,7 +609,7 @@ def test_component_tracking_adapter_preserves_measurement_time_and_odom_identity
     world = np.array([[-.4, 1., .75], [.4, 1., .75]])
     candidates = [SimpleNamespace(edge_endpoints_optical_m=world)]
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
-                        lambda *a: SimpleNamespace(
+                        lambda *a, **kw: SimpleNamespace(
                             candidates=tuple(candidates), component_sizes=(200,),
                             input_point_count=240, height_point_count=200,
                             evaluated_components=1))
@@ -495,12 +636,48 @@ def test_an_ambiguous_scene_is_not_forwarded_as_a_parking_target(monkeypatch):
     node._table_request_enabled = True
     node._table_config = config()
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
-                        lambda *a: SimpleNamespace(
+                        lambda *a, **kw: SimpleNamespace(
                             candidates=(object(), object()), component_sizes=(200, 200),
                             input_point_count=500, height_point_count=400,
                             evaluated_components=2))
     detection, fields, _ = node._table_observation(None, INTRINSICS, 10., OPTICAL_FRAME)
     assert detection is None and fields['table_candidate_count'] == 2
+
+
+def test_target_region_is_applied_before_fitting_and_final_selection(monkeypatch):
+    from jdamr_cube_navigation.table_surface_model import TableScene
+    from test_table_edge_detection import INTRINSICS, config
+
+    node = object.__new__(DepthBoxParkingNode)
+    node._table_components = node._table_request_enabled = True
+    node._table_tracker, node._table_config = None, config()
+    node._table_region_map, node._table_region_odom = (1., 2., .3), None
+    transform = np.eye(4)
+    transform[0, 3] = 2.
+    lookups = []
+
+    def lookup(target, source, *args, **kwargs):
+        lookups.append(source)
+        return SimpleNamespace(transform=transform.copy())
+
+    node._table_tf = SimpleNamespace(lookup_transform=lookup)
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.transform_matrix', lambda x: x)
+    outside = SimpleNamespace(edge_endpoints_optical_m=((10., 2., 0.), (11., 2., 0.)))
+    selected = SimpleNamespace(edge_endpoints_optical_m=((.9, 2., 0.), (1.1, 2., 0.)))
+    priorities = []
+
+    def detect(*args, **kwargs):
+        priorities.append(kwargs)
+        return TableScene((outside, selected), (400, 200), 800, 600, 2, 1)
+
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene', detect)
+    detection, fields, _ = node._table_observation(None, INTRINSICS, 10., OPTICAL_FRAME)
+    assert detection is selected
+    assert priorities[0]['target_region_odom'].center_xy_m == (3., 2.)
+    np.testing.assert_array_equal(priorities[0]['odom_from_optical'], transform)
+    assert fields['table_region_prioritized_components'] == 1
+    node._table_observation(None, INTRINSICS, 10.1, OPTICAL_FRAME)
+    assert lookups == [OPTICAL_FRAME, 'map', OPTICAL_FRAME]
 
 
 @pytest.mark.parametrize('candidate_count', [0, 1])
@@ -517,7 +694,8 @@ def test_tf_failure_keeps_scene_evidence_and_clears_stability(
     info, image = _messages(np.ones((2, 2), dtype='<u2') * 1000)
     node = object.__new__(DepthBoxParkingNode)
     node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
-    node._camera_info, node._optical_frame = info, OPTICAL_FRAME
+    node._on_camera_info(info)
+    node._optical_frame = OPTICAL_FRAME
     node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
     node._surface_mode, node._config = 'table_edge', BoxTopConfig()
     node._table_components = node._table_request_enabled = True
@@ -532,7 +710,7 @@ def test_tf_failure_keeps_scene_evidence_and_clears_stability(
     node._table_tracker.update((candidate,), 9.9, np.eye(4), 'previous')
     scene = TableScene((candidate,) if candidate_count else (), (200,), 500, 200, 1)
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
-                        lambda *args: scene)
+                        lambda *args, **kwargs: scene)
     def matrix(value):
         if value is None:
             raise ValueError('invalid_transform_quaternion')
@@ -603,7 +781,7 @@ def test_selected_region_is_frozen_in_odom_across_map_localization_jumps(monkeyp
     candidate = SimpleNamespace(edge_endpoints_optical_m=np.array([
         [-.4, 1., .75], [.4, 1., .75]]))
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
-                        lambda *a: SimpleNamespace(candidates=(candidate,),
+                        lambda *a, **kw: SimpleNamespace(candidates=(candidate,),
                                                    input_point_count=240, height_point_count=200,
                                                    component_sizes=(200,), evaluated_components=1))
     _, first, stable = node._table_observation(None, INTRINSICS, 10., OPTICAL_FRAME)

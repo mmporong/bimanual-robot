@@ -4,8 +4,10 @@ from dataclasses import asdict, replace
 import hashlib
 import json
 import math
+from pathlib import Path
 import time
 
+from ament_index_python.packages import get_package_share_directory
 from jdamr_cube_navigation.box_top_detection import (
     BoxTopConfig,
     CameraIntrinsics,
@@ -13,20 +15,23 @@ from jdamr_cube_navigation.box_top_detection import (
     detect_box_top,
     DetectionStability,
 )
+from jdamr_cube_navigation.camera_info_history import CameraInfoHistory, stamp_nanoseconds
 from jdamr_cube_navigation.depth_obstacle_core import _depth_view
 from jdamr_cube_navigation.depth_obstacle_filter import camera_intrinsics, transform_matrix
+from jdamr_cube_navigation.observer_camera_mount import load_observer_camera_mount
 from jdamr_cube_navigation.table_edge_detection import detect_table_edge, TableEdgeConfig
 from jdamr_cube_navigation.table_surface_model import detect_table_scene
 from jdamr_cube_navigation.table_surface_tracking import (
     candidates_in_region, TableSurfaceTracker, TargetRegion, TrackConfig,
 )
 import numpy as np
-from rcl_interfaces.msg import SetParametersResult
+from rcl_interfaces.msg import ParameterDescriptor, SetParametersResult
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import (
     DurabilityPolicy,
     HistoryPolicy,
@@ -60,6 +65,12 @@ def decode_depth_observation(
         raise ValueError('stale_or_future_depth')
     if str(image.encoding).upper() != '16UC1':
         raise ValueError(f'unsupported_depth_encoding:{image.encoding}')
+    info_stamp_ns = stamp_nanoseconds(info.header.stamp)
+    image_stamp_ns = stamp_nanoseconds(image.header.stamp)
+    if info_stamp_ns > image_stamp_ns:
+        raise ValueError('future_camera_info')
+    if info_stamp_ns and image_stamp_ns - info_stamp_ns > round(max_image_age_s * 1e9):
+        raise ValueError('stale_camera_info')
     values = camera_intrinsics(
         info, image, optical_frame, calibration_model)
     intrinsics = CameraIntrinsics(
@@ -123,6 +134,20 @@ class DepthBoxParkingNode(Node):
         for name in TableEdgeConfig.__dataclass_fields__:
             if name not in BoxTopConfig.__dataclass_fields__:
                 self.declare_parameter(name, getattr(table_defaults, name))
+        self.declare_parameter(
+            'camera_mount_file', '', ParameterDescriptor(read_only=True))
+        mount_path = str(self.get_parameter('camera_mount_file').value).strip()
+        if mount_path:
+            # A selected provenance file owns startup geometry. Explicit geometry
+            # parameters remain available when camera_mount_file is empty.
+            config_directory = (Path(get_package_share_directory('jdamr_cube_navigation'))
+                                / 'config' if not Path(mount_path).expanduser().is_absolute()
+                                else Path('.'))
+            mount_values = load_observer_camera_mount(mount_path, config_directory)
+            result = self.set_parameters_atomically([
+                Parameter(name, value=value) for name, value in mount_values.items()])
+            if not result.successful:
+                raise ValueError(f'cannot apply observer camera mount: {result.reason}')
         self._config = BoxTopConfig(**{
             field: self.get_parameter(field).value
             for field in BoxTopConfig.__dataclass_fields__
@@ -185,7 +210,8 @@ class DepthBoxParkingNode(Node):
             self.get_parameter('calibration_model').value)
         self._minimum_period_s = 1.0 / processing_hz
         self._last_processed_s = -math.inf
-        self._camera_info = None
+        self._camera_info_history = CameraInfoHistory()
+        self._camera_geometry = None
         self._status = self.create_publisher(
             String, '/box_parking/perception_status', 10)
         self.create_subscription(
@@ -316,7 +342,12 @@ class DepthBoxParkingNode(Node):
         return tuple(float(v) for v in region)
 
     def _on_camera_info(self, message: CameraInfo) -> None:
-        self._camera_info = message
+        if not hasattr(self, '_camera_info_history'):
+            self._camera_info_history = CameraInfoHistory()
+        try:
+            self._camera_info_history.add(message)
+        except ValueError as error:
+            self._reject(str(error))
 
     def _publish(self, document: dict) -> None:
         document = {**document, 'control_ready': False}
@@ -331,9 +362,7 @@ class DepthBoxParkingNode(Node):
 
     def _reject(self, reason: str, **details) -> None:
         """Clear consecutive stability after any unusable observation."""
-        self._stability.update(None)
-        if getattr(self, '_table_tracker', None) is not None:
-            self._table_tracker.reset()
+        self._reset_measurements()
         self._publish({
             'detected': False,
             'stable': False,
@@ -342,33 +371,50 @@ class DepthBoxParkingNode(Node):
             **details,
         })
 
+    def _reset_measurements(self) -> None:
+        """Discard accumulated observations after input geometry or time changes."""
+        self._stability.update(None)
+        if getattr(self, '_table_tracker', None) is not None:
+            self._table_tracker.reset()
+
     def _table_observation(self, depth_mm, intrinsics, stamp_s, frame_id):
         """Adapt optional component/tracking output to the existing observer contract."""
         if (not getattr(self, '_table_components', False)
                 or not getattr(self, '_table_request_enabled', False)):
             return detect_table_edge(depth_mm, intrinsics, self._table_config), {}, None
-        scene = detect_table_scene(depth_mm, intrinsics, self._table_config)
+        region_map = getattr(self, '_table_region_map', None)
+        needs_transform = self._table_tracker is not None or region_map is not None
+        transform, transform_error = None, None
+        if needs_transform:
+            try:
+                stamped = self._table_tf.lookup_transform(
+                    'odom', frame_id, Time(seconds=stamp_s), timeout=Duration(seconds=.05))
+                transform = transform_matrix(stamped.transform)
+                if region_map is not None and getattr(self, '_table_region_odom', None) is None:
+                    map_tf = self._table_tf.lookup_transform(
+                        'odom', 'map', Time(seconds=stamp_s), timeout=Duration(seconds=.05))
+                    map_to_odom = transform_matrix(map_tf.transform)
+                    center = map_to_odom @ np.array([*region_map[:2], 0., 1.])
+                    self._table_region_odom = TargetRegion(tuple(center[:2]), region_map[2])
+            except (TransformException, ValueError) as error:
+                transform_error = error
+        region = getattr(self, '_table_region_odom', None)
+        priority = {}
+        if transform_error is None and transform is not None and region is not None:
+            priority = {'target_region_odom': region, 'odom_from_optical': transform}
+        scene = detect_table_scene(depth_mm, intrinsics, self._table_config, **priority)
         fields = {
             'table_component_count': len(scene.component_sizes),
             'table_candidate_count': len(scene.candidates),
             'table_evaluated_components': scene.evaluated_components,
             'table_input_point_count': scene.input_point_count,
             'table_height_point_count': scene.height_point_count,
+            'table_region_prioritized_components': getattr(
+                scene, 'region_prioritized_components', 0),
         }
-        region_map = getattr(self, '_table_region_map', None)
-        if self._table_tracker is None and region_map is None:
+        if not needs_transform:
             return (scene.candidates[0] if len(scene.candidates) == 1 else None), fields, None
-        try:
-            stamped = self._table_tf.lookup_transform(
-                'odom', frame_id, Time(seconds=stamp_s), timeout=Duration(seconds=.05))
-            transform = transform_matrix(stamped.transform)
-            if region_map is not None and getattr(self, '_table_region_odom', None) is None:
-                map_tf = self._table_tf.lookup_transform(
-                    'odom', 'map', Time(seconds=stamp_s), timeout=Duration(seconds=.05))
-                map_to_odom = transform_matrix(map_tf.transform)
-                center = map_to_odom @ np.array([*region_map[:2], 0., 1.])
-                self._table_region_odom = TargetRegion(tuple(center[:2]), region_map[2])
-        except (TransformException, ValueError) as error:
+        if transform_error is not None:
             # Keep the completed detector evidence even when tracking cannot run.
             if self._table_tracker is not None:
                 self._table_tracker.reset()
@@ -376,11 +422,10 @@ class DepthBoxParkingNode(Node):
                 'table_track_state': 'transform_unavailable',
                 'table_track_frame_count': 0,
                 'reason': ('table_tracking_transform_unavailable:'
-                           if isinstance(error, TransformException)
-                           else 'table_tracking_transform_invalid:') + str(error),
+                           if isinstance(transform_error, TransformException)
+                           else 'table_tracking_transform_invalid:') + str(transform_error),
             })
             return None, fields, False
-        region = getattr(self, '_table_region_odom', None)
         if self._table_tracker is None:
             selected = candidates_in_region(scene.candidates, transform, region)
             return (selected[0] if len(selected) == 1 else None), fields, None
@@ -409,16 +454,25 @@ class DepthBoxParkingNode(Node):
         if now_s - self._last_processed_s < self._minimum_period_s:
             return
         self._last_processed_s = now_s
-        if self._camera_info is None:
-            self._reject('camera_info_missing')
-            return
         try:
             table_fields, table_stable = {}, None
             ros_now_s = self.get_clock().now().nanoseconds * 1e-9
+            info = self._camera_info_history.select(
+                stamp_nanoseconds(message.header.stamp),
+                maximum_lag_ns=round(self._max_image_age_s * 1e9))
+            if info is None:
+                self._reject('camera_info_unavailable_for_depth_stamp')
+                return
             depth_mm, intrinsics, stamp_s, age_s = decode_depth_observation(
-                self._camera_info, message, self._optical_frame,
+                info, message, self._optical_frame,
                 self._calibration_model, ros_now_s,
                 self._max_image_age_s)
+            geometry = (intrinsics, message.header.frame_id, self._calibration_model)
+            previous_geometry = getattr(self, '_camera_geometry', None)
+            if (self._camera_info_history.rewound
+                    or (previous_geometry is not None and geometry != previous_geometry)):
+                self._reset_measurements()
+            self._camera_geometry = geometry
             if self._surface_mode == 'table_edge':
                 detection, table_fields, table_stable = self._table_observation(
                     depth_mm, intrinsics, stamp_s, message.header.frame_id)
@@ -437,9 +491,13 @@ class DepthBoxParkingNode(Node):
             return
         input_age_s = age_s
         age_s = self.get_clock().now().nanoseconds * 1e-9 - stamp_s
+        info_stamp_s = stamp_nanoseconds(info.header.stamp) * 1e-9
         timing = {
             'input_age_s': input_age_s,
             'processing_duration_s': time.monotonic() - now_s,
+            'camera_info_stamp_s': info_stamp_s,
+            'camera_info_age_s': stamp_s - info_stamp_s if info_stamp_s else None,
+            'camera_info_mode': 'stamped' if info_stamp_s else 'static',
         }
         stable = self._stability.update(detection)
         if table_stable is not None:

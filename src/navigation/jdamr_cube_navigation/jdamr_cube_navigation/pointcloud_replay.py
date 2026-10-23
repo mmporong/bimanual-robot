@@ -259,7 +259,11 @@ def replay(manifest_path, output_directory):
         baseline = detect_table_edge(image, intrinsics, configured)
         baseline_duration = time.perf_counter() - started
         started = time.perf_counter()
-        scene = detect_table_scene(image, intrinsics, configured, **asdict(scene_config))
+        priority = {}
+        if tracking_reason is None and region is not None:
+            priority = {'target_region_odom': region, 'odom_from_optical': transforms[index]}
+        scene = detect_table_scene(
+            image, intrinsics, configured, **asdict(scene_config), **priority)
         scene_duration = time.perf_counter() - started
         track = None
         if tracking_reason is None:
@@ -273,6 +277,7 @@ def replay(manifest_path, output_directory):
                 baseline.edge_endpoints_optical_m if baseline is not None else None),
             'component_count': len(scene.component_sizes),
             'evaluated_components': scene.evaluated_components,
+            'region_prioritized_components': scene.region_prioritized_components,
             'candidate_count': len(scene.candidates),
             'candidate_edges_optical_m': json.dumps([
                 item.edge_endpoints_optical_m for item in scene.candidates]),
