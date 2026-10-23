@@ -121,6 +121,34 @@ npz에는 uint16 mm `depth`와 `intrinsics=[fx,fy,cx,cy]` 또는 유효한 recti
 
 근거 원본은 Pi `$HOME/jdamr_deploy/pointcloud_check_20261023_073244/`, 회수본은 PC `$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/pi/`다. 주요 파일은 `promotion_and_service_receipt.json`, `cleanup_receipt.json`, `measurements/summary.json`, `measurements/*_raw.npz`, `replay_manifest.json`, `replay/summary.json`과 `replay/frames.csv`다. PC 상위 폴더의 `motion_before_bounded.txt`, `join_after_cleanup.txt`, `stationary_probe_live.log`, `pi_replay_run.txt`에 통신·실행 기록을 보존했다. `depth_pointcloud_preview.png`는 대표 깊이와 장착 모델 투영이며 독립 보정·물체 정답 그림이 아니다. 임시 수집기 자체의 초기 실패 기록은 최종 비교와 혼용하지 않는다.
 
+## 2026-10-23 바닥 후보 오프라인 로직 시험
+
+사용자 요청으로 위 정지 깊이 90장만 PC에서 분석했다. ROS 노드·Pi 서비스·속도 발행·실물 이동은 없고 운영 장착값·TF는 변경하지 않았다. 원본·장착 SHA를 대조한 뒤 분석 프로토콜·스크립트 SHA와 프레임별 CSV를 보존했다.
+
+| 검사 | 결과 | 해석 범위 |
+|---|---|---|
+| 독립 축 회전·ray renderer와 production 좌표 변환 | 행렬 절대오차 허용치 1e-14 이내 | 광학→level 축·부호 대조 |
+| 무잡음 합성 바닥 3개 높이·자세 | 3조건 모두 높이 2 mm·각도 0.1° 진단 허용치 이내 복원 | 이상 기하 계산 검사. 실물 정확도 허용치가 아님 |
+| 현 설정의 합성 바닥 / 책상 | 바닥 0검출, 카메라 기준 전방 0.30/0.45/0.60 m의 책상은 기존·성분별 모두 검출 | 4개 대조 검사 통과. 실제 가림·센서 노이즈 강건성은 미검증 |
+| 실제 바닥 후보 ROI의 높이 필터 | 90장 모두 유효점 최소 6,383개에서 검색 높이 통과점 0개 | 해당 ROI의 점들이 현 50–105 cm 검색 범위 밖이라는 검사 |
+| 실제 전체 영상의 기존/성분별 검출 | 두 방식 모두 90장 중 0장 | 책상 정답이 없는 한 정지 장면의 관측 사실 |
+| 기존 관련 4스위트 | 85 PASS(1.17초) | 면 검출·성분·재생·추적의 소프트웨어 회귀 |
+
+시각 선택한 ROI는 `(x:32–287, y:40–144)`의 **바닥 후보**이며 바닥 정답 주석은 아니다. ROI 밖을 0으로 만든 입력은 경계 아래 배경도 없애므로 그 입력의 0검출만으로 높이 필터 성공을 주장하지 않았다. 별도로 유효점 수와 높이 필터 통과점 0개를 확인했다.
+
+90장 평면 추정의 중앙값은 카메라↔평면 수직거리 1.14778 m, roll -4.81309°, pitch 50.88301°다. 기존 설정 1.26 m·-2.23586°·52.54996°와 다르다. 기존 변환으로 환산한 ROI 높이 중앙값은 0.07684 m, 전방 거리에 대한 높이 기울기는 약 -0.03045 m/m다. 적합점의 평면 RMS 중앙값은 6.69 mm, ROI 전체 점의 프레임별 잔차 p95 중앙값은 15.60 mm였다. 첫 프레임에서 고정한 면에 대한 전체 ROI 잔차 p95 중앙값도 15.71 mm다. 이는 같은 capture 내부의 일관성 수치이며 독립 반복 정확도가 아니다.
+
+**판정:** 계산·단위·축 변환·선택 영역의 높이 제외와 이상 기하 대조는 통과했다. 실제 거리 보정·장착 일치·1 cm 주차 정확도는 통과 판정하지 않는다. 후보가 실제 수평 바닥인지, 깊이/P의 거리 보정이 맞는지 외부 기준이 없으므로 위 추정치를 새 높이·각도로 자동 적용하지 않았다. 이 시험으로 DDS/TF 연결 문제도 해결되지 않는다.
+
+PC 산출물은 `$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/floor_logic_check/`의 `protocol.json`, `analyze.py`, `summary.json`, `frames.csv`, `execution.log`, `floor_logic_preview.png`다. 합성 입력의 진단 허용치와 ROI·RANSAC 선택 근거는 `protocol.json`에 있고 운영 보정값은 아니다. 오프라인 재현 명령은 다음과 같다.
+
+```bash
+cd "$HOME/bimanual-robot-pointcloud"
+PYTHONPATH="$PWD/src/navigation/jdamr_cube_navigation" OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  python3 "$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/floor_logic_check/analyze.py" \
+  "$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/floor_logic_check/protocol.json"
+```
+
 ## 다음 실증에 필요한 입력
 
 1. DDS 합류·차체 정적 TF 수신 문제를 분리한 뒤 현재 장착의 깊이·CameraInfo·취득 시각 TF/odom을 같은 기록에 보존한다. 정지/이동, 인접 책상, 경계 가림을 구분한다.
