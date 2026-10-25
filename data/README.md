@@ -15,10 +15,17 @@
 
 | 데이터셋 | HF repo | policy·scope | 에피소드 수 | 수집 기간 | 상태 |
 |---|---|---|---|---|---|
-| (아직 없음) | | | | | |
+| 물따르기 핸드오프 (차체 결합) | `jun-seo/water-pour-position-jitter-gravel-chassis-mounted-handoff-v1` | SmolVLA·pi0 물따르기 | 60 | 2026-10-23~25 | 학습 본편 (⚠ 현재 public) |
+| 물따르기 핸드오프 추가분 | `jun-seo/water-pour-position-jitter-gravel-chassis-mounted-handoff-v1-part2` | 같음 | 20 | 2026-10-23~25 | 80개 학습 때 v1 앞에 병합 (⚠ public) |
+| 컵배치 핸드오프 (차체 결합) | `jun-seo/cup-place-position-jitter-gravel-chassis-mounted-handoff-v1` | SmolVLA·pi0 컵배치 | 60 | 2026-10-23~25 | 학습 본편 (⚠ public) |
+| 컵배치 핸드오프 추가분 | `jun-seo/cup-place-position-jitter-gravel-chassis-mounted-handoff-v1-part2` | 같음 | 20 | 2026-10-23~25 | 80개 학습 때 v1 앞에 병합 (⚠ public) |
+| 물따르기 핸드오프 (테이블 거치) | `jun-seo/water-pour-position-jitter-gravel-tabletop-handoff-v2` | SmolVLA 물따르기 v2 | 40 | 2026-10-21~22 | 차체 결합 전 기준선 (⚠ public) |
+| 컵배치 핸드오프 (테이블 거치) | `jun-seo/cup-place-position-jitter-gravel-tabletop-handoff-v2` | SmolVLA 컵배치 v2 | 40 | 2026-10-21~22 | 차체 결합 전 기준선 (⚠ public) |
 
 수집을 시작하면 이 표에 한 줄씩 추가한다. 표에 없는 데이터셋은 팀 기준으로 존재하지 않는
-것으로 본다. 현재 실제 데이터셋이 없으므로 스키마 변경에 따른 마이그레이션 대상도 없다.
+것으로 본다. 차체 결합 데이터의 수집·정리 이력과 포함/제외 근거는
+[20261023 차체결합 데이터 기록](../docs/experiments/20261023_차체결합_데이터수집_레포구성과_에피소드정리.md)에 있다.
+그보다 앞선 핸드오프 v1·위치 지터 데이터는 아직 이 표에 옮기지 않았다.
 
 ## 2. 데이터셋 분리
 
