@@ -14,6 +14,9 @@ lerobot-rollout을 그대로 실행하되 세 가지를 덧붙인다. lerobot �
                 그리퍼 미는 힘을 줄여, 다음 실행까지 기다리는 동안 과부하가 쌓이지 않게 한다.
    pour_start : 물따르기 v2 시작 자세(시연 40개 평균)로 end.move_s초에 걸쳐 이동 후 유지.
    initial    : lerobot 기본(이번 실행 시작 자세로 복귀).
+   <저장 이름> : save_start_pose.py로 저장한 자세(config/rollout_poses/<이름>.json)로, 추론과 작업 끝
+                감지가 모두 끝난 뒤 이동 후 유지. 이동 시간은 5)와 같은 규칙(end.move_s와 start.max_speed).
+                그리퍼는 기본으로 건드리지 않는다(--end.grippers를 주면 함께 맞춘다).
 
 3) 붓기 훅 (--pour_hook): tools/rollout/rollout_pour_hook.py의 훅을 함께 켠다.
    훅 값은 --hook.* 로 조정한다.
@@ -34,15 +37,26 @@ lerobot-rollout을 그대로 실행하되 세 가지를 덧붙인다. lerobot �
            (컵 놓음이 먼저 감지돼야 판정하므로 놓기 전에 자세가 비슷해도 끝나지 않는다).
    duration은 최대 시간(안전 상한)으로만 남는다.
 
+5) 시작 자세 (--start.pose=<이름 또는 json 경로>)
+   save_start_pose.py로 텔레옵해서 저장한 자세(config/rollout_poses/<이름>.json)로 추론 직전에
+   맞춘 뒤 추론을 시작한다. 그리퍼는 기본으로 건드리지 않는다(컵배치는 컵을 쥔 채 시작하므로).
+   --start.grippers를 주면 그리퍼도 저장값으로 맞춘다.
+   이동 시간 = max(start.move_s, 가장 많이 움직이는 관절 각도 / start.max_speed).
+   도착 후 저장값과 start.tol도 넘게 차이 나는 관절이 있으면 그 자리에 멈추고(현재 위치를
+   목표로 고정) 추론을 시작하지 않는다. 이때 끝 자세는 --end.pose와 상관없이 "그대로 유지"다.
+
 사용법 (평소 lerobot-rollout 플래그를 그대로 붙인다, --strategy.type=base 전용):
     python tools/rollout/rollout_handoff.py --end.pose=final ...물따르기 플래그...
     python tools/rollout/rollout_handoff.py --end.pose=pour_start ...컵배치 플래그...
     python tools/rollout/rollout_handoff.py --pour_hook --end.pose=final ...물따르기 플래그...
+    python tools/rollout/rollout_handoff.py --start.pose=pour --end.pose=final ...물따르기 플래그...
+    python tools/rollout/rollout_handoff.py --end.pose=place_end ...컵배치 플래그...
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -52,6 +66,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rollout_pour_hook import PourHook, fill_camera_indices, install, parse_args as parse_hook_args  # noqa: E402
 
 logger = logging.getLogger("rollout_handoff")
+
+POSE_DIR = Path(__file__).resolve().parents[2] / "config" / "rollout_poses"
+# 시작 자세 이동이 실패하면 끝 자세 처리(_teardown)가 팔을 더 움직이지 않게 막는 표시
+RUN_STATE = {"start_failed": False}
 
 GRIPPER_ID = 6
 OVERLOAD_BIT = 32
@@ -202,7 +220,8 @@ def pre_relax(ports: dict[str, str], margin: int) -> None:
                 bus.port_handler.closePort()
 
 
-def make_pose_mover(target: dict[str, float], move_s: float):
+def make_pose_mover(target: dict[str, float], move_s: float, label: str = "물따르기 시작 자세",
+                    max_speed: float | None = None):
     from lerobot.utils.robot_utils import precise_sleep
 
     def _move(hw, duration_s: float = 3.0, fps: int = 50) -> None:
@@ -210,7 +229,12 @@ def make_pose_mover(target: dict[str, float], move_s: float):
         try:
             cur = robot.get_observation()
             start = {k: float(cur[k]) for k in target if k in cur}
-            steps = max(int(move_s * fps), 1)
+            dur = move_s
+            if max_speed:
+                biggest = max(abs(target[k] - start[k]) for k in start)
+                dur = max(move_s, biggest / max_speed)
+                print(f"[end] {label}로 {dur:.1f}s 동안 이동 (가장 큰 차이 {biggest:.1f}도)")
+            steps = max(int(dur * fps), 1)
             for i in range(1, steps + 1):
                 t = i / steps
                 t = t * t * (3 - 2 * t)
@@ -222,23 +246,74 @@ def make_pose_mover(target: dict[str, float], move_s: float):
             if off:
                 # 목표에 못 간 관절은 더 밀지 않게 현재 위치를 목표로 고정한다
                 robot.send_action({k: float(now[k]) for k in start})
-                print(f"[end] 물따르기 시작 자세 도달 실패(10도 초과) {off} - 현재 위치에서 정지")
+                print(f"[end] {label} 도달 실패(10도 초과) {off} - 현재 위치에서 정지")
             else:
-                print("[end] 물따르기 시작 자세 도달")
+                print(f"[end] {label} 도달")
         except Exception as e:  # noqa: BLE001
-            logger.warning("물따르기 시작 자세 이동 실패: %s", e)
+            logger.warning("%s 이동 실패: %s", label, e)
 
     return _move
 
 
-def install_end_pose(pose: str, margin: int, move_s: float) -> None:
+def load_start_pose(arg: str, grippers: bool) -> tuple[Path, dict[str, float]]:
+    path = Path(arg) if arg.endswith(".json") else POSE_DIR / f"{arg}.json"
+    if not path.is_file():
+        sys.exit(f"자세 파일 없음: {path} (save_start_pose.py --name 으로 먼저 저장)")
+    pose = {k: float(v) for k, v in json.loads(path.read_text(encoding="utf-8"))["pose"].items()}
+    if not grippers:
+        pose = {k: v for k, v in pose.items() if not k.endswith("gripper.pos")}
+    return path, pose
+
+
+def install_start_pose(target: dict[str, float], move_s: float, max_speed: float, tol: float) -> None:
+    from lerobot.rollout.strategies import base as base_strategy
+    from lerobot.utils.robot_utils import precise_sleep
+
+    orig_run = base_strategy.BaseStrategy.run
+
+    def run(self, ctx) -> None:
+        robot = ctx.hardware.robot_wrapper
+        fps = 50
+        try:
+            cur = robot.get_observation()
+            start = {k: float(cur[k]) for k in target}
+            biggest = max(abs(target[k] - start[k]) for k in target)
+            dur = max(move_s, biggest / max_speed)
+            print(f"[start] 시작 자세로 {dur:.1f}s 동안 이동 (가장 큰 차이 {biggest:.1f}도)")
+            steps = max(int(dur * fps), 1)
+            for i in range(1, steps + 1):
+                t = i / steps
+                t = t * t * (3 - 2 * t)
+                robot.send_action({k: start[k] * (1 - t) + target[k] * t for k in start})
+                precise_sleep(1 / fps)
+            time.sleep(0.5)
+            now = robot.get_observation()
+            off = {k: round(float(now[k]) - target[k], 1) for k in target if abs(float(now[k]) - target[k]) > tol}
+        except Exception as e:  # noqa: BLE001
+            now, off = None, {"error": str(e)}
+        if off:
+            if now is not None:
+                # 목표에 못 간 관절은 더 밀지 않게 현재 위치를 목표로 고정한다
+                robot.send_action({k: float(now[k]) for k in target})
+            RUN_STATE["start_failed"] = True
+            print(f"[start] 시작 자세 도달 실패({tol:.0f}도 초과) {off} - 그 자리에 멈추고 추론하지 않음")
+            ctx.runtime.shutdown_event.set()
+            return
+        print("[start] 시작 자세 도착 -> 추론 시작")
+        return orig_run(self, ctx)
+
+    base_strategy.BaseStrategy.run = run
+
+
+def install_end_pose(pose: str, margin: int, move_s: float, saved: dict[str, float] | None = None,
+                     max_speed: float | None = None) -> None:
     from lerobot.rollout.strategies.core import RolloutStrategy
 
     orig_teardown = RolloutStrategy._teardown_hardware
 
     def _teardown(self, hw, return_to_initial_position: bool = True) -> None:
         robot = hw.robot_wrapper.inner
-        if pose == "final":
+        if pose == "final" or RUN_STATE["start_failed"]:
             if robot.is_connected:
                 for side in ("left_arm", "right_arm"):
                     bus = getattr(robot, side).bus
@@ -252,11 +327,16 @@ def install_end_pose(pose: str, margin: int, move_s: float) -> None:
         if pose == "pour_start":
             print(f"[end] 물따르기 시작 자세로 {move_s:.0f}s 동안 이동")
             return orig_teardown(self, hw, return_to_initial_position=True)
+        if saved is not None:
+            return orig_teardown(self, hw, return_to_initial_position=True)
         return orig_teardown(self, hw, return_to_initial_position=return_to_initial_position)
 
     RolloutStrategy._teardown_hardware = _teardown
     if pose == "pour_start":
         RolloutStrategy._return_to_initial_position = staticmethod(make_pose_mover(POUR_START, move_s))
+    elif saved is not None:
+        RolloutStrategy._return_to_initial_position = staticmethod(
+            make_pose_mover(saved, move_s, f"저장 자세 '{pose}'", max_speed))
 
 
 def arg_value(args: list[str], key: str) -> str | None:
@@ -268,7 +348,8 @@ def arg_value(args: list[str], key: str) -> str | None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--end.pose", dest="end_pose", choices=END_POSES, default="final")
+    ap.add_argument("--end.pose", dest="end_pose", default="final", help=f"{END_POSES} 또는 저장 자세 이름")
+    ap.add_argument("--end.grippers", dest="end_grippers", action="store_true")
     ap.add_argument("--end.move_s", dest="move_s", type=float, default=5.0)
     ap.add_argument("--grip.margin", dest="margin", type=int, default=10)
     ap.add_argument("--grip.skip_pre", dest="skip_pre", action="store_true")
@@ -277,6 +358,11 @@ def main() -> None:
     ap.add_argument("--end.tol", dest="tol", type=float, default=10.0)
     ap.add_argument("--end.settle_s", dest="settle_s", type=float, default=1.0)
     ap.add_argument("--end.place_tol", dest="place_tol", type=float, default=20.0)
+    ap.add_argument("--start.pose", dest="start_pose", default=None)
+    ap.add_argument("--start.grippers", dest="start_grippers", action="store_true")
+    ap.add_argument("--start.move_s", dest="start_move_s", type=float, default=5.0)
+    ap.add_argument("--start.max_speed", dest="start_max_speed", type=float, default=20.0)
+    ap.add_argument("--start.tol", dest="start_tol", type=float, default=10.0)
     ns, rest = ap.parse_known_args(sys.argv[1:])
     hook_params, _, rest = parse_hook_args(rest)
     rest = fill_camera_indices(rest)
@@ -290,7 +376,15 @@ def main() -> None:
                                     ("right", arg_value(rest, "--robot.right_arm_config.port"))) if p}
         pre_relax(ports, ns.margin)
 
-    install_end_pose(ns.end_pose, ns.margin, ns.move_s)
+    if ns.start_pose:
+        path, target = load_start_pose(ns.start_pose, ns.start_grippers)
+        install_start_pose(target, ns.start_move_s, ns.start_max_speed, ns.start_tol)
+        print(f"[start] 시작 자세 = {path} ({len(target)}관절)")
+    saved_end = None
+    if ns.end_pose not in END_POSES:
+        path, saved_end = load_start_pose(ns.end_pose, ns.end_grippers)
+        print(f"[end] 끝 자세 파일 = {path} ({len(saved_end)}관절)")
+    install_end_pose(ns.end_pose, ns.margin, ns.move_s, saved_end, ns.start_max_speed)
     hook = None
     if ns.pour_hook:
         hook = PourHook(hook_params)
