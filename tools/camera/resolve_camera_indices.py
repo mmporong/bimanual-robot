@@ -23,8 +23,12 @@ from comtypes.persist import IPropertyBag
 from pygrabber.dshow_graph import SystemDeviceEnum
 from pygrabber.dshow_ids import DeviceCategories
 
-LEFT_DEVPATH_HINT = "268b1cad"
-RIGHT_DEVPATH_HINT = "30e3ab42"
+# 2026-10-23: 왼쪽 손목캠을 USB 2.0 PC Cam(268b1cad)에서 Innomaker-U20CAM-720P로 교체.
+# 화면에 순정 SO-101 집게가 보이는 것으로 왼쪽임을 확인했다. v2 데이터는 이전 카메라로 녹화됨.
+# 2026-10-24: 차체 결합 후 오른쪽 손목캠이 다른 USB 포트로 옮겨져 30e3ab42 -> b7049f8.
+# 캡처에 오른손이 잡은 병이 보이는 것으로 오른쪽임을 확인했다.
+LEFT_DEVPATH_HINT = "2bd3af6b"
+RIGHT_DEVPATH_HINT = "b7049f8"
 DEPTH_NAME = "OBS Virtual Camera"
 
 
