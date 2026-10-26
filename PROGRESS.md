@@ -13,6 +13,8 @@
 - 새 지도는 목적지 registry/급수대·테이블/keepout 등록과 주행 설정 전환 전이다. 이전 지도의 좌표·도크·route를 새 지도에서 재사용하지 않는다. 새 Astra(0401)·변경된 장착 각도의 주차 보정도 별도 작업이다.
 - 후처리 요청에 따라 PC에 원본을 보존한 `map_cropped.yaml/.pgm` 비교본을 만들었다. 미관측 외곽 6,088셀만 잘라 186×254셀로 줄였고, 알려진 26,471셀·장애물·도크의 지도 좌표를 유지했다. 셀 중심의 좌표 차이는 부동소수 오차 약 1.78e-15 m 이내다. 1–2셀 크기의 장애물 성분 54개는 실제 의자·책상 다리일 수 있어 표시만 하고 삭제하지 않았다. 독립 검증에서 원본 해시·좌표·도크 연결·잡점 보존을 대조해 APPROVE를 받았다. 비교본은 아직 Pi 배포·주행 지도 적용 전이며 근거는 `postprocess_receipt.json`과 `postprocess_comparison.png`다.
 
+- 사용자 스크린샷의 두 구역을 골라 `map_refined.yaml/.pgm`에 반영했다. 1번 회색 151셀을 free로, 2번 대각선 121셀(occupied 63·unknown 58)을 free로 바꿨다. 선택 trace 밖의 모든 검은 셀과 인접 책상 다리 5구역의 검은 73셀을 유지했다. crop의 origin·해상도·도크 좌표는 동일하며 수정 지도 해시에 연결한 `home_dock_refined.yaml`·`dock_scan_reference_refined.json`을 따로 만들었다. 원본 지도·pbstream·기존 운영 registry는 보존했다. 수정 근거와 비교는 `requested_map_edits.json`, `requested_region1_mask.pgm`, `requested_region2_mask.pgm`, `requested_edits_comparison.png`에 있다. 독립 검증 APPROVE 후 Pi·PC 수정본 12파일의 SHA를 대조했다. 양쪽 `current_manual_mapping.json`을 수정본 준비 경로로 갱신했으며, 실제 Nav2 지도·운영 registry 전환과 주행은 수행하지 않았다.
+
 ## 2026-10-23 | 목표 책상 우선 평가·CameraInfo 연관·장착 설정 일원화
 
 - 목표 근방과 겹치는 점군 성분을 fit 예산보다 먼저 고르도록 관측기·재생기에 연결했다. 큰 비목표 성분이 작은 목표를 밀어내는 합성 재현을 추가했고, 원래 점·기존 평가 수·최종 선분 영역 판정·다중 후보 모호성 처리는 유지한다. TF 실패 때 검출 진단을 보존하는 앞선 수정도 유지했다.
