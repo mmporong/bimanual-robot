@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-10-26 | 교체 Astra 깊이 수신·USB 복구 모델 설정 수정
+
+- 사용자가 정밀주차 목표를 차체 앞끝과 책상 면 사이 1 cm로 재확인했다. 양팔 결합을 이유로 목표 간격이나 기준점을 바꾸지 않는다. 새 카메라 장착값의 보정·새 지도의 목적지 등록과 1 cm 실차 확인은 아직 남아 있다.
+- Pi에서 새 Astra USB `2bc5:0401`을 확인했다. 기존 `jdamr-box-rgbd.service`는 disabled·inactive인 필요 시 기동 서비스여서 USB 연결만으로 영상을 시작하지 않았다. 이번 부팅의 카메라 실행 실패 근거는 없었으며, 기동 시 USB 복구 서비스가 이전 Astra S `0402`를 찾느라 약 38초 동안 두 차례 재시도한 뒤에야 카메라가 시작됐다.
+- Pi `/etc/systemd/system/jdamr-astra-usb-recover.service.d/40-camera-model.conf`에 `ASTRA_USB_ID=2bc5:0401`을 설정했다. daemon-reload 후 기존 복구 서비스를 한 번 실행해 같은 초에 `Astra USB enumeration already valid: 2bc5:0401`, exit 0을 확인했다. 기존 USB 포트·제어 로직은 유지했고 베이스를 재시작하지 않았다. 이 항목은 Pi 로컬 설치 설정이며 저장소의 범용 unit 기본값은 변경하지 않았다.
+- 실제 `/camera/depth/image_raw` 35장·`camera_info` 34개를 수신했다. 320×240 `16UC1`, 영상 시각 기준 29.949 Hz, 마지막 영상 유효 깊이 비율 62.13%다. 새 CameraInfo의 fx/fy는 258.41214, cx/cy는 162.12051/126.47111이며 영상·보정 프레임은 `camera_color_optical_frame`으로 일치했다. 이는 입력 확인이며 책상 검출·장착 보정·주차 정확도 검증은 아니다.
+- 장소 등록용 깊이 입력을 유지하기 위해 `jdamr-box-rgbd.service` PID 8382를 켜 둔다. 기존 베이스 PID 1301은 유지하고 새 이동 명령은 보내지 않았다. 카메라 종료는 Pi `sudo systemctl stop jdamr-box-rgbd.service`다. 매핑·Nav2·관측기·자동 실행기는 이번 작업에서 기동하지 않았다. 로컬 브랜치 커밋만 남기며 push는 하지 않는다.
+
 ## 2026-10-26 | 새 수동 SLAM 지도 저장·현재 도크 기준 기록
 
 - 기존 지도 상태를 불러오지 않고 Pi의 기존 `jdamr-operator-mapping.service`로 수동 Cartographer 지도를 만들었다. 사용자 완료 후 추가 이동한 최종 위치를 이번 지도의 도크로 지정했다. 현재 도크는 후면이 도크 테이블, 전면이 통로를 향하는 사용자 기준이다.
