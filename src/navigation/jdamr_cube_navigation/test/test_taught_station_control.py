@@ -110,7 +110,9 @@ def test_profile_rejects_different_map_before_subscribing(tmp_path, monkeypatch)
     node.create_subscription.assert_not_called()
 
 
-def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction():
+def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction(monkeypatch):
+    # A fresh Jazzy process need not expose duration on the rclpy package.
+    monkeypatch.delattr(box_service.rclpy, 'duration', raising=False)
     node = _node()
     model = Mock(return_value=None)
     model.observe.return_value = {
@@ -120,8 +122,9 @@ def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction():
     node.station_reference = model
     node.parking_tf = Mock()
 
-    def lookup(target, source, stamp):
+    def lookup(target, source, stamp, *, timeout):
         assert stamp.nanoseconds == int(10e9)
+        assert 0 < timeout.nanoseconds <= int(.2e9)
         if (target, source) == ('odom', 'base_link'):
             return SimpleNamespace(transform=_pose(.8, .1, .05))
         assert (target, source) == ('map', 'odom')
@@ -243,7 +246,49 @@ def test_invalid_or_stale_reference_never_claims_lateral_precision():
         'millimeter_accuracy_validated': False,
         'internal_lateral_error_m': None,
         'internal_lateral_within_tolerance': False,
+        'lateral_goal_valid': False,
+        'lateral_goal_basis': None,
+        'lateral_goal_observation_stamp_s': None,
     }
+
+
+def test_rejected_rgb_frame_retains_accepted_odom_goal_only_for_steering():
+    node = _node()
+    node.station_reference = Mock()
+    accepted = {
+        'valid': True, 'goal_odom': [.4, .03, 0.],
+        'goal_map': [1.4, .13, 0.], 'stamp_s': 9.9,
+    }
+    rejected = {'valid': False, 'reason': 'camera_pose_has_excess_pitch_roll'}
+    node._fresh_station_reference = Mock(side_effect=[accepted, rejected, rejected])
+    first, current = node._station_goal_reference()
+    carried, current = node._station_goal_reference()
+
+    assert first == carried == accepted
+    assert current == rejected
+    status = node._station_lateral_status()
+    assert status['lateral_goal_valid'] is True
+    assert status['lateral_reference_valid'] is False
+    assert status['internal_lateral_within_tolerance'] is False
+    assert status['lateral_goal_observation_stamp_s'] == 9.9
+
+
+def test_final_lateral_status_uses_current_observation_even_after_goal_freezes():
+    node = _node()
+    node.station_reference = Mock()
+    node.station_reference_goal_frozen = True
+    node.station_reference_goal = {
+        'valid': True, 'goal_odom': [.4, 0., 0.], 'stamp_s': 9.8,
+    }
+    node._fresh_station_reference = Mock(return_value={
+        'valid': True, 'goal_odom': [.4, .028, 0.], 'stamp_s': 10.,
+    })
+    node._odom_pose = Mock(return_value=(.4, 0., 0.))
+
+    status = node._station_lateral_status()
+
+    assert status['internal_lateral_error_m'] == pytest.approx(.028)
+    assert status['internal_lateral_within_tolerance'] is False
 
 
 def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
@@ -303,6 +348,16 @@ def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
     assert stop['target']['x_m'] == pytest.approx(.425)
     assert stop['target']['y_m'] == pytest.approx(.10)
     assert stop['lateral_reference_valid'] is True
+
+    # Entering the old 5 cm precision band must not discard a remaining
+    # lateral error simply because the chassis is currently face-parallel.
+    near = update((.39, 0., 0.))
+    assert near['heading_rad'] > 0.
+    assert node._continuous_table_stop['basis'] != 'aligned_face_frozen_for_precision_band'
+
+    aligned = update((.39, .10, 0.))
+    assert aligned['heading_rad'] == pytest.approx(0.)
+    assert node.station_reference_goal_frozen is True
 
 
 def test_destroy_stops_worker_before_ros_node(monkeypatch):

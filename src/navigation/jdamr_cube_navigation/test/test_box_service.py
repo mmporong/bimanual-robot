@@ -2280,6 +2280,35 @@ def _final_judged(mission, final_pose, frame_width_m=0.45):
     return mission.emit.call_args
 
 
+@pytest.mark.parametrize('valid,lateral_error_m,expected', [
+    (False, None, False),
+    (True, .028, False),
+    (True, .004, True),
+])
+def test_taught_station_does_not_leave_with_only_the_front_gap_confirmed(
+        mission, valid, lateral_error_m, expected):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    mission._station_lateral_status = Mock(return_value={
+        'lateral_reference_valid': valid,
+        'internal_lateral_error_m': lateral_error_m,
+        'internal_lateral_within_tolerance': (
+            lateral_error_m is not None and abs(lateral_error_m) <= .005),
+    })
+    mission.capture_stationary_pose.side_effect = [
+        ((0., 0., 0.), {}), ((.925, 0., 0.), {})]
+
+    result = invoke(mission)
+
+    assert result is expected
+    finished = [call for call in mission.emit.call_args_list
+                if call.args == ('box_approach_finished',)]
+    assert bool(finished) is expected
+    assert bool(getattr(mission, '_confirmed_box_stop', None)) is expected
+    if not expected:
+        assert mission.emit.call_args.kwargs['reason'] == 'station_lateral_arrival_unconfirmed'
+
+
 def test_box_contract_judges_the_nearest_front_corner_at_its_target(mission):
     """Face at x 1.0 facing -x; the contract target is met at the nearest frame corner."""
     from jdamr_cube_navigation.parking import load_parking_contract
@@ -3320,6 +3349,19 @@ def test_moving_table_distance_uses_stamped_pose_and_revises_far_face(monkeypatc
     assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
     update((0.21, 0.0, 0.0))
     assert lookup.call_count == 1
+
+
+def test_moving_table_centres_both_corner_gaps_instead_of_stopping_at_the_nearer_one(
+        monkeypatch):
+    node, _clock, update, _lookup = _moving_table_route(monkeypatch)
+    yaw = .005
+
+    control = update((.2, 0., yaw))
+
+    center_gap = .53 - .2 - .065 * math.cos(yaw)
+    assert control['remaining_m'] == pytest.approx((center_gap - .01) / math.cos(yaw))
+    assert control['surface_gap_m'] == pytest.approx(
+        center_gap - .225 * math.sin(yaw))
 
 
 def test_moving_table_consumes_queued_fresh_depth_before_stopping(monkeypatch):

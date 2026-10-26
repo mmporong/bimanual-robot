@@ -1393,7 +1393,8 @@ class ServiceRoute(CorridorRoute):
                  'target_reached': False, 'face_heading': None, 'heading_updated_s': None,
                  'validate_control': None, 'allow_near_alignment': False,
                  'alignment_in_progress': False, 'observed_heading': None,
-                 'surface_gap_m': None, 'target_confirmed': False}
+                 'surface_gap_m': None, 'target_confirmed': False,
+                 'lateral_tracking': False, 'face_normal_heading': None}
         command = Twist()
 
         def measure():
@@ -1422,6 +1423,17 @@ class ServiceRoute(CorridorRoute):
                         raise RuntimeError('invalid live target confirmation')
                     state['target_confirmed'] = confirmed
                     state['surface_gap_m'] = update.get('surface_gap_m')
+                    lateral_tracking = update.get('lateral_tracking', False)
+                    if not isinstance(lateral_tracking, bool):
+                        raise RuntimeError('invalid lateral tracking mode')
+                    face_heading = update.get('face_heading_rad')
+                    if lateral_tracking and (
+                            not continuous_table or isinstance(face_heading, bool)
+                            or not isinstance(face_heading, (int, float))
+                            or not math.isfinite(face_heading)):
+                        raise RuntimeError('lateral tracking requires a finite live face heading')
+                    state['lateral_tracking'] = lateral_tracking
+                    state['face_normal_heading'] = face_heading
                     allow_near = update.get('allow_near_alignment', False)
                     if not isinstance(allow_near, bool):
                         raise RuntimeError('invalid near alignment mode')
@@ -1462,9 +1474,14 @@ class ServiceRoute(CorridorRoute):
                 raw_error_rad = (error_rad if state['observed_heading'] is None else math.atan2(
                     math.sin(state['observed_heading'] - yaw),
                     math.cos(state['observed_heading'] - yaw)))
+                geometry_error_rad = (
+                    math.atan2(math.sin(state['face_normal_heading'] - yaw),
+                               math.cos(state['face_normal_heading'] - yaw))
+                    if state['lateral_tracking'] else raw_error_rad)
                 state['alignment_in_progress'] = (
                     state['allow_near_alignment']
-                    and max(abs(error_rad), abs(raw_error_rad)) > FACE_HEADING_TOLERANCE_RAD)
+                    and (abs(geometry_error_rad) if state['lateral_tracking'] else
+                         max(abs(error_rad), abs(raw_error_rad))) > FACE_HEADING_TOLERANCE_RAD)
                 command.angular.z = max(
                     -PRECISION_HEADING_MAX_RADPS,
                     min(PRECISION_HEADING_MAX_RADPS,
@@ -1477,14 +1494,17 @@ class ServiceRoute(CorridorRoute):
                             state['remaining_m'], error_rad, approach_time_s=approach_time_s,
                             allow_near_alignment=state['allow_near_alignment'],
                             **({'continuous_table': True, 'surface_gap_m': state['surface_gap_m']}
-                               if continuous_table else {}))
+                               if continuous_table else {}),
+                            **({'lateral_tracking': True, 'face_error_rad': geometry_error_rad}
+                               if state['lateral_tracking'] else {}))
                         command.linear.x = direction * linear
                         command.angular.z = angular
                         if (state['allow_near_alignment']
                                 and state['remaining_m'] <= FACE_ALIGNMENT_GAP_M - .01):
                             if state['alignment_in_progress']:
                                 command.linear.x = 0.
-                            if command.angular.z * raw_error_rad <= 0.:
+                            if ((not state['lateral_tracking'] or state['alignment_in_progress'])
+                                    and command.angular.z * geometry_error_rad <= 0.):
                                 command.angular.z = 0.
                     except (ValueError, RuntimeError) as error:
                         state['target_failure'] = str(error)

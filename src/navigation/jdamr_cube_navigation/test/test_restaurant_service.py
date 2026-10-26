@@ -3240,6 +3240,47 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
     assert all(command == (0.0, 0.0) for command in commands[first_zero:])
 
 
+def test_lateral_curve_passes_face_geometry_separately_without_a_false_alignment_stop(
+        monkeypatch):
+    node = route()
+    clock, x, velocity, commands = [0.], [0.], [0.], []
+    command_law = Mock(wraps=restaurant_service.face_approach_command)
+
+    def publish(message):
+        velocity[0] = message.linear.x
+        commands.append((message.linear.x, message.angular.z))
+
+    def spin(*_args, **_kwargs):
+        clock[0] += .02
+        x[0] += velocity[0] * .02
+        node.latest_motion = (clock[0], velocity[0], 0.)
+
+    def update(actual):
+        return {'remaining_m': .15 - actual[0], 'surface_gap_m': .16 - actual[0],
+                'heading_rad': .05, 'face_heading_rad': 0.,
+                'lateral_tracking': True, 'allow_near_alignment': True}
+
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=x[0], y=0.),
+            rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    monkeypatch.setattr(restaurant_service, 'face_approach_command', command_law)
+
+    assert node._drive_zero_turn(
+        .15, precision=True, hold_heading=True,
+        target_update=update, continuous_table=True) is not None
+    assert command_law.call_count > 0
+    assert all(call.kwargs['lateral_tracking'] is True
+               and call.kwargs['face_error_rad'] == 0.
+               for call in command_law.call_args_list)
+    first_stop = commands.index((0., 0.))
+    assert all(v > 0. for v, _w in commands[:first_stop])
+    assert any(w > 0. for _v, w in commands[:first_stop])
+
+
 def test_near_face_flip_holds_motion_until_heading_filter_agrees(monkeypatch):
     node = route()
     clock = [0.]

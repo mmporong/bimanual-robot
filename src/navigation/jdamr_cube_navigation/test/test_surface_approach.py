@@ -3,7 +3,9 @@
 import math
 
 from jdamr_cube_navigation.reverse_parking import static_corridor_clear
+from jdamr_cube_navigation.station_parking_reference import lateral_approach_heading
 from jdamr_cube_navigation.surface_approach import (
+    FACE_ALIGNMENT_ENTRY_MARGIN_M, FACE_ALIGNMENT_GAP_M,
     face_approach_command, face_approach_waypoints, filtered_face_heading,
 )
 import pytest
@@ -111,6 +113,38 @@ def test_large_table_error_aligns_once_without_slow_translation():
     assert 0. < face_approach_command(.3, math.radians(12.))[0] < .05
 
 
+def test_lateral_tracking_steers_without_treating_command_as_face_error():
+    command_error = math.radians(12.)
+
+    linear, angular = face_approach_command(
+        .3, command_error, continuous_table=True,
+        lateral_tracking=True, face_error_rad=0.)
+
+    assert linear == .1
+    assert angular == .08
+    # The same angle is still a stop-and-align request in the default mode.
+    assert face_approach_command(
+        .3, command_error, continuous_table=True)[0] == 0.
+
+
+def test_lateral_tracking_keeps_face_clearance_gate():
+    linear, angular = face_approach_command(
+        .03, math.radians(-4.), continuous_table=True,
+        surface_gap_m=.04, allow_near_alignment=True,
+        lateral_tracking=True, face_error_rad=math.radians(12.))
+
+    assert linear == 0.
+    assert angular < 0.
+
+
+@pytest.mark.parametrize('face_error', [None, math.nan])
+def test_lateral_tracking_requires_a_finite_face_error(face_error):
+    with pytest.raises(ValueError, match='finite face error'):
+        face_approach_command(
+            .3, 0., continuous_table=True, lateral_tracking=True,
+            face_error_rad=face_error)
+
+
 @pytest.mark.parametrize('filtered_deg', [3., 12., 30.])
 def test_continuous_table_preserves_near_rate_with_raw_filtered_heading_difference(filtered_deg):
     gap = .049
@@ -137,6 +171,111 @@ def test_near_table_preview_matches_command_with_filtered_heading():
         command_heading_rad=filtered_heading)
     assert linear == 0.
     assert poses[1] == pytest.approx((0.,0.,yaw+angular*.05))
+
+
+def test_lateral_preview_does_not_stop_for_intentional_command_offset():
+    command_heading = math.radians(8.)
+    poses = face_approach_waypoints(
+        (0., 0., 0.), (.5, 0.), (-1., 0.), .065, .225,
+        continuous_table=True, allow_near_alignment=True,
+        command_heading_rad=command_heading, lateral_tracking=True,
+        lateral_goal_odom=(.425, .03, 0.), lateral_tolerance_m=.005,
+        max_lateral_heading_rad=math.radians(30.))
+
+    assert len(poses) > 2
+    assert poses[1][0] > poses[0][0]
+    assert abs(poses[1][2]) > 0.
+
+
+@pytest.mark.parametrize(('field', 'value'), [
+    ('lateral_goal_odom', None),
+    ('lateral_tolerance_m', None),
+    ('max_lateral_heading_rad', None),
+])
+def test_lateral_preview_requires_the_live_control_contract(field, value):
+    kwargs = {
+        'lateral_goal_odom': (.425, 0., 0.),
+        'lateral_tolerance_m': .005,
+        'max_lateral_heading_rad': math.radians(30.),
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match='lateral preview'):
+        face_approach_waypoints(
+            (0., 0., 0.), (.5, 0.), (-1., 0.), .065, .225,
+            continuous_table=True, lateral_tracking=True, **kwargs)
+
+
+def _actual_lateral_rollout(start_y, start_yaw):
+    face_x = .5
+    target_x = face_x - .065 - .01
+    x, y, yaw = 0., start_y, start_yaw
+    filtered_heading = None
+    step_s = .05
+    poses = [(x, y, yaw)]
+    stopped_before_band = False
+
+    for step in range(200):
+        face_error = -yaw
+        center_gap = face_x - x - .065 * math.cos(face_error)
+        gap = center_gap - .225 * abs(math.sin(face_error))
+        if gap <= FACE_ALIGNMENT_GAP_M + FACE_ALIGNMENT_ENTRY_MARGIN_M:
+            return poses, stopped_before_band
+        remaining = (center_gap - .01) / math.cos(face_error)
+        observed_heading = lateral_approach_heading(
+            0., (target_x, 0., 0.), (x, y, yaw), remaining, .005,
+            math.radians(30.))
+        filtered_heading = filtered_face_heading(
+            filtered_heading, observed_heading, 0. if step == 0 else step_s)
+        command_error = math.atan2(
+            math.sin(filtered_heading - yaw),
+            math.cos(filtered_heading - yaw))
+        linear, angular = face_approach_command(
+            remaining, command_error, continuous_table=True,
+            surface_gap_m=gap, allow_near_alignment=True,
+            lateral_tracking=True, face_error_rad=face_error)
+        stopped_before_band |= linear == 0.
+        x += linear * math.cos(yaw) * step_s
+        y += linear * math.sin(yaw) * step_s
+        yaw += angular * step_s
+        poses.append((x, y, yaw))
+    pytest.fail('lateral tracking rollout did not reach precision band')
+
+
+@pytest.mark.parametrize(('start_y', 'start_yaw'), [
+    (-.028, 0.),
+    (-.04, math.radians(8.)),
+    (.04, math.radians(-8.)),
+])
+def test_lateral_tracking_reaches_precision_band_aligned_without_stop_turn(
+        start_y, start_yaw):
+    """Exercise the real filter, 0.08 rad/s limit and command law together."""
+    poses, stopped_before_band = _actual_lateral_rollout(start_y, start_yaw)
+    _x, y, yaw = poses[-1]
+
+    assert not stopped_before_band
+    assert abs(y) <= .005
+    assert abs(yaw) <= math.radians(.3)
+
+
+def test_lateral_preview_matches_live_rollout_swept_range_and_endpoint():
+    start = (0., -.04, math.radians(8.))
+    goal = (.425, 0., 0.)
+    actual, stopped = _actual_lateral_rollout(start[1], start[2])
+    preview = face_approach_waypoints(
+        start, (.5, 0.), (-1., 0.), .065, .225,
+        continuous_table=True, allow_near_alignment=True,
+        lateral_tracking=True, lateral_goal_odom=goal,
+        lateral_tolerance_m=.005,
+        max_lateral_heading_rad=math.radians(30.))
+
+    assert not stopped
+    assert min(pose[1] for pose in preview) == pytest.approx(
+        min(pose[1] for pose in actual), abs=.001)
+    assert max(pose[1] for pose in preview) == pytest.approx(
+        max(pose[1] for pose in actual), abs=.001)
+    assert preview[-1][:2] == pytest.approx(actual[-1][:2], abs=.002)
+    assert preview[-1][2] == pytest.approx(actual[-1][2], abs=math.radians(.2))
+    assert abs(preview[-1][1] - start[1]) >= .035
 
 
 @pytest.mark.parametrize('angle_deg', [-30., -12., -3., 3., 12., 30.])

@@ -358,7 +358,15 @@ def anchor_face_to_taught_lateral(target, taught_xy):
 def lateral_approach_heading(
         face_heading, goal_odom, actual_odom, remaining_m, tolerance_m,
         max_heading_rad, minimum_lookahead_m=DEFAULT_MINIMUM_LOOKAHEAD_M):
-    """Aim toward a taught lateral goal while retaining the face heading."""
+    """Follow a smooth lateral path that ends parallel to the target face.
+
+    A cubic Hermite path is rebuilt in the face-aligned frame on every
+    update.  Its start tangent is the current chassis heading and its end
+    tangent is parallel to the face.  A rate-led midpoint tangent therefore
+    corrects lateral error early while progressively removing yaw error,
+    instead of aiming straight at the lateral coordinate and turning back at
+    the end of the approach.
+    """
     heading = _finite(face_heading, 'face_heading')
     goal = _pose(goal_odom, 'goal_odom')
     actual = _pose(actual_odom, 'actual_odom')
@@ -379,9 +387,19 @@ def lateral_approach_heading(
     lateral_error = ((goal[0] - actual[0]) * left[0]
                      + (goal[1] - actual[1]) * left[1])
     if abs(lateral_error) <= tolerance:
-        correction = 0.0
-    else:
-        correction = math.atan2(
-            lateral_error, max(remaining, lookahead_minimum))
-        correction = max(-maximum, min(maximum, correction))
+        lateral_error = 0.0
+
+    path_length = max(remaining, lookahead_minimum)
+    heading_error = _wrapped(actual[2] - heading)
+    bounded_start_heading = max(-maximum, min(maximum, heading_error))
+    start_slope = math.tan(bounded_start_heading)
+
+    # Midpoint Hermite tangent feedback is 1.5*error/path - .25*start_slope.
+    # The lateral term receives 4/3 command lead so the existing 0.08 rad/s
+    # yaw-rate limit and 0.35 s heading filter do not postpone straightening
+    # until the final 5 cm band.  The final heading term still drives the path
+    # tangent parallel to the face.
+    correction = math.atan(
+        2.0 * lateral_error / path_length - 0.25 * start_slope)
+    correction = max(-maximum, min(maximum, correction))
     return _wrapped(heading + correction)
