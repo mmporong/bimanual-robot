@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-10-26 | 급수대 기준점·컵과 물병 참조 영상 저장·IMU 사용 현황 확인
+
+- 사용자가 수동 이동 후 지정한 현재 위치를 새 지도의 `water_station.yaml`에 저장했다. map→base_link 추정값은 x=0.024608312 m, y=-0.076957432 m, yaw=-0.025996508 rad다. 차체 앞끝 목표 1 cm와 등록 위치 기준 좌우 ±5 mm를 목표 메타데이터로 남겼으며, 현재 실물 도착점·방향이 최우선이고 컵·물병은 목표점을 바꾸지 않는 보조 참조로 지정했다. 좌우 5 mm 보정 제어 구현·성능 검증이나 자동 운영 registry 활성화를 완료한 것은 아니다. 실제 현재 앞 간격은 미측정이다.
+- Pi·PC `$HOME/jdamr_data/maps/20261026_manual_160135/stations/water_station_081718/`에 정지 관측을 저장했다. 깊이 77장·scan 32회·odom 225회를 받았고 깊이 최근 20장·scan 최근 12회·odom 최근 100개를 보존했다. 최근 odom 20개 최대 절대 v=0.002524 m/s, w=0.009896 rad/s다. 캡처에는 보정 전 새 Astra라는 상태와 실제 CameraInfo·AMCL covariance를 포함하며 외부 정확도를 주장하지 않는다.
+- 고정 컵·물병의 보조 참조 가능성을 확인하기 위해 카메라에만 `/run/systemd/system/jdamr-box-rgbd.service.d/95-reference-rgb.conf`를 적용해 RGB 640×480@30을 추가하고 깊이 320×240@30은 유지했다. camera PID는 8382→14012, base·수동 주행·Nav2는 유지했다. 실제 RGB 23장·깊이 15장을 수신했고 저장한 마지막 영상의 시각 차는 12.234 ms다. `reference_rgb.ppm`에서 왼쪽 컵·오른쪽 물병이 모두 보이는 것을 확인했다. 이는 참조 영상 저장이며 물체 검출·영상 기반 위치 보정 구현은 아니다. 런타임 override는 재부팅 시 사라진다.
+- 급수대 YAML과 캡처 원본 6파일의 Pi·PC SHA, 수정 지도 identity를 대조했다. 근거는 `$HOME/.local/state/bimanual-robot/destination_teaching_20261026/station_sync_receipt.json`이며 PC 열람용 `reference_rgb.png`도 원본 PPM에서 만들었다. 사용자 수동 운전용 화면·RViz는 이전 엔트리의 PID/종료 명령으로 유지하고 RGB-D는 `sudo systemctl stop jdamr-box-rgbd.service`로 종료한다. 테이블 위치 등록과 새 Astra 장착 보정은 남아 있다. 에이전트의 비영 이동·자동 목표 제출은 없다.
+- 사용자 질문에 따라 현재 IMU 사용을 읽기 확인했다. `/imu/data_raw`의 imu_link 자료 97개를 수신했으나 EKF·imu_bias 노드가 없고 `/imu/data`와 `/odometry/filtered` 발행자도 0개다. 센서 출력은 있으나 주행 odom에는 미융합이다. 기존 EKF launch/config는 보존했으며 실행하지 않았다. 과거 인계 §2-11의 큰 회전 1회 개선 수치와 날짜별 gyro bias 변화·미검증 보정 상태는 과거 근거이며 현재 4륜·양팔 구성의 정확도 증명이 아니다.
+
+## 2026-10-26 | 새 저장 지도 기반 수동 목적지 등록과 RViz 기동
+
+- 사용자가 급수대로 수동 이동해 위치를 지정하기로 했다. 기존 SLAM을 다시 시작하지 않고 수정 지도 `map_refined.yaml`을 map_server에 올려 AMCL을 저장 도크 자세로 초기화했다. 급수대·테이블 좌표는 아직 등록 전이며, 이전 지도의 자동 route·registry·keepout은 재사용하지 않았다. 도크 이탈은 지도 이미지 오른쪽인 전방으로 진행한 뒤 회전하고 복귀는 후면 주차하는 사용자 기준을 유지한다.
+- 기존 `navigation.launch.py`를 Pi 임시 `jdamr-destination-teaching.service` PID 9507로 실행했다. 수동 세션의 params는 `$HOME/.local/state/jdamr/destination_teaching_20261026/params.yaml`이며 기존 새 차체 설정에서 도크 초기 자세와 수동 후진 허용값 `min_velocity[0]=-0.12`만 바꿨다. keepout은 새 마스크 미등록으로 비활성화하고 실제 라이다 기반 CM·명령 신선도·차체 제원은 유지했다. 첫 기동은 Nav2 PythonExpression이 소문자 `use_composition=false`를 Python 식으로 해석해 이동 연결 전에 실패했고, `False`로 고쳐 기동했다.
+- `jdamr-webteleop.service` PID 9308의 조작 화면은 `http://192.168.0.159:8080`이다. cmd_vel_nav → velocity_smoother → cmd_vel_smoothed → collision_monitor → cmd_vel → base 경로 각각의 구독자 1개와 map_server·AMCL·smoother·CM active를 확인했다. 확인 때 odom v/w는 0이었고 에이전트의 비영 이동 명령·자동 목표 제출은 없었다. 차체 앞끝 목표 1 cm는 유지하며 이번 기동을 정밀주차 성공으로 기록하지 않는다.
+- PC에서 읽기 전용 표시 중계 PID 3970840과 RViz PID 3970846을 켰고 186×254 새 지도·라이다·로봇 표시를 화면으로 확인했다. 사용자의 장소 등록 중 계속 표시하기 위해 유지한다. 경로와 상태는 `$HOME/.local/state/bimanual-robot/destination_teaching_20261026/session.json`, 화면은 같은 디렉터리 `rviz_ready.png`다. 종료는 Pi `sudo systemctl stop jdamr-webteleop.service jdamr-destination-teaching.service`, PC `XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user stop jdamr-destination-teaching-rviz.service jdamr-destination-teaching-relay.service`다. 기존 베이스·카메라는 유지한다. 저장소 코드·자동 실행기는 변경하지 않았고 로그는 로컬 브랜치 커밋만 수행한다.
+
 ## 2026-10-26 | 교체 Astra 깊이 수신·USB 복구 모델 설정 수정
 
 - 사용자가 정밀주차 목표를 차체 앞끝과 책상 면 사이 1 cm로 재확인했다. 양팔 결합을 이유로 목표 간격이나 기준점을 바꾸지 않는다. 새 카메라 장착값의 보정·새 지도의 목적지 등록과 1 cm 실차 확인은 아직 남아 있다.
