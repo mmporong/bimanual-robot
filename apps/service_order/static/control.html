@@ -37,6 +37,7 @@
     .col { display: grid; gap: 12px; align-content: start; min-width: 0; }
     .card { padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
     .banner { margin-bottom: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+    .banner.align { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; background: var(--accent-soft); color: var(--accent); }
     .current-head { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 12px; }
     .current-head b { font-size: 16px; }
     .muted { color: var(--muted); }
@@ -86,6 +87,10 @@
   </header>
 
   <div class="banner" id="demo-note" hidden>체험용 데모 화면입니다. 실제 로봇과 연결되어 있지 않으며, 주문은 이 브라우저 안에서만 공유됩니다.</div>
+  <div class="banner align" id="align-banner" hidden>
+    <span id="align-text"></span>
+    <button type="button" class="btn primary" id="align-confirm">정렬 완료</button>
+  </div>
   <div class="banner" id="paused-banner" hidden>자동 진행이 일시정지되었습니다. 진행 중인 단계는 끝까지 수행한 뒤 멈춥니다.</div>
 
   <div class="stats">

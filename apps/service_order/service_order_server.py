@@ -14,7 +14,7 @@ import threading
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from src.mission.service_execution_backend import CommandBackend, ImmediateBackend, Ros2ManipulationBackend, Ros2PlannedArtifactBackend, Ros2PlannedRoundtripBackend, Ros2PlannedSessionBackend
+from src.mission.service_execution_backend import CommandBackend, ImmediateBackend, Ros2ManipulationBackend, Ros2PlannedArtifactBackend, Ros2PlannedRoundtripBackend, Ros2PlannedSessionBackend, RolloutServiceBackend
 from src.mission.service_mission_control import DryRunRuntime, MissionController
 from src.mission.service_order_store import ServiceOrderStore
 
@@ -371,6 +371,18 @@ def handler_factory(app: ServiceApplication, cors_origin: str | None = None) -> 
                         raise ValueError("failure must be a nonempty string")
                     self._json(HTTPStatus.OK, app.step(success=success, failure=failure))
                     return
+                if path == "/api/align/confirm":
+                    confirm = getattr(app.backend, "confirm_alignment", None)
+                    if confirm is None:
+                        self._json(HTTPStatus.CONFLICT, {"error": "backend_has_no_alignment_gate"})
+                        return
+                    length = int(self.headers.get("Content-Length") or 0)
+                    station = self._read_json().get("station") if length else None
+                    if station is not None and not isinstance(station, str):
+                        raise ValueError("station must be a string")
+                    result = confirm(station)
+                    self._json(HTTPStatus.OK if result.get("confirmed") else HTTPStatus.CONFLICT, result)
+                    return
                 if path == "/api/control":
                     paused = self._read_json().get("paused")
                     if not isinstance(paused, bool):
@@ -419,11 +431,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "ros2-planned-artifact",
             "ros2-planned-session",
             "ros2-planned-roundtrip",
+            "rollout-service",
         ),
         default="immediate",
-        help="manipulation backend; ROS modes are simulation-only and never access hardware",
+        help="manipulation backend; ROS modes are simulation-only, rollout-service moves the real arms",
     )
     parser.add_argument("--manipulation-timeout-s", type=float, default=30.0)
+    parser.add_argument("--manip-url", default="http://127.0.0.1:8770",
+                        help="rollout-service backend: address of tools/rollout/rollout_service.py")
+    parser.add_argument("--no-align-confirm", action="store_true",
+                        help="rollout-service backend: do not wait for the alignment-done signal before arm work")
+    parser.add_argument("--accept-duration", action="store_true",
+                        help="rollout-service backend: count a policy that hit its max duration as success")
     parser.add_argument(
         "--cors-origin",
         help="allow this origin (e.g. https://<site>.netlify.app) to call the API from a separately hosted page",
@@ -458,6 +477,14 @@ def main(argv: list[str] | None = None) -> int:
             executor_socket=args.executor_socket,
             timeout_sec=args.manipulation_timeout_s,
         )
+    elif args.backend == "rollout-service":
+        backend = RolloutServiceBackend(
+            url=args.manip_url,
+            require_alignment=not args.no_align_confirm,
+            accept_duration=args.accept_duration,
+        )
+        status = backend.service_status(max_age_s=0)
+        print(f"manipulation service {args.manip_url}: {status.get('state')}", flush=True)
     else:
         backend = ImmediateBackend()
     app = ServiceApplication(
@@ -475,7 +502,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"service order dashboard: http://{args.host}:{server.server_port}", flush=True)
     print(f"guest order page: http://{args.host}:{server.server_port}/order?table=1", flush=True)
     print(f"control page: http://{args.host}:{server.server_port}/control", flush=True)
-    print(f"mode: {backend.mode} (hardware disabled; simulator access depends on backend)", flush=True)
+    if backend.info().get("hardware_accessed"):
+        print(f"mode: {backend.mode} (REAL ARMS: manipulation phases call the rollout service)", flush=True)
+    else:
+        print(f"mode: {backend.mode} (hardware disabled; simulator access depends on backend)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

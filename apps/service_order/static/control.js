@@ -15,6 +15,7 @@ const PHASE_LABEL = Object.fromEntries([
 const MISSION_LABEL = { RUNNING: "작업 중", IDLE: "대기", CHARGING: "충전 중", TERMINAL: "정지 대기" };
 const STATE_LABEL = { QUEUED: "대기", RUNNING: "진행 중", SUCCEEDED: "완료", FAILED: "실패", CANCELED: "취소" };
 const DRINKS = { COLD_WATER: "냉수", HOT_WATER: "온수" };
+const MANIP_LABEL = { loading: "준비 중", ready: "대기", running: "실행 중", closing: "종료 중", unreachable: "연결 안 됨" };
 const EVENT_LABEL = {
   ORDER_QUEUED: "주문 접수", ORDER_CANCELED: "주문 취소", ORDER_DUPLICATE_IGNORED: "중복 주문 무시",
   MISSION_STARTED: "작업 시작", MISSION_SUCCEEDED: "작업 완료", MISSION_FAILED: "작업 실패",
@@ -85,8 +86,20 @@ function render() {
   $("s-mission").textContent = MISSION_LABEL[state.mission_state] || state.mission_state;
   $("s-location").textContent = place(state.current_location);
   $("s-battery").textContent = `${state.battery_percent.toFixed(1)}%`;
-  $("s-mode").textContent = mode;
-  $("s-mode").title = mode;
+  const eb = state.execution_backend || {};
+  const manip = eb.manipulation_service_state;
+  $("s-mode").textContent = manip ? `${mode} · 조작 ${MANIP_LABEL[manip] || manip}` : mode;
+  $("s-mode").title = eb.manipulation || mode;
+
+  // 정렬 완료 신호 대기 (rollout-service backend). 주행 연동 전에는 운영자가 확인 후 누른다.
+  const waiting = eb.waiting_alignment;
+  $("align-banner").hidden = !waiting;
+  if (waiting) {
+    const next = waiting.station === "kitchen" ? "물따르기" : "컵 배치";
+    $("align-text").textContent = `${waiting.station === "kitchen" ? "주방" : "테이블"} 정렬 완료 신호를 기다리는 중입니다. 차가 완전히 멈추고 정렬됐는지 확인한 뒤 누르면 ${next}를 시작합니다.`;
+    $("align-confirm").textContent = `정렬 완료 → ${next} 시작`;
+    $("align-confirm").dataset.station = waiting.station;
+  }
 
   $("pause").textContent = state.auto_paused ? "자동 진행 재개" : "자동 진행 일시정지";
   $("pause").className = state.auto_paused ? "btn primary" : "btn";
@@ -103,6 +116,7 @@ function render() {
       el("span", `주문 ${active.order_id}`, "muted"),
       el("span", `단계: ${PHASE_LABEL[state.phase] || state.phase}${state.phase_attempt > 1 ? ` (${state.phase_attempt}번째 시도)` : ""}`),
     );
+    if (eb.running_policy) head.append(el("b", `팔 정책 실행 중: ${eb.running_policy === "pour" ? "물따르기" : "컵 배치"}`));
   } else {
     head.replaceChildren(el("span", `진행 중인 주문 없음 — ${PHASE_LABEL[state.phase] || state.phase}`, "muted"));
   }
@@ -158,6 +172,12 @@ function cancelOrder(id) {
   if (confirm(`주문 ${id}을(를) 취소할까요?`)) act(() => api(`/api/orders/${encodeURIComponent(id)}/cancel`, {}));
 }
 
+$("align-confirm").addEventListener("click", () => {
+  const station = $("align-confirm").dataset.station;
+  if (confirm("차가 멈추고 정렬된 것을 확인했나요? 누르면 팔이 움직입니다.")) {
+    act(() => api("/api/align/confirm", { station }));
+  }
+});
 $("pause").addEventListener("click", () => act(() => api("/api/control", { paused: !state?.auto_paused })));
 $("abort").addEventListener("click", () => {
   const id = state?.active_order_id;
