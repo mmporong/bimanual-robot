@@ -265,44 +265,62 @@ def load_start_pose(arg: str, grippers: bool) -> tuple[Path, dict[str, float]]:
     return path, pose
 
 
+def move_to_start_pose(robot, target: dict[str, float], move_s: float, max_speed: float, tol: float) -> bool:
+    """저장 자세로 부드럽게 옮긴다. 도착 후 tol도 넘게 벗어난 관절이 있으면 그 자리에 고정하고 False."""
+    from lerobot.utils.robot_utils import precise_sleep
+
+    fps = 50
+    try:
+        cur = robot.get_observation()
+        start = {k: float(cur[k]) for k in target}
+        biggest = max(abs(target[k] - start[k]) for k in target)
+        dur = max(move_s, biggest / max_speed)
+        print(f"[start] 시작 자세로 {dur:.1f}s 동안 이동 (가장 큰 차이 {biggest:.1f}도)")
+        steps = max(int(dur * fps), 1)
+        for i in range(1, steps + 1):
+            t = i / steps
+            t = t * t * (3 - 2 * t)
+            robot.send_action({k: start[k] * (1 - t) + target[k] * t for k in start})
+            precise_sleep(1 / fps)
+        time.sleep(0.5)
+        now = robot.get_observation()
+        off = {k: round(float(now[k]) - target[k], 1) for k in target if abs(float(now[k]) - target[k]) > tol}
+    except Exception as e:  # noqa: BLE001
+        now, off = None, {"error": str(e)}
+    if off:
+        if now is not None:
+            # 목표에 못 간 관절은 더 밀지 않게 현재 위치를 목표로 고정한다
+            robot.send_action({k: float(now[k]) for k in target})
+        print(f"[start] 시작 자세 도달 실패({tol:.0f}도 초과) {off} - 그 자리에 멈추고 추론하지 않음")
+        return False
+    print("[start] 시작 자세 도착 -> 추론 시작")
+    return True
+
+
 def install_start_pose(target: dict[str, float], move_s: float, max_speed: float, tol: float) -> None:
     from lerobot.rollout.strategies import base as base_strategy
-    from lerobot.utils.robot_utils import precise_sleep
 
     orig_run = base_strategy.BaseStrategy.run
 
     def run(self, ctx) -> None:
-        robot = ctx.hardware.robot_wrapper
-        fps = 50
-        try:
-            cur = robot.get_observation()
-            start = {k: float(cur[k]) for k in target}
-            biggest = max(abs(target[k] - start[k]) for k in target)
-            dur = max(move_s, biggest / max_speed)
-            print(f"[start] 시작 자세로 {dur:.1f}s 동안 이동 (가장 큰 차이 {biggest:.1f}도)")
-            steps = max(int(dur * fps), 1)
-            for i in range(1, steps + 1):
-                t = i / steps
-                t = t * t * (3 - 2 * t)
-                robot.send_action({k: start[k] * (1 - t) + target[k] * t for k in start})
-                precise_sleep(1 / fps)
-            time.sleep(0.5)
-            now = robot.get_observation()
-            off = {k: round(float(now[k]) - target[k], 1) for k in target if abs(float(now[k]) - target[k]) > tol}
-        except Exception as e:  # noqa: BLE001
-            now, off = None, {"error": str(e)}
-        if off:
-            if now is not None:
-                # 목표에 못 간 관절은 더 밀지 않게 현재 위치를 목표로 고정한다
-                robot.send_action({k: float(now[k]) for k in target})
+        if not move_to_start_pose(ctx.hardware.robot_wrapper, target, move_s, max_speed, tol):
             RUN_STATE["start_failed"] = True
-            print(f"[start] 시작 자세 도달 실패({tol:.0f}도 초과) {off} - 그 자리에 멈추고 추론하지 않음")
             ctx.runtime.shutdown_event.set()
             return
-        print("[start] 시작 자세 도착 -> 추론 시작")
         return orig_run(self, ctx)
 
     base_strategy.BaseStrategy.run = run
+
+
+def relax_grippers(robot, margin: int, when: str) -> None:
+    """양팔 그리퍼가 물체를 계속 밀지 않게 목표를 실제 위치 쪽으로 당긴다(토크는 유지)."""
+    for side in ("left_arm", "right_arm"):
+        try:
+            bus = getattr(robot, side).bus
+            relax_gripper(bus.packet_handler, bus.port_handler, bus.model_ctrl_table["sts3215"],
+                          f"{side} {when}", margin, clear_overload=False)
+        except Exception as e:  # noqa: BLE001
+            print(f"[grip] {side} {when} 처리 실패: {e}")
 
 
 def install_end_pose(pose: str, margin: int, move_s: float, saved: dict[str, float] | None = None,
@@ -315,13 +333,7 @@ def install_end_pose(pose: str, margin: int, move_s: float, saved: dict[str, flo
         robot = hw.robot_wrapper.inner
         if pose == "final" or RUN_STATE["start_failed"]:
             if robot.is_connected:
-                for side in ("left_arm", "right_arm"):
-                    bus = getattr(robot, side).bus
-                    try:
-                        relax_gripper(bus.packet_handler, bus.port_handler, bus.model_ctrl_table["sts3215"],
-                                      f"{side} 종료 시", margin, clear_overload=False)
-                    except Exception as e:  # noqa: BLE001
-                        print(f"[grip] {side} 종료 시 처리 실패: {e}")
+                relax_grippers(robot, margin, "종료 시")
             print("[end] 마지막 자세 유지")
             return orig_teardown(self, hw, return_to_initial_position=False)
         if pose == "pour_start":
