@@ -1045,12 +1045,13 @@ def recover_controller_before_departure(started):
     stop_requested_since(started)
 
 
-def show_event(event, *, notify=True):
+def show_event(event):
+    # Historical runs may still contain removed notification events.
+    if event.get('event') == 'operator_call':
+        return
     keep = {k: event[k] for k in ('event', 'level', 'category', 'phase', 'reason', 'waypoint_id',
                                   'terminal_status_code', 'nav2_error_code') if k in event}
     log('  ' + json.dumps(keep, ensure_ascii=False))
-    if notify and event.get('event') == 'operator_call':
-        alert_operator(event)
 
 
 def execution_failure_cause(events):
@@ -1065,32 +1066,6 @@ def execution_failure_cause(events):
                 and event.get('reason') not in (None, 'rear box coarse handoff ready')):
             return str(event['reason'])
     return None
-
-
-def alert_operator(event):
-    """Bell, desktop notification and an optional extra channel for an operator_call.
-
-    JDAMR_OPERATOR_NOTIFY_CMD, when set, is run with the message as its last argument
-    (for example a Telegram helper). Nothing is sent outside the PC without it.
-    """
-    text = f'{event.get("level")} {event.get("category")}: {event.get("reason")}'
-    if load_state().get('operator_alerts', True) is False:
-        # Test runs: the operator is not called (2026-10-02 "호출알림 보내지말라니까");
-        # `alerts on` restores it for demonstrations.
-        log(f'operator call (alerts off, not sent): {text}')
-        return
-    log(f'OPERATOR CALL {text}')
-    print('\a', end='', flush=True)
-    title = shlex.quote('JD-AMR 운영자 호출')
-    commands = [f'notify-send -u critical {title} {shlex.quote(text)}']
-    extra = os.environ.get('JDAMR_OPERATOR_NOTIFY_CMD')
-    if extra:
-        commands.append(f'{extra} {shlex.quote("JD-AMR 운영자 호출: " + text)}')
-    for command in commands:
-        try:   # an alert channel never stops the follow-up of the run
-            sh(command, timeout=15, check=False)
-        except subprocess.TimeoutExpired:
-            log(f'alert channel timed out: {command.split()[0]}')
 
 
 def run_cycle(args, state, table_id):
@@ -1228,24 +1203,15 @@ def run_cycle(args, state, table_id):
                 log(f'monitor start failed ({error}); the run continues without it')
         stops = ('rear box only' if rear_box_only else 'dock only' if args.dock_only else
                  f'{VIA_ID} -> {table_id}' if include_via else f'{table_id}')
-        alerts = 'on' if load_state().get('operator_alerts', True) is not False else 'off'
         submission_label = 'SUBMISSION_UNCONFIRMED' if submission_uncertain else 'SUBMITTED'
         log(f'{submission_label} {stops} -> dock: unit {unit}, log {run_dir}/cycle_events.jsonl, '
-            f'request_submit_s={time.monotonic() - requested_s:.3f}, '
-            f'operator alerts {alerts}')
+            f'request_submit_s={time.monotonic() - requested_s:.3f}')
         seen, bag_checked, departed_s, lost_since = 0, False, time.monotonic(), None
         first_event_reported = False
-        deferred_calls = []
 
         def report_new(events):
-            for index in range(seen, len(events)):
-                event = events[index]
-                defer = (getattr(args, '_map_retry_allowed', False)
-                         and event.get('event') == 'operator_call'
-                         and map_wait_failed(events[:index + 1]))
-                show_event(event, notify=not defer)
-                if defer:
-                    deferred_calls.append(event)
+            for event in events[seen:]:
+                show_event(event)
 
         while True:
             # The recorder needs ~13 s to subscribe on a loaded Pi (2026-10-01).
@@ -1282,9 +1248,6 @@ def run_cycle(args, state, table_id):
                 if completion_error is not None:
                     final.append(completion_error)
                     show_event(completion_error)
-                if not map_wait_failed(final):
-                    for event in deferred_calls:
-                        alert_operator(event)
                 if record_diagnostics:
                     stop_monitors(monitors)
                     finish_onboard_bag(bag_unit, run_dir)
@@ -1662,14 +1625,6 @@ def cmd_estop_reset(_args):
          + (out.strip().splitlines() or ['no answer'])[-1]) + f'; state: {estop_state()}')
 
 
-def cmd_alerts(args):
-    """Switch the operator-call alerts (bell, desktop, extra channel) on or off."""
-    state = load_state()
-    state['operator_alerts'] = args.mode == 'on'
-    save_state(state)
-    log(f'operator alerts: {args.mode}')
-
-
 def cmd_status(_args):
     state = load_state()
     log('session: ' + pi('systemctl is-active jdamr-restaurant-navigation.service',
@@ -1684,8 +1639,6 @@ def cmd_status(_args):
     log(f'emergency stop: {estop_state()}')
     log('state: ' + json.dumps({k: state[k] for k in ('pose', 'home', 'last_run', 'bag')
                                 if k in state}))
-    log('operator alerts: ' + ('on' if state.get('operator_alerts', True) is not False
-                               else 'off'))
 
 
 def main():
@@ -1768,8 +1721,6 @@ def main():
     go.add_argument('--resume-parked-log',
                     help='cycle_events.jsonl of a run that stopped at the first box: hold, escape, continue')
     sub.add_parser('health')
-    alerts = sub.add_parser('alerts', help='operator-call alerts on (demos) or off (tests)')
-    alerts.add_argument('mode', choices=('on', 'off'))
     recover = sub.add_parser('recover')
     recover.add_argument('--seed', nargs=3, type=float, metavar=('X', 'Y', 'YAW_DEG'),
                          help='placement when the robot is not at the last init pose')
@@ -1786,7 +1737,7 @@ def main():
                 'display-stop': cmd_display_stop, 'session-start': cmd_session_start,
                 'session-stop': cmd_session_stop, 'init': cmd_init, 'go': cmd_go,
                 'stop': cmd_stop, 'status': cmd_status, 'health': cmd_health,
-                'estop': cmd_estop, 'estop-reset': cmd_estop_reset, 'alerts': cmd_alerts,
+                'estop': cmd_estop, 'estop-reset': cmd_estop_reset,
                 'recover': cmd_recover,
                 'record-start': lambda _a: record_start(),
                 'record-stop': lambda _a: record_stop(),

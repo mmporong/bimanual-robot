@@ -2976,17 +2976,6 @@ def parse_args(argv=None):
     return args
 
 
-def _attempt_code(node, ok):
-    """
-    Return the exit code of one attempt; one that stopped short calls the operator.
-
-    A stop the operator sent (SIGINT from `jdamr_depart.py stop`) needs no call.
-    """
-    if not ok and not getattr(node, 'operator_stopped', False):
-        node.call_operator()
-    return 0 if ok else 1
-
-
 def run_attempt(args, active=None):
     """
     Run one table attempt in an initialized rclpy context; return the exit code.
@@ -3044,7 +3033,7 @@ def run_attempt(args, active=None):
                 ok = node.park_rear_box(
                     geometry, args.approach_route,
                     execute=args.execute, timeout_s=args.task_timeout_s)
-                return _attempt_code(node, ok)
+                return 0 if ok else 1
             if args.home_only:
                 # Dock return alone, e.g. to re-dock after a crooked stop; it may run
                 # down to the running cutoff, since it goes to the charger.
@@ -3053,7 +3042,7 @@ def run_attempt(args, active=None):
                 if not node.wait_until_ready(timeout=10.0):
                     raise RuntimeError(node.readiness_failure_reason())
                 ok = node.go_home(execute=True, timeout_s=args.return_timeout_s)
-                return _attempt_code(node, ok)
+                return 0 if ok else 1
             if args.resume_parked_from_log is not None:
                 # The first stop was reached by an earlier run: hold and escape only.
                 face = last_logged_face(args.resume_parked_from_log)
@@ -3064,7 +3053,7 @@ def run_attempt(args, active=None):
                 if args.via_id is None:
                     # The parked stop was the table: its escape leads straight home.
                     ok = ok and node.go_home(execute=True, timeout_s=args.return_timeout_s)
-                    return _attempt_code(node, ok)
+                    return 0 if ok else 1
             via_done = False
             if (args.resume_parked_from_log is None and args.via_id is not None
                     and args.resume_at_observation
@@ -3085,9 +3074,9 @@ def run_attempt(args, active=None):
                     search=args.search, task_timeout_s=args.task_timeout_s)
                 ok = ok and node.dwell_and_leave(args.dwell_s)
                 if ok and node.battery_return_due():
-                    # Low between stops: no further stop, dock, then call (research P10).
+                    # Low between stops: skip the next stop and return to the dock.
                     node.go_home(execute=True, timeout_s=args.return_timeout_s)
-                    return _attempt_code(node, False)
+                    return 1
             # A resume applies to the first stop of this run only.
             ok = ok and node.visit_observed_box(
                 args.approach_route, mount, geometry, args.table_id,
@@ -3109,11 +3098,10 @@ def run_attempt(args, active=None):
                 returned = node.go_home(execute=True, timeout_s=args.return_timeout_s)
                 node.emit('incomplete_parking_return_finished', home_confirmed=returned,
                           parking_success=False)
-            return _attempt_code(node, ok)
+            return 0 if ok else 1
         except (ValueError, RuntimeError) as error:
             if node is not None:
                 node.emit('failed', reason=str(error))
-                node.call_operator()
             print(json.dumps({'failed': str(error)}))
             return 1
         finally:

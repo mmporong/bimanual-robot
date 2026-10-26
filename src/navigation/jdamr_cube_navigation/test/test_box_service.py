@@ -1664,8 +1664,8 @@ def test_failed_visit_returns_only_after_confirmed_incomplete_stop(
         node.destroy_node.assert_called_once_with()
         if not camera_stop_ok:
             node.emit.assert_called_with('failed', phase='cleanup', reason='camera_stop_failed')
-    # A cycle that stopped short calls the operator once; a finished one does not.
-    failed.call_operator.assert_called_once_with()
+    # Failed and successful attempts both finish without a notification callback.
+    failed.call_operator.assert_not_called()
     succeeded.call_operator.assert_not_called()
     succeeded.dwell_and_return_home.assert_called_once_with(0.0, 500.0)
     assert succeeded.visit_observed_box.call_args.kwargs['task_timeout_s'] == 240.0
@@ -1800,12 +1800,12 @@ def test_t36_water_station_then_table_then_dock(monkeypatch, tmp_path):
                      ('dwell_and_return_home', 0.0, 500.0)]
 
 
-def test_low_battery_after_the_water_stop_docks_and_calls_the_operator(monkeypatch, tmp_path):
-    """Below the departure reserve between stops: no table, straight to the dock, then a call."""
+def test_low_battery_after_the_water_stop_docks_without_an_operator_call(monkeypatch, tmp_path):
+    """Below the departure reserve between stops: skip the table and return to the dock."""
     code, calls = _via_main(monkeypatch, tmp_path, battery_low=True)
     assert code == 1
     assert calls == [('visit', 'water.yaml', 'water_station', [-0.14, -1.53], True),
-                     ('dwell_and_leave', 0.0), ('go_home',), ('call_operator',)]
+                     ('dwell_and_leave', 0.0), ('go_home',)]
 
 
 @pytest.mark.parametrize('via_ok,leave_ok,expected', [
@@ -1818,8 +1818,8 @@ def test_t36_failed_water_stop_never_goes_to_the_table(
     code, calls = _via_main(monkeypatch, tmp_path, via_ok=via_ok, leave_ok=leave_ok)
     assert code == 1
     assert [call[:len(step)] for call, step in zip(calls, expected)] == expected
-    # Nothing moves after the failed step; the stopped cycle calls the operator.
-    assert calls[len(expected):] == [('call_operator',)]
+    # Nothing moves or invokes a notification after the failed step.
+    assert calls[len(expected):] == []
 
 
 @pytest.mark.parametrize('parked,left,expected', [
@@ -2171,19 +2171,6 @@ def test_depth_window_failure_is_recorded_and_does_not_stop_the_observation(clie
     assert node._configure_observer(
         yaml.safe_load(CAMERA_MOUNT.read_text()), 0.4) is False
     assert events[-1][1]['applied'] is False and events[-1][1]['reason']
-
-
-def test_operator_sent_stop_is_not_called_back_to_the_operator():
-    """`jdamr_depart.py stop` ends the attempt quietly; any other short stop calls."""
-    node = SimpleNamespace(call_operator=Mock())
-    assert box_service._attempt_code(node, True) == 0
-    node.call_operator.assert_not_called()
-    assert box_service._attempt_code(node, False) == 1
-    node.call_operator.assert_called_once_with()
-    node.call_operator.reset_mock()
-    node.operator_stopped = True
-    assert box_service._attempt_code(node, False) == 1
-    node.call_operator.assert_not_called()
 
 
 def test_rpp_transit_flag_selects_rpp_before_the_cycle(monkeypatch, tmp_path):

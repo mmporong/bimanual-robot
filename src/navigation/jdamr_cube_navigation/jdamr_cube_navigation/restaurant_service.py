@@ -92,28 +92,6 @@ REVERSE_PATH_UPDATE_S = 1.0
 REVERSE_PATH_CHECK_ATTEMPTS = 3
 ENTRY_HEADING_CHECKER = 'entry_heading_checker'
 ENTRY_HEADING_TOLERANCE_RAD = math.radians(ENTRY_HEADING_TOLERANCE_DEG)
-# Events whose reason may explain why a cycle stopped short (operator_call).
-FAILURE_EVENTS = frozenset({
-    'failed', 'interrupted', 'reverse_interrupted', 'departure_blocked',
-    'path_blocked_give_up', 'path_blocked_wait_aborted', 'dock_heading_out_of_tolerance',
-    'cancel_unconfirmed', 'emergency_stop_requested', 'battery_return'})
-# Operator call levels after VDA 5050 v3: FATAL needs a person before any motion,
-# CRITICAL stops the task, URGENT finishes safely and takes no new task. The first
-# rule whose text appears in a failure reason gives the category; the most severe
-# match over the run wins (evaluation/20261002_ANOMALY_HANDLING_RESEARCH.md 5.4).
-OPERATOR_CALL_RULES = (
-    ('emergency stop', 'emergency_stop', 'FATAL'),
-    ('cancel_unconfirmed', 'software', 'FATAL'),
-    ('AMCL', 'localization', 'FATAL'),
-    ('covariance', 'localization', 'FATAL'),
-    ('map', 'localization', 'FATAL'),
-    ('stale', 'sensor', 'FATAL'),
-    ('missing', 'sensor', 'FATAL'),
-    ('path blocked', 'path_blocked', 'CRITICAL'),
-    ('operator_link_lost', 'operator_link', 'URGENT'),
-    ('battery', 'battery', 'URGENT'),
-)
-OPERATOR_CALL_SEVERITY = {'URGENT': 1, 'CRITICAL': 2, 'FATAL': 3}
 # The PC refreshes the heartbeat on every 10 s poll; a missed poll stays inside this.
 OPERATOR_LINK_TIMEOUT_S = 30.0
 # A blocked base with an object right in front backs this far straight out before
@@ -522,10 +500,6 @@ class ServiceRoute(CorridorRoute):
                 yaw_covariance if yaw_covariance is not None
                 and math.isfinite(yaw_covariance) else None),
         }
-        if event in FAILURE_EVENTS:
-            text = ' '.join(str(fields[key]) for key in ('reason', 'phase') if fields.get(key))
-            self._failure_trail = [*getattr(self, '_failure_trail', []),
-                                   {'event': event, 'text': f'{event}: {text}'.rstrip(': ')}]
         payload = json.dumps(record, ensure_ascii=False, allow_nan=False)
         self.result_stream.write(payload + '\n')
         self.result_stream.flush()
@@ -1691,7 +1665,7 @@ class ServiceRoute(CorridorRoute):
         return False
 
     def battery_return_due(self):
-        """Below the departure reserve between stops: skip the rest and dock (URGENT)."""
+        """Below the departure reserve between stops: skip the rest and dock."""
         voltage_v = self.battery_voltage
         reserve_v = self.service_contract['minimum_start_battery_v']
         if voltage_v is not None and math.isfinite(voltage_v) and voltage_v >= reserve_v:
@@ -1700,24 +1674,6 @@ class ServiceRoute(CorridorRoute):
                   voltage_v=voltage_v if voltage_v is not None and math.isfinite(voltage_v)
                   else None, minimum_start_battery_v=reserve_v)
         return True
-
-    def call_operator(self):
-        """Emit one operator_call for a cycle that stopped short, with its cause."""
-        trail = getattr(self, '_failure_trail', [])
-        best = None
-        for entry in trail:
-            for needle, category, level in OPERATOR_CALL_RULES:
-                if needle in entry['text']:
-                    if best is None or (OPERATOR_CALL_SEVERITY[level]
-                                        > OPERATOR_CALL_SEVERITY[best[1]]):
-                        best = (category, level, entry['text'])
-                    break
-        if best is None:
-            best = ('task_failed', 'CRITICAL', trail[-1]['text'] if trail else 'cycle failed')
-        category, level, reason = best
-        self.emit('operator_call', level=level, category=category, reason=reason,
-                  failures=[entry['text'] for entry in trail][-8:])
-        return level
 
     def _departure_battery_ready(self):
         """

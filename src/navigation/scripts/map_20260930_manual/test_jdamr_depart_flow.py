@@ -600,24 +600,23 @@ def test_poll_pi_tells_a_failed_link_from_a_finished_cycle(monkeypatch):
     assert d.poll_pi('test -e result || echo running').stdout.strip() == ''
 
 
-def test_operator_call_event_alerts_the_pc(env, monkeypatch):
-    """An operator_call rings, notifies the desktop, and uses the optional extra channel."""
-    sent = []
+def test_historical_operator_call_never_sends_notifications(env, monkeypatch, capsys):
+    sent, messages = [], []
     monkeypatch.setattr(d, 'sh', lambda command, **kwargs: sent.append(command)
                         or SimpleNamespace(returncode=0, stdout=''))
-    monkeypatch.setattr(d, 'log', lambda message: sent.append(('log', message)))
-    monkeypatch.delenv('JDAMR_OPERATOR_NOTIFY_CMD', raising=False)
-    d.show_event({'event': 'interrupted', 'reason': 'scan stale'})
-    assert not any(isinstance(item, str) for item in sent)
-    d.show_event({'event': 'operator_call', 'level': 'FATAL', 'category': 'emergency_stop',
-                  'reason': 'interrupted: emergency stop engaged'})
-    assert any(isinstance(item, str) and item.startswith('notify-send') for item in sent)
-    assert ('log', 'OPERATOR CALL FATAL emergency_stop: interrupted: emergency stop engaged') \
-        in sent
-    monkeypatch.setenv('JDAMR_OPERATOR_NOTIFY_CMD', 'echo')
-    sent.clear()
-    d.alert_operator({'level': 'URGENT', 'category': 'battery', 'reason': 'low'})
-    assert any(isinstance(item, str) and item.startswith('echo ') for item in sent)
+    monkeypatch.setattr(d, 'log', messages.append)
+    monkeypatch.setenv('JDAMR_OPERATOR_NOTIFY_CMD', 'removed-notification-hook')
+    state = d.load_state()
+    state['operator_alerts'] = True
+    d.save_state(state)
+    d.show_event({'event': 'operator_call', 'level': 'FATAL', 'reason': 'old run'})
+    assert sent == []
+    assert messages == []
+    assert '\a' not in capsys.readouterr().out
+    d.show_event({'event': 'failed', 'reason': 'scan stale'})
+    assert len(messages) == 1
+    assert json.loads(messages[0])['reason'] == 'scan stale'
+    assert sent == []
 
 
 def test_go_passes_the_rpp_transit_switch_only_when_asked(env, monkeypatch):
@@ -688,19 +687,6 @@ def test_rear_box_success_does_not_require_map_home_arrival(env, monkeypatch):
     monkeypatch.setattr(d, 'run_cycle', lambda *a: [
         {'event': 'rear_box_parking_finished', 'confirmed': True}])
     d.cmd_go(go_args(rear_box_only=True))
-
-
-def test_operator_alerts_can_be_switched_off_for_test_runs(env, monkeypatch):
-    sent = []
-    monkeypatch.setattr(d, 'sh', lambda command, **k: sent.append(command) or
-                        SimpleNamespace(returncode=0, stdout=''))
-    event = {'level': 'CRITICAL', 'category': 'path_blocked', 'reason': 'give up'}
-    d.cmd_alerts(SimpleNamespace(mode='off'))
-    d.alert_operator(event)
-    assert sent == []
-    d.cmd_alerts(SimpleNamespace(mode='on'))
-    d.alert_operator(event)
-    assert any(command.startswith('notify-send') for command in sent)
 
 
 def test_go_passes_the_zero_turn_final_switch_only_when_asked(env, monkeypatch):
@@ -995,18 +981,20 @@ def test_init_records_the_inlier_threshold_actually_used(env, monkeypatch):
     assert written['min_inlier_used'] == 0.3
 
 
-def test_status_and_departure_show_the_operator_alerts_state(env, monkeypatch):
+def test_status_and_departure_ignore_obsolete_operator_alert_settings(env, monkeypatch):
     pi = ExecutorPi()
     monkeypatch.setattr(d, 'pi', pi)
     messages = []
     monkeypatch.setattr(d, 'log', messages.append)
     monkeypatch.setattr(d, 'estop_state', lambda: 'released')
     monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
-    d.cmd_alerts(SimpleNamespace(mode='off'))
+    state = d.load_state()
+    state['operator_alerts'] = True
+    d.save_state(state)
     d.cmd_status(SimpleNamespace())
     d.run_cycle(go_args(), d.load_state(), 'table_02')
-    assert 'operator alerts: off' in messages
-    assert any(m.startswith('SUBMITTED') and m.endswith('operator alerts off') for m in messages)
+    assert not any('operator alerts' in m for m in messages)
+    assert any(m.startswith('SUBMITTED') for m in messages)
 
 
 @pytest.mark.parametrize('result', ['{"code": 1}', '{"code": 2}', '', '{', '{}',
@@ -1039,12 +1027,11 @@ MAP_FAILURE_EVENTS = [
 
 
 @pytest.mark.parametrize('recovered', [True, False])
-def test_real_map_failure_metadata_retries_once_and_alerts_only_terminal_failure(
+def test_real_map_failure_metadata_retries_once_without_notification_side_effects(
         env, monkeypatch, recovered):
     pi = ExecutorPi(result='{"code": 1}')
     monkeypatch.setattr(d, 'pi', pi)
-    alerts, restarts = [], []
-    monkeypatch.setattr(d, 'alert_operator', alerts.append)
+    restarts = []
     monkeypatch.setattr(d, 'read_events', lambda _path: (
         HOME_EVENTS.copy() if pi.result == '{"code": 0}' else MAP_FAILURE_EVENTS.copy()))
 
@@ -1060,7 +1047,6 @@ def test_real_map_failure_metadata_retries_once_and_alerts_only_terminal_failure
         with pytest.raises(SystemExit):
             d.cmd_go(go_args())
     assert restarts == [True]
-    assert len(alerts) == (0 if recovered else 1)
     assert len([c for c in pi.calls if is_submission(c)]) == 2
 
 

@@ -2703,25 +2703,19 @@ def test_only_blocking_nav2_codes_of_intermediate_legs_are_retried(code, final, 
     assert (node._retry_blocked_reason is not None) is tagged
 
 
-@pytest.mark.parametrize('failures, level, category', [
-    ([('interrupted', {'reason': 'emergency stop engaged'}), ('failed', {'phase': 'via_dwell'})],
-     'FATAL', 'emergency_stop'),
-    ([('path_blocked_give_up', {'reason': 'path blocked: nav2 error 105'})],
-     'CRITICAL', 'path_blocked'),
-    ([('battery_return', {'reason': 'battery below the departure reserve'})],
-     'URGENT', 'battery'),
-    ([('departure_blocked', {'reason': 'operator_link_lost'}),
-      ('interrupted', {'reason': 'scan stale: age=3.0s limit=2.5s'})], 'FATAL', 'sensor'),
-    ([('failed', {'phase': 'table_dwell'})], 'CRITICAL', 'task_failed'),
-    ([], 'CRITICAL', 'task_failed'),
+@pytest.mark.parametrize('event,reason', [
+    ('interrupted', 'emergency stop engaged'),
+    ('path_blocked_give_up', 'path blocked: nav2 error 105'),
+    ('battery_return', 'battery below the departure reserve'),
+    ('failed', 'scan stale: age=3.0s limit=2.5s'),
 ])
-def test_operator_call_names_the_most_severe_cause(failures, level, category):
+def test_failure_evidence_remains_without_a_separate_operator_call(event, reason):
     node = route()
-    for event, fields in failures:
-        node.emit(event, **fields)
-    assert node.call_operator() == level
-    call = _events(node)[-1]
-    assert (call['event'], call['level'], call['category']) == ('operator_call', level, category)
+    node.emit(event, reason=reason)
+    events = _events(node)
+    assert events[-1]['event'] == event
+    assert events[-1]['reason'] == reason
+    assert not any(item['event'] == 'operator_call' for item in events)
 
 
 def test_operator_link_blocks_the_next_goal_once_the_heartbeat_is_old(tmp_path):
