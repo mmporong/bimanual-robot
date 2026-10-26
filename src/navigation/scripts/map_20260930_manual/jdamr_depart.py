@@ -200,7 +200,7 @@ def prepare_reference_mount():
     pitch = math.atan2(-rotation[2, 0], math.hypot(rotation[0, 0], rotation[1, 0]))
     yaw = math.atan2(rotation[1, 0], rotation[0, 0])
     document = {'camera_mount': {
-        'status': 'nominal', 'parent_frame': 'base_link', 'child_frame': 'camera_link',
+        'status': 'derived', 'parent_frame': 'base_link', 'child_frame': 'camera_link',
         'transform': dict(zip(('x_m', 'y_m', 'z_m', 'roll_rad', 'pitch_rad', 'yaw_rad'),
                               [*map(float, position), roll, pitch, yaw])),
         'table_observation': {'base_offset_m': 0.5},
@@ -210,6 +210,8 @@ def prepare_reference_mount():
                        'plane_rms_m': model.basis.plane_rms_m,
                        'camera_position_source': config.get('camera_position_source'),
                        'camera_yaw_source': config.get('camera_yaw_source'),
+                       'translation_basis': 'existing_urdf_nominal_mount_geometry',
+                       'orientation_basis': 'reference_tabletop_plane_fit_with_nominal_yaw',
                        'mount_calibration_complete': False,
                        'millimeter_accuracy_validated': False},
     }}
