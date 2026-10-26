@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 name = sys.argv[1]
-LOGDIR = Path("/home/dgu/lerobot-training")
+LOGDIR = Path.home() / "lerobot-training"
 ckdir = LOGDIR / "outputs" / name / "checkpoints"
 text = (LOGDIR / f"{name}.log").read_text(errors="ignore").replace("\r", "\n")
 pairs = [(int(m.group(1)), float(m.group(2))) for m in re.finditer(r"step (\d+): eval_loss=([\d.]+)", text)]
@@ -25,3 +25,10 @@ for s in steps:
     if s != best and s < newest:
         shutil.rmtree(ckdir / f"{s:06d}")
         print(f"pruned {name} {s:06d} (best={best}, newest={newest})", flush=True)
+# 최적이지만 최신이 아닌 체크포인트는 업로드에 쓰는 pretrained_model만 남기고 재개용 상태(optimizer 등)를 지운다.
+# GR00T는 체크포인트 하나가 24GB(그중 학습 상태 약 12GB)라 최적+최신+저장 중 3개가 겹치면 디스크가 넘친다.
+if best != newest:
+    ts = ckdir / f"{best:06d}" / "training_state"
+    if ts.is_dir():
+        shutil.rmtree(ts)
+        print(f"trimmed {name} {best:06d}/training_state (best, not newest)", flush=True)

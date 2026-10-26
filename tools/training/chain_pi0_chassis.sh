@@ -44,7 +44,8 @@ train_and_upload () {  # name dataset_dir eval_split steps
     sleep 60
   done
   wait $pid
-  echo "$(date -Iseconds) $name training finished (exit $?)" >> $CHAINLOG
+  local rc=$?  # $(date)가 $?를 덮어써서 예전엔 실패도 exit 0으로 남았다
+  echo "$(date -Iseconds) $name training finished (exit $rc)" >> $CHAINLOG
   python3 $LOGDIR/prune_ckpts.py $name >> $CHAINLOG 2>&1
   python3 - "$name" <<'PYEOF' >> $CHAINLOG 2>&1
 import re, sys
@@ -59,7 +60,7 @@ if not pairs:
 print(f"{name}: eval history " + ", ".join(f"{s}:{l}" for s, l in pairs))
 best_step, best_loss = min(pairs, key=lambda p: p[1])
 ckpt = LOGDIR / "outputs" / name / "checkpoints" / f"{best_step:06d}" / "pretrained_model"
-if not ckpt.is_dir():
+if not (ckpt / "model.safetensors").is_file():  # 저장 중 죽으면 폴더만 남는다
     sys.exit(f"{name}: best step {best_step} 체크포인트 폴더 없음 {ckpt}")
 repo = f"jun-seo/{name}_{best_step}S"
 create_repo(repo, repo_type="model", private=True, exist_ok=True)

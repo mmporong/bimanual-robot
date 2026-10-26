@@ -1,0 +1,48 @@
+diff --git a/src/lerobot/scripts/lerobot_train.py b/src/lerobot/scripts/lerobot_train.py
+index 0098213..f15c4cb 100644
+--- a/src/lerobot/scripts/lerobot_train.py
++++ b/src/lerobot/scripts/lerobot_train.py
+@@ -732,6 +732,12 @@ def train(cfg: TrainPipelineConfig):
+             f"Start offline training on a fixed dataset, with effective batch size: {effective_batch_size}"
+         )
+ 
++    EVAL_PATIENCE = 3
++    EVAL_MIN_DELTA = 1e-4
++    best_eval_loss = float("inf")
++    eval_patience_counter = 0
++    overfitting_stop = False
++
+     for _ in range(step, cfg.steps):
+         step_start = time.perf_counter()
+         batch = next(dl_iter)
+@@ -810,10 +816,19 @@ def train(cfg: TrainPipelineConfig):
+ 
+             if is_main_process():
+                 logging.info(f"step {step}: eval_loss={eval_loss:.4f}")
++                if eval_loss < best_eval_loss - EVAL_MIN_DELTA:
++                    best_eval_loss = eval_loss
++                    eval_patience_counter = 0
++                else:
++                    eval_patience_counter += 1
++                    logging.info(f"eval_loss no improvement ({eval_patience_counter}/{EVAL_PATIENCE})")
++                    if eval_patience_counter >= EVAL_PATIENCE:
++                        logging.info("Overfitting detected -- stopping training early")
++                        overfitting_stop = True
+                 if wandb_logger:
+                     wandb_logger.log_dict({"eval_loss": eval_loss}, step=step, mode="eval")
+ 
+-        if cfg.save_checkpoint and is_saving_step:
++        if cfg.save_checkpoint and (is_saving_step or overfitting_stop):
+             # Collective: every rank participates (gathers / DCP shard writes); rank-0-only file
+             # writes are gated inside save_checkpoint — no rank branches at the call site.
+             if is_main_process():
+@@ -853,6 +868,9 @@ def train(cfg: TrainPipelineConfig):
+                     wandb_logger.log_policy(checkpoint_dir)
+             accelerator.wait_for_everyone()
+ 
++        if overfitting_stop:
++            break
++
+         if cfg.env and is_env_eval_step:
+             if is_main_process():
+                 step_id = get_step_identifier(step, cfg.steps)
