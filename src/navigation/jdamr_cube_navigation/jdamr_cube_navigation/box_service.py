@@ -1,9 +1,9 @@
 """Approach a mapped table region, then park using a fresh observed surface."""
 
 import argparse
-import hashlib
 from collections import deque
 import fcntl
+import hashlib
 from itertools import islice
 import json
 import math
@@ -11,6 +11,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 from ament_index_python.packages import get_package_share_directory
@@ -31,18 +32,25 @@ from jdamr_cube_navigation.restaurant_service import (
     ServiceRoute, TRANSIT_VARIANTS)
 from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
+from jdamr_cube_navigation.station_parking_reference import (
+    anchor_face_to_taught_lateral,
+    lateral_approach_heading,
+    LATERAL_PRECISION_STATUS,
+    TaughtStationReference,
+)
 from jdamr_cube_navigation.surface_approach import (
     FACE_APPROACH_TIME_S, face_approach_waypoints,
 )
 from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
 from nav2_msgs.action import Spin
 from nav_msgs.msg import Path as RosPath
+import numpy as np
 import rclpy
 from rclpy.parameter import Parameter, parameter_value_to_python
 from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, Image
 import yaml
 
 
@@ -130,6 +138,8 @@ ESCAPE_PATH_CONTRACT = {
 # A completed parking confirmation hands off immediately unless a hold is requested.
 STOP_DWELL_S = 0.0
 SURFACE_MODES = ('front', 'table_edge')
+STATION_REFERENCE_MAX_AGE_S = 0.5
+STATION_REFERENCE_MIN_PERIOD_S = 0.2
 
 
 def front_lead_m(front_extent_m, half_width_m, heading_error_rad):
@@ -230,6 +240,18 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.last_box_face = None
         self.depth_camera_info = None
         self.depth_info_subscription = None
+        self.station_reference = None
+        self.station_reference_profile = None
+        self.station_reference_rgb_info = None
+        self.station_reference_result = None
+        self.station_reference_result_received_s = None
+        self.station_reference_image_subscription = None
+        self.station_reference_info_subscription = None
+        self._station_reference_pending = None
+        self._station_reference_lock = threading.Lock()
+        self._station_reference_wake = threading.Event()
+        self._station_reference_stop = threading.Event()
+        self._station_reference_thread = None
         # The same observer configuration decides how many frames make a
         # stable face; an unreadable value leaves every latency verdict limited.
         try:
@@ -246,6 +268,265 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         super().__init__(*args, **kwargs)
         self.precision_parameters = AsyncParameterClient(
             self, 'collision_monitor')
+
+    @staticmethod
+    def _station_image_array(message):
+        """Decode the two rectified RGB encodings used by the Astra driver."""
+        encoding = str(getattr(message, 'encoding', '')).lower()
+        if encoding not in ('bgr8', 'rgb8'):
+            raise ValueError('station reference requires bgr8 or rgb8 image')
+        height, width = int(message.height), int(message.width)
+        step = int(message.step)
+        if height <= 0 or width <= 0 or step < width * 3:
+            raise ValueError('invalid station reference image dimensions')
+        raw = np.frombuffer(message.data, dtype=np.uint8)
+        if raw.size != height * step:
+            raise ValueError('station reference image byte count mismatch')
+        image = raw.reshape(height, step)[:, :width * 3].reshape(height, width, 3)
+        if encoding == 'rgb8':
+            image = image[:, :, ::-1]
+        return np.ascontiguousarray(image)
+
+    @staticmethod
+    def _stamp_s(message):
+        stamp = message.header.stamp
+        value = stamp.sec + stamp.nanosec * 1e-9
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError('station reference image stamp invalid')
+        return value
+
+    @staticmethod
+    def _yaw(rotation):
+        return math.atan2(
+            2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+            1.0 - 2.0 * (rotation.y ** 2 + rotation.z ** 2))
+
+    def _station_info_callback(self, message):
+        self.station_reference_rgb_info = message
+
+    def _station_image_callback(self, message):
+        """Replace the pending frame; the subscription callback never runs ORB."""
+        if getattr(self, 'station_reference', None) is None:
+            return
+        try:
+            image = self._station_image_array(message)
+            stamp_s = self._stamp_s(message)
+        except (AttributeError, TypeError, ValueError) as error:
+            self._evidence_emit_failed('station_reference_image', error)
+            return
+        info = self.station_reference_rgb_info
+        if info is None or info.header.frame_id != message.header.frame_id:
+            return
+        with self._station_reference_lock:
+            self._station_reference_pending = (image, info, stamp_s)
+        self._station_reference_wake.set()
+
+    def _station_reference_loop(self):
+        """Process at most the newest RGB frame on one managed worker."""
+        while not self._station_reference_stop.is_set():
+            self._station_reference_wake.wait(timeout=0.1)
+            self._station_reference_wake.clear()
+            if self._station_reference_stop.is_set():
+                break
+            with self._station_reference_lock:
+                pending = self._station_reference_pending
+                self._station_reference_pending = None
+            if pending is None:
+                continue
+            started_s = time.monotonic()
+            image, info, stamp_s = pending
+            try:
+                stamp = rclpy.time.Time(seconds=stamp_s)
+                base = self.parking_contract['robot_base_frame']
+                odom_transform = self.parking_tf.lookup_transform(
+                    'odom', base, stamp).transform
+                map_from_odom = self.parking_tf.lookup_transform(
+                    'map', 'odom', stamp).transform
+                odom_pose = (
+                    odom_transform.translation.x,
+                    odom_transform.translation.y,
+                    self._yaw(odom_transform.rotation),
+                )
+                result = self.station_reference.observe(
+                    image, info, odom_pose, stamp_s)
+                if result.get('valid') is True:
+                    goal = result['goal_odom']
+                    turn = self._yaw(map_from_odom.rotation)
+                    cosine, sine = math.cos(turn), math.sin(turn)
+                    result = dict(result)
+                    result['goal_map'] = [
+                        map_from_odom.translation.x + cosine * goal[0] - sine * goal[1],
+                        map_from_odom.translation.y + sine * goal[0] + cosine * goal[1],
+                        math.atan2(math.sin(goal[2] + turn), math.cos(goal[2] + turn)),
+                    ]
+            except Exception as error:
+                result = {
+                    'valid': False,
+                    'reason': f'station_reference_runtime:{type(error).__name__}',
+                    'stamp_s': stamp_s,
+                }
+            with self._station_reference_lock:
+                self.station_reference_result = result
+                self.station_reference_result_received_s = time.monotonic()
+            remaining_s = STATION_REFERENCE_MIN_PERIOD_S - (
+                time.monotonic() - started_s)
+            if remaining_s > 0.0:
+                self._station_reference_stop.wait(timeout=remaining_s)
+
+    def configure_station_reference(self, profiles_path, table_id):
+        """Load one map-bound taught target and start its bounded RGB worker."""
+        if profiles_path is None:
+            return
+        document = json.loads(Path(profiles_path).read_text(encoding='utf-8'))
+        if not isinstance(document, dict) or document.get('schema_version') != 1:
+            raise ValueError('station profiles require schema 1')
+        for name in ('map', 'keepout'):
+            expected = document.get(name)
+            active = self.registry.get(name)
+            if not isinstance(expected, dict) or not isinstance(active, dict):
+                raise ValueError(f'station profiles {name} identity missing')
+            for key in ('yaml_sha256', 'image_sha256'):
+                if expected.get(key) != active.get(key):
+                    raise ValueError(f'station profiles {name} {key} mismatch')
+        stations = document.get('stations')
+        profile = stations.get(table_id) if isinstance(stations, dict) else None
+        if not isinstance(profile, dict):
+            raise ValueError(f'station profile missing: {table_id}')
+        if (profile.get('target_priority')
+                != 'operator_taught_map_pose_and_heading'):
+            raise ValueError('station target must retain operator taught pose priority')
+        tolerance = profile.get('lateral_tolerance_m')
+        if (profile.get('lateral_precision_status') != LATERAL_PRECISION_STATUS
+                or isinstance(tolerance, bool)
+                or not isinstance(tolerance, (int, float))
+                or not math.isfinite(tolerance)
+                or not math.isclose(tolerance, 0.005, abs_tol=1e-12)):
+            raise ValueError('station lateral target must remain 0.005 m NOT_VALIDATED')
+        table = next((item for item in self.registry.get('tables', ())
+                      if item.get('table_id') == table_id), None)
+        if table is None:
+            raise ValueError(f'registered station missing: {table_id}')
+        pose = next((item for item in table.get('service_poses', ())
+                     if item.get('priority') == 1), None)
+        if pose is None:
+            raise ValueError(f'primary station pose missing: {table_id}')
+        taught = tuple(pose.get(key) for key in ('x_m', 'y_m', 'yaw_rad'))
+        if (any(isinstance(value, bool) or not isinstance(value, (int, float))
+                for value in taught)
+                or not all(math.isfinite(value) for value in taught)):
+            raise ValueError('registered station pose must be finite')
+        taught = tuple(float(value) for value in taught)
+        rgbd = profile.get('rgbd_reference')
+        if not isinstance(rgbd, dict):
+            raise ValueError(f'RGB-D station reference missing: {table_id}')
+        self.station_reference = TaughtStationReference(rgbd)
+        self.station_reference_profile = profile
+        self.station_reference_taught_map_pose = taught
+        self.station_reference_table_id = table_id
+        self.station_reference_info_subscription = self.create_subscription(
+            CameraInfo, '/camera/color/camera_info',
+            self._station_info_callback, qos_profile_sensor_data)
+        self.station_reference_image_subscription = self.create_subscription(
+            Image, '/camera/color/image_raw',
+            self._station_image_callback, qos_profile_sensor_data)
+        self._station_reference_thread = threading.Thread(
+            target=self._station_reference_loop,
+            name='station-rgbd-reference', daemon=True)
+        self._station_reference_thread.start()
+        self.emit(
+            'station_reference_configured', table_id=table_id,
+            target_role='operator_taught_map_pose_and_heading',
+            lateral_tolerance_m=0.005,
+            lateral_precision_status=LATERAL_PRECISION_STATUS,
+            millimeter_accuracy_validated=False)
+
+    def _fresh_station_reference(self):
+        """Return a valid recent estimate; keep invalidity visible to callers."""
+        if getattr(self, 'station_reference', None) is None:
+            return None
+        with self._station_reference_lock:
+            result = self.station_reference_result
+            received_s = self.station_reference_result_received_s
+        if not isinstance(result, dict) or received_s is None:
+            return {'valid': False, 'reason': 'station_reference_not_observed'}
+        if time.monotonic() - received_s > STATION_REFERENCE_MAX_AGE_S:
+            return {'valid': False, 'reason': 'station_reference_stale'}
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+        stamp_s = result.get('stamp_s')
+        if (isinstance(stamp_s, bool) or not isinstance(stamp_s, (int, float))
+                or not math.isfinite(stamp_s)
+                or not 0.0 <= now_s - stamp_s <= STATION_REFERENCE_MAX_AGE_S):
+            return {'valid': False, 'reason': 'station_reference_stale'}
+        return result
+
+    def _station_anchor_target(self, target, *, reference_frame='map'):
+        """Keep the measured normal/gap and select only the taught tangent."""
+        if getattr(self, 'station_reference', None) is None:
+            return target
+        reference = self._fresh_station_reference()
+        if reference_frame == 'odom':
+            taught = reference.get('goal_odom') if reference and reference.get('valid') else None
+        else:
+            taught = reference.get('goal_map') if reference and reference.get('valid') else None
+        if taught is None:
+            if reference_frame == 'map':
+                taught = self.station_reference_taught_map_pose
+            else:
+                return target
+        anchored = anchor_face_to_taught_lateral(target, taught[:2])
+        anchored['rgbd_reference_valid'] = bool(reference and reference.get('valid'))
+        anchored['rgbd_reference_reason'] = (
+            reference.get('reason') if reference else 'station_reference_not_observed')
+        anchored['millimeter_accuracy_validated'] = False
+        return anchored
+
+    def _station_lateral_status(self):
+        """Report only internal lateral evidence; external millimetres stay unvalidated."""
+        if getattr(self, 'station_reference', None) is None:
+            return {}
+        reference = self._fresh_station_reference()
+        status = {
+            'lateral_reference_valid': bool(
+                reference and reference.get('valid') is True),
+            'lateral_reference_reason': (
+                reference.get('reason') if reference
+                else 'station_reference_not_observed'),
+            'lateral_tolerance_m': 0.005,
+            'lateral_precision_status': LATERAL_PRECISION_STATUS,
+            'millimeter_accuracy_validated': False,
+            'internal_lateral_error_m': None,
+            'internal_lateral_within_tolerance': False,
+        }
+        if not status['lateral_reference_valid']:
+            return status
+        try:
+            actual = self._odom_pose()
+            goal = reference['goal_odom']
+            left = (-math.sin(goal[2]), math.cos(goal[2]))
+            error_m = ((goal[0] - actual[0]) * left[0]
+                       + (goal[1] - actual[1]) * left[1])
+        except (KeyError, RuntimeError, TypeError, ValueError):
+            status['lateral_reference_valid'] = False
+            status['lateral_reference_reason'] = 'station_reference_final_pose_unavailable'
+            return status
+        status['internal_lateral_error_m'] = error_m
+        status['internal_lateral_within_tolerance'] = abs(error_m) <= 0.005
+        return status
+
+    def destroy_node(self):
+        """Stop the station reference worker before destroying ROS entities."""
+        stop = getattr(self, '_station_reference_stop', None)
+        wake = getattr(self, '_station_reference_wake', None)
+        if stop is not None:
+            stop.set()
+        if wake is not None:
+            wake.set()
+        worker = getattr(self, '_station_reference_thread', None)
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=2.0)
+            if worker.is_alive():
+                raise RuntimeError('station reference worker did not stop')
+        return super().destroy_node()
 
     def _go_home_reverse(self, pose, execute, _map_reapproach=False):
         """Use the registered staging pose, then the configured rear reference."""
@@ -655,12 +936,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     raise RuntimeError('pointcloud target region has not been selected')
                 observer_parameters.extend([
                     Parameter('table_request_enabled', value=enabled),
-                    Parameter('table_target_region_map', value=json.dumps(region) if enabled else ''),
+                    Parameter(
+                        'table_target_region_map',
+                        value=json.dumps(region) if enabled else ''),
                     Parameter('table_calibration_id', value=hashlib.sha256(
                         json.dumps(camera_mount, sort_keys=True).encode()).hexdigest()
                               if enabled else ''),
                 ])
-            response = self._wait(client.set_parameters_atomically(observer_parameters), 2.0).result
+            response = self._wait(
+                client.set_parameters_atomically(observer_parameters), 2.0).result
             if response.successful is not True:
                 raise RuntimeError(response.reason or 'observer parameters rejected')
         except Exception as error:
@@ -826,6 +1110,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     retryable = True
                     if math.dist(target['face_center_map_xy_m'], region_xy) > region_radius_m:
                         raise ValueError('observed_table_edge_outside_selected_table_region')
+                    target = self._station_anchor_target(target)
                     self.emit(
                         'box_target_observed', observation=observation, target=target,
                         surface_mode=surface_mode, target_basis='tabletop_front_edge',
@@ -1492,6 +1777,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         'face_center_xy_m': list(face),
                         'outward_normal_xy': list(outward),
                     }
+            lateral_status = self._station_lateral_status()
             self.emit('box_approach_finished' if gap_confirmed else 'box_gap_not_confirmed',
                       estimated_front_gap_m=estimated_gap_m,
                       estimated_front_corner_gaps_m=corner_gaps,
@@ -1504,13 +1790,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                       allowed_face_yaw_error_rad=allowed_yaw_error_rad,
                       desired_front_gap_m=target_gap_m, confirmation=self.confirmation,
                       physical_accuracy='NOT_EXTERNALLY_MEASURED',
-                      final_depth_measurement=final_depth_measurement)
+                      final_depth_measurement=final_depth_measurement,
+                      **lateral_status)
             if gap_confirmed:
                 self.run_deadline_s = None
                 self._confirmed_box_stop = {
                     'motion_revision': getattr(self, 'parking_motion_revision', None),
                     'selected_pose': dict(self.selected_pose),
                     'gap_confirmation_basis': gap_confirmation_basis,
+                    **lateral_status,
                 }
                 return True
             self.incomplete_gap_stop = (
@@ -1859,6 +2147,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                  'span_m': target.get('observed_face_span_m')}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
+        def station_goal_odom():
+            if getattr(self, 'station_reference', None) is None:
+                return None, None
+            reference = self._fresh_station_reference()
+            if reference and reference.get('valid') is True:
+                return tuple(reference['goal_odom']), reference
+            taught = self.station_reference_taught_map_pose
+            return to_odom(*taught), reference
+
         def validate_control(actual, filtered_heading):
             heading_change = (math.inf if state['validated_heading'] is None else abs(
                 math.atan2(math.sin(filtered_heading - state['validated_heading']),
@@ -1931,6 +2228,17 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         {'x_m': transform.translation.x, 'y_m': transform.translation.y,
                          'yaw_rad': yaw}, requested_gap_m=self._final_gap_m(),
                         front_extent_m=front_extent_m, now_s=now_s)
+                    goal_odom, station_observation = station_goal_odom()
+                    if goal_odom is not None:
+                        measured = anchor_face_to_taught_lateral(
+                            measured, goal_odom[:2])
+                        measured['rgbd_reference_valid'] = bool(
+                            station_observation
+                            and station_observation.get('valid') is True)
+                        measured['rgbd_reference_reason'] = (
+                            station_observation.get('reason')
+                            if station_observation else 'station_reference_not_observed')
+                        measured['millimeter_accuracy_validated'] = False
                     face = measured['face_center_map_xy_m']
                     normal = measured['outward_normal_map_xy']
                     if math.dist(to_map(face), region_xy) > region_radius_m:
@@ -1977,6 +2285,13 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                                    actual[1] - state['start'][1])
             if travelled + max(0.0, remaining) > LIVE_APPROACH_MAX_M:
                 raise RuntimeError('live table approach exceeds bounded travel')
+            command_heading = heading
+            goal_odom, station_observation = station_goal_odom()
+            if goal_odom is not None and not state['precision_band_latched']:
+                command_heading = lateral_approach_heading(
+                    heading, goal_odom, actual, max(0.0, remaining),
+                    self.station_reference_profile['lateral_tolerance_m'],
+                    FINAL_TRIM_MAX_RAD)
             face_map = to_map(state['face'])
             normal_map = (cosine * state['normal'][0] + sine * state['normal'][1],
                           -sine * state['normal'][0] + cosine * state['normal'][1])
@@ -1987,8 +2302,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                            'yaw_rad': math.atan2(-normal_map[1], -normal_map[0]),
                            'x_m': face_map[0] + normal_map[0] * offset,
                            'y_m': face_map[1] + normal_map[1] * offset},
-                'basis': state['basis'], 'observation_stamp_s': state['stamp']}
-            return {'remaining_m': remaining, 'heading_rad': heading, 'basis': state['basis'],
+                'basis': state['basis'], 'observation_stamp_s': state['stamp'],
+                'lateral_reference_valid': bool(
+                    station_observation and station_observation.get('valid') is True)}
+            return {'remaining_m': remaining, 'heading_rad': command_heading,
+                    'basis': state['basis'],
                     'surface_gap_m': gap,
                     'allow_near_alignment': (gap > 0. and abs(residual) < math.atan2(
                         self.box_front_half_width_m, front_extent_m)),
@@ -2451,7 +2769,9 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('registry', 'approach-route', 'camera-mount', 'geometry', 'log'):
         parser.add_argument('--' + name, required=True, type=Path)
-    parser.add_argument('--table-id', choices=('table_01', 'table_02'), required=True)
+    parser.add_argument('--table-id', required=True)
+    parser.add_argument('--station-profiles', type=Path,
+                        help='Map-bound taught station and optional RGB-D reference metadata')
     parser.add_argument('--region-xy', nargs=2, type=float, required=True)
     parser.add_argument('--region-radius-m', type=float, default=0.6)
     parser.add_argument('--parking-contract', required=True, type=Path)
@@ -2642,6 +2962,11 @@ def run_attempt(args, active=None):
             node.operator_heartbeat = args.operator_heartbeat
             node.operator_link_timeout_s = args.operator_link_timeout_s
             node.final_gap_override_m = args.final_gap_m
+            if (args.station_profiles is not None
+                    and not args.home_only and not args.rear_box_only
+                    and args.resume_parked_from_log is None):
+                node.configure_station_reference(
+                    args.station_profiles, args.table_id)
             ok = True
             if getattr(args, 'rear_box_only', False):
                 ok = node.park_rear_box(

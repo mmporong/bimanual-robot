@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Repository entry point for the preserved JD-AMR departure runbook.
-
-The movement and localization implementation remains in the imported JD-AMR source
-tree.  This entry point only prepares missing static assets and hands control to that
-single maintained helper.
-"""
+"""Run the current taught map through the maintained JD-AMR executor."""
 
 from __future__ import annotations
 
@@ -22,11 +17,26 @@ HELPER_DIR = REPO_ROOT / "src/navigation/scripts/map_20260930_manual"
 
 def _load_helper():
     prepare_user_service_environment()
-    bootstrap_assets()
     # The helper reads these during import.  setdefault keeps explicit operator
     # overrides authoritative.
     import os
+    pointer = Path(os.environ.get(
+        'JDAMR_MAP_SESSION', str(Path.home() / 'jdamr_data/maps/current_manual_mapping.json')))
+    if '--legacy-map' in sys.argv:
+        bootstrap_assets()
+        os.environ.pop('JDAMR_MAP_SESSION', None)
+    elif not any(arg == '--map-session' or arg.startswith('--map-session=')
+                 for arg in sys.argv[1:]):
+        if not pointer.is_file() and not any(
+                arg in ('--help', '-h', 'stop', 'estop', 'session-stop', 'display-stop')
+                for arg in sys.argv[1:]):
+            raise FileNotFoundError(
+                f'current taught-map pointer is missing: {pointer}; '
+                'select --map-session or use --legacy-map for archival access')
+        if pointer.is_file():
+            os.environ['JDAMR_MAP_SESSION'] = str(pointer)
     os.environ.setdefault("JDAMR_PC_WS", str(PC_WORKSPACE))
+    sys.path.insert(0, str(REPO_ROOT / 'src/navigation/jdamr_cube_navigation'))
     sys.path.insert(0, str(HELPER_DIR))
     spec = importlib.util.spec_from_file_location(
         "jdamr_depart_operational", HELPER_DIR / "jdamr_depart.py"

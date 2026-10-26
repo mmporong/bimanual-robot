@@ -40,6 +40,22 @@ def test_wrong_map_annotation_rejected(assets):
         build_markers(registry, annotation)
 
 
+def test_single_taught_water_station_does_not_invent_old_table_regions(assets):
+    registry, _ = assets
+    registry['tables'] = [{'table_id': 'water_station', 'service_poses': [
+        {'x_m': 0.1, 'y_m': -0.2, 'yaw_rad': 0.3}]}]
+    markers = build_markers(
+        registry, {'source_map_sha256': 'abc', 'markers': {}},
+        selected='water_station').markers
+    assert not any(item.type == Marker.CYLINDER for item in markers)
+    station = next(item for item in markers if item.id == 200)
+    assert station.type == Marker.ARROW
+    assert station.pose.position.x == 0.1
+    assert [item.id for item in markers if item.type == Marker.ARROW] == [200, 100]
+    assert len({item.id for item in markers}) == len(markers)
+    assert any('WATER_STATION_SELECTED' in item.text for item in markers)
+
+
 def test_taught_pose_gains_heading_arrow(assets):
     registry, annotation = assets
     registry['tables'] = [{'table_id': 'table_01', 'service_poses': [
