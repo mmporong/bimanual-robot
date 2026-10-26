@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 from _common import (
-    PC_WORKSPACE, REPO_ROOT, bootstrap_assets, prepare_user_service_environment,
+    DATA_ROOT, PC_WORKSPACE, REPO_ROOT, bootstrap_assets, prepare_user_service_environment,
 )
 
 
@@ -21,7 +21,7 @@ def _load_helper():
     # overrides authoritative.
     import os
     pointer = Path(os.environ.get(
-        'JDAMR_MAP_SESSION', str(Path.home() / 'jdamr_data/maps/current_manual_mapping.json')))
+        'JDAMR_MAP_SESSION', str(DATA_ROOT / 'maps/current_manual_mapping.json')))
     if '--legacy-map' in sys.argv:
         bootstrap_assets()
         os.environ.pop('JDAMR_MAP_SESSION', None)

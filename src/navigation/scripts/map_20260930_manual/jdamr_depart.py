@@ -1693,7 +1693,8 @@ def main():
     context.add_argument('--legacy-map', action='store_true',
                          help='Explicit archival access to the previous map; never selected by default')
     selected, remaining = context.parse_known_args()
-    if selected.map_session is not None and not selected.legacy_map:
+    if (selected.map_session is not None and not selected.legacy_map
+            and not any(arg in ('--help', '-h') for arg in sys.argv[1:])):
         if remaining and remaining[0] in (
                 'stop', 'estop', 'session-stop', 'display-stop', 'status'):
             select_stop_state(selected.map_session)

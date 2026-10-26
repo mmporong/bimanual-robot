@@ -140,9 +140,22 @@ class StandaloneRuntimeTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout)
             self.assertIn("go", result.stdout)
             aligned = Path(temporary) / "map_20260930_manual/aligned"
-            self.assertTrue((aligned / "map.yaml").is_file())
+            self.assertFalse(aligned.exists())
             self.assertFalse((aligned / "state.json").exists())
             self.assertFalse((aligned / "rviz_initialpose.json").exists())
+
+    def test_legacy_help_can_prepare_archived_static_assets_without_runtime_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env = {**os.environ, "JDAMR_DATA_ROOT": temporary}
+            result = subprocess.run(
+                [str(TOOLS / "jdamr_depart.py"), "--legacy-map", "--help"],
+                cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            aligned = Path(temporary) / "map_20260930_manual/aligned"
+            self.assertTrue((aligned / "map.yaml").is_file())
+            self.assertFalse((aligned / "state.json").exists())
 
     def test_bootstrap_preserves_changed_registry_and_refresh_backs_it_up(self):
         common = load("jdamr_common_test", TOOLS / "_common.py")
