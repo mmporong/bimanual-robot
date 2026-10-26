@@ -43,21 +43,34 @@ live 경로에서 다시 빌드하지 않으며 서비스 재시작과 로봇 �
 
 ```bash
 tools/jdamr/jdamr_depart.py status
+tools/jdamr/jdamr_depart.py prepare
+tools/jdamr/jdamr_depart.py session-start
 tools/jdamr/jdamr_depart.py init
-tools/jdamr/jdamr_depart.py go table_01
+tools/jdamr/jdamr_depart.py go water_station
 ```
 
-실행기는 누락된 정적 자산을 준비한 뒤
+기본 지도는 `$HOME/jdamr_data/maps/current_manual_mapping.json`에서 선택한다.
+다른 포인터는 전역 옵션 `--map-session <전체 경로>` 또는 `JDAMR_MAP_SESSION`으로 지정한다.
+`prepare`는 등록 도크·급수대로 실행 자산을 만들고 참조 파일과 함께 Pi에 동기화한다.
+`session-start`는 기존 Astra 드라이버 한 개에서 RGB와 깊이를 함께 받도록 설정하고,
+Nav2를 이동 전 준비 상태로 기동한다. `init`은 등록 도크를 다시 가르치지 않고 위치를 초기화한다.
+충전 중에는 `go`를 실행하지 않는다.
+
+실행기는 새 지도·도크·급수대 참조의 해시를 대조한 뒤
 `src/navigation/scripts/map_20260930_manual/jdamr_depart.py`를 불러온다. 주행·위치초기화
 알고리즘의 관리 대상은 이 파일 하나다. `status`는 상태 조회, `init`은 위치초기화,
 `go`는 실물 이동 명령이므로 운영 상황에 맞게 사용한다.
 
-기본 `go table_01`은 도크 → 급수대 → 1번 테이블 → 도크를 수행한다.
-급수대를 생략할 때만 `--skip-via`를 지정한다. 등록된 도크 방향이 `reverse`이면
+기본 `go water_station`은 도크 → 등록 급수대 → 도크를 수행한다.
+급수대를 목적지와 경유점으로 중복 방문하지 않는다. 이전 지도의 박스·테이블 경로는
+`--legacy-map`으로만 불러온다. 등록 위치가 우선이며 RGB-D 참조는 좌우 보정에 사용한다.
+목표는 차체 앞끝 1 cm와 좌우 ±5 mm다. 새 참조의 상판 앞 경계 검출과 실제 정확도 검증은
+남아 있으며, `NOT_VALIDATED` 상태를 소프트웨어 테스트 통과로 바꾸지 않는다.
+등록된 도크 방향이 `reverse`이면
 고정 도크 앞쪽에서 후진 진입하며, 테이블 주차 목표로 도크 위치를 다시 등록하지 않는다.
 
 기본 책상 주차와 박스 주차는 주차 계약의 `target_front_gap_m`(현재 0.01 m)을
-사용한다. 간격을 바꿀 때는 `go table_01 --final-gap-m 0.03`처럼 지정한다.
+사용한다. 간격을 바꿀 때는 `go water_station --final-gap-m 0.03`처럼 지정한다.
 책상 면 정렬 뒤에는 중간 5 cm 정지를 끼우지 않고 최종 간격까지 직진한다.
 유효한 관측은 관측 시각의 TF로 갱신하며, 근접 가림 판정 뒤에는 마지막 면을 동결하고
 odometry로 남은 거리를 계산한다. 이 경우 최종 값은 새 깊이 실측이 아닌 내부 추정이다.
@@ -80,6 +93,7 @@ odometry로 남은 거리를 계산한다. 이 경우 최종 값은 새 깊이 �
 | `JDAMR_PI_HOME` | `/home/lim` | Pi 홈 경로 |
 | `JDAMR_PI_WS` | `$JDAMR_PI_HOME/jdamr_ws` | Pi ROS 워크스페이스 |
 | `JDAMR_DATA_ROOT` | `$HOME/jdamr_data` | PC 지도·등록부·실행 상태 루트 |
+| `JDAMR_MAP_SESSION` | `$HOME/jdamr_data/maps/current_manual_mapping.json` | 현재 수동 지도·도크·급수대 참조 포인터 |
 | `JDAMR_RUNTIME_ROOT` | `<저장소>/.runtime/jdamr` | 로컬 빌드·백업 루트 |
 | `JDAMR_PC_WS` | `$JDAMR_RUNTIME_ROOT/pc_ws` | PC ROS 빌드 워크스페이스 |
 

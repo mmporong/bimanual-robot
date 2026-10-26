@@ -89,6 +89,104 @@ def go_args(**extra):
     return SimpleNamespace(**base)
 
 
+def _map_session_fixture(tmp_path):
+    data_root = tmp_path / 'data'
+    session = data_root / 'maps' / 'manual-session'
+    runtime = session / 'runtime'
+    runtime.mkdir(parents=True)
+    map_image = runtime / 'map.pgm'
+    map_image.write_bytes(b'P5\n2 2\n255\n\x00\xfe\xcd\x00')
+    map_yaml = runtime / 'map.yaml'
+    map_yaml.write_text(yaml.safe_dump({
+        'image': map_image.name, 'mode': 'trinary', 'resolution': .05,
+        'origin': [-1., -2., 0.], 'negate': 0,
+        'occupied_thresh': .65, 'free_thresh': .196,
+    }, sort_keys=False))
+    keepout = runtime / 'keepout.pgm'
+    keepout.write_bytes(b'P5\n2 2\n255\n\xfe\x00\x00\xfe')
+    (runtime / 'keepout.yaml').write_text(yaml.safe_dump({
+        'image': keepout.name, 'mode': 'trinary', 'resolution': .05,
+        'origin': [-1., -2., 0.], 'negate': 0,
+        'occupied_thresh': .65, 'free_thresh': .196,
+    }, sort_keys=False))
+    destinations = {
+        'destinations': {
+            'water_station': {
+                'face_xy': [1.2, -.225], 'normal_deg': 270.,
+                'source': 'fixture derived search face',
+            },
+        },
+    }
+    (runtime / 'destinations.json').write_text(json.dumps(destinations))
+    registry = {
+        'home': {'x_m': -.8, 'y_m': .4, 'yaw_rad': .1,
+                 'parking_direction': 'reverse'},
+        'tables': [{
+            'table_id': 'water_station',
+            'service_poses': [{
+                'x_m': 1.2, 'y_m': -.3, 'yaw_rad': math.pi / 2,
+                'approach_offset_m': .5,
+            }],
+        }],
+    }
+    (runtime / 'service_destinations.yaml').write_text(
+        yaml.safe_dump(registry, sort_keys=False))
+    profiles = runtime / 'station_profiles.json'
+    profiles.write_text(json.dumps({
+        'stations': {'water_station': {'target_priority': 'operator_taught'}},
+    }))
+    map_identity = [d.sha256(map_yaml), d.sha256(map_image)]
+    scan = session / 'dock_scan.json'
+    scan.write_text('{"scans": []}\n')
+    reference = session / 'dock_scan_reference.json'
+    reference.write_text(json.dumps({
+        'map_identity': map_identity,
+        'home_pose': [-.8, .4, .1], 'pose_map': [-.8, .4, .1],
+        'scan_path': str(scan),
+    }))
+    pointer = tmp_path / 'current_manual_mapping.json'
+    pointer.write_text(json.dumps({
+        'directory': str(session), 'map_yaml': str(map_yaml),
+        'dock_scan_reference': str(reference),
+    }))
+    (runtime / 'state.json').write_text(json.dumps({
+        'operator_owned': 'preserve',
+        'localized': True,
+        'regions': {'water_station': {'xy': [1.2, -.3], 'radius_m': .4}},
+    }, indent=1))
+    profile = {
+        'session_directory': str(session),
+        'runtime_directory': str(runtime),
+        'station_ids': ['water_station'],
+        'map_hashes': {'runtime': {
+            'yaml_sha256': map_identity[0], 'image_sha256': map_identity[1],
+        }},
+    }
+    return SimpleNamespace(
+        data_root=data_root, session=session, runtime=runtime,
+        pointer=pointer, profile=profile, map_identity=map_identity,
+        station_profiles=profiles,
+    )
+
+
+def _configure_fixture_session(tmp_path, monkeypatch):
+    fixture = _map_session_fixture(tmp_path)
+    for name in (
+            'ACTIVE_MAP_SESSION', 'BASE', 'P2', 'MAP_YAML', 'KEEPOUT_YAML',
+            'REGISTRY', 'ANNOTATION', 'CLICK', 'STATE', 'PI_BASE', 'PI_P2',
+            'PI_REGISTRY', 'DDS_PROFILE', 'DESTINATIONS', 'TABLES',
+            'STATION_PROFILES'):
+        monkeypatch.setattr(d, name, getattr(d, name))
+    monkeypatch.setattr(d, 'DATA_ROOT', fixture.data_root)
+    monkeypatch.setattr(d, 'prepare_reference_mount', lambda: False)
+    fake_assets = SimpleNamespace(
+        prepare_map_session=lambda pointer: fixture.profile)
+    monkeypatch.setitem(
+        sys.modules, 'jdamr_cube_navigation.map_session_assets', fake_assets)
+    assert d.configure_map_session(fixture.pointer) == fixture.profile
+    return fixture
+
+
 def test_go_refuses_without_a_completed_init(env, monkeypatch):
     state = d.load_state()
     state['localized'] = False
@@ -706,6 +804,64 @@ def test_generated_table_routes_keep_distinct_dock_and_via_starts(env, monkeypat
         for field in ('frame_id', 'map_yaml', 'keepout_mask_yaml',
                       'expected_mask_sha256', 'max_route_start_distance_m'):
             assert dock[field] == via[field]
+
+
+def test_configured_map_session_is_idempotent_and_generates_only_taught_routes(
+        tmp_path, monkeypatch):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    first = d.load_state()
+
+    assert d.TABLES == ('water_station',)
+    assert d.STATION_PROFILES == fixture.station_profiles
+    assert d.dock_map_identity() == fixture.map_identity
+    assert first['operator_owned'] == 'preserve'
+    assert first['localized'] is False
+    assert first['map_session_identity'] == fixture.map_identity
+    assert first['dock_scan_reference']['home_pose'] == [-.8, .4, .1]
+
+    first['localized'] = True
+    d.save_state(first)
+    stable_state = d.STATE.read_bytes()
+    d.configure_map_session(fixture.pointer)
+    assert d.STATE.read_bytes() == stable_state
+
+    d.write_routes((-.8, .4, .1))
+    routes = sorted(path.name for path in fixture.runtime.glob('*_route.yaml'))
+    assert routes == ['water_station_direct_route.yaml', 'water_station_route.yaml']
+    route = yaml.safe_load(
+        (fixture.runtime / 'water_station_direct_route.yaml').read_text())
+    assert route['station_profiles'] == str(fixture.station_profiles)
+    assert route['map_yaml'] == str(fixture.runtime / 'map.yaml')
+    assert route['expected_mask_sha256'] == d.sha256(
+        fixture.runtime / 'keepout.pgm')
+    assert [point['id'] for point in route['waypoints']] == [
+        'home_exit', 'water_station_pre', 'water_station_observation']
+    assert len({point['id'] for point in route['waypoints']}) == 3
+
+
+def test_new_water_station_request_uses_profile_and_has_no_via(
+        tmp_path, monkeypatch):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    d.write_routes((-.8, .4, .1))
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
+
+    events = d.run_cycle(
+        go_args(table_id='water_station'), d.load_state(), 'water_station')
+
+    assert events == [{'event': 'home_arrived'}]
+    argv = json.loads(next(value for value in pi.stdins if value))['argv']
+    assert argv.count('--table-id') == 1
+    assert argv[argv.index('--table-id') + 1] == 'water_station'
+    assert '--station-profiles' in argv
+    assert argv[argv.index('--station-profiles') + 1] == str(
+        d.pi_path(fixture.station_profiles))
+    assert argv[argv.index('--approach-route') + 1] == str(
+        d.pi_path(fixture.runtime / 'water_station_direct_route.yaml'))
+    assert '--via-id' not in argv
+    assert '--via-route' not in argv
+    assert '--via-region-xy' not in argv
 
 
 def test_observation_waypoint_uses_mount_profile_without_changing_aisle_point(
@@ -1359,3 +1515,61 @@ def test_controller_recovery_stop_between_steps_prevents_remaining_work(env, mon
 ])
 def test_controller_recovery_rejects_motion_or_unknown_execution_evidence(extra):
     assert not d.controller_wait_failed([*CONTROLLER_FAIL, extra])
+
+
+@pytest.mark.parametrize('command,handler', [
+    ('stop', 'cmd_stop'), ('estop', 'cmd_estop'),
+    ('session-stop', 'cmd_session_stop'), ('display-stop', 'cmd_display_stop'),
+])
+def test_stop_dispatch_survives_broken_taught_map(env, monkeypatch, tmp_path, command, handler):
+    pointer = tmp_path / 'broken-pointer.json'
+    pointer.write_text('{broken json')
+    calls = []
+    monkeypatch.setattr(d, 'configure_map_session', lambda *_: pytest.fail('perception before stop'))
+    monkeypatch.setattr(d, handler, lambda args: calls.append(args.command))
+    monkeypatch.setattr(sys, 'argv', ['jdamr_depart.py', '--map-session', str(pointer), command])
+    d.main()
+    assert calls == [command]
+
+
+def test_taught_stop_reads_current_request_without_loading_reference(env, monkeypatch, tmp_path):
+    base = tmp_path / 'new-session'
+    pointer = tmp_path / 'current.json'
+    pointer.write_text(json.dumps({'directory': str(base)}))
+    monkeypatch.setattr(d, 'BASE', d.BASE)
+    monkeypatch.setattr(d, 'P2', d.P2)
+    monkeypatch.setattr(d, 'STATE', d.STATE)
+    d.select_stop_state(pointer)
+    assert d.STATE == base / 'runtime/state.json'
+
+
+def test_stop_signals_robot_when_taught_state_directory_is_missing(env, monkeypatch, tmp_path):
+    remote = Pi()
+    monkeypatch.setattr(d, 'pi', remote)
+    monkeypatch.setattr(d, 'STATE', tmp_path / 'missing/runtime/state.json')
+    d.cmd_stop(None)
+    assert 'kill --signal=SIGINT ' + d.EXECUTOR_UNIT in remote.calls[0]
+    assert not d.STATE.exists()
+
+
+def test_stop_without_request_state_still_signals_resident_executor(env, monkeypatch):
+    remote = Pi()
+    monkeypatch.setattr(d, 'pi', remote)
+    d.save_state({})
+    d.cmd_stop(None)
+    assert any('kill --signal=SIGINT ' + d.EXECUTOR_UNIT in call for call in remote.calls)
+
+
+def test_reference_camera_uses_single_driver_for_registered_rgb_and_depth(env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(d, 'ACTIVE_MAP_SESSION', {'session_directory': 'new'})
+    def remote(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout='inactive' if 'is-active' in command else '')
+    monkeypatch.setattr(d, 'pi', remote)
+    d.prepare_reference_camera()
+    content = next(kwargs['stdin'] for _, kwargs in calls if 'stdin' in kwargs)
+    assert content.count('ros2 launch astra_camera') == 1
+    assert 'enable_color:=true' in content and 'enable_depth:=true' in content
+    assert 'depth_registration:=true' in content
+    assert not any('restart' in command for command, _ in calls)

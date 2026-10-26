@@ -41,7 +41,9 @@ def build_markers(registry, annotation, selected='table_01'):
     result = [clear]
     for number in (1, 2):
         table_id = f'table_{number:02d}'
-        region = annotation['markers'][f'table_{number}']
+        region = annotation['markers'].get(f'table_{number}')
+        if region is None:
+            continue
         x, y = region['approximate_map_xy_m']
         color = (0.15, 0.5, 1.0, 0.45) if number == 1 else (0.1, 0.8, 0.3, 0.45)
         area = marker(number * 10, Marker.CYLINDER, x, y, color, frame)
@@ -59,6 +61,21 @@ def build_markers(registry, annotation, selected='table_01'):
             label.text = label.text.replace('AREA_ONLY', 'DOCK_POSE_TAUGHT')
             for index, pose in enumerate(table['service_poses']):
                 result.append(pose_arrow(number * 10 + 2 + index, pose, color, frame))
+    for number, table in enumerate(registry['tables']):
+        table_id = table['table_id']
+        if table_id in ('table_01', 'table_02'):
+            continue
+        for index, pose in enumerate(table['service_poses']):
+            identifier = 200 + number * 100 + index * 2
+            color = (0.0, 0.65, 0.75, 1.0)
+            result.append(pose_arrow(identifier, pose, color, frame))
+            label = marker(identifier + 1, Marker.TEXT_VIEW_FACING,
+                           pose['x_m'], pose['y_m'] + 0.35,
+                           (0.1, 0.15, 0.22, 1.0), frame)
+            label.pose.position.z, label.scale.z = 0.2, 0.14
+            label.text = table_id.upper() + (
+                '_SELECTED' if selected == table_id else '') + '\nDOCK_POSE_TAUGHT'
+            result.append(label)
     water = annotation['markers'].get('water_station')
     if water:
         # The via stop before a table; an area like the tables, not a goal pose.

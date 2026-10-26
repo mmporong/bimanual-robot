@@ -4,6 +4,85 @@
 
 ---
 
+## 2026-10-26 | 새 지도·등록 급수대·RGB-D 상대 좌우 보정 연결
+
+- 현재 수동 매핑 포인터에서 수정 지도·등록 도크·급수대 자산을 생성해 기존 실행기에 연결했다. 지도 YAML/이미지와 도크 자세·기준 스캔 SHA를 함께 확인하고 원본과 실행 상태를 보존한다. 기존 지도 테이블 좌표·경유점·상판 킵아웃을 새 지도로 복사하지 않는다. 이전 박스 기반 운영은 `--legacy-map`으로만 선택한다.
+- 새 기본 태스크는 도크 전진 이탈 → 등록 급수대 1회 방문 → 도크 후진 복귀다. 미등록 table_01/table_02를 만들거나 급수대를 목적지와 경유점으로 중복 방문하지 않는다. `prepare`·`session-start`·`init`은 이동 없는 설정 단계이며 출발은 기존 상주 실행기의 `go water_station`으로 제출한다.
+- 등록한 물리 위치·방향을 우선하고 컵·물병의 immutable RGB-D 참조로 상대 좌우 목표만 보정한다. ORB·3D PnP는 기준 특징을 한 번 준비한 뒤 최신 프레임 1개를 최대 5 Hz worker에서 처리한다. 왜곡·평면 퇴화·ROI 지지·시각·카메라 identity를 확인하고, 영상 시각의 TF를 사용한다. 기존 면 법선과 1 cm 거리 제어·충돌 감시·속도 경로를 유지한다. 잘못되거나 오래된 추정을 좌우 ±5 mm 성공으로 표시하지 않으며 외부 정확도는 `NOT_VALIDATED`다.
+- 새 참조 평면에서 얻은 후보 자세는 roll 약 1.05°·pitch 약 48.21°이고 명목 높이 1.26 m·앞뒤 lever는 기존 모델 가정이다. 이전 카메라의 각도와 경험적 거리 bias를 새 실행 설정에 사용하지 않는다. 저장 깊이에서 상판 평면은 맞지만 앞 경계의 아래쪽 유효 깊이 증거가 없어 기존 검출은 None이다. 참조 위치의 실제 앞끝 간격도 미측정이므로 새 환경의 1 cm·좌우 ±5 mm 성능은 미확인이다. 관측 실패를 성공으로 바꾸거나 제조사 최소 거리 사양만으로 원인을 확정하지 않았다.
+- 정지·비상정지·종료 명령은 지도/참조 생성과 분리했다. 상태 경로가 없어도 실행기에 먼저 정지를 보내며, RViz는 새 급수대 등록점만 표시하고 이전 테이블을 만들지 않는다. Astra RGB/깊이는 기존 드라이버 한 개를 함께 사용하도록 준비 경로에 연결했다.
+- 관련 9스위트 554 PASS, 기본 pytest 전체 1,065 PASS·3 skip, ROS `jdamr_cube_navigation` 빌드 성공, compile/fatal lint/diff 검사와 별도 코드 리뷰 APPROVE를 확인했다. 첫 로컬 테스트의 19실패는 설치 workspace를 source하지 않아 package index를 찾지 못한 경우였으며, 해당 환경을 갖춘 동일 소스 재실행에서 모두 통과했다. 도움말은 지도·참조 생성을 생략하고 데이터 루트 선택을 존중하도록 추가 보완했으며 standalone/helper 176 PASS와 별도 리뷰를 확인했다. 실차 정밀도 검증은 아직 하지 않았다.
+- Pi `bimanual_stage_20261026_191216`에 전체 실차 소스를 복사하고 9패키지 빌드(3분 10초) 후 기존 source/install/tools 슬롯을 승격했다. 2개 CMake 경고는 미사용 `PYTHON_EXECUTABLE`이며 빌드 실패는 없다. 백업은 `$HOME/jdamr_deploy/bimanual_backup_20261026_191216/`다. 새 지도 실행 자산과 참조 SHA를 동기화하고 설치 모듈 5개 SHA·OpenCV import·저장 참조 자기 관측 성공을 확인했다. 근거는 PC `$HOME/.local/state/bimanual-robot/taught_station_20261026/deployment_receipt.json`과 Pi 백업의 `promotion_receipt.json`이다. 자기 관측은 외부 정밀도 증명이 아니다.
+- 로봇 이동·팔 조작·자동 목표·새 위치초기화는 수행하지 않았다. Pi base PID1035는 유지됐고 Nav2/자동 실행기는 inactive다. 기동은 문서의 `session-start`·`init` 준비 경로로 이어가며 실차 검증은 충전 종료 후 별도 수행한다. 이전 등록 세션의 PC RViz·중계는 종료해 PID0/inactive를 확인했다.
+- 사용자 소유의 병합 완료 PR head와 원격 tip을 대조해 이전 원격 AMR 브랜치 2개와 로컬 PR81 완료 브랜치를 정리했다. 기존 주행 브랜치의 후속 14커밋과 팀원 브랜치는 보존했고, 새 작업은 목적별 `feat/amr-taught-station-docking`으로 분리했다. PR 병합 후 이 작업 브랜치도 같은 head 대조 방식으로 정리한다.
+
+## 2026-10-26 | 급수대 기준점·컵과 물병 참조 영상 저장·IMU 사용 현황 확인
+
+- 사용자가 수동 이동 후 지정한 현재 위치를 새 지도의 `water_station.yaml`에 저장했다. map→base_link 추정값은 x=0.024608312 m, y=-0.076957432 m, yaw=-0.025996508 rad다. 차체 앞끝 목표 1 cm와 등록 위치 기준 좌우 ±5 mm를 목표 메타데이터로 남겼으며, 현재 실물 도착점·방향이 최우선이고 컵·물병은 목표점을 바꾸지 않는 보조 참조로 지정했다. 좌우 5 mm 보정 제어 구현·성능 검증이나 자동 운영 registry 활성화를 완료한 것은 아니다. 실제 현재 앞 간격은 미측정이다.
+- Pi·PC `$HOME/jdamr_data/maps/20261026_manual_160135/stations/water_station_081718/`에 정지 관측을 저장했다. 깊이 77장·scan 32회·odom 225회를 받았고 깊이 최근 20장·scan 최근 12회·odom 최근 100개를 보존했다. 최근 odom 20개 최대 절대 v=0.002524 m/s, w=0.009896 rad/s다. 캡처에는 보정 전 새 Astra라는 상태와 실제 CameraInfo·AMCL covariance를 포함하며 외부 정확도를 주장하지 않는다.
+- 고정 컵·물병의 보조 참조 가능성을 확인하기 위해 카메라에만 `/run/systemd/system/jdamr-box-rgbd.service.d/95-reference-rgb.conf`를 적용해 RGB 640×480@30을 추가하고 깊이 320×240@30은 유지했다. camera PID는 8382→14012, base·수동 주행·Nav2는 유지했다. 실제 RGB 23장·깊이 15장을 수신했고 저장한 마지막 영상의 시각 차는 12.234 ms다. `reference_rgb.ppm`에서 왼쪽 컵·오른쪽 물병이 모두 보이는 것을 확인했다. 이는 참조 영상 저장이며 물체 검출·영상 기반 위치 보정 구현은 아니다. 런타임 override는 재부팅 시 사라진다.
+- 급수대 YAML과 캡처 원본 6파일의 Pi·PC SHA, 수정 지도 identity를 대조했다. 근거는 `$HOME/.local/state/bimanual-robot/destination_teaching_20261026/station_sync_receipt.json`이며 PC 열람용 `reference_rgb.png`도 원본 PPM에서 만들었다. 사용자 수동 운전용 화면·RViz는 이전 엔트리의 PID/종료 명령으로 유지하고 RGB-D는 `sudo systemctl stop jdamr-box-rgbd.service`로 종료한다. 테이블 위치 등록과 새 Astra 장착 보정은 남아 있다. 에이전트의 비영 이동·자동 목표 제출은 없다.
+- 사용자 질문에 따라 현재 IMU 사용을 읽기 확인했다. `/imu/data_raw`의 imu_link 자료 97개를 수신했으나 EKF·imu_bias 노드가 없고 `/imu/data`와 `/odometry/filtered` 발행자도 0개다. 센서 출력은 있으나 주행 odom에는 미융합이다. 기존 EKF launch/config는 보존했으며 실행하지 않았다. 과거 인계 §2-11의 큰 회전 1회 개선 수치와 날짜별 gyro bias 변화·미검증 보정 상태는 과거 근거이며 현재 4륜·양팔 구성의 정확도 증명이 아니다.
+
+## 2026-10-26 | 새 저장 지도 기반 수동 목적지 등록과 RViz 기동
+
+- 사용자가 급수대로 수동 이동해 위치를 지정하기로 했다. 기존 SLAM을 다시 시작하지 않고 수정 지도 `map_refined.yaml`을 map_server에 올려 AMCL을 저장 도크 자세로 초기화했다. 급수대·테이블 좌표는 아직 등록 전이며, 이전 지도의 자동 route·registry·keepout은 재사용하지 않았다. 도크 이탈은 지도 이미지 오른쪽인 전방으로 진행한 뒤 회전하고 복귀는 후면 주차하는 사용자 기준을 유지한다.
+- 기존 `navigation.launch.py`를 Pi 임시 `jdamr-destination-teaching.service` PID 9507로 실행했다. 수동 세션의 params는 `$HOME/.local/state/jdamr/destination_teaching_20261026/params.yaml`이며 기존 새 차체 설정에서 도크 초기 자세와 수동 후진 허용값 `min_velocity[0]=-0.12`만 바꿨다. keepout은 새 마스크 미등록으로 비활성화하고 실제 라이다 기반 CM·명령 신선도·차체 제원은 유지했다. 첫 기동은 Nav2 PythonExpression이 소문자 `use_composition=false`를 Python 식으로 해석해 이동 연결 전에 실패했고, `False`로 고쳐 기동했다.
+- `jdamr-webteleop.service` PID 9308의 조작 화면은 `http://192.168.0.159:8080`이다. cmd_vel_nav → velocity_smoother → cmd_vel_smoothed → collision_monitor → cmd_vel → base 경로 각각의 구독자 1개와 map_server·AMCL·smoother·CM active를 확인했다. 확인 때 odom v/w는 0이었고 에이전트의 비영 이동 명령·자동 목표 제출은 없었다. 차체 앞끝 목표 1 cm는 유지하며 이번 기동을 정밀주차 성공으로 기록하지 않는다.
+- PC에서 읽기 전용 표시 중계 PID 3970840과 RViz PID 3970846을 켰고 186×254 새 지도·라이다·로봇 표시를 화면으로 확인했다. 사용자의 장소 등록 중 계속 표시하기 위해 유지한다. 경로와 상태는 `$HOME/.local/state/bimanual-robot/destination_teaching_20261026/session.json`, 화면은 같은 디렉터리 `rviz_ready.png`다. 종료는 Pi `sudo systemctl stop jdamr-webteleop.service jdamr-destination-teaching.service`, PC `XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus systemctl --user stop jdamr-destination-teaching-rviz.service jdamr-destination-teaching-relay.service`다. 기존 베이스·카메라는 유지한다. 저장소 코드·자동 실행기는 변경하지 않았고 로그는 로컬 브랜치 커밋만 수행한다.
+
+## 2026-10-26 | 교체 Astra 깊이 수신·USB 복구 모델 설정 수정
+
+- 사용자가 정밀주차 목표를 차체 앞끝과 책상 면 사이 1 cm로 재확인했다. 양팔 결합을 이유로 목표 간격이나 기준점을 바꾸지 않는다. 새 카메라 장착값의 보정·새 지도의 목적지 등록과 1 cm 실차 확인은 아직 남아 있다.
+- Pi에서 새 Astra USB `2bc5:0401`을 확인했다. 기존 `jdamr-box-rgbd.service`는 disabled·inactive인 필요 시 기동 서비스여서 USB 연결만으로 영상을 시작하지 않았다. 이번 부팅의 카메라 실행 실패 근거는 없었으며, 기동 시 USB 복구 서비스가 이전 Astra S `0402`를 찾느라 약 38초 동안 두 차례 재시도한 뒤에야 카메라가 시작됐다.
+- Pi `/etc/systemd/system/jdamr-astra-usb-recover.service.d/40-camera-model.conf`에 `ASTRA_USB_ID=2bc5:0401`을 설정했다. daemon-reload 후 기존 복구 서비스를 한 번 실행해 같은 초에 `Astra USB enumeration already valid: 2bc5:0401`, exit 0을 확인했다. 기존 USB 포트·제어 로직은 유지했고 베이스를 재시작하지 않았다. 이 항목은 Pi 로컬 설치 설정이며 저장소의 범용 unit 기본값은 변경하지 않았다.
+- 실제 `/camera/depth/image_raw` 35장·`camera_info` 34개를 수신했다. 320×240 `16UC1`, 영상 시각 기준 29.949 Hz, 마지막 영상 유효 깊이 비율 62.13%다. 새 CameraInfo의 fx/fy는 258.41214, cx/cy는 162.12051/126.47111이며 영상·보정 프레임은 `camera_color_optical_frame`으로 일치했다. 이는 입력 확인이며 책상 검출·장착 보정·주차 정확도 검증은 아니다.
+- 장소 등록용 깊이 입력을 유지하기 위해 `jdamr-box-rgbd.service` PID 8382를 켜 둔다. 기존 베이스 PID 1301은 유지하고 새 이동 명령은 보내지 않았다. 카메라 종료는 Pi `sudo systemctl stop jdamr-box-rgbd.service`다. 매핑·Nav2·관측기·자동 실행기는 이번 작업에서 기동하지 않았다. 로컬 브랜치 커밋만 남기며 push는 하지 않는다.
+
+## 2026-10-26 | 새 수동 SLAM 지도 저장·현재 도크 기준 기록
+
+- 기존 지도 상태를 불러오지 않고 Pi의 기존 `jdamr-operator-mapping.service`로 수동 Cartographer 지도를 만들었다. 사용자 완료 후 추가 이동한 최종 위치를 이번 지도의 도크로 지정했다. 현재 도크는 후면이 도크 테이블, 전면이 통로를 향하는 사용자 기준이다.
+- Pi와 PC의 `$HOME/jdamr_data/maps/20261026_manual_160135/`에 `map_final.yaml/.pgm`, `map_final.pbstream`, `home_dock.yaml`, `dock_scan.json`, `dock_scan_reference.json`, `completion.json`을 저장했다. `current_manual_mapping.json`은 같은 maps 디렉터리의 최신 기록 포인터다. 지도 해상도는 0.05 m, 크기는 199×268셀이다. 원본 지도·기존 운영 registry는 보존했다.
+- 도크의 SLAM/TF 추정값은 map 좌표계의 base_link 자세로 x=-2.780726088 m, y=0.567876018 m, yaw=-0.016969863 rad다. 외부 실측 정확도나 후면 정밀주차 성공으로 기록하지 않는다. 주변 라이다 40회·odom 265개·배터리·차체↔라이다 정적 TF와 매핑 종료 전후 자세를 묶었다. 도크 캡처 구간 최대 절대 v=0.001262 m/s, w=0.004948 rad/s다.
+- FinishTrajectory와 WriteState 응답 code 0, SaveMap result true를 확인했고, PC로 가져온 원본 9파일의 크기·SHA가 Pi receipt와 일치했다. 매핑·수동 조종·RViz·표시 중계는 종료했다. 기존 베이스는 센서 대기용으로 유지하며 Pi `sudo systemctl stop jdamr-base.service`로 종료한다. 표시 중계 종료 때 ExternalShutdownException으로 exit 1이 남았으나 요청에 따른 종료이며, PID 소멸 확인 후 해당 임시 unit 실패 상태만 정리했다.
+- 새 지도는 목적지 registry/급수대·테이블/keepout 등록과 주행 설정 전환 전이다. 이전 지도의 좌표·도크·route를 새 지도에서 재사용하지 않는다. 새 Astra(0401)·변경된 장착 각도의 주차 보정도 별도 작업이다.
+- 후처리 요청에 따라 PC에 원본을 보존한 `map_cropped.yaml/.pgm` 비교본을 만들었다. 미관측 외곽 6,088셀만 잘라 186×254셀로 줄였고, 알려진 26,471셀·장애물·도크의 지도 좌표를 유지했다. 셀 중심의 좌표 차이는 부동소수 오차 약 1.78e-15 m 이내다. 1–2셀 크기의 장애물 성분 54개는 실제 의자·책상 다리일 수 있어 표시만 하고 삭제하지 않았다. 독립 검증에서 원본 해시·좌표·도크 연결·잡점 보존을 대조해 APPROVE를 받았다. 비교본은 아직 Pi 배포·주행 지도 적용 전이며 근거는 `postprocess_receipt.json`과 `postprocess_comparison.png`다.
+
+- 사용자 스크린샷의 두 구역을 골라 `map_refined.yaml/.pgm`에 반영했다. 1번 회색 151셀을 free로, 2번 대각선 121셀(occupied 63·unknown 58)을 free로 바꿨다. 선택 trace 밖의 모든 검은 셀과 인접 책상 다리 5구역의 검은 73셀을 유지했다. crop의 origin·해상도·도크 좌표는 동일하며 수정 지도 해시에 연결한 `home_dock_refined.yaml`·`dock_scan_reference_refined.json`을 따로 만들었다. 원본 지도·pbstream·기존 운영 registry는 보존했다. 수정 근거와 비교는 `requested_map_edits.json`, `requested_region1_mask.pgm`, `requested_region2_mask.pgm`, `requested_edits_comparison.png`에 있다. 독립 검증 APPROVE 후 Pi·PC 수정본 12파일의 SHA를 대조했다. 양쪽 `current_manual_mapping.json`을 수정본 준비 경로로 갱신했으며, 실제 Nav2 지도·운영 registry 전환과 주행은 수행하지 않았다.
+
+## 2026-10-23 | 목표 책상 우선 평가·CameraInfo 연관·장착 설정 일원화
+
+- 목표 근방과 겹치는 점군 성분을 fit 예산보다 먼저 고르도록 관측기·재생기에 연결했다. 큰 비목표 성분이 작은 목표를 밀어내는 합성 재현을 추가했고, 원래 점·기존 평가 수·최종 선분 영역 판정·다중 후보 모호성 처리는 유지한다. TF 실패 때 검출 진단을 보존하는 앞선 수정도 유지했다.
+- 기본 observer YAML의 오래된 각도 상수를 없애고 현재 장착 파일에서 시작 값을 읽는다. 기존 실행기의 원자적 장착값 갱신과 수동 파라미터 모드는 유지한다. 보정/URDF 수치를 새로 추정하거나 변경하지 않았다.
+- CameraInfo를 8개 이력 안에서 영상 시각과 연관하고 미래 보정을 제외한다. 양수 timestamp에는 기존 `max_image_age_s` 신선도를 적용하며 잘못된 timestamp 수신 시 캐시를 무효화한다. 정적 timestamp 0 지원, 깊이 시각 역행·유효 intrinsics 변경 시 안정성/추적 초기화를 추가했다. 대기나 새 출발 절차는 없으며 timestamp만으로 단조 증가하는 시각에서의 카메라 재시작까지 구분하지는 않는다.
+- 관련 9스위트 229 PASS(2.31초), 변경 Python 10파일 문법·fatal lint와 diff PASS이며 독립 코드 리뷰 APPROVE를 받았다. 실제 영상 111장의 기존 비시간 필드와 원본 SHA는 이전 재생과 같다. 동기 odom이 없어 실제 목표 우선순위·추적 개선은 미평가다. 근거는 `$HOME/.local/state/bimanual-robot/pointcloud_input_selection_20261023/verification_receipt.json`과 `replay/`에 있다.
+- Pi는 재확인해도 `No route to host`다. 로컬 브랜치 커밋 범위이며 배포·push/main 병합·주행은 수행하지 않았다. 현재 장착의 외부 정확도와 Pi TF 수신은 연결 복구 뒤 확인할 항목으로 남는다.
+
+## 2026-10-23 | 점군 관측 실패 진단과 재생 보정·좌표계 계약 수정
+
+- TF 조회 실패가 검출 후보 수까지 지우던 문제를 수정했다. 입력·높이 점 수, 성분·후보 수, 취득 시각과 처리 시간을 보존하며 무효 변환과 조회 실패를 구분한다. 추적 초기화와 false 검출·stable 상태는 유지한다. 신규 회귀는 수정 전 후보 필드 누락으로 실패했고, 수정 후 카메라/map 변환 실패·무효값·후보 유무 8조합과 재수신 초기화를 통과했다.
+- 오프라인 재생에 NPZ/manifest 광학 프레임 대조와 보정 원본→높이·roll·pitch 수치 대조를 추가했다. v2는 보정 매핑을 요구하며, v1은 검출 재생을 유지하고 근거가 부족한 추적은 미평가로 표시한다. odom 변환의 프레임 선언은 독립 정답 검증과 구분한다. 원본 영상·보정값·기존 manifest는 변경하지 않았다.
+- 관련 7스위트 172 PASS(2.22초), fatal flake8·문법·diff PASS다. 실제 3캡처 111장을 새 manifest로 재생해 기존 검출 반환과 경계 좌표가 모두 유지됨을 확인했다. 독립 리뷰에서 코드 차단 이슈가 없었으며 재생 산출물도 대조했다. LSP 도구는 없어 해당 검사는 수행하지 못했다.
+- 근거는 `$HOME/.local/state/bimanual-robot/pointcloud_contract_20261023/`의 `input_receipt.json`, `verification_receipt.json`, v2 manifest와 `replay/`다. [개발판 안내](docs/guides/AMR_POINTCLOUD_DOCKING.md)에 계약·재현 명령과 한계를 반영했다. 정확도·정상 추적·주행 시간 개선을 이번 검증 결과로 주장하지 않는다.
+- Pi는 `No route to host`이며 같은 Wi-Fi 대역의 이웃 탐색도 실패했다. 보존 로그에서 차체 정적 TF 전체 미수신을 확인해 URDF joint 누락보다 DDS 합류·정적 데이터 전달을 우선 가설로 좁혔다. 현재 RSP 상태와 재연결 후 검증은 남아 있다. Pi 서비스·장착값·출발 경로·실물 이동은 변경하지 않았고 작업 브랜치 로컬 커밋까지 수행한다.
+
+## 2026-10-23 | 무이동 바닥 후보 로직 시험
+
+- 사용자 요청으로 저장 깊이 90장만 PC에서 분석했다. 원본·장착 해시 대조, 고정 ROI·RANSAC/SVD·프레임별 추정·첫 프레임 고정면 잔차를 기록했다. ROS 노드·Pi 조작·이동은 없고 운영 보정값과 TF는 그대로다.
+- production과 독립 축 회전/광선 교차 renderer를 대조했다. 무잡음 바닥 3조건의 높이·각도 복원, 현 설정 바닥 음성 대조, 카메라 전방 0.30/0.45/0.60 m 책상 양성 대조를 모두 통과했다. 관련 검출·성분·재생·추적 4스위트 85 PASS(1.17초)다. 합성 검사는 실물 정확도·가림/노이즈 강건성을 증명하지 않는다.
+- 실제 ROI는 바닥 정답이 아닌 시각 선택 후보다. 90장 모두 유효점 최소 6,383개에서 높이 필터 통과점 0개였고, 전체 장면의 기존·성분별 검출도 모두 0장이다. ROI 마스킹은 경계 배경도 제거하므로 0검출만으로 높이 gate 성공을 해석하지 않고 중간 점 수를 확인했다.
+- 후보 평면 중앙값은 카메라↔평면 1.14778 m·roll -4.81309°·pitch 50.88301°로 기존 1.26 m·-2.23586°·52.54996°와 다르다. 기존 변환의 ROI 높이 중앙값은 약 7.68 cm, 평면 적합점 RMS 중앙값은 6.69 mm다. 한 capture의 내부 일관성이지 외부 정확도가 아니며 추정값을 운영 보정으로 적용하지 않았다. 장착/깊이 보정 일치와 DDS/TF 연결은 남은 문제다.
+- [개발판 안내](docs/guides/AMR_POINTCLOUD_DOCKING.md)에 방법·수치·한계·재현 명령을 기록했다. 분석 스크립트·프로토콜·해시·CSV·그림은 `$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/floor_logic_check/`에 보존한다. 독립 검토에서 마스킹 입력의 한계를 지적해 중간 높이 점 수를 보완했다. 이번 범위는 기록의 로컬 커밋이며 추가 배포·push/main 병합은 하지 않는다.
+
+## 2026-10-23 | 점군 개발판 Pi 배포·무이동 입력과 부분 부하 확인
+
+- 사용자 요청으로 `5c29ac1`을 Pi stage에 전송하고 9개 패키지 빌드(3분 1초)·설치 경로/모듈 SHA 확인 뒤 source/install/tools를 승격했다. 지도·목적지·keepout·장착값은 보존했다. stage 82 MiB·백업 88 MiB, 디스크 여유 15 GiB다. 원래 주행 worktree는 변경하지 않았다.
+- rsync SSH transport 끝의 `--` 뒤로 rsync가 `-l 사용자`를 삽입해 `hostname contains invalid characters`로 전송 실패하던 원인을 수정했다. 독립 ssh와 rsync 파일 경계의 `--`·호스트/경로 검증은 유지한다. 실제 rsync+연결 없는 `ssh -G` 회귀가 수정 전 실패·수정 후 통과했고 관련 17건·fatal lint·compile·diff와 독립 리뷰를 통과했다.
+- 기존 센서 유닛·DDS 설정·stable 8프레임을 보존하고 선택형 capability만 설치했다. 도크에서 통로를 보는 정지 장면에서 같은 개발판의 요청 OFF/ON을 각 20초 비교했다. observer CPU는 한 코어 기준 55.63→69.39%, 프로세스 트리 peak RSS 100.96→101.50 MiB, Pi 전체 CPU 39.78→42.08%, 최소 가용 RAM 약 2.7 GiB·최고 65.24℃였다. 새 경로는 TF 연결 실패 후 반환하므로 정상 추적·최악 부하 측정이 아니다.
+- 기존 LOCALHOST DDS에서 새 노드 생성 hang이 재현됐다. 임시 UDP loopback 설정에서 깊이·odom 입력은 수신했으나 차체와 카메라의 TF 트리가 연결되지 않아 추적은 `table_tracking_transform_unavailable` 94회로 미검증이다. 물체 정답 없는 통로 장면이며 바닥·의자 가림 가능성을 기록했다. 새 깊이 90장 오프라인 재생은 기존/성분별 각 0검출·성분 p95 112.44 ms였고 동기 odom·독립 정확도는 없다. 이 재생 시간을 Pi live 지연으로 해석하지 않는다. 통신/좌표 통합 문제와 검출 정확도를 혼동하지 않는다.
+- 시험 뒤 요청 false·센서 inactive·임시 DDS override/진단 프로세스 제거를 확인했다. base PID99657·Nav2 PID99423 유지, executor PID104674는 idle serve, spool request/running0이다. 새 속도 명령·action·위치초기화는 없었다. 기존 Nav2 identity 불일치는 건드리지 않았으며 주행 준비 완료를 주장하지 않는다. 유지 서비스 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다.
+- 결과·근거·남은 문제는 [개발판 안내](docs/guides/AMR_POINTCLOUD_DOCKING.md)에 정리했다. PC 근거는 `$HOME/.local/state/bimanual-robot/pointcloud_pi_20261023_073244/`, Pi 백업은 `$HOME/jdamr_deploy/bimanual_backup_pointcloud_5c29ac1_20261023_073244/`다. 이번 수정과 기록은 목적 브랜치의 로컬 커밋 범위이며 추가 push/main 병합은 하지 않는다.
+
 ## 2026-10-22 | 뎁스 포인트클라우드 분리·odom 추적·선택형 관측 연결
 
 - 기준선 `1626d47` 위에 organized XYZ 인접 성분 분리, 성분별 기존 상판 경계 맞춤, 취득 시각 odom 보상 추적과 재생 CLI를 구현했다. ICP·PCL·새 옆면 평면 맞춤·상판 점유 모델은 추가하지 않았다. 기존 AMCL·NavFn·RPP·장애물 입력·최종 1 cm 판정을 유지한다.
