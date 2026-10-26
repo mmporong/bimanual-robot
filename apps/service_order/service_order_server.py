@@ -22,6 +22,23 @@ from src.mission.service_order_store import ServiceOrderStore
 ROOT = Path(__file__).resolve().parents[2]
 INDEX = Path(__file__).resolve().parents[2] / 'apps/service_order/static/index.html'
 DASHBOARD_JS = INDEX.with_name("dashboard.js")
+ORDER_PAGE = INDEX.with_name("order.html")
+ORDER_JS = INDEX.with_name("order.js")
+CONTROL_PAGE = INDEX.with_name("control.html")
+CONTROL_JS = INDEX.with_name("control.js")
+API_JS = INDEX.with_name("api.js")
+CONFIG_JS = INDEX.with_name("config.js")
+STATIC_FILES = {
+    "/": (INDEX, "text/html"),
+    "/index.html": (INDEX, "text/html"),
+    "/dashboard.js": (DASHBOARD_JS, "text/javascript"),
+    "/order": (ORDER_PAGE, "text/html"),
+    "/order.js": (ORDER_JS, "text/javascript"),
+    "/control": (CONTROL_PAGE, "text/html"),
+    "/control.js": (CONTROL_JS, "text/javascript"),
+    "/api.js": (API_JS, "text/javascript"),
+    "/config.js": (CONFIG_JS, "text/javascript"),
+}
 ORDER_PATH = re.compile(r"^/api/orders/([A-Za-z0-9._:-]{1,64})/cancel$")
 
 
@@ -68,6 +85,7 @@ class ServiceApplication:
         self.backend = selected_backend
         self.execution_lock = threading.Lock()
         self.last_backend_result: dict | None = None
+        self.auto_paused = False
         self._persist()
 
     def _persist(self, command: dict | None = None) -> None:
@@ -105,7 +123,14 @@ class ServiceApplication:
             snapshot["execution_backend"] = self.backend.info()
             snapshot['simulator_accessed'] = snapshot['execution_backend'].get('simulator_accessed', False)
             snapshot["last_backend_result"] = self.last_backend_result
+            snapshot["auto_paused"] = self.auto_paused
             return snapshot
+
+    def set_auto_paused(self, paused: bool) -> dict:
+        """Pause or resume automatic phase execution; a running backend command still finishes."""
+        with self.lock:
+            self.auto_paused = paused
+            return {"auto_paused": self.auto_paused}
 
     def _stats(self, snapshot: dict) -> dict:
         if self.store is not None:
@@ -242,9 +267,23 @@ class ServiceApplication:
             self.store.close()
 
 
-def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
+def handler_factory(app: ServiceApplication, cors_origin: str | None = None) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "HoldTheFlowOrderServer/1.0"
+
+        def end_headers(self) -> None:
+            # 다른 주소(예: Netlify)에 올린 화면이 이 서버 API를 부를 때만 허용한다.
+            if cors_origin:
+                self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Vary", "Origin")
+            super().end_headers()
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            self.send_response(HTTPStatus.NO_CONTENT if cors_origin else HTTPStatus.METHOD_NOT_ALLOWED)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def log_message(self, fmt: str, *args: Any) -> None:
             if urlparse(self.path).path == "/api/state":
@@ -299,19 +338,11 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
                 kind = "orders" if path == "/api/orders/history" else "events"
                 self._json(HTTPStatus.OK, {kind: app.history(kind, limit)})
                 return
-            if path in {"/", "/index.html"}:
-                body = INDEX.read_bytes()
+            if path in STATIC_FILES:
+                file_path, content_type = STATIC_FILES[path]
+                body = file_path.read_bytes()
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            if path == "/dashboard.js":
-                body = DASHBOARD_JS.read_bytes()
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/javascript; charset=utf-8")
+                self.send_header("Content-Type", f"{content_type}; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
@@ -340,6 +371,12 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
                         raise ValueError("failure must be a nonempty string")
                     self._json(HTTPStatus.OK, app.step(success=success, failure=failure))
                     return
+                if path == "/api/control":
+                    paused = self._read_json().get("paused")
+                    if not isinstance(paused, bool):
+                        raise ValueError("paused must be boolean")
+                    self._json(HTTPStatus.OK, app.set_auto_paused(paused))
+                    return
                 match = ORDER_PATH.fullmatch(path)
                 if match:
                     self._json(HTTPStatus.OK, app.cancel(match.group(1)))
@@ -358,6 +395,8 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
 def auto_step(app: ServiceApplication, interval_s: float, stop: threading.Event) -> None:
     while not stop.wait(interval_s):
         state = app.state()
+        if state["auto_paused"]:
+            continue
         if state["phase"] not in {"IDLE_AT_DOCK", "TERMINAL_HOLD"} or state["queue"] or state["active_order_id"]:
             try:
                 app.execute_next()
@@ -385,6 +424,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="manipulation backend; ROS modes are simulation-only and never access hardware",
     )
     parser.add_argument("--manipulation-timeout-s", type=float, default=30.0)
+    parser.add_argument(
+        "--cors-origin",
+        help="allow this origin (e.g. https://<site>.netlify.app) to call the API from a separately hosted page",
+    )
     parser.add_argument(
         "--executor-socket",
         type=Path,
@@ -425,11 +468,13 @@ def main(argv: list[str] | None = None) -> int:
         args.state_dir,
         backend,
     )
-    server = ThreadingHTTPServer((args.host, args.port), handler_factory(app))
+    server = ThreadingHTTPServer((args.host, args.port), handler_factory(app, args.cors_origin))
     stop = threading.Event()
     worker = threading.Thread(target=auto_step, args=(app, args.auto_step_s, stop), daemon=True)
     worker.start()
     print(f"service order dashboard: http://{args.host}:{server.server_port}", flush=True)
+    print(f"guest order page: http://{args.host}:{server.server_port}/order?table=1", flush=True)
+    print(f"control page: http://{args.host}:{server.server_port}/control", flush=True)
     print(f"mode: {backend.mode} (hardware disabled; simulator access depends on backend)", flush=True)
     try:
         server.serve_forever()

@@ -15,7 +15,7 @@ import pytest
 from src.mission.service_mission_control import MissionController
 import src.mission.service_execution_backend as service_execution_backend
 from src.mission.service_execution_backend import BackendResult, ImmediateBackend, Ros2ManipulationBackend, Ros2PlannedRoundtripBackend, Ros2PlannedSessionBackend
-from apps.service_order.service_order_server import BackendBusyError, DASHBOARD_JS, INDEX, ServiceApplication, auto_step, default_state_dir, handler_factory
+from apps.service_order.service_order_server import API_JS, BackendBusyError, CONTROL_JS, CONTROL_PAGE, DASHBOARD_JS, INDEX, ORDER_JS, ORDER_PAGE, ServiceApplication, auto_step, default_state_dir, handler_factory
 from src.mission.service_order_store import ServiceOrderStore
 
 
@@ -152,6 +152,86 @@ def test_static_dashboard_has_no_external_runtime_dependencies():
     assert "fetch(\"http" not in javascript and "request(\"http" not in javascript
     assert "request(\"/api/orders\"" in javascript
     assert ".innerHTML" not in javascript
+
+
+def test_guest_and_control_pages_are_served(server):
+    _, base, _ = server
+    pages = {
+        "/order": "물 주문",
+        "/order.js": "STEP_BY_PHASE",
+        "/control": "서빙 로봇 관제",
+        "/control.js": "SERVICE_PHASES",
+        "/api.js": "orderApi",
+        "/config.js": "ORDER_API_BASE",
+    }
+    for path, marker in pages.items():
+        with urlopen(base + path, timeout=3) as response:
+            assert marker in response.read().decode()
+
+
+def test_guest_and_control_pages_have_no_external_runtime_dependencies():
+    for page, script in ((ORDER_PAGE, ORDER_JS), (CONTROL_PAGE, CONTROL_JS), (CONTROL_PAGE, API_JS)):
+        html = Path(page).read_text(encoding="utf-8")
+        javascript = Path(script).read_text(encoding="utf-8")
+        assert "https://" not in html and "http://" not in html
+        assert "fetch(\"http" not in javascript
+        assert ".innerHTML" not in javascript
+
+
+def test_cors_headers_only_when_origin_configured(tmp_path):
+    app = ServiceApplication(MissionController(), tmp_path / "state")
+    servers = {}
+    for name, origin in (("closed", None), ("open", "https://example.netlify.app")):
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(app, origin))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        servers[name] = httpd
+    try:
+        base = f"http://127.0.0.1:{servers['open'].server_port}"
+        with urlopen(base + "/api/health", timeout=3) as response:
+            assert response.headers["Access-Control-Allow-Origin"] == "https://example.netlify.app"
+        with urlopen(Request(base + "/api/orders", method="OPTIONS"), timeout=3) as response:
+            assert response.status == 204
+        closed = f"http://127.0.0.1:{servers['closed'].server_port}"
+        with urlopen(closed + "/api/health", timeout=3) as response:
+            assert response.headers["Access-Control-Allow-Origin"] is None
+        with pytest.raises(HTTPError) as error:
+            urlopen(Request(closed + "/api/orders", method="OPTIONS"), timeout=3)
+        assert error.value.code == 405
+    finally:
+        for httpd in servers.values():
+            httpd.shutdown()
+            httpd.server_close()
+        app.close()
+
+
+def test_netlify_bundle_contains_pages_and_demo_config(tmp_path):
+    from apps.service_order.build_netlify import build
+
+    build(tmp_path / "site", "demo")
+    names = {path.name for path in (tmp_path / "site").iterdir()}
+    assert {"order.html", "order.js", "control.html", "control.js", "api.js", "config.js", "_redirects"} <= names
+    assert '"demo"' in (tmp_path / "site/config.js").read_text(encoding="utf-8")
+
+
+def test_control_pause_stops_auto_step_until_resumed(server):
+    app, base, _ = server
+    post_json(base + "/api/orders", {"order_id": "PAUSE-1", "table_id": "table_1", "drink": "COLD_WATER"})
+    status, body = post_json(base + "/api/control", {"paused": True})
+    assert status == 200 and body == {"auto_paused": True}
+    stop = threading.Event()
+    worker = threading.Thread(target=auto_step, args=(app, 0.01, stop), daemon=True)
+    worker.start()
+    stop.wait(0.2)
+    assert app.state()["phase"] == "NAVIGATE_KITCHEN"
+    post_json(base + "/api/control", {"paused": False})
+    stop.wait(0.3)
+    stop.set()
+    worker.join(timeout=3)
+    assert app.state()["auto_paused"] is False
+    assert app.state()["phase"] != "NAVIGATE_KITCHEN"
+    with pytest.raises(HTTPError) as error:
+        post_json(base + "/api/control", {"paused": "yes"})
+    assert error.value.code == 400
 
 
 def test_restart_restores_active_mission_and_history(tmp_path):

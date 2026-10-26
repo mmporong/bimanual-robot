@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>물 주문</title>
+  <style>
+    :root {
+      --bg: #f4f6f9; --card: #fff; --ink: #142538; --muted: #66768a; --line: #dbe2ea;
+      --accent: #1761c4; --accent-soft: #e8f1fd; --cold: #1f78c8; --hot: #c85a35;
+      --ok: #15805b; --danger: #b42332; --radius: 14px;
+      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 16px; line-height: 1.5; }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    button:focus-visible { outline: 3px solid rgba(23,97,196,.35); outline-offset: 2px; }
+    main { width: min(480px, 100%); margin: 0 auto; padding: 20px 16px 40px; }
+    header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: -.02em; }
+    .table-label { color: var(--muted); font-weight: 600; }
+    h2 { margin: 0 0 10px; font-size: 15px; color: var(--muted); font-weight: 600; }
+    section { margin-bottom: 22px; }
+    .grid { display: grid; gap: 10px; }
+    .grid.tables { grid-template-columns: repeat(4, 1fr); }
+    .grid.drinks { grid-template-columns: 1fr 1fr; }
+    .choice { padding: 14px 8px; background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); font-weight: 700; }
+    .choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .drink { padding: 22px 10px; font-size: 20px; }
+    .drink small { display: block; margin-top: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
+    .drink[data-drink="COLD_WATER"][aria-pressed="true"] { border-color: var(--cold); color: var(--cold); background: #e6f3ff; }
+    .drink[data-drink="HOT_WATER"][aria-pressed="true"] { border-color: var(--hot); color: var(--hot); background: #fff0e9; }
+    .primary { width: 100%; padding: 16px; border: 0; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 18px; font-weight: 700; }
+    .primary:disabled { background: #a9b6c5; cursor: not-allowed; }
+    .secondary { width: 100%; padding: 14px; margin-top: 10px; background: transparent; border: 1px solid var(--line); border-radius: var(--radius); color: var(--muted); font-weight: 600; }
+    .error { min-height: 1.5em; margin: 10px 0 0; color: var(--danger); font-size: 14px; text-align: center; }
+    .card { padding: 22px 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+    .status-title { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+    .status-sub { margin: 6px 0 0; color: var(--muted); }
+    .summary { display: flex; gap: 8px; margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+    .summary b { color: var(--ink); }
+    ol.steps { list-style: none; margin: 20px 0 0; padding: 0; }
+    .steps li { position: relative; padding: 0 0 18px 34px; color: var(--muted); }
+    .steps li:last-child { padding-bottom: 0; }
+    .steps li::before { content: ""; position: absolute; left: 6px; top: 4px; width: 14px; height: 14px; border: 2px solid var(--line); border-radius: 50%; background: var(--card); }
+    .steps li:not(:last-child)::after { content: ""; position: absolute; left: 13px; top: 22px; bottom: 2px; width: 2px; background: var(--line); }
+    .steps li.done { color: var(--ink); }
+    .steps li.done::before { border-color: var(--ok); background: var(--ok); }
+    .steps li.done::after { background: var(--ok); }
+    .steps li.now { color: var(--accent); font-weight: 700; }
+    .steps li.now::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+    .card.ok { border-color: var(--ok); } .card.ok .status-title { color: var(--ok); }
+    .card.fail { border-color: var(--danger); } .card.fail .status-title { color: var(--danger); }
+    .offline { margin: 12px 0 0; color: var(--danger); font-size: 14px; text-align: center; }
+    .demo-note { margin: 0 0 16px; padding: 8px 12px; border-radius: 8px; background: #fff6df; color: #9d6818; font-size: 13px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>물 주문</h1>
+    <span class="table-label" id="table-label"></span>
+  </header>
+
+  <p class="demo-note" id="demo-note" hidden>체험용 데모 화면입니다. 실제 로봇과 연결되어 있지 않습니다.</p>
+
+  <div id="order-view">
+    <section id="table-section">
+      <h2>테이블</h2>
+      <div class="grid tables" id="tables"></div>
+    </section>
+    <section>
+      <h2>음료</h2>
+      <div class="grid drinks">
+        <button type="button" class="choice drink" data-drink="COLD_WATER" aria-pressed="false">냉수<small>시원한 물 한 잔</small></button>
+        <button type="button" class="choice drink" data-drink="HOT_WATER" aria-pressed="false">온수<small>따뜻한 물 한 잔</small></button>
+      </div>
+    </section>
+    <button type="button" class="primary" id="submit" disabled>주문하기</button>
+    <p class="error" id="order-error" role="alert"></p>
+  </div>
+
+  <div id="track-view" hidden>
+    <p class="summary"><b id="track-drink"></b><span id="track-id"></span></p>
+    <div class="card" id="status-card" aria-live="polite">
+      <p class="status-title" id="status-title"></p>
+      <p class="status-sub" id="status-sub"></p>
+      <ol class="steps" id="steps"></ol>
+    </div>
+    <button type="button" class="secondary" id="cancel" hidden>주문 취소</button>
+    <button type="button" class="primary" id="again" hidden style="margin-top:12px">새로 주문하기</button>
+    <p class="offline" id="offline" hidden>서버와 연결이 끊겼어요. 다시 연결하는 중…</p>
+  </div>
+</main>
+<script src="/config.js"></script>
+<script src="/api.js"></script>
+<script src="/order.js"></script>
+</body>
+</html>

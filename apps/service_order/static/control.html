@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>서빙 로봇 관제</title>
+  <style>
+    :root {
+      --bg: #f4f6f9; --card: #fff; --ink: #142538; --muted: #66768a; --line: #dbe2ea;
+      --accent: #1761c4; --accent-soft: #e8f1fd; --ok: #15805b; --ok-soft: #e9f7f1;
+      --warn: #9d6818; --warn-soft: #fff6df; --danger: #b42332; --danger-soft: #fff0f1; --radius: 10px;
+      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.45; }
+    button, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    button:focus-visible, select:focus-visible { outline: 3px solid rgba(23,97,196,.3); outline-offset: 2px; }
+    main { width: min(1200px, 100%); margin: 0 auto; padding: 16px 16px 40px; }
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+    h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    h2 { margin: 0 0 10px; font-size: 14px; }
+    .conn { color: var(--muted); font-size: 12px; }
+    .conn.bad { color: var(--danger); font-weight: 700; }
+    .btn { padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-weight: 600; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+    .btn.small { padding: 4px 10px; font-size: 12px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+    .stat { padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+    .stat span { display: block; color: var(--muted); font-size: 12px; }
+    .stat strong { display: block; margin-top: 2px; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+    .layout { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+    .col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+    .card { padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+    .banner { margin-bottom: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+    .current-head { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 12px; }
+    .current-head b { font-size: 16px; }
+    .muted { color: var(--muted); }
+    .phases { display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px; }
+    .phase { padding: 8px 2px; border-radius: 6px; background: var(--bg); color: var(--muted); font-size: 11px; text-align: center; overflow-wrap: anywhere; }
+    .phase.done { background: var(--ok-soft); color: var(--ok); }
+    .phase.now { background: var(--accent); color: #fff; font-weight: 700; }
+    .phase.fail { background: var(--danger); color: #fff; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    td.num { font-variant-numeric: tabular-nums; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+    .badge.QUEUED { background: var(--warn-soft); color: var(--warn); }
+    .badge.RUNNING { background: var(--accent-soft); color: var(--accent); }
+    .badge.SUCCEEDED { background: var(--ok-soft); color: var(--ok); }
+    .badge.FAILED { background: var(--danger-soft); color: var(--danger); }
+    .badge.CANCELED { background: var(--bg); color: var(--muted); }
+    .empty { color: var(--muted); padding: 6px 0; }
+    .form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+    select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+    .links { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+    .links a { color: var(--accent); }
+    .events { max-height: 300px; overflow: auto; font-size: 12px; }
+    .events li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+    .events ol { margin: 0; padding: 0; list-style: none; }
+    .table-wrap { overflow-x: auto; }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .phases { grid-template-columns: repeat(4, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>서빙 로봇 관제</h1>
+      <span class="conn" id="conn">연결 중…</span>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="pause">자동 진행 일시정지</button>
+      <button type="button" class="btn danger" id="abort" disabled>현재 주문 중단</button>
+    </div>
+  </header>
+
+  <div class="banner" id="demo-note" hidden>체험용 데모 화면입니다. 실제 로봇과 연결되어 있지 않으며, 주문은 이 브라우저 안에서만 공유됩니다.</div>
+  <div class="banner" id="paused-banner" hidden>자동 진행이 일시정지되었습니다. 진행 중인 단계는 끝까지 수행한 뒤 멈춥니다.</div>
+
+  <div class="stats">
+    <div class="stat"><span>로봇 상태</span><strong id="s-mission">-</strong></div>
+    <div class="stat"><span>현재 위치</span><strong id="s-location">-</strong></div>
+    <div class="stat"><span>배터리</span><strong id="s-battery">-</strong></div>
+    <div class="stat"><span>실행 모드</span><strong id="s-mode">-</strong></div>
+  </div>
+
+  <div class="layout">
+    <div class="col">
+      <section class="card">
+        <h2>현재 작업</h2>
+        <div class="current-head" id="current-head"></div>
+        <div class="phases" id="phases"></div>
+      </section>
+
+      <section class="card">
+        <h2>대기 주문 <span class="muted" id="queue-count"></span></h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>순서</th><th>주문 번호</th><th>테이블</th><th>음료</th><th>접수 시각</th><th></th></tr></thead>
+          <tbody id="queue"></tbody>
+        </table></div>
+      </section>
+
+      <section class="card">
+        <h2>최근 주문</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>주문 번호</th><th>테이블</th><th>음료</th><th>상태</th><th>완료 시각</th><th>실패 원인</th></tr></thead>
+          <tbody id="history"></tbody>
+        </table></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <h2>직원 대리 주문</h2>
+        <div class="form">
+          <select id="f-table" aria-label="테이블"></select>
+          <select id="f-drink" aria-label="음료">
+            <option value="COLD_WATER">냉수</option>
+            <option value="HOT_WATER">온수</option>
+          </select>
+          <button type="button" class="btn primary" id="f-submit">등록</button>
+        </div>
+        <p class="muted" id="f-msg" style="margin:8px 0 0"></p>
+      </section>
+
+      <section class="card" id="test-tools" hidden>
+        <h2>시험 도구 <span class="muted">(dry-run·데모 전용)</span></h2>
+        <p class="muted" style="margin:0 0 8px">일시정지 상태에서 단계를 한 칸씩 진행하거나 실패를 주입합니다.</p>
+        <div class="actions">
+          <button type="button" class="btn" id="t-step">한 단계 진행</button>
+          <button type="button" class="btn" id="t-fail">현재 단계 실패</button>
+          <button type="button" class="btn" id="t-reset" hidden>데모 초기화</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>손님 주문 링크</h2>
+        <ul class="links" id="links"></ul>
+      </section>
+
+      <section class="card">
+        <h2>이벤트 기록</h2>
+        <div class="events"><ol id="events"></ol></div>
+      </section>
+    </div>
+  </div>
+</main>
+<script src="/config.js"></script>
+<script src="/api.js"></script>
+<script src="/control.js"></script>
+</body>
+</html>
