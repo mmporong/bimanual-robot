@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-26 | 새 수동 SLAM 지도 저장·현재 도크 기준 기록
+
+- 기존 지도 상태를 불러오지 않고 Pi의 기존 `jdamr-operator-mapping.service`로 수동 Cartographer 지도를 만들었다. 사용자 완료 후 추가 이동한 최종 위치를 이번 지도의 도크로 지정했다. 현재 도크는 후면이 도크 테이블, 전면이 통로를 향하는 사용자 기준이다.
+- Pi와 PC의 `$HOME/jdamr_data/maps/20261026_manual_160135/`에 `map_final.yaml/.pgm`, `map_final.pbstream`, `home_dock.yaml`, `dock_scan.json`, `dock_scan_reference.json`, `completion.json`을 저장했다. `current_manual_mapping.json`은 같은 maps 디렉터리의 최신 기록 포인터다. 지도 해상도는 0.05 m, 크기는 199×268셀이다. 원본 지도·기존 운영 registry는 보존했다.
+- 도크의 SLAM/TF 추정값은 map 좌표계의 base_link 자세로 x=-2.780726088 m, y=0.567876018 m, yaw=-0.016969863 rad다. 외부 실측 정확도나 후면 정밀주차 성공으로 기록하지 않는다. 주변 라이다 40회·odom 265개·배터리·차체↔라이다 정적 TF와 매핑 종료 전후 자세를 묶었다. 도크 캡처 구간 최대 절대 v=0.001262 m/s, w=0.004948 rad/s다.
+- FinishTrajectory와 WriteState 응답 code 0, SaveMap result true를 확인했고, PC로 가져온 원본 9파일의 크기·SHA가 Pi receipt와 일치했다. 매핑·수동 조종·RViz·표시 중계는 종료했다. 기존 베이스는 센서 대기용으로 유지하며 Pi `sudo systemctl stop jdamr-base.service`로 종료한다. 표시 중계 종료 때 ExternalShutdownException으로 exit 1이 남았으나 요청에 따른 종료이며, PID 소멸 확인 후 해당 임시 unit 실패 상태만 정리했다.
+- 새 지도는 목적지 registry/급수대·테이블/keepout 등록과 주행 설정 전환 전이다. 이전 지도의 좌표·도크·route를 새 지도에서 재사용하지 않는다. 새 Astra(0401)·변경된 장착 각도의 주차 보정도 별도 작업이다.
+- 후처리 요청에 따라 PC에 원본을 보존한 `map_cropped.yaml/.pgm` 비교본을 만들었다. 미관측 외곽 6,088셀만 잘라 186×254셀로 줄였고, 알려진 26,471셀·장애물·도크의 지도 좌표를 유지했다. 셀 중심의 좌표 차이는 부동소수 오차 약 1.78e-15 m 이내다. 1–2셀 크기의 장애물 성분 54개는 실제 의자·책상 다리일 수 있어 표시만 하고 삭제하지 않았다. 독립 검증에서 원본 해시·좌표·도크 연결·잡점 보존을 대조해 APPROVE를 받았다. 비교본은 아직 Pi 배포·주행 지도 적용 전이며 근거는 `postprocess_receipt.json`과 `postprocess_comparison.png`다.
+
 ## 2026-10-23 | 목표 책상 우선 평가·CameraInfo 연관·장착 설정 일원화
 
 - 목표 근방과 겹치는 점군 성분을 fit 예산보다 먼저 고르도록 관측기·재생기에 연결했다. 큰 비목표 성분이 작은 목표를 밀어내는 합성 재현을 추가했고, 원래 점·기존 평가 수·최종 선분 영역 판정·다중 후보 모호성 처리는 유지한다. TF 실패 때 검출 진단을 보존하는 앞선 수정도 유지했다.
