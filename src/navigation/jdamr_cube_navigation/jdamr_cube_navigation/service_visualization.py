@@ -135,7 +135,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--registry', type=Path, required=True)
     parser.add_argument('--annotation', type=Path, required=True)
-    parser.add_argument('--selected', choices=('table_01', 'table_02'), default='table_01')
+    parser.add_argument('--selected', choices=('water_station', 'table_01', 'table_02'),
+                        default='table_01')
     args = parser.parse_args()
     registry = load_registry(args.registry)
     annotation = json.loads(args.annotation.read_text())
