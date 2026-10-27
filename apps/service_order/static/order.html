@@ -11,16 +11,14 @@
       --bg: #ffffff; --bg-2: #f4f9fd; --card: #ffffff; --card-2: #e8f4fc; --line: #dbe7f1;
       --ink: #1f3553; --muted: #5a6b80; --faint: #9aa9ba;
       --accent: #1677c8; --accent-ink: #ffffff; --accent-soft: rgba(22,119,200,.10);
-      --cold: #3a8fd6; --hot: #e8590c; --ok: #2b8a5a; --danger: #d63c3c;
+      --ok: #2b8a5a; --danger: #d63c3c;
       --radius: 18px;
       font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0; min-height: 100vh; display: flex; flex-direction: column; color: var(--ink); font-size: 16px; line-height: 1.5;
-      background: var(--bg);
-      -webkit-tap-highlight-color: transparent;
-    }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; color: var(--ink); font-size: 16px; line-height: 1.5;
+      background: var(--bg); -webkit-tap-highlight-color: transparent; }
     button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
     button:focus-visible { outline: 3px solid rgba(22,119,200,.45); outline-offset: 2px; }
     svg { display: block; }
@@ -30,52 +28,51 @@
     .top { display: flex; align-items: center; justify-content: space-between; gap: 12px;
       padding: 18px clamp(16px, 3vw, 32px); border-bottom: 1px solid var(--line); }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .brand-mark { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
-      background: var(--accent); color: var(--accent-ink); flex: none; }
+    .brand-mark { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); flex: none; }
     .brand-name { margin: 0; font-family: Georgia, "Noto Serif KR", "Batang", serif; font-size: 22px; letter-spacing: .04em; white-space: nowrap; }
     .brand-sub { margin: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .table-pill { flex: none; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 700; font-size: 14px; }
     .table-pill:empty { display: none; }
     .demo-note { margin: 0; padding: 8px clamp(16px, 3vw, 32px); background: #e8f4fc; color: #155a94; font-size: 13px; }
 
-    /* ---------- 메뉴 화면 ---------- */
-    .shop { flex: 1; display: grid; grid-template-columns: 1fr; }
-    .menu { padding: 20px clamp(16px, 3vw, 32px) 140px; min-width: 0; }
-    .tabs { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -4px 20px; padding: 0 4px; }
+    /* ---------- 메뉴 (세로로 이어지는 카테고리 + 따라오는 탭) ---------- */
+    .shop { flex: 1; display: grid; grid-template-columns: 1fr; align-items: start; }
+    .menu { padding: 0 clamp(16px, 3vw, 32px) 150px; min-width: 0; }
+    .tabs { position: sticky; top: 0; z-index: 4; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+      margin: 0 calc(-1 * clamp(16px, 3vw, 32px)); padding: 14px clamp(16px, 3vw, 32px); background: rgba(255,255,255,.96);
+      border-bottom: 1px solid var(--line); backdrop-filter: blur(6px); }
     .tabs::-webkit-scrollbar { display: none; }
     .tab { flex: none; padding: 10px 18px; border-radius: 999px; background: var(--card); color: var(--muted); font-weight: 600; border: 1px solid var(--line); }
     .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
     .tab .dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--ok); vertical-align: middle; }
     .tab[aria-selected="true"] .dot { background: var(--accent-ink); }
+    .sec { padding-top: 22px; scroll-margin-top: 70px; }
+    .sec + .sec { margin-top: 18px; border-top: 1px dashed var(--line); }
     .section-title { margin: 0 0 4px; font-family: Georgia, "Noto Serif KR", serif; font-size: 24px; letter-spacing: .01em; }
-    .section-sub { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+    .section-sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
     .items { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-    .item { position: relative; display: flex; flex-direction: column; text-align: left; padding: 14px; min-width: 0;
-      background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); transition: border-color .15s, transform .15s; }
-    .item .art { height: 120px; margin: -2px -2px 12px; border-radius: 12px; display: grid; place-items: center;
-      background: var(--card-2); }
-    .item .art svg { width: 84px; height: 84px; }
-    .item .name { font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
-    .item .desc { margin-top: 2px; color: var(--muted); font-size: 13px; min-height: 2.6em; }
-    .item .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+    .item { position: relative; display: flex; flex-direction: column; text-align: left; padding: 10px; min-width: 0;
+      background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); transition: border-color .15s, box-shadow .15s; }
+    .item:hover { border-color: #b9d6ee; box-shadow: 0 6px 18px rgba(31,53,83,.06); }
+    .photo { aspect-ratio: 4 / 3; margin-bottom: 10px; border-radius: 12px; overflow: hidden; background: var(--card-2); }
+    .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .item .name { padding: 0 4px; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+    .item .desc { padding: 0 4px; margin-top: 2px; color: var(--muted); font-size: 13px; min-height: 2.6em; }
+    .item .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 0 4px 2px; }
     .item .price { font-weight: 700; color: var(--accent); }
     .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
     .badge.robot { background: rgba(43,138,90,.10); color: var(--ok); }
-    .badge.soon { background: #eef2f7; color: var(--faint); }
-    /* 로봇 서빙 탭: 데모에서 누를 메뉴라 크게 보여 준다 */
-    .items.feature { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .item[data-drink]:hover { border-color: #b9d6ee; box-shadow: 0 6px 18px rgba(31,53,83,.06); }
+    .badge.staff { background: #eef2f7; color: var(--muted); }
     .item[aria-pressed="true"] { border-color: var(--accent); background: linear-gradient(180deg, rgba(22,119,200,.06), var(--card) 60%); }
-    .item[aria-pressed="true"]::after { content: "✓"; position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border-radius: 50%;
-      display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 800; }
-    .item.disabled { cursor: not-allowed; opacity: .6; }
-    .item.disabled .art { filter: grayscale(.35); }
+    .item .count { position: absolute; top: 16px; right: 16px; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 999px;
+      display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 800; font-size: 14px; box-shadow: 0 2px 8px rgba(31,53,83,.25); }
+    .item .count:empty { display: none; }
 
     /* ---------- 주문 패널 ---------- */
     .cart { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
-      background: rgba(255,255,255,.97); border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(31,53,83,.06); backdrop-filter: blur(8px); }
-    .cart-title { display: none; }
+      background: rgba(255,255,255,.97); border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(31,53,83,.06); }
+    .cart-title, .cart-lines { display: none; }
     .cart-tables { margin-bottom: 12px; }
     .cart-tables h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
     .table-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -85,35 +82,45 @@
     .cart-sel { flex: 1; min-width: 0; }
     .cart-sel .what { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cart-sel .hint { color: var(--muted); font-size: 13px; }
+    .lines { list-style: none; margin: 0; padding: 0; }
+    .line { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .line .ln { font-weight: 700; min-width: 0; }
+    .line .ln small { display: block; color: var(--muted); font-weight: 500; font-size: 12px; }
+    .line .lp { font-weight: 700; text-align: right; }
+    .qty { display: inline-flex; align-items: center; gap: 6px; }
+    .qty button { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); font-weight: 800; color: var(--accent); }
+    .qty span { min-width: 18px; text-align: center; font-weight: 700; }
     .primary { padding: 16px 22px; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 17px; font-weight: 800; white-space: nowrap; }
     .primary:disabled { background: #e3ebf3; color: #9aa9ba; cursor: not-allowed; }
     .ghost { padding: 14px 18px; border-radius: 14px; border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
     .error { margin: 8px 0 0; color: var(--danger); font-size: 14px; }
     .error:empty { display: none; }
 
+    /* Netlify 무료 배포는 오른쪽 아래에 "Powered by Netlify" 배지(약 184x48)를 덮어씌운다. 데모에서는 주문 버튼을 그 위로 올린다. */
+    body.demo .cart { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
     @media (min-width: 900px) {
-      .shop { grid-template-columns: minmax(0, 1fr) 340px; }
-      .items { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-      .items.feature { grid-template-columns: repeat(2, minmax(0, 300px)); gap: 20px; }
-      .items.feature .art { height: 200px; }
-      .items.feature .art svg { width: 130px; height: 130px; }
-      .items.feature .name { font-size: 22px; }
-      .menu { padding-bottom: 40px; }
-      .cart { position: static; display: flex; flex-direction: column;
-        padding: 24px; border-top: 0; border-left: 1px solid var(--line); background: var(--bg-2); }
+      .shop { grid-template-columns: minmax(0, 1fr) 360px; }
+      .items { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+      .menu { padding-bottom: 60px; }
+      .cart { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+        padding: 24px; border-top: 0; border-left: 1px solid var(--line); background: var(--bg-2); box-shadow: none; }
       .cart-title { display: block; margin: 0 0 18px; font-family: Georgia, "Noto Serif KR", serif; font-size: 22px; }
-      .cart-row { flex-direction: column; align-items: stretch; margin-top: auto; }
-      .cart-sel { padding: 16px; border-radius: 14px; background: var(--card); border: 1px dashed var(--line); }
+      .cart-lines { display: block; flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 12px; }
+      .cart-lines:empty::before { content: "담은 메뉴가 없어요"; color: var(--faint); font-size: 14px; }
+      .cart-row { flex-direction: column; align-items: stretch; }
+      .cart-sel { padding: 14px 16px; border-radius: 14px; background: var(--card); border: 1px dashed var(--line); }
       .cart-sel .what { font-size: 18px; white-space: normal; }
       .primary { width: 100%; padding: 18px; font-size: 19px; }
+      body.demo .cart { padding-bottom: 72px; }
     }
 
     /* ---------- 확인 창 ---------- */
     .modal { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; background: rgba(31,53,83,.45); }
-    .sheet { width: min(420px, 100%); padding: 26px 22px 20px; border-radius: 22px; background: var(--bg); border: 1px solid var(--line); text-align: center; box-shadow: 0 20px 50px rgba(31,53,83,.18); }
-    .sheet .art { width: 96px; height: 96px; margin: 0 auto 10px; }
-    .sheet h2 { margin: 0; font-size: 22px; }
-    .sheet p { margin: 6px 0 20px; color: var(--muted); }
+    .sheet { width: min(440px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 24px 22px 20px; border-radius: 22px;
+      background: var(--bg); border: 1px solid var(--line); box-shadow: 0 20px 50px rgba(31,53,83,.18); }
+    .sheet h2 { margin: 0; font-size: 22px; text-align: center; }
+    .sheet > p { margin: 6px 0 14px; color: var(--muted); text-align: center; }
+    .sheet .total { display: flex; justify-content: space-between; margin: 12px 0 18px; font-size: 18px; font-weight: 800; }
     .sheet .row { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
 
     /* ---------- 진행 화면 ---------- */
@@ -121,7 +128,7 @@
     .ticket { display: inline-flex; flex-direction: column; align-items: center; padding: 14px 28px; margin-bottom: 26px;
       border: 1px dashed var(--accent); border-radius: 16px; background: var(--bg-2); }
     .ticket .label { color: var(--muted); font-size: 13px; }
-    .ticket .no { font-family: Georgia, "Noto Serif KR", serif; font-size: 40px; line-height: 1.1; letter-spacing: .08em; color: var(--accent); }
+    .ticket .no { font-size: 36px; font-weight: 800; line-height: 1.15; letter-spacing: .08em; font-variant-numeric: tabular-nums; color: var(--accent); }
     .ticket .what { margin-top: 2px; font-weight: 600; }
     .hero { width: 120px; height: 120px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; background: var(--card-2); border: 1px solid var(--line); }
     .hero svg { width: 72px; height: 72px; }
@@ -141,9 +148,14 @@
     .steps li.done::after, .steps li.now::after { background: var(--ok); }
     .steps li.now { color: var(--accent); }
     .steps li.now::before { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 5px var(--accent-soft); }
-    .actions { display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%); margin: 30px auto 0; }
+    .receipt { width: min(420px, 100%); margin: 28px auto 0; padding: 14px 18px; text-align: left; border: 1px solid var(--line); border-radius: 16px; background: var(--bg-2); }
+    .receipt h3 { margin: 0 0 4px; font-size: 14px; color: var(--muted); }
+    .receipt .total { display: flex; justify-content: space-between; padding-top: 10px; font-weight: 800; }
+    .staff-note { margin: 10px 0 0; font-size: 14px; color: var(--muted); }
+    .staff-note.served { color: var(--ok); font-weight: 700; }
+    .actions { display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%); margin: 26px auto 0; }
     .offline { margin: 14px 0 0; color: var(--danger); font-size: 14px; }
-    @media (max-width: 420px) { .steps li { font-size: 11px; } .ticket .no { font-size: 34px; } }
+    @media (max-width: 420px) { .steps li { font-size: 11px; } .ticket .no { font-size: 30px; } .items { gap: 10px; } .item .name { font-size: 15px; } }
   </style>
 </head>
 <body>
@@ -154,7 +166,7 @@
     </div>
     <div style="min-width:0">
       <p class="brand-name">MS RESTAURANT</p>
-      <p class="brand-sub">서빙 로봇이 물을 따라 테이블까지 가져다드립니다</p>
+      <p class="brand-sub">서빙 로봇이 음료를 따라 테이블까지 가져다드립니다</p>
     </div>
   </div>
   <span class="table-pill" id="table-label"></span>
@@ -164,9 +176,7 @@
 <div id="order-view" class="shop">
   <main class="menu">
     <nav class="tabs" id="tabs" role="tablist" aria-label="메뉴 분류"></nav>
-    <h1 class="section-title" id="section-title"></h1>
-    <p class="section-sub" id="section-sub"></p>
-    <div class="items" id="items"></div>
+    <div id="sections"></div>
   </main>
 
   <aside class="cart" aria-label="주문 내역">
@@ -175,10 +185,11 @@
       <h3>테이블을 선택해 주세요</h3>
       <div class="table-grid" id="tables"></div>
     </section>
+    <ul class="lines cart-lines" id="cart-lines"></ul>
     <div class="cart-row">
       <div class="cart-sel">
         <div class="what" id="cart-what">메뉴를 골라 주세요</div>
-        <div class="hint" id="cart-hint">로봇은 한 번에 한 잔씩 서빙해요</div>
+        <div class="hint" id="cart-hint">로봇은 한 번에 음료 한 잔을 서빙해요</div>
       </div>
       <button type="button" class="primary" id="submit" disabled>주문하기</button>
     </div>
@@ -188,9 +199,10 @@
 
 <div class="modal" id="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
   <div class="sheet">
-    <div class="art" id="confirm-art"></div>
-    <h2 id="confirm-title"></h2>
+    <h2 id="confirm-title">주문을 확인해 주세요</h2>
     <p id="confirm-sub"></p>
+    <ul class="lines" id="confirm-lines"></ul>
+    <div class="total"><span>합계</span><span id="confirm-total"></span></div>
     <div class="row">
       <button type="button" class="ghost" id="confirm-cancel">돌아가기</button>
       <button type="button" class="primary" id="confirm-ok">주문 확정</button>
@@ -210,24 +222,19 @@
     <p class="status-sub" id="status-sub"></p>
     <ol class="steps" id="steps"></ol>
   </div>
+  <div class="receipt" id="receipt" hidden>
+    <h3>주문 내역</h3>
+    <ul class="lines" id="track-lines"></ul>
+    <div class="total"><span>합계</span><span id="track-total"></span></div>
+    <p class="staff-note" id="staff-note" hidden></p>
+  </div>
   <div class="actions">
     <button type="button" class="ghost" id="cancel" hidden>주문 취소</button>
     <button type="button" class="primary" id="again" hidden>새로 주문하기</button>
   </div>
   <p class="offline" id="offline" hidden>서버와 연결이 끊겼어요. 다시 연결하는 중…</p>
-  <p class="section-sub" style="margin-top:22px" id="track-id"></p>
 </div>
-<!-- 메뉴·진행 그림. order.js 가 복제해 쓴다(innerHTML 미사용). -->
-<template id="art-cold"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 12h32l-4 42a4 4 0 0 1-4 4H24a4 4 0 0 1-4-4z" stroke="#3a7fb8" stroke-width="2.5"/><path d="M19 26h26l-2.7 28a3 3 0 0 1-3 2.7H24.7a3 3 0 0 1-3-2.7z" fill="#7cc4ef" fill-opacity=".5"/><rect x="24" y="30" width="8" height="8" rx="1.5" transform="rotate(-12 28 34)" fill="#ffffff" stroke="#9fcbea" stroke-width="1.2"/><rect x="33" y="36" width="8" height="8" rx="1.5" transform="rotate(10 37 40)" fill="#ffffff" stroke="#9fcbea" stroke-width="1.2"/><path d="M22 18v6" stroke="#3a7fb8" stroke-width="2" stroke-opacity=".5"/></svg></template>
-<template id="art-hot"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 26h30v18a12 12 0 0 1-12 12h-6a12 12 0 0 1-12-12z" stroke="#b9653a" stroke-width="2.5"/><path d="M16 32h26v12a10 10 0 0 1-10 10h-6a10 10 0 0 1-10-10z" fill="#f6c9a8" fill-opacity=".45"/><path d="M44 30h4a6 6 0 0 1 0 12h-4" stroke="#b9653a" stroke-width="2.5"/><path d="M22 8c-3 4 3 6 0 10M30 6c-3 4 3 6 0 10M38 8c-3 4 3 6 0 10" stroke="#e8590c" stroke-width="2.2"/></svg></template>
-<template id="art-bowl"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 30h48a24 24 0 0 1-48 0z" stroke="#7a5a3a" stroke-width="2.5"/><path d="M12 30c2-8 10-12 20-12s18 4 20 12" fill="#f3e3c3" stroke="#c9a46a" stroke-width="2"/><path d="M20 24c3-3 7-3 10 0M34 22c3-3 7-3 10 1" stroke="#b5452a" stroke-width="2.5"/><circle cx="28" cy="26" r="2" fill="#4f9a4a"/><circle cx="40" cy="27" r="2" fill="#4f9a4a"/><path d="M24 54h16" stroke="#7a5a3a" stroke-width="2.5"/></svg></template>
-<template id="art-pasta"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="32" cy="40" rx="26" ry="12" stroke="#7a6a5a" stroke-width="2.5"/><path d="M16 38c4-10 28-10 32 0" fill="#f6e2a8" stroke="#d8b25a" stroke-width="2"/><path d="M20 36c4-4 8 2 12-2s8 2 12-2" stroke="#d8b25a" stroke-width="2"/><circle cx="28" cy="33" r="2" fill="#c0392b"/><circle cx="37" cy="34" r="2" fill="#4f9a4a"/><path d="M44 8l-8 26M50 10l-10 24" stroke="#8a8a8a" stroke-width="2.5"/></svg></template>
-<template id="art-steak"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="32" cy="40" rx="27" ry="14" stroke="#7a6a5a" stroke-width="2.5"/><path d="M18 36c0-8 10-12 18-10s12 6 10 12-10 8-18 6-10-4-10-8z" fill="#a8553a" stroke="#7d3a24" stroke-width="2"/><path d="M24 34l10 4M28 30l10 4" stroke="#e7b08c" stroke-width="1.8"/><circle cx="48" cy="42" r="3.5" fill="#4f9a4a"/><circle cx="44" cy="46" r="2.5" fill="#e0a43a"/></svg></template>
-<template id="art-salad"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 32h48a24 24 0 0 1-48 0z" stroke="#4a7a4a" stroke-width="2.5"/><path d="M14 32c-2-8 6-12 10-8 2-6 10-8 14-2 4-4 12-2 12 6 2 0 2 2 2 4" fill="#bfe3a5" stroke="#4f9a4a" stroke-width="2"/><circle cx="26" cy="28" r="3" fill="#e05a4f"/><circle cx="40" cy="27" r="3" fill="#e05a4f"/><path d="M24 54h16" stroke="#4a7a4a" stroke-width="2.5"/></svg></template>
-<template id="art-fries"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 28l-2-18M26 28l-1-20M32 28V6M38 28l1-20M44 28l2-18" stroke="#e7b84a" stroke-width="4"/><path d="M16 28h32l-4 28H20z" fill="#e8590c" stroke="#b9440a" stroke-width="2.5"/><path d="M24 40h16" stroke="#ffffff" stroke-width="2.5"/></svg></template>
-<template id="art-lemon"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 14h28l-3 42a3 3 0 0 1-3 3H24a3 3 0 0 1-3-3z" stroke="#8a7a4a" stroke-width="2.5"/><path d="M20 24h24l-2.3 31H22.3z" fill="#f2d16b" fill-opacity=".55"/><path d="M14 18a8 8 0 0 1 16 0z" fill="#f2d16b" stroke="#c9a42a" stroke-width="1.5"/><path d="M22 18v-7" stroke="#8a7a4a" stroke-width="1.5"/></svg></template>
-<template id="art-soda"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10h24l-3 46a3 3 0 0 1-3 3H26a3 3 0 0 1-3-3z" stroke="#6b5f55" stroke-width="2.5"/><path d="M21.7 26h20.6l-1.9 29H23.6z" fill="#7a4a2e" fill-opacity=".75"/><circle cx="28" cy="34" r="1.5" fill="#fff" fill-opacity=".7"/><circle cx="35" cy="42" r="1.5" fill="#fff" fill-opacity=".7"/><circle cx="31" cy="48" r="1.2" fill="#fff" fill-opacity=".6"/><path d="M36 4l-4 24" stroke="#e05a4f" stroke-width="2.5"/></svg></template>
-<template id="art-sparkling"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10h24l-3 46a3 3 0 0 1-3 3H26a3 3 0 0 1-3-3z" stroke="#4a7f9a" stroke-width="2.5"/><path d="M21.7 22h20.6l-2.2 33H23.9z" fill="#cdeaf5" fill-opacity=".8"/><circle cx="28" cy="32" r="1.6" stroke="#4a9fc2" stroke-width="1.2"/><circle cx="35" cy="40" r="1.6" stroke="#4a9fc2" stroke-width="1.2"/><circle cx="30" cy="47" r="1.3" stroke="#4a9fc2" stroke-width="1.2"/><path d="M38 14a5 5 0 0 1 6 6" stroke="#7cb342" stroke-width="2.5"/></svg></template>
+<!-- 진행 그림. order.js 가 복제해 쓴다(innerHTML 미사용). 메뉴 사진은 /menu/<이름>.jpg (AI 생성). -->
 <template id="art-receipt"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8h28v48l-5-3-5 3-4-3-4 3-5-3-5 3z" stroke="#1677c8" stroke-width="2.5"/><path d="M25 20h14M25 28h14M25 36h8" stroke="#1677c8" stroke-width="2.5"/></svg></template>
 <template id="art-robot"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="14" y="20" width="36" height="26" rx="6" stroke="#1677c8" stroke-width="2.5"/><circle cx="25" cy="33" r="3.5" fill="#1677c8"/><circle cx="39" cy="33" r="3.5" fill="#1677c8"/><path d="M32 20v-8M28 10h8M14 33H8M56 33h-6" stroke="#1677c8" stroke-width="2.5"/><circle cx="22" cy="52" r="4" stroke="#1677c8" stroke-width="2.5"/><circle cx="42" cy="52" r="4" stroke="#1677c8" stroke-width="2.5"/></svg></template>
 <template id="art-pour"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 18l14-8 8 8-14 8z" stroke="#1677c8" stroke-width="2.5"/><path d="M28 22c2 6 4 10 4 14" stroke="#3a8fd6" stroke-width="2.5"/><path d="M22 36h22l-3 20a3 3 0 0 1-3 2.5H28a3 3 0 0 1-3-2.5z" stroke="#1677c8" stroke-width="2.5"/><path d="M24 44h18l-1.6 11H25.6z" fill="#7cc4ef" fill-opacity=".6"/></svg></template>

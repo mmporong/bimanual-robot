@@ -33,12 +33,12 @@
   const PHASES = ["NAVIGATE_KITCHEN", "ALIGN_KITCHEN", "GRASP_CUP", "GRASP_BOTTLE", "POUR", "RETURN_BOTTLE",
     "PLACE_DECK", "NAVIGATE_TABLE", "ALIGN_TABLE", "REGRASP_CUP", "SERVE"];
   const TABLES = ["table_1", "table_2", "table_3", "table_4"];
-  const DRINKS = ["COLD_WATER", "HOT_WATER"];
+  const DRINKS = ["COLD_WATER", "HOT_WATER", "LEMONADE", "COLA"];
   const now = () => new Date().toISOString();
 
   function fresh() {
     return { phase: "IDLE_AT_DOCK", phase_attempt: 0, active_order_id: null, current_location: "dock",
-      battery_percent: 100, orders: [], events: [], auto_paused: false, sequence: 0, event_sequence: 0, last_tick: Date.now() };
+      battery_percent: 100, orders: [], tickets: [], events: [], auto_paused: false, sequence: 0, event_sequence: 0, last_tick: Date.now() };
   }
   // 손님·관제 탭이 같은 상태를 동시에 고치므로, 읽기-수정-쓰기를 IndexedDB 트랜잭션 하나로 묶어
   // 탭 사이 쓰기가 서로 덮어쓰지 않게 한다. IndexedDB 를 못 쓰면 이 탭 메모리에만 둔다.
@@ -156,6 +156,7 @@
       current_location: s.current_location, battery_percent: s.battery_percent,
       queue: queued(s).map((o) => o.order_id), orders: s.orders, events: s.events,
       auto_paused: s.auto_paused,
+      tickets: s.tickets,
       restaurant: { tables: TABLES.map((id) => ({ id })) },
       execution_backend: { mode: "browser_demo", hardware_accessed: false },
     };
@@ -166,24 +167,74 @@
     return withState((s) => handle(s, path, payload));
   }
 
+  // 서버와 같은 주문 번호: YYMMDD + 일련번호 3자리.
+  function nextOrderNo(s) {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    const prefix = `${String(d.getFullYear()).slice(2)}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+    // 예전 형식 번호(WEB-…)는 관제 화면에서 그날 비어 있는 가장 작은 번호로 보이므로 새 번호는 그 자리도 건너뛴다.
+    const records = new Map([...s.orders, ...s.tickets].map((o) => [o.order_id, o.created_at]));
+    const used = new Set();
+    let legacy = 0;
+    for (const [id, created] of records) {
+      if (/^\d{9}$/.test(id)) { if (id.startsWith(prefix)) used.add(Number(id.slice(6))); }
+      else if (created) {
+        const c = new Date(created);
+        if (`${String(c.getFullYear()).slice(2)}${p(c.getMonth() + 1)}${p(c.getDate())}` === prefix) legacy += 1;
+      }
+    }
+    let slot = 0;
+    while (legacy) { slot += 1; if (!used.has(slot)) legacy -= 1; }
+    return `${prefix}${String(Math.max(slot, ...used) + 1).padStart(3, "0")}`;
+  }
+
+  function submit(s, payload) {
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    if (payload.client_ref) {
+      const ticket = s.tickets.find((t) => t.client_ref === payload.client_ref);
+      if (ticket) return { order: s.orders.find((o) => o.order_id === ticket.order_id) || null, ticket };
+    }
+    if (!TABLES.includes(payload.table_id) || (payload.drink == null && !items.length)
+      || (payload.drink != null && !DRINKS.includes(payload.drink))) throw new ApiError("invalid order", 400);
+    const orderId = payload.order_id || nextOrderNo(s);
+    let order = s.orders.find((o) => o.order_id === orderId) || null;
+    if (payload.drink != null && !order) {
+      s.sequence += 1;
+      order = { order_id: orderId, table_id: payload.table_id, drink: payload.drink, created_at: now(),
+        priority: 0, sequence: s.sequence, state: "QUEUED", mission_id: null, failure: null, completed_at: null };
+      s.orders.push(order);
+      record(s, "ORDER_QUEUED", { order_id: order.order_id, table_id: order.table_id, drink: order.drink });
+      if (!s.active_order_id) { startNext(s); s.last_tick = Date.now(); }
+    }
+    let ticket = s.tickets.find((t) => t.order_id === orderId) || null;
+    if (!ticket && (items.length || payload.client_ref || payload.drink == null)) {
+      ticket = { order_id: orderId, table_id: payload.table_id, drink: payload.drink ?? null, items,
+        total: items.reduce((sum, i) => sum + i.qty * i.price, 0),
+        staff_state: items.some((i) => !i.robot) ? "PREPARING" : null,
+        created_at: now(), served_at: null, client_ref: payload.client_ref || null };
+      s.tickets.push(ticket);
+      s.tickets = s.tickets.slice(-100);
+    }
+    return { order, ticket };
+  }
+
   function handle(s, path, payload) {
+    s.tickets = s.tickets || [];
     tick(s);
     let result;
     const cancel = path.match(/^\/api\/orders\/([^/]+)\/cancel$/);
+    const served = path.match(/^\/api\/tickets\/([^/]+)\/served$/);
     if (path === "/api/state") {
       result = snapshot(s);
     } else if (path === "/api/orders") {
-      if (!TABLES.includes(payload.table_id) || !DRINKS.includes(payload.drink)) throw new ApiError("invalid order", 400);
-      let order = s.orders.find((o) => o.order_id === payload.order_id);
-      if (!order) {
-        s.sequence += 1;
-        order = { order_id: payload.order_id, table_id: payload.table_id, drink: payload.drink, created_at: now(),
-          priority: 0, sequence: s.sequence, state: "QUEUED", mission_id: null, failure: null, completed_at: null };
-        s.orders.push(order);
-        record(s, "ORDER_QUEUED", { order_id: order.order_id, table_id: order.table_id, drink: order.drink });
-        if (!s.active_order_id) { startNext(s); s.last_tick = Date.now(); }
-      }
-      result = { order };
+      result = submit(s, payload);
+    } else if (served) {
+      const ticket = s.tickets.find((t) => t.order_id === decodeURIComponent(served[1]));
+      if (!ticket) throw new ApiError("unknown order", 404);
+      if (!ticket.staff_state) throw new ApiError("no staff items", 400);
+      ticket.staff_state = "SERVED";
+      ticket.served_at = now();
+      result = { ticket };
     } else if (cancel) {
       const order = s.orders.find((o) => o.order_id === decodeURIComponent(cancel[1]));
       if (!order) throw new ApiError("unknown order", 404);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -40,6 +41,65 @@ STATIC_FILES = {
     "/config.js": (CONFIG_JS, "text/javascript"),
 }
 ORDER_PATH = re.compile(r"^/api/orders/([A-Za-z0-9._:-]{1,64})/cancel$")
+TICKET_PATH = re.compile(r"^/api/tickets/([A-Za-z0-9._:-]{1,64})/served$")
+# 메뉴 사진(static/menu/*.jpg)과 관제 지도(static/map/*.png|json)
+ASSET_PATH = re.compile(r"^/(menu|map)/([a-z0-9_]{1,40})\.(jpg|png|json)$")
+ASSET_TYPES = {"jpg": "image/jpeg", "png": "image/png", "json": "application/json; charset=utf-8"}
+CLIENT_REF_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+ORDER_NO_DIGITS = 3  # 주문 번호 = YYMMDD + 일련번호 3자리 (예: 261027001)
+
+
+class RobotPoseFeed:
+    """Polls the Pi navigation dashboard (ammr_dashboard /api/state) for the live map pose.
+
+    The dashboard listens on the Pi loopback only, so reach it through an SSH tunnel:
+    `ssh -N -L 8090:127.0.0.1:8090 lim@<pi>` (or pass --robot-ssh to let this server open it).
+    """
+
+    def __init__(self, url: str, interval_s: float = 1.0, ssh_target: str | None = None) -> None:
+        self.url = url
+        self.interval_s = interval_s
+        self.ssh_target = ssh_target
+        self.pose: dict = {"live": False, "error": "not polled yet"}
+        self._stop = threading.Event()
+        self._tunnel = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        if self.ssh_target:
+            import subprocess
+
+            port = urlparse(self.url).port or 8090
+            self._tunnel = subprocess.Popen(
+                ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=8",
+                 "-L", f"{port}:127.0.0.1:8090", self.ssh_target],
+                stdin=subprocess.DEVNULL,
+            )
+        self._thread.start()
+
+    def _run(self) -> None:
+        import time
+        import urllib.request
+
+        while not self._stop.is_set():
+            try:
+                with urllib.request.urlopen(self.url, timeout=2.0) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                loc = (data.get("navigation") or {}).get("localization") or {}
+                if not all(isinstance(loc.get(k), (int, float)) for k in ("x_m", "y_m", "yaw_deg")):
+                    raise ValueError("dashboard has no map pose yet")
+                self.pose = {
+                    "live": bool(loc.get("live", True)), "x_m": loc["x_m"], "y_m": loc["y_m"], "yaw_deg": loc["yaw_deg"],
+                    "frame_id": loc.get("frame_id", "map"), "age_s": loc.get("age_s"), "received_at": time.time(),
+                }
+            except Exception as exc:  # noqa: BLE001 - 위치는 보조 정보다. 실패해도 주문 처리는 계속한다.
+                self.pose = {"live": False, "error": str(exc)[:160], "last": self.pose if self.pose.get("x_m") is not None else self.pose.get("last")}
+            self._stop.wait(self.interval_s)
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._tunnel is not None:
+            self._tunnel.terminate()
 
 
 class BackendBusyError(RuntimeError):
@@ -86,7 +146,71 @@ class ServiceApplication:
         self.execution_lock = threading.Lock()
         self.last_backend_result: dict | None = None
         self.auto_paused = False
+        # 주문표: 주문 번호별 메뉴 줄(로봇 음료 + 직원이 가져다주는 음식). 로봇 미션은 음료만 맡는다.
+        self.tickets: dict[str, dict] = self._load_tickets()
+        self.pose_feed: RobotPoseFeed | None = None
         self._persist()
+
+    def _load_tickets(self) -> dict[str, dict]:
+        path = self.state_dir / "tickets.json" if self.state_dir is not None else None
+        if path is None or not path.exists():
+            return {}
+        try:
+            return {ticket["order_id"]: ticket for ticket in json.loads(path.read_text(encoding="utf-8"))}
+        except (ValueError, KeyError, TypeError):
+            return {}
+
+    def _persist_tickets(self) -> None:
+        if self.state_dir is None:
+            return
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        temporary = self.state_dir / "tickets.json.tmp"
+        temporary.write_text(json.dumps(list(self.tickets.values()), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(self.state_dir / "tickets.json")
+
+    def _next_order_no(self) -> str:
+        """Next YYMMDDNNN for today.
+
+        Orders from before the 9-digit format (WEB-..., STAFF-...) are shown on /control with the lowest
+        free numbers of their day (control.js `buildDisplayNumbers`), so a new number also skips those slots.
+        """
+        prefix = datetime.now().strftime("%y%m%d")
+        used: set[int] = set()
+        legacy = 0
+        records = [*((o.order_id, o.created_at) for o in self.controller.orders.values()),
+                   *((t["order_id"], t.get("created_at")) for t in self.tickets.values())]
+        for order_id, created_at in dict(records).items():
+            if re.fullmatch(r"\d{9}", order_id):
+                if order_id.startswith(prefix):
+                    used.add(int(order_id[6:]))
+            elif created_at and datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone().strftime("%y%m%d") == prefix:
+                legacy += 1
+        slot = 0
+        while legacy:
+            slot += 1
+            if slot not in used:
+                legacy -= 1
+        return f"{prefix}{max([slot, *used]) + 1:0{ORDER_NO_DIGITS}d}"
+
+    @staticmethod
+    def _validate_items(raw: Any) -> list[dict]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list) or len(raw) > 20:
+            raise ValueError("items must be a list of at most 20 menu lines")
+        items = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError("each item must be an object")
+            name, qty, price = item.get("name"), item.get("qty", 1), item.get("price", 0)
+            if not isinstance(name, str) or not 0 < len(name) <= 40:
+                raise ValueError("item name must be 1-40 characters")
+            if isinstance(qty, bool) or not isinstance(qty, int) or not 1 <= qty <= 20:
+                raise ValueError("item qty must be an integer from 1 to 20")
+            if isinstance(price, bool) or not isinstance(price, int) or not 0 <= price <= 1_000_000:
+                raise ValueError("item price must be an integer from 0 to 1000000")
+            items.append({"name": name, "qty": qty, "price": price, "robot": bool(item.get("robot", False))})
+        return items
 
     def _persist(self, command: dict | None = None) -> None:
         if self.state_dir is None:
@@ -124,6 +248,8 @@ class ServiceApplication:
             snapshot['simulator_accessed'] = snapshot['execution_backend'].get('simulator_accessed', False)
             snapshot["last_backend_result"] = self.last_backend_result
             snapshot["auto_paused"] = self.auto_paused
+            snapshot["tickets"] = list(self.tickets.values())
+            snapshot["robot_pose"] = self.pose_feed.pose if self.pose_feed is not None else None
             return snapshot
 
     def set_auto_paused(self, paused: bool) -> dict:
@@ -158,13 +284,73 @@ class ServiceApplication:
             return self.store.order_history(limit) if kind == "orders" else self.store.event_history(limit)
 
     def submit(self, payload: dict) -> tuple[dict, bool]:
+        """Accept an order. Without order_id the server assigns the next YYMMDDNNN number.
+
+        `drink` (optional) goes to the robot mission; `items` (optional) are the menu lines for the
+        ticket, food included, which staff serve.  `client_ref` makes a resend idempotent.
+        """
         with self.lock:
-            validate_order = getattr(self.backend, "validate_order", None)
-            if validate_order is not None:
-                validate_order(payload, existing_order_ids=set(self.controller.orders))
-            order, created = self.controller.submit(payload)
+            if not isinstance(payload, dict):
+                raise ValueError("order payload must be an object")
+            client_ref = payload.get("client_ref")
+            if client_ref is not None and (not isinstance(client_ref, str) or not CLIENT_REF_PATTERN.fullmatch(client_ref)):
+                raise ValueError("client_ref must be 1-64 safe identifier characters")
+            if client_ref is not None:
+                for ticket in self.tickets.values():
+                    if ticket.get("client_ref") == client_ref:
+                        order = self.controller.orders.get(ticket["order_id"])
+                        return {"order": order.__dict__ if order else None, "ticket": ticket,
+                                "state": self.controller.snapshot()}, False
+            items = self._validate_items(payload.get("items"))
+            drink = payload.get("drink")
+            if drink is None and not items:
+                raise ValueError("an order needs a drink or menu items")
+            if payload.get("table_id") not in self.controller.table_ids:
+                raise ValueError("unknown table_id")
+            mission_payload = {k: v for k, v in payload.items() if k not in {"items", "client_ref"}}
+            if "order_id" not in mission_payload:
+                mission_payload["order_id"] = self._next_order_no()
+            order, created = None, True
+            if drink is not None:
+                validate_order = getattr(self.backend, "validate_order", None)
+                if validate_order is not None:
+                    validate_order(mission_payload, existing_order_ids=set(self.controller.orders))
+                order, created = self.controller.submit(mission_payload)
+            elif mission_payload["order_id"] in self.tickets:
+                return {"order": None, "ticket": self.tickets[mission_payload["order_id"]],
+                        "state": self.controller.snapshot()}, False
+            ticket = self.tickets.get(mission_payload["order_id"])
+            if created and (items or client_ref or drink is None):
+                staff_items = [item for item in items if not item["robot"]]
+                ticket = {
+                    "order_id": mission_payload["order_id"],
+                    "table_id": mission_payload["table_id"],
+                    "drink": drink,
+                    "items": items,
+                    "total": sum(item["qty"] * item["price"] for item in items),
+                    "staff_state": "PREPARING" if staff_items else None,
+                    "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "served_at": None,
+                    "client_ref": client_ref,
+                }
+                self.tickets[ticket["order_id"]] = ticket
+                self._persist_tickets()
             self._persist()
-            return {"order": order.__dict__, "state": self.controller.snapshot()}, created
+            return {"order": order.__dict__ if order else None, "ticket": ticket,
+                    "state": self.controller.snapshot()}, created
+
+    def mark_served(self, order_id: str) -> dict:
+        """Staff brought the food lines of a ticket to the table."""
+        with self.lock:
+            ticket = self.tickets.get(order_id)
+            if ticket is None:
+                raise KeyError(order_id)
+            if ticket["staff_state"] is None:
+                raise ValueError("this order has no staff-served items")
+            ticket["staff_state"] = "SERVED"
+            ticket["served_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+            self._persist_tickets()
+            return {"ticket": ticket}
 
     def cancel(self, order_id: str) -> dict:
         with self.lock:
@@ -262,6 +448,8 @@ class ServiceApplication:
             self.execution_lock.release()
 
     def close(self) -> None:
+        if self.pose_feed is not None:
+            self.pose_feed.close()
         self.backend.close()
         if self.store is not None:
             self.store.close()
@@ -348,6 +536,16 @@ def handler_factory(app: ServiceApplication, cors_origin: str | None = None) -> 
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            asset = ASSET_PATH.fullmatch(path)
+            if asset and (INDEX.parent / asset.group(1) / f"{asset.group(2)}.{asset.group(3)}").is_file():
+                body = (INDEX.parent / asset.group(1) / f"{asset.group(2)}.{asset.group(3)}").read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", ASSET_TYPES[asset.group(3)])
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "max-age=3600")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if path == "/favicon.ico":
                 self.send_response(HTTPStatus.NO_CONTENT)
                 self.end_headers()
@@ -392,6 +590,10 @@ def handler_factory(app: ServiceApplication, cors_origin: str | None = None) -> 
                 match = ORDER_PATH.fullmatch(path)
                 if match:
                     self._json(HTTPStatus.OK, app.cancel(match.group(1)))
+                    return
+                match = TICKET_PATH.fullmatch(path)
+                if match:
+                    self._json(HTTPStatus.OK, app.mark_served(match.group(1)))
                     return
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             except KeyError as exc:
@@ -448,6 +650,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="allow this origin (e.g. https://<site>.netlify.app) to call the API from a separately hosted page",
     )
     parser.add_argument(
+        "--robot-pose-url",
+        help="live map pose source for /control: the Pi navigation dashboard state, e.g. http://127.0.0.1:8090/api/state",
+    )
+    parser.add_argument(
+        "--robot-ssh",
+        help="open an SSH tunnel to this Pi (e.g. lim@192.168.0.159) for --robot-pose-url; needs key login",
+    )
+    parser.add_argument(
         "--executor-socket",
         type=Path,
         help="required Unix socket for ros2-planned-roundtrip",
@@ -495,6 +705,10 @@ def main(argv: list[str] | None = None) -> int:
         args.state_dir,
         backend,
     )
+    if args.robot_pose_url:
+        app.pose_feed = RobotPoseFeed(args.robot_pose_url, ssh_target=args.robot_ssh)
+        app.pose_feed.start()
+        print(f"robot pose: {args.robot_pose_url}" + (f" via ssh {args.robot_ssh}" if args.robot_ssh else ""), flush=True)
     server = ThreadingHTTPServer((args.host, args.port), handler_factory(app, args.cors_origin))
     stop = threading.Event()
     worker = threading.Thread(target=auto_step, args=(app, args.auto_step_s, stop), daemon=True)

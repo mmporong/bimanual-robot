@@ -17,6 +17,8 @@ cd /d "%~dp0..\.."
 
 start "manip-service" "%PY%" tools\rollout\rollout_service.py --pour.policy="%POUR%" --place.policy="%PLACE%" --end.tol=15 --policy.device=cuda --robot.type=bi_so_follower --robot.id=arms --robot.calibration_dir=calibration\bi_follower --robot.left_arm_config.port=%LEFT_PORT% --robot.left_arm_config.gripper_protection=true --robot.left_arm_config.disable_torque_on_disconnect=false --robot.left_arm_config.max_relative_target=20 --robot.left_arm_config.cameras="{ wrist: {type: opencv, index_or_path: {left}, width: 640, height: 480, fps: 30} }" --robot.right_arm_config.port=%RIGHT_PORT% --robot.right_arm_config.disable_torque_on_disconnect=false --robot.right_arm_config.max_relative_target=20 --robot.right_arm_config.cameras="{ wrist: {type: opencv, index_or_path: {right}, width: 640, height: 480, fps: 30} }" --robot.cameras="{ top: {type: opencv, index_or_path: {depth}, width: 640, height: 480, fps: 30, mirror: true} }"
 
+REM Live robot position on the /control map (needs SSH key login to the Pi and its navigation dashboard running):
+REM   add  --robot-pose-url http://127.0.0.1:8090/api/state --robot-ssh lim@192.168.0.159
 start "order-server" "%PY%" -m apps.service_order.service_order_server --host 0.0.0.0 --port 8765 --backend rollout-service --auto-step-s 0.5
 
 timeout /t 3 /nobreak >nul

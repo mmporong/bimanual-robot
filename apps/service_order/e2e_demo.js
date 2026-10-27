@@ -1,4 +1,4 @@
-// 배포된 데모 화면 E2E 확인: 손님 메뉴 -> 주문 확인 창 -> 관제 표시 -> 일시정지/한 단계 진행 -> 대리 주문·취소 -> 완료 -> 손님 취소.
+// 배포된 데모 화면 E2E 확인: 손님 메뉴(스크롤 탭) -> 주문 확인 창 -> 관제 표시 -> 일시정지/한 단계 진행 -> 대리 주문·취소 -> 완료 -> 손님 취소 -> 음식 주문·직원 서빙.
 // 준비: 빈 폴더에서 `npm i puppeteer-core@23.11.1` 후 이 파일을 복사해 실행한다(Edge 사용, Windows 경로).
 // 실행: node e2e_demo.js [사이트 주소] [스크린샷 폴더]
 const os = require("os");
@@ -24,14 +24,19 @@ const ok = (cond, msg) => { console.log(`${cond ? "PASS" : "FAIL"} ${msg}`); if 
   ok(await guest.$eval("#submit", (b) => b.disabled), "주문 버튼은 음료 선택 전 비활성");
   ok((await text(guest, "#table-label")) === "3번 테이블", "QR 테이블 번호 표시");
   ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "375px 가로 넘침 없음");
-  ok((await guest.$$(".item.disabled")).length === 0 && (await guest.$$("[data-drink]")).length === 2, "첫 화면은 로봇 서빙 메뉴 2개");
+  ok((await guest.$$("[data-item]")).length === 11 && (await guest.$$("[data-drink]")).length === 4, "메뉴 11개 모두 주문 가능, 로봇 서빙 음료 4개");
   await guest.screenshot({ path: `${OUT}/0_guest_menu.png` });
+  await guest.evaluate(() => document.getElementById("sec-side").scrollIntoView({ block: "start" }));
+  await sleep(1500); // 부드러운 스크롤이 끝날 때까지
+  ok((await guest.$eval('[data-tab="side"]', (b) => b.getAttribute("aria-selected"))) === "true", "스크롤하면 탭이 사이드로 바뀜");
+  await guest.click('[data-tab="robot"]');
+  await sleep(1500);
   await guest.click('[data-drink="COLD_WATER"]');
   await guest.click("#submit");
   await guest.waitForSelector("#confirm:not([hidden])");
   await guest.click("#confirm-ok");
   await guest.waitForSelector("#track-view:not([hidden])");
-  ok(guest.url().includes("order=WEB-"), `주소에 주문 번호 기록 (${guest.url().split("?")[1]})`);
+  ok(/order=\d{9}(&|$)/.test(guest.url()), `주소에 9자리 주문 번호 기록 (${guest.url().split("?")[1]})`);
   await guest.screenshot({ path: `${OUT}/1_guest_tracking.png` });
 
   const control = await browser.newPage();
@@ -95,5 +100,26 @@ const ok = (cond, msg) => { console.log(`${cond ? "PASS" : "FAIL"} ${msg}`); if 
   const history = await text(control, "#history");
   ok(history.includes("완료") && history.includes("취소"), "관제 최근 주문에 완료·취소 기록");
   await control.screenshot({ path: `${OUT}/4_control_history.png`, fullPage: true });
+
+  // 음식만 주문 -> 직원 서빙 목록 -> 서빙 완료 -> 손님 화면 완료
+  await guest.bringToFront();
+  await guest.click("#again");
+  await guest.click('[data-item="steak"]');
+  await guest.click('[data-item="steak"]');
+  ok((await text(guest, "#cart-what")) === "2개 · 48,000원", "음식 수량·합계 표시");
+  await guest.click("#submit");
+  await guest.waitForSelector("#confirm:not([hidden])");
+  await guest.click("#confirm-ok");
+  await guest.waitForSelector("#track-view:not([hidden])");
+  await sleep(1200);
+  ok((await text(guest, "#status-title")) === "주문이 접수됐어요", "음식 주문 접수 표시");
+  await control.bringToFront();
+  await sleep(1500);
+  const staffButtons = await control.$$("#staff tr button");
+  ok(staffButtons.length === 1, "관제 직원 서빙 목록에 음식 주문");
+  if (staffButtons.length) await staffButtons[0].click();
+  await guest.bringToFront();
+  await sleep(2000);
+  ok((await text(guest, "#status-title")) === "음식이 나왔어요", "직원 서빙 완료가 손님 화면에 반영");
   await browser.close();
 })().catch((e) => { console.error(e); process.exit(1); });

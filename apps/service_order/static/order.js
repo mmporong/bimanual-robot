@@ -1,47 +1,41 @@
 "use strict";
 
 // 손님용 주문 화면(식당 키오스크). 주문 API(/api/orders)와 상태 API(/api/state)만 사용한다.
-// 로봇이 실제로 서빙할 수 있는 메뉴는 냉수·온수뿐이다. 나머지는 매장 분위기용으로 "준비 중"으로 보여 주고 누를 수 없다.
-const DRINKS = { COLD_WATER: "냉수", HOT_WATER: "온수" };
+// 로봇 서빙 칸의 음료는 로봇이 컵에 따라 가져다주고(주문 1건에 1잔), 식사·사이드는 직원이 가져다준다.
+// 주문 번호(YYMMDDNNN)는 서버가 정한다. client_ref 로 같은 주문을 다시 보내도 한 번만 접수된다.
 
-// 64x64 그림은 order.html 의 <template id="art-이름"> 에 있다.
-const artOf = (name) => document.getElementById(`art-${name}`).content.cloneNode(true);
-
-// 매장 메뉴. drink 가 있는 것만 실제 주문(로봇 서빙)이 된다.
+// 메뉴 사진은 /menu/<photo>.jpg (AI 생성 이미지).
 const MENU = [
-  { id: "robot", tab: "로봇 서빙", live: true, title: "로봇 서빙", sub: "양팔 로봇이 직접 컵에 물을 따라 테이블까지 가져다드려요.",
+  { id: "robot", tab: "로봇 서빙", live: true, title: "로봇 서빙 · 음료",
+    sub: "양팔 로봇이 컵에 따라 테이블까지 가져다드려요. 로봇은 한 번에 음료 한 잔을 서빙해요.",
     items: [
-      { drink: "COLD_WATER", name: "얼음 냉수", desc: "시원한 물 한 잔", price: "무료", art: "cold" },
-      { drink: "HOT_WATER", name: "따뜻한 온수", desc: "따뜻한 물 한 잔", price: "무료", art: "hot" },
+      { id: "COLD_WATER", drink: "COLD_WATER", name: "얼음 냉수", desc: "시원한 물 한 잔", price: 0, photo: "cold_water" },
+      { id: "HOT_WATER", drink: "HOT_WATER", name: "따뜻한 온수", desc: "따뜻한 물 한 잔", price: 0, photo: "hot_water" },
+      { id: "LEMONADE", drink: "LEMONADE", name: "수제 레몬에이드", desc: "레몬청, 탄산수, 민트", price: 6000, photo: "lemonade" },
+      { id: "COLA", drink: "COLA", name: "콜라", desc: "얼음 가득", price: 3000, photo: "cola" },
     ] },
-  { id: "main", tab: "식사", title: "식사", sub: "서빙 로봇이 곧 배울 메뉴예요.",
+  { id: "main", tab: "식사", title: "식사", sub: "주방에서 만들어 직원이 테이블로 가져다드려요.",
     items: [
-      { name: "소고기 덮밥", desc: "간장 불고기, 반숙 계란", price: "11,000원", art: "bowl" },
-      { name: "크림 파스타", desc: "베이컨, 버섯, 파르메산", price: "13,000원", art: "pasta" },
-      { name: "안심 스테이크", desc: "구운 채소, 매시드 포테이토", price: "24,000원", art: "steak" },
-      { name: "해물 리조또", desc: "새우, 홍합, 토마토 소스", price: "14,000원", art: "bowl" },
+      { id: "beef_bowl", name: "소고기 덮밥", desc: "간장 불고기, 반숙 계란", price: 11000, photo: "beef_bowl" },
+      { id: "cream_pasta", name: "크림 파스타", desc: "베이컨, 버섯, 파르메산", price: 13000, photo: "cream_pasta" },
+      { id: "steak", name: "안심 스테이크", desc: "구운 채소, 매시드 포테이토", price: 24000, photo: "steak" },
+      { id: "risotto", name: "해물 리조또", desc: "새우, 홍합, 토마토 소스", price: 14000, photo: "risotto" },
     ] },
-  { id: "side", tab: "사이드", title: "사이드", sub: "서빙 로봇이 곧 배울 메뉴예요.",
+  { id: "side", tab: "사이드", title: "사이드", sub: "식사와 함께 직원이 가져다드려요.",
     items: [
-      { name: "시저 샐러드", desc: "로메인, 크루통, 시저 드레싱", price: "8,000원", art: "salad" },
-      { name: "감자튀김", desc: "트러플 소금", price: "5,000원", art: "fries" },
-      { name: "리코타 샐러드", desc: "제철 과일, 발사믹", price: "9,000원", art: "salad" },
-    ] },
-  { id: "drink", tab: "음료", title: "음료", sub: "서빙 로봇이 곧 배울 메뉴예요.",
-    items: [
-      { name: "수제 레몬에이드", desc: "레몬청, 탄산수", price: "6,000원", art: "lemon" },
-      { name: "콜라", desc: "얼음 가득", price: "3,000원", art: "soda" },
-      { name: "탄산수", desc: "라임 한 조각", price: "3,000원", art: "sparkling" },
+      { id: "caesar_salad", name: "시저 샐러드", desc: "로메인, 크루통, 시저 드레싱", price: 8000, photo: "caesar_salad" },
+      { id: "fries", name: "감자튀김", desc: "트러플 소금", price: 5000, photo: "fries" },
+      { id: "ricotta_salad", name: "리코타 샐러드", desc: "제철 과일, 발사믹", price: 9000, photo: "ricotta_salad" },
     ] },
 ];
-const ART_BY_DRINK = { COLD_WATER: "cold", HOT_WATER: "hot" };
-const NAME_BY_DRINK = { COLD_WATER: "얼음 냉수", HOT_WATER: "따뜻한 온수" };
+const ITEM_BY_ID = new Map(MENU.flatMap((s) => s.items.map((item) => [item.id, item])));
+const NAME_BY_DRINK = Object.fromEntries(MENU[0].items.map((item) => [item.drink, item.name]));
 
 const STEPS = [
   { label: "주문 접수", title: "주문이 접수됐어요", sub: "로봇이 곧 출발합니다.", art: "receipt" },
   { label: "주방 이동", title: "로봇이 주방으로 가고 있어요", sub: "잠시만 기다려 주세요.", art: "robot" },
-  { label: "따르기", title: "물을 따르고 있어요", sub: "양팔 로봇이 컵에 물을 담는 중입니다.", art: "pour" },
-  { label: "테이블 이동", title: "테이블로 가고 있어요", sub: "물을 싣고 이동 중입니다.", art: "robot" },
+  { label: "따르기", title: "음료를 따르고 있어요", sub: "양팔 로봇이 컵에 음료를 담는 중입니다.", art: "pour" },
+  { label: "테이블 이동", title: "테이블로 가고 있어요", sub: "음료를 싣고 이동 중입니다.", art: "robot" },
   { label: "서빙", title: "곧 도착해요", sub: "로봇이 컵을 테이블 위에 놓습니다. 컵에 손대지 말아 주세요.", art: "pour" },
 ];
 const STEP_BY_PHASE = {
@@ -53,11 +47,12 @@ const STEP_BY_PHASE = {
 const STORAGE_KEY = "bimanual-robot.order";
 
 const $ = (id) => document.getElementById(id);
+const artOf = (name) => document.getElementById(`art-${name}`).content.cloneNode(true);
+const won = (n) => (n === 0 ? "무료" : `${n.toLocaleString("ko-KR")}원`);
 const params = new URLSearchParams(location.search);
 const fixedTable = normalizeTable(params.get("table"));
 let selectedTable = fixedTable;
-let selectedDrink = null;
-let activeTab = MENU[0].id;
+const cart = new Map(); // 메뉴 id -> 수량. 로봇 음료는 최대 1개(1잔).
 const linkedOrder = params.get("order");
 let currentOrder = linkedOrder ? { order_id: linkedOrder } : loadSaved();
 let pollTimer = null;
@@ -68,8 +63,6 @@ function normalizeTable(value) {
   return /^table_\d+$/.test(id) ? id : null;
 }
 function tableName(id) { return `${id.replace("table_", "")}번 테이블`; }
-// 주문 번호 끝의 임의 4자리를 영수증 번호처럼 크게 보여 준다.
-function ticketNo(orderId) { return (orderId.split("-").pop() || orderId).slice(-4).toUpperCase(); }
 
 function loadSaved() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { return null; }
@@ -89,73 +82,164 @@ function setOrderParam(orderId) {
   history.replaceState(null, "", url);
 }
 
-function newOrderId() {
-  const now = new Date();
-  const p = (n) => String(n).padStart(2, "0");
-  const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
-  return `WEB-${stamp}-${Math.random().toString(36).slice(2, 6)}`;
+const api = (path, options) => window.orderApi(path, options);
+
+// ---------- 장바구니 ----------
+function cartLines() {
+  return [...cart].map(([id, qty]) => {
+    const item = ITEM_BY_ID.get(id);
+    return { id, item, qty, amount: item.price * qty };
+  });
+}
+const cartTotal = () => cartLines().reduce((sum, line) => sum + line.amount, 0);
+const robotDrink = () => cartLines().find((line) => line.item.drink)?.item.drink || null;
+
+function addItem(id) {
+  const item = ITEM_BY_ID.get(id);
+  if (item.drink) {
+    // 로봇은 한 번에 한 잔: 다른 음료를 고르면 바꾸고, 같은 음료를 다시 누르면 뺀다.
+    const had = cart.has(id);
+    for (const key of [...cart.keys()]) if (ITEM_BY_ID.get(key).drink) cart.delete(key);
+    if (!had) cart.set(id, 1);
+  } else {
+    cart.set(id, Math.min((cart.get(id) || 0) + 1, 20));
+  }
+  refreshForm();
+}
+function changeQty(id, delta) {
+  const next = (cart.get(id) || 0) + delta;
+  if (next <= 0) cart.delete(id);
+  else cart.set(id, Math.min(next, ITEM_BY_ID.get(id).drink ? 1 : 20));
+  refreshForm();
 }
 
-const api = (path, options) => window.orderApi(path, options);
+function lineEl(line, editable) {
+  const li = document.createElement("li");
+  li.className = "line";
+  const name = document.createElement("div");
+  name.className = "ln";
+  name.textContent = line.item.name;
+  const sub = document.createElement("small");
+  sub.textContent = line.item.drink ? "로봇 서빙" : "직원 서빙";
+  name.append(sub);
+  const price = document.createElement("div");
+  price.className = "lp";
+  price.textContent = won(line.amount);
+  li.append(name, price);
+  const qty = document.createElement("div");
+  if (editable) {
+    qty.className = "qty";
+    const minus = document.createElement("button");
+    minus.type = "button";
+    minus.textContent = "−";
+    minus.setAttribute("aria-label", `${line.item.name} 빼기`);
+    minus.addEventListener("click", () => changeQty(line.id, -1));
+    const count = document.createElement("span");
+    count.textContent = String(line.qty);
+    const plus = document.createElement("button");
+    plus.type = "button";
+    plus.textContent = "+";
+    plus.setAttribute("aria-label", `${line.item.name} 더하기`);
+    plus.disabled = Boolean(line.item.drink);
+    plus.addEventListener("click", () => changeQty(line.id, 1));
+    qty.append(minus, count, plus);
+    li.append(qty);
+  } else {
+    name.firstChild.textContent = `${line.item.name} × ${line.qty}`;
+  }
+  return li;
+}
 
 // ---------- 메뉴 화면 ----------
 function renderTabs() {
-  $("tabs").replaceChildren(...MENU.map((section) => {
+  $("tabs").replaceChildren(...MENU.map((section, i) => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "tab";
+    b.dataset.tab = section.id;
     b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", String(section.id === activeTab));
+    b.setAttribute("aria-selected", String(i === 0));
     if (section.live) {
       const dot = document.createElement("span");
       dot.className = "dot";
       b.append(dot);
     }
     b.append(section.tab);
-    b.addEventListener("click", () => { activeTab = section.id; renderTabs(); renderItems(); });
+    b.addEventListener("click", () => {
+      setActiveTab(section.id);
+      $(`sec-${section.id}`).scrollIntoView({ behavior: "smooth", block: "start" });
+    });
     return b;
   }));
 }
 
-function renderItems() {
-  const section = MENU.find((s) => s.id === activeTab);
-  $("section-title").textContent = section.title;
-  $("section-sub").textContent = section.sub;
-  $("items").classList.toggle("feature", Boolean(section.live));
-  $("items").replaceChildren(...section.items.map((item) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "item";
-    const art = document.createElement("div");
-    art.className = "art";
-    art.append(artOf(item.art));
-    const name = document.createElement("div");
-    name.className = "name";
-    name.textContent = item.name;
-    const desc = document.createElement("div");
-    desc.className = "desc";
-    desc.textContent = item.desc;
-    const foot = document.createElement("div");
-    foot.className = "foot";
-    const price = document.createElement("span");
-    price.className = "price";
-    price.textContent = item.price;
-    const badge = document.createElement("span");
-    badge.className = `badge ${item.drink ? "robot" : "soon"}`;
-    badge.textContent = item.drink ? "로봇 서빙" : "준비 중";
-    foot.append(price, badge);
-    b.append(art, name, desc, foot);
-    if (item.drink) {
-      b.dataset.drink = item.drink;
-      b.addEventListener("click", () => { selectedDrink = item.drink; refreshForm(); });
-    } else {
-      b.classList.add("disabled");
-      b.disabled = true;
-      b.setAttribute("aria-label", `${item.name} (준비 중)`);
-    }
-    return b;
+function setActiveTab(id) {
+  document.querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === id)));
+}
+
+// 스크롤 위치에 따라 탭을 맞춘다: 탭 줄 바로 아래를 지난 마지막 칸이 현재 칸이다.
+function syncTabToScroll() {
+  if ($("order-view").hidden) return;
+  const line = $("tabs").getBoundingClientRect().bottom + 12;
+  let current = MENU[0].id;
+  for (const section of MENU) if ($(`sec-${section.id}`).getBoundingClientRect().top <= line) current = section.id;
+  if (window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) current = MENU[MENU.length - 1].id;
+  setActiveTab(current);
+}
+
+function renderSections() {
+  $("sections").replaceChildren(...MENU.map((section) => {
+    const sec = document.createElement("section");
+    sec.className = "sec";
+    sec.id = `sec-${section.id}`;
+    const title = document.createElement("h2");
+    title.className = "section-title";
+    title.textContent = section.title;
+    const sub = document.createElement("p");
+    sub.className = "section-sub";
+    sub.textContent = section.sub;
+    const grid = document.createElement("div");
+    grid.className = "items";
+    grid.append(...section.items.map(itemCard));
+    sec.append(title, sub, grid);
+    return sec;
   }));
-  refreshForm();
+}
+
+function itemCard(item) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "item";
+  b.dataset.item = item.id;
+  if (item.drink) b.dataset.drink = item.drink;
+  const photo = document.createElement("div");
+  photo.className = "photo";
+  const img = document.createElement("img");
+  img.src = `/menu/${item.photo}.jpg`;
+  img.alt = item.name;
+  img.loading = "lazy";
+  img.addEventListener("error", () => img.remove());
+  photo.append(img);
+  const count = document.createElement("span");
+  count.className = "count";
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = item.name;
+  const desc = document.createElement("div");
+  desc.className = "desc";
+  desc.textContent = item.desc;
+  const foot = document.createElement("div");
+  foot.className = "foot";
+  const price = document.createElement("span");
+  price.className = "price";
+  price.textContent = won(item.price);
+  const badge = document.createElement("span");
+  badge.className = `badge ${item.drink ? "robot" : "staff"}`;
+  badge.textContent = item.drink ? "로봇 서빙" : "직원 서빙";
+  foot.append(price, badge);
+  b.append(photo, count, name, desc, foot);
+  b.addEventListener("click", () => addItem(item.id));
+  return b;
 }
 
 function renderTables(tables) {
@@ -174,17 +258,25 @@ function renderTables(tables) {
 
 function refreshForm() {
   document.querySelectorAll("[data-table]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.table === selectedTable)));
-  document.querySelectorAll("[data-drink]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.drink === selectedDrink)));
+  document.querySelectorAll("[data-item]").forEach((b) => {
+    const qty = cart.get(b.dataset.item) || 0;
+    b.setAttribute("aria-pressed", String(qty > 0));
+    b.querySelector(".count").textContent = qty ? (ITEM_BY_ID.get(b.dataset.item).drink ? "✓" : String(qty)) : "";
+  });
   $("table-label").textContent = selectedTable ? tableName(selectedTable) : "";
-  $("cart-what").textContent = selectedDrink ? `${NAME_BY_DRINK[selectedDrink]} 1잔 · 무료` : "메뉴를 골라 주세요";
-  $("cart-hint").textContent = !selectedTable ? "테이블을 먼저 골라 주세요" : "로봇은 한 번에 한 잔씩 서빙해요";
-  $("submit").disabled = !(selectedTable && selectedDrink);
+  const lines = cartLines();
+  $("cart-lines").replaceChildren(...lines.map((line) => lineEl(line, true)));
+  const count = lines.reduce((n, line) => n + line.qty, 0);
+  $("cart-what").textContent = count ? `${count}개 · ${won(cartTotal())}` : "메뉴를 골라 주세요";
+  $("cart-hint").textContent = !selectedTable ? "테이블을 먼저 골라 주세요"
+    : robotDrink() ? `${NAME_BY_DRINK[robotDrink()]}는 로봇이 가져다드려요` : "로봇은 한 번에 음료 한 잔을 서빙해요";
+  $("submit").disabled = !(selectedTable && count);
 }
 
 function openConfirm() {
-  $("confirm-art").replaceChildren(artOf(ART_BY_DRINK[selectedDrink]));
-  $("confirm-title").textContent = `${NAME_BY_DRINK[selectedDrink]} 1잔`;
-  $("confirm-sub").textContent = `${tableName(selectedTable)}로 로봇이 가져다드려요.`;
+  $("confirm-sub").textContent = `${tableName(selectedTable)}로 가져다드려요.`;
+  $("confirm-lines").replaceChildren(...cartLines().map((line) => lineEl(line, false)));
+  $("confirm-total").textContent = won(cartTotal());
   $("confirm").hidden = false;
   $("confirm-ok").focus();
 }
@@ -194,13 +286,17 @@ async function submitOrder() {
   button.disabled = true;
   button.textContent = "주문 보내는 중…";
   $("order-error").textContent = "";
-  const order = { order_id: newOrderId(), table_id: selectedTable, drink: selectedDrink };
+  const items = cartLines().map((line) => ({ name: line.item.name, qty: line.qty, price: line.item.price, robot: Boolean(line.item.drink) }));
+  const payload = { client_ref: `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, table_id: selectedTable, items };
+  if (robotDrink()) payload.drink = robotDrink();
   try {
-    await api("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(order) });
-    currentOrder = order;
-    save(order);
-    setOrderParam(order.order_id);
+    const result = await api("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const orderId = result.ticket ? result.ticket.order_id : result.order.order_id;
+    currentOrder = { order_id: orderId, table_id: selectedTable, drink: payload.drink || null, items, total: cartTotal() };
+    save(currentOrder);
+    setOrderParam(currentOrder.order_id);
     $("confirm").hidden = true;
+    cart.clear();
     showTracking();
   } catch (error) {
     $("confirm").hidden = true;
@@ -218,17 +314,18 @@ function showOrderForm() {
   save(null);
   setOrderParam(null);
   clearInterval(pollTimer);
-  selectedDrink = null;
-  activeTab = MENU[0].id;
+  cart.clear();
   $("track-view").hidden = true;
   $("order-view").hidden = false;
-  renderTabs();
-  renderItems();
+  window.scrollTo(0, 0);
+  setActiveTab(MENU[0].id);
+  refreshForm();
 }
 
 function showTracking() {
   $("order-view").hidden = true;
   $("track-view").hidden = false;
+  window.scrollTo(0, 0);
   renderSummary();
   poll();
   clearInterval(pollTimer);
@@ -245,17 +342,32 @@ async function poll() {
   }
 }
 
+function summaryText(order) {
+  const items = order.items || [];
+  if (!items.length) return order.drink ? `${NAME_BY_DRINK[order.drink] || order.drink} 1잔` : "";
+  const rest = items.reduce((n, item) => n + item.qty, 0) - 1;
+  return rest > 0 ? `${items[0].name} 외 ${rest}개` : items[0].name;
+}
+
 function renderSummary() {
   $("table-label").textContent = currentOrder.table_id ? tableName(currentOrder.table_id) : "";
-  $("track-no").textContent = ticketNo(currentOrder.order_id);
-  $("track-drink").textContent = currentOrder.drink ? `${NAME_BY_DRINK[currentOrder.drink] || DRINKS[currentOrder.drink] || currentOrder.drink} 1잔` : "";
-  $("track-id").textContent = `주문 번호 ${currentOrder.order_id}`;
+  $("track-no").textContent = currentOrder.order_id;
+  $("track-drink").textContent = summaryText(currentOrder);
+  const items = currentOrder.items || [];
+  $("receipt").hidden = !items.length;
+  $("track-lines").replaceChildren(...items.map((item) => lineEl(
+    { item: { name: item.name, drink: item.robot }, qty: item.qty, amount: item.qty * item.price }, false)));
+  $("track-total").textContent = won(currentOrder.total ?? items.reduce((s, i) => s + i.qty * i.price, 0));
 }
 
 function renderStatus(state) {
   const order = state.orders.find((o) => o.order_id === currentOrder.order_id);
-  if (order && !currentOrder.table_id) {
-    currentOrder = { order_id: order.order_id, table_id: order.table_id, drink: order.drink };
+  const ticket = (state.tickets || []).find((t) => t.order_id === currentOrder.order_id);
+  if ((order || ticket) && !currentOrder.table_id) {
+    currentOrder = {
+      order_id: currentOrder.order_id, table_id: (ticket || order).table_id, drink: order ? order.drink : null,
+      items: ticket ? ticket.items : [], total: ticket ? ticket.total : 0,
+    };
     save(currentOrder);
     renderSummary();
   }
@@ -263,34 +375,47 @@ function renderStatus(state) {
   card.className = "card";
   $("cancel").hidden = true;
   $("again").hidden = true;
+  $("steps").hidden = false;
 
-  if (!order) {
+  // 직원이 가져다주는 음식 상태
+  const staffPending = Boolean(ticket && ticket.staff_state === "PREPARING");
+  $("staff-note").hidden = !(ticket && ticket.staff_state);
+  $("staff-note").className = `staff-note${staffPending ? "" : " served"}`;
+  $("staff-note").textContent = staffPending ? "음식은 주방에서 준비해 직원이 가져다드려요." : "음식이 테이블에 나왔어요.";
+
+  if (!order && !ticket) {
     setStatus("주문을 찾을 수 없어요", "서버가 초기화되었을 수 있어요. 다시 주문해 주세요.", -1, "fail");
     card.classList.add("fail");
     $("again").hidden = false;
     return;
   }
-  if (order.state === "QUEUED") {
+  let robotDone = true;
+  if (!order) {
+    // 로봇 음료가 없는 주문: 직원 서빙만 있다.
+    $("steps").hidden = true;
+    if (staffPending) setStatus("주문이 접수됐어요", "주방에서 준비해 직원이 테이블로 가져다드려요.", 0, "receipt");
+    else { setStatus("음식이 나왔어요", "맛있게 드세요!", STEPS.length, "done"); card.classList.add("ok"); }
+  } else if (order.state === "QUEUED") {
+    robotDone = false;
     const ahead = state.queue.indexOf(order.order_id) + (state.active_order_id ? 1 : 0);
     setStatus(STEPS[0].title, ahead > 0 ? `앞에 ${ahead}건의 주문이 있어요. 순서대로 준비합니다.` : STEPS[0].sub, 0, STEPS[0].art);
     $("cancel").hidden = false;
   } else if (order.state === "RUNNING") {
+    robotDone = false;
     const step = STEP_BY_PHASE[state.phase] ?? 1;
     setStatus(STEPS[step].title, STEPS[step].sub, step, STEPS[step].art);
   } else if (order.state === "SUCCEEDED") {
-    setStatus("물이 도착했어요", "맛있게 드세요!", STEPS.length, "done");
+    setStatus(order.drink.endsWith("_WATER") ? "물이 도착했어요" : "음료가 도착했어요", "맛있게 드세요!", STEPS.length, "done");
     card.classList.add("ok");
-    $("again").hidden = false;
-    clearInterval(pollTimer);
   } else if (order.state === "CANCELED") {
     setStatus("주문이 취소됐어요", "", -1, "fail");
-    $("again").hidden = false;
-    clearInterval(pollTimer);
   } else {
     setStatus("준비 중 문제가 생겼어요", "직원이 확인 후 직접 가져다드릴게요.", -1, "fail");
     card.classList.add("fail");
+  }
+  if (robotDone) {
     $("again").hidden = false;
-    clearInterval(pollTimer);
+    if (!staffPending) clearInterval(pollTimer);
   }
 }
 
@@ -327,10 +452,13 @@ $("confirm").addEventListener("click", (e) => { if (e.target === $("confirm")) $
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("confirm").hidden = true; });
 $("cancel").addEventListener("click", cancelOrder);
 $("again").addEventListener("click", showOrderForm);
+window.addEventListener("scroll", syncTabToScroll, { passive: true });
 if (fixedTable) $("table-section").hidden = true;
 $("demo-note").hidden = window.orderApiMode !== "demo";
+document.body.classList.toggle("demo", window.orderApiMode === "demo");
 renderTabs();
-renderItems();
+renderSections();
+refreshForm();
 
 api("/api/state")
   .then((state) => {

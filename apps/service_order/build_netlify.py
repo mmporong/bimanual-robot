@@ -21,6 +21,9 @@ def build(out: Path, api_base: str) -> None:
     out.mkdir(parents=True)
     for name in PAGES:
         shutil.copy2(STATIC / name, out / name)
+    for folder in ("menu", "map"):  # 메뉴 사진, 관제 지도
+        if (STATIC / folder).is_dir():
+            shutil.copytree(STATIC / folder, out / folder)
     (out / "config.js").write_text(f"window.ORDER_API_BASE = {json.dumps(api_base)};\n", encoding="utf-8")
     # 루트 주소는 손님 주문 화면으로 보낸다. /order, /control 은 Netlify가 .html 없이 연다.
     (out / "_redirects").write_text("/  /order  302\n", encoding="utf-8")
