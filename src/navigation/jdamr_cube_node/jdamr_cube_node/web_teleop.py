@@ -120,7 +120,8 @@ const held = new Set();
 const clientId = (globalThis.crypto && crypto.randomUUID)
   ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 let sequence = 0;
-let pendingRequest = null;
+const pendingRequests = new Set();
+const MAX_PENDING_COMMANDS = 3;
 let queuedCommand = null;
 let stateRequest = null;
 let latestAck = 0;
@@ -145,13 +146,12 @@ function paint() {
 function dispatchCommand(command) {
   const controller = new AbortController();
   const request = {controller, command, timeoutId:null};
-  pendingRequest = request;
+  pendingRequests.add(request);
   const startedAt = performance.now();
   request.timeoutId = setTimeout(() => {
-    if (pendingRequest !== request) return;
-    pendingRequest = null;
+    if (!pendingRequests.delete(request)) return;
     controller.abort();
-    setSync(false, "명령 응답 지연 · 자동 정지");
+    setSync(false, "명령 응답 지연 · 재전송 중");
     const next = queuedCommand;
     queuedCommand = null;
     if (next) dispatchCommand(next);
@@ -165,6 +165,8 @@ function dispatchCommand(command) {
     signal:controller.signal,
   }).then(async response => {
     const state = await response.json();
+    if (!pendingRequests.has(request)) return;
+    if ((state.accepted_sequence || 0) < latestAck) return;
     if (!response.ok) {
       renderState(state);
       setSync(false, "명령 순서 재동기화 중");
@@ -177,11 +179,10 @@ function dispatchCommand(command) {
     renderState(state);
   }).catch(error => {
     if (error.name !== "AbortError")
-      setSync(false, "명령 응답 지연 · 자동 정지");
+      setSync(false, "명령 응답 지연 · 재전송 중");
   }).finally(() => {
     clearTimeout(request.timeoutId);
-    if (pendingRequest !== request) return;
-    pendingRequest = null;
+    if (!pendingRequests.delete(request)) return;
     const next = queuedCommand;
     queuedCommand = null;
     if (next) dispatchCommand(next);
@@ -189,14 +190,16 @@ function dispatchCommand(command) {
 }
 function send({urgent=false} = {}) {
   const command = {...target(), client_id: clientId, sequence: ++sequence};
-  if (pendingRequest && !urgent) {
+  if (pendingRequests.size >= MAX_PENDING_COMMANDS && !urgent) {
     queuedCommand = command;
     return;
   }
-  if (pendingRequest) {
-    pendingRequest.controller.abort();
-    clearTimeout(pendingRequest.timeoutId);
-    pendingRequest = null;
+  if (urgent) {
+    for (const request of pendingRequests) {
+      request.controller.abort();
+      clearTimeout(request.timeoutId);
+    }
+    pendingRequests.clear();
   }
   queuedCommand = null;
   dispatchCommand(command);
@@ -242,7 +245,7 @@ async function pollState() {
     latestAck = Math.max(latestAck, state.accepted_sequence || 0);
     renderState(state);
   } catch (_) {
-    setSync(false, "파이 연결 끊김 · 자동 정지");
+    setSync(false, "상태 응답 지연 · 재확인 중");
   } finally {
     clearTimeout(timeoutId);
     if (stateRequest === controller) stateRequest = null;
@@ -298,7 +301,7 @@ window.addEventListener("pagehide", () => {
 window.addEventListener("contextmenu", e => e.preventDefault());
 setInterval(() => {
   if (Date.now() - lastReplyAt > 900)
-    setSync(false, "파이 응답 지연 · 자동 정지");
+    setSync(false, "파이 응답 지연 · 연결 확인 중");
 }, 300);
 setInterval(pollState, 250);
 paint(); pollState();
@@ -540,6 +543,9 @@ def main():
     class Handler(BaseHTTPRequestHandler):
         """Serve the controller UI, state and command endpoints."""
 
+        protocol_version = 'HTTP/1.1'
+        disable_nagle_algorithm = True
+
         def log_message(self, *a):        # 접근 로그 소음 차단
             """Suppress per-request access log noise."""
             pass
@@ -599,8 +605,7 @@ def main():
                 self.end_headers()
                 self.wfile.write(body)
             except Exception:
-                self.send_response(400)
-                self.end_headers()
+                self.send_error(400)
 
     srv = ThreadingHTTPServer(('0.0.0.0', node.port), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

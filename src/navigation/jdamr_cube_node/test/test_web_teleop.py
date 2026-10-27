@@ -46,6 +46,11 @@ const document = {{
 const window = {{addEventListener() {{}}}};
 const intervals = [];
 const cmdRequests = [];
+const serverAccepts = [];
+let serverSequence = -1;
+let outboundDelays = [];
+let cmdInFlight = 0;
+let maxCmdInFlight = 0;
 let cmdAborts = 0;
 let commandMode = 'delay';
 let commandDelayMs = 200;
@@ -78,20 +83,34 @@ function fetch(url, options={{}}) {{
   const command = JSON.parse(options.body);
   cmdRequests.push(command);
   const ordinal = cmdRequests.length;
+  cmdInFlight += 1;
+  maxCmdInFlight = Math.max(maxCmdInFlight, cmdInFlight);
   return new Promise((resolve, reject) => {{
+    let settled = false;
+    function finish(action) {{
+      if (settled) return;
+      settled = true;
+      cmdInFlight -= 1;
+      action();
+    }}
     options.signal.addEventListener('abort', () => {{
       cmdAborts += 1;
       const error = new Error('aborted');
       error.name = 'AbortError';
-      reject(error);
+      finish(() => reject(error));
     }}, {{once:true}});
     if (commandMode === 'hang-first' && ordinal === 1) return;
-    setTimeout(() => resolve(reply({{
+    setTimeout(() => {{
+      if (options.signal.aborted || command.sequence <= serverSequence) return;
+      serverSequence = command.sequence;
+      serverAccepts.push({{...command, at:performance.now()}});
+    }}, outboundDelays[ordinal - 1] || 0);
+    setTimeout(() => finish(() => resolve(reply({{
       ...stateBody,
       accepted_sequence: command.sequence,
       linear_x: command.vx,
       angular_z: command.wz,
-    }})), commandDelayMs);
+    }}))), commandDelayMs);
   }});
 }}
 const context = vm.createContext({{
@@ -126,7 +145,7 @@ vm.runInContext({json.dumps(script)}, context);
     assert result.returncode == 0, result.stderr
 
 
-def test_page_keeps_one_command_in_flight_during_200ms_rtt():
+def test_page_does_not_cancel_healthy_commands_during_200ms_rtt():
     """A slow-but-healthy ACK must not be cancelled by 100 ms keepalives."""
     _run_page_scenario("""
       vm.runInContext('press("w")', context);
@@ -138,6 +157,45 @@ def test_page_keeps_one_command_in_flight_during_200ms_rtt():
       await new Promise(resolve => setTimeout(resolve, 310));
       assert.equal(cmdAborts, 0);
       assert.ok(cmdRequests.filter(command => command.vx > 0).length >= 2);
+    """)
+
+
+def test_page_keepalives_reach_server_without_waiting_for_slow_responses():
+    """Delayed replies must not stretch server acceptance past the deadman."""
+    _run_page_scenario("""
+      commandDelayMs = 620;
+      outboundDelays = Array.from({length:30}, (_, i) => i % 2 ? 120 : 20);
+      vm.runInContext('press("w")', context);
+      const keepalive = intervals.find(item => item.ms === 100).fn;
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        keepalive();
+      }
+      vm.runInContext('release("w")', context);
+      await new Promise(resolve => setTimeout(resolve, 140));
+      const moving = serverAccepts.filter(command => command.vx > 0);
+      assert.ok(moving.length >= 6);
+      const gaps = moving.slice(1).map((command, i) => command.at - moving[i].at);
+      assert.ok(Math.max(...gaps) < 350, JSON.stringify(gaps));
+      assert.ok(maxCmdInFlight <= 3);
+      assert.equal(serverAccepts.at(-1).vx, 0);
+    """)
+
+
+def test_page_stop_cancels_all_bounded_pending_motion_requests():
+    """A STOP supersedes every transport slot and drops queued movement."""
+    _run_page_scenario("""
+      commandDelayMs = 1000;
+      vm.runInContext('press("w")', context);
+      const keepalive = intervals.find(item => item.ms === 100).fn;
+      for (let i = 0; i < 8; i++) keepalive();
+      assert.equal(cmdRequests.length, 3);
+      assert.equal(maxCmdInFlight, 3);
+      vm.runInContext('release("w")', context);
+      assert.equal(cmdAborts, 3);
+      assert.equal(cmdRequests.at(-1).vx, 0);
+      await new Promise(resolve => setTimeout(resolve, 330));
+      assert.ok(cmdRequests.slice(3).every(command => command.vx === 0));
     """)
 
 

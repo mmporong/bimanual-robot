@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-27 | 수동 조종 끊김 수정·남은 정지 스캔으로 테이블1 지도 부분 갱신
+
+- 수동 기록 `AMR-20261027-manual-map-recorder`는 SQLite `database is locked`로 약 27.70초 뒤 중단됐다. 남은 scan 259장·odom 1,386개의 이동 적산은 0 m이며 사용자 한 바퀴 주행 기록은 누락됐다. 실행 중 SQLite 조회가 겹친 점은 잠금 발생 가설이며 저장소 예외 자체는 journal로 확인했다. 기존 표준 MCAP 기록으로 전환해 약 40.86초의 scan 396장과 metadata 마감을 확인했고 임시 기록기 두 개는 종료됐다. 이 확인을 누락 주행의 복구로 기록하지 않는다.
+- 사용자가 남은 데이터를 사용하도록 요청해 정지 스캔의 실제 광선과 등록된 테이블1 자세로 관측 셀을 갱신했다. 명시 범위 map x=-0.70~0.65 m, y=-2.65~-0.65 m의 1,080셀 중 230셀만 바뀌었다. 기존 점유→free 82셀은 별도 검토에서도 hit 0회·free 28~259회로 확인했고, 새 점유 21셀·unknown→free 127셀을 반영했다. 범위 밖·미관측 셀, 지도 크기 186×254·해상도 5 cm·origin과 도크·급수대·테이블1 좌표는 유지했다. 원본 지도·pbstream도 보존했다. 포즈 그래프 SLAM 재생이나 테이블 뒤쪽 전체 재측정은 아니다.
+- 새 지도는 `$HOME/jdamr_data/maps/20261026_manual_160135/map_table01_observed.yaml/.pgm`이다. 등록 자료의 지도 바인딩과 도크 기준 스캔의 지도 해시, 런타임·표시 annotation을 같은 지도에 연결했다. PC·Pi 26파일 SHA 대조와 파이 map/mask LoadMap 성공을 확인했고 응답의 실제 occupancy 전체가 파일과 일치했다. 양 costmap도 갱신했다. 원본·등록 자료 복원본은 해당 지도 폴더의 `local_updates/table_01_refresh_20261027_100353/activation_backup_pc/`와 `activation_backup_pi/`에 있다. 처리·활성화 근거와 한글 비교 그림도 같은 갱신 폴더에 보존한다.
+- 수동 조종 `AMR-20261027-webteleop-ack-gap`는 100 ms keepalive가 단일 HTTP ACK 대기에 묶이는 결함을 무이동 재현했다. 당시 PC→Pi 상태 조회 15회 RTT는 129~620 ms·중앙값 약 246 ms였다. 최대 3개 명령을 ACK와 분리해 전송하고 긴급 정지 때 모두 취소하며 역순 명령 거절을 유지했다. HTTP/1.1 지속 연결·TCP_NODELAY와 오류 응답 framing도 반영했다. 기존 300 ms 요청 timeout·350 ms ROS deadman과 충돌 감시는 유지한다. 당시 실물 끊김 각각의 원인을 전송 결함 하나로 확정하지 않는다.
+- 조종 회귀 19개·지도 관측 회귀 8개, 합계 27 PASS와 문법·fatal lint·diff 검사 PASS, 두 변경의 별도 code-reviewer APPROVE를 확인했다. 620 ms 응답 지연과 20/120 ms 편도 지연을 분리한 검사에서 서버 수락 간격·동시 요청 상한·STOP 취소를 확인했다. 파이 source SHA 일치·HTTP/1.1 동일 연결 3회 GET·잘못된 JSON의 400 응답을 확인했다. 서비스 PID 25914와 실제 사용 중인 대시보드를 갱신했다. 실차 연속 수동 주행은 수정 후 아직 하지 않았다. 복원 소스는 Pi `$HOME/jdamr_deploy/webteleop_ack_backup_20261027_101956/`다.
+- 사용자 확인용 PC 표시 5유닛을 유지한다. mapserver PID 1937567, markers 1947814, RViz 1553348, relay 1553335, click 1553355이며 전체 종료는 `python3 "$HOME/bimanual-robot/tools/jdamr/jdamr_depart.py" display-stop`이다. Pi 수동 대시보드는 `sudo systemctl stop jdamr-webteleop.service`로 종료한다. 기록기·임시 진단 노드는 남기지 않았다. 사용자가 도크로 들어 옮기겠다고 했으나 배치 완료는 아직 받지 않아 도크 위치초기화·자동 이동은 하지 않았다. 변경은 작업 브랜치 로컬 커밋만 남기며 push·main 병합은 하지 않는다.
+
 ## 2026-10-27 | 테이블1 라이다 재위치추정·교시 좌표 저장
 
 - 사용자가 로봇을 들어 옮긴 뒤 RViz에는 옮기기 전 위치가 남아 있었다. 정지 라이다 8스캔으로 기존 지도의 전역 후보를 비교했고 모든 스캔에서 같은 후보가 우세했다. 그 후보로 AMCL을 초기화한 뒤 새 6스캔에서도 다른 후보보다 일관되게 잘 맞는 것을 확인했다. 지도 해상도는 5 cm이며 이 비교는 외부 위치 정확도 검증이 아니다.
