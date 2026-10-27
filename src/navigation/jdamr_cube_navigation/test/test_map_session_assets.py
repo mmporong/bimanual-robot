@@ -71,6 +71,25 @@ def _write_fixture(tmp_path):
     }
     (source / 'water_station.yaml').write_text(
         yaml.safe_dump(station, sort_keys=False), encoding='utf-8')
+    table = {
+        'id': 'table_01', 'frame_id': 'map', 'robot_base_frame': 'base_link',
+        'x_m': -0.734910483363684, 'y_m': -1.6068820918282494,
+        'yaw_rad': -0.03841021709958648,
+        'source': 'operator_taught_physical_pose_global_lidar_match_then_tf',
+        'captured_at': '2026-10-27T00:57:14+00:00',
+        'target_front_gap_m': 0.01,
+        'physical_accuracy': 'NOT_EXTERNALLY_MEASURED', 'map': identity,
+        'capture_folder': str(source / 'stations/table_01'),
+        'registration_status': 'CONFIRMED_BY_OPERATOR',
+        'lateral_reference': 'operator_taught_map_pose_without_visual_landmark',
+        'lateral_precision_status': 'NOT_VALIDATED',
+        'object_reference_role': 'none_featureless_table',
+        'operating_registry_activated': False,
+        'pose_receipt': str(source / 'stations/table_01/current_pose_receipt.json'),
+        'pose_receipt_sha256': '1' * 64,
+    }
+    (source / 'table_01.yaml').write_text(
+        yaml.safe_dump(table, sort_keys=False), encoding='utf-8')
     pointer = tmp_path / 'current.json'
     pointer.write_text(json.dumps({
         'directory': str(source), 'map_yaml': str(map_yaml),
@@ -100,7 +119,7 @@ def test_prepares_loadable_runtime_without_mutating_sources(tmp_path):
     assert before == after
     assert result['session_directory'] == str(source)
     assert result['runtime_directory'] == str(tmp_path / 'runtime')
-    assert result['station_ids'] == ['water_station']
+    assert result['station_ids'] == ['water_station', 'table_01']
     assert set(Path(result['output_dir']).iterdir()) == {
         tmp_path / 'runtime/map.yaml', tmp_path / 'runtime/map.pgm',
         tmp_path / 'runtime/refined.pgm', tmp_path / 'runtime/keepout.yaml',
@@ -139,7 +158,8 @@ def test_registry_preserves_taught_poses_and_goal_metadata(tmp_path):
     assert dock['scan_sha256'] == hashlib.sha256(
         (tmp_path / 'capture/dock_scan.json').read_bytes()).hexdigest()
     assert dock['schema']['scan_count'] == 1
-    assert [table['table_id'] for table in registry['tables']] == ['water_station']
+    assert [table['table_id'] for table in registry['tables']] == [
+        'water_station', 'table_01']
     pose = registry['tables'][0]['service_poses'][0]
     assert (pose['x_m'], pose['y_m'], pose['yaw_rad']) == pytest.approx(
         (1.2, -0.3, math.pi / 2))
@@ -149,17 +169,48 @@ def test_registry_preserves_taught_poses_and_goal_metadata(tmp_path):
     assert pose['teaching']['table_gap_m'] is None
     assert pose['target_gap_status'] == 'NOT_VALIDATED'
 
+    table_pose = registry['tables'][1]['service_poses'][0]
+    assert (table_pose['x_m'], table_pose['y_m'], table_pose['yaw_rad']) == pytest.approx(
+        (-0.734910483363684, -1.6068820918282494, -0.03841021709958648))
+    assert table_pose['target_front_gap_m'] == pytest.approx(0.01)
+    assert table_pose['lateral_tolerance_m'] == pytest.approx(0.005)
+    assert table_pose['lateral_precision_status'] == 'NOT_VALIDATED'
+    assert table_pose['registration_status'] == 'CONFIRMED_BY_OPERATOR'
+    assert table_pose['runtime_registry_activated'] is True
+    assert table_pose['source_record_operating_registry_activated'] is False
+    assert table_pose['teaching']['observation']['source_record'][
+        'operating_registry_activated'] is False
+
     destinations = json.loads(Path(result['assets']['destinations']).read_text())
     target = destinations['destinations']['water_station']
     assert target['face_xy'] == pytest.approx([1.2, -0.225])
     assert target['normal_deg'] == pytest.approx(270.0)
     assert target['provenance']['status'] == 'DERIVED_NOT_MEASURED'
     assert target['provenance']['front_extent']['measured_at'] == '2026-09-15'
+    table_target = destinations['destinations']['table_01']
+    table_xyz = (-0.734910483363684, -1.6068820918282494, -0.03841021709958648)
+    assert table_target['face_xy'] == pytest.approx([
+        table_xyz[0] + 0.075 * math.cos(table_xyz[2]),
+        table_xyz[1] + 0.075 * math.sin(table_xyz[2]),
+    ])
+    assert table_target['provenance']['taught_pose_xy_yaw'] == pytest.approx(table_xyz)
+    assert table_target['provenance']['requested_gap_m'] == pytest.approx(0.01)
+    assert table_target['provenance']['status'] == 'DERIVED_NOT_MEASURED'
     profiles = json.loads(Path(result['assets']['station_profiles']).read_text())
     profile = profiles['stations']['water_station']
     assert profile['target_priority'] == 'operator_taught_map_pose_and_heading'
     assert profile['actual_measured_gap_m'] is None
     assert profile['approach_offset_role'] == 'route_observation_only_not_final_parking_gap'
+    assert profile['reference_mode'] == 'rgbd_auxiliary'
+    table_profile = profiles['stations']['table_01']
+    assert table_profile['reference_mode'] == 'map_pose_only'
+    assert table_profile['rgbd_reference'] is None
+    assert table_profile['object_reference_role'] == 'none_featureless_table'
+    assert table_profile['lateral_tolerance_m'] == pytest.approx(0.005)
+    assert table_profile['lateral_precision_status'] == 'NOT_VALIDATED'
+    assert table_profile['actual_measured_gap_m'] is None
+    assert table_profile['runtime_registry_activated'] is True
+    assert table_profile['source_record_operating_registry_activated'] is False
     assert profiles['keepout']['scope'] == 'unknown-only'
     assert profiles['home']['dock_scan']['reference_sha256'] == hashlib.sha256(
         (tmp_path / 'capture/dock_scan_reference.json').read_bytes()).hexdigest()
@@ -201,6 +252,92 @@ def test_repeated_preparation_is_byte_stable_and_preserves_runtime_state(tmp_pat
 def test_rejects_missing_stale_or_invalid_station(tmp_path, mutation, message):
     pointer, geometry, source, _, _, _ = _write_fixture(tmp_path)
     mutation(pointer, source)
+    with pytest.raises(ValueError, match=message):
+        prepare_map_session(pointer, tmp_path / 'runtime', geometry)
+
+
+@pytest.mark.parametrize(('mutation', 'message'), [
+    (lambda source: _rewrite_yaml(
+        source / 'table_01.yaml', lambda value: value['map'].update(image_sha256='0' * 64)),
+     'stale map image_sha256'),
+    (lambda source: _rewrite_yaml(
+        source / 'table_01.yaml', lambda value: value.update(id='table_02')),
+     'ID must match its filename'),
+    (lambda source: _rewrite_yaml(
+        source / 'table_01.yaml', lambda value: value.update(target_front_gap_m=0.03)),
+     'table_01 target front gap must be 0.01 m'),
+])
+def test_rejects_stale_or_invalid_taught_table(tmp_path, mutation, message):
+    pointer, geometry, source, _, _, _ = _write_fixture(tmp_path)
+    mutation(source)
+    with pytest.raises(ValueError, match=message):
+        prepare_map_session(pointer, tmp_path / 'runtime', geometry)
+
+
+def test_keeps_water_only_sessions_backward_compatible(tmp_path):
+    pointer, geometry, source, _, _, _ = _write_fixture(tmp_path)
+    (source / 'table_01.yaml').unlink()
+
+    result = prepare_map_session(pointer, tmp_path / 'runtime', geometry)
+
+    assert result['station_ids'] == ['water_station']
+    registry = load_registry(result['assets']['service_destinations'])
+    assert [table['table_id'] for table in registry['tables']] == ['water_station']
+
+
+def test_ignores_route_files_that_share_the_table_prefix(tmp_path):
+    pointer, geometry, source, _, _, _ = _write_fixture(tmp_path)
+    (source / 'table_01_route.yaml').write_text('waypoints: []\n', encoding='utf-8')
+
+    result = prepare_map_session(pointer, tmp_path / 'runtime', geometry)
+
+    assert result['station_ids'] == ['water_station', 'table_01']
+
+
+def _write_table_02(source):
+    table = yaml.safe_load((source / 'table_01.yaml').read_text(encoding='utf-8'))
+    table.update(id='table_02', x_m=2.0, y_m=3.0, yaw_rad=0.4)
+    (source / 'table_02.yaml').write_text(
+        yaml.safe_dump(table, sort_keys=False), encoding='utf-8')
+
+
+def test_unselected_table_draft_is_not_activated_by_default(tmp_path):
+    pointer, geometry, source, _, _, _ = _write_fixture(tmp_path)
+    _write_table_02(source)
+
+    result = prepare_map_session(pointer, tmp_path / 'runtime', geometry)
+
+    assert result['station_ids'] == ['water_station', 'table_01']
+    registry = load_registry(result['assets']['service_destinations'])
+    assert [table['table_id'] for table in registry['tables']] == [
+        'water_station', 'table_01']
+
+
+def test_pointer_can_select_a_different_explicit_table(tmp_path):
+    pointer, geometry, source, _, _, _ = _write_fixture(tmp_path)
+    _write_table_02(source)
+    _rewrite_json(pointer, lambda value: value.update(enabled_table_ids=['table_02']))
+
+    result = prepare_map_session(pointer, tmp_path / 'runtime', geometry)
+
+    assert result['station_ids'] == ['water_station', 'table_02']
+    registry = load_registry(result['assets']['service_destinations'])
+    pose = registry['tables'][1]['service_poses'][0]
+    assert (pose['x_m'], pose['y_m'], pose['yaw_rad']) == pytest.approx((2.0, 3.0, 0.4))
+
+
+@pytest.mark.parametrize(('enabled_table_ids', 'message'), [
+    ('table_01', 'must be a list'),
+    (['table_01', 'table_01'], 'must not contain duplicates'),
+    (['../table_01'], 'must contain table IDs'),
+    (['table_02'], 'enabled table record is missing'),
+])
+def test_rejects_invalid_or_missing_explicit_table_selection(
+        tmp_path, enabled_table_ids, message):
+    pointer, geometry, _, _, _, _ = _write_fixture(tmp_path)
+    _rewrite_json(
+        pointer, lambda value: value.update(enabled_table_ids=enabled_table_ids))
+
     with pytest.raises(ValueError, match=message):
         prepare_map_session(pointer, tmp_path / 'runtime', geometry)
 

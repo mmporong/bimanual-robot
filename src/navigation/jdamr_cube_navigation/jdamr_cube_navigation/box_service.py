@@ -52,6 +52,7 @@ from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import CameraInfo, Image
+from tf2_ros import TransformException
 import yaml
 
 
@@ -242,6 +243,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.depth_camera_info = None
         self.depth_info_subscription = None
         self.station_reference = None
+        self.station_reference_mode = None
         self.station_reference_profile = None
         self.station_reference_rgb_info = None
         self.station_reference_result = None
@@ -374,6 +376,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 result = {
                     'valid': False,
                     'reason': f'station_reference_runtime:{type(error).__name__}',
+                    'detail': str(error),
                     'stamp_s': stamp_s,
                 }
             with self._station_reference_lock:
@@ -385,7 +388,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 self._station_reference_stop.wait(timeout=remaining_s)
 
     def configure_station_reference(self, profiles_path, table_id):
-        """Load one map-bound taught target and start its bounded RGB worker."""
+        """Select one map-bound target and its available lateral reference."""
         if profiles_path is None:
             return
         document = json.loads(Path(profiles_path).read_text(encoding='utf-8'))
@@ -428,31 +431,101 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             raise ValueError('registered station pose must be finite')
         taught = tuple(float(value) for value in taught)
         rgbd = profile.get('rgbd_reference')
-        if not isinstance(rgbd, dict):
+        mode = profile.get('reference_mode', 'rgbd_auxiliary')
+        if mode not in ('rgbd', 'rgbd_auxiliary', 'map_pose_only'):
+            raise ValueError(f'unsupported station reference mode: {mode}')
+        if mode != 'map_pose_only' and not isinstance(rgbd, dict):
             raise ValueError(f'RGB-D station reference missing: {table_id}')
-        self.station_reference = TaughtStationReference(rgbd)
+        if mode == 'map_pose_only' and rgbd is not None:
+            raise ValueError('map-only station must not carry an RGB-D reference')
+        reference = TaughtStationReference(rgbd) if mode != 'map_pose_only' else None
+        self._station_reference_stop.set()
+        self._station_reference_wake.set()
+        worker = getattr(self, '_station_reference_thread', None)
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=2.0)
+            if worker.is_alive():
+                raise RuntimeError('previous station reference worker did not stop')
+        self._station_reference_thread = None
+        with self._station_reference_lock:
+            self._station_reference_pending = None
+            self.station_reference_result = None
+            self.station_reference_result_received_s = None
+        self.station_reference_goal = None
+        self.station_reference_goal_frozen = False
+        self.station_reference = reference
+        self.station_reference_mode = mode
         self.station_reference_profile = profile
         self.station_reference_taught_map_pose = taught
         self.station_reference_table_id = table_id
-        self.station_reference_info_subscription = self.create_subscription(
-            CameraInfo, '/camera/color/camera_info',
-            self._station_info_callback, qos_profile_sensor_data)
-        self.station_reference_image_subscription = self.create_subscription(
-            Image, '/camera/color/image_raw',
-            self._station_image_callback, qos_profile_sensor_data)
-        self._station_reference_thread = threading.Thread(
-            target=self._station_reference_loop,
-            name='station-rgbd-reference', daemon=True)
-        self._station_reference_thread.start()
+        if mode != 'map_pose_only':
+            if self.station_reference_info_subscription is None:
+                self.station_reference_info_subscription = self.create_subscription(
+                    CameraInfo, '/camera/color/camera_info',
+                    self._station_info_callback, qos_profile_sensor_data)
+            if self.station_reference_image_subscription is None:
+                self.station_reference_image_subscription = self.create_subscription(
+                    Image, '/camera/color/image_raw',
+                    self._station_image_callback, qos_profile_sensor_data)
+            self._station_reference_stop.clear()
+            self._station_reference_wake.clear()
+            self._station_reference_thread = threading.Thread(
+                target=self._station_reference_loop,
+                name='station-rgbd-reference', daemon=True)
+            self._station_reference_thread.start()
         self.emit(
             'station_reference_configured', table_id=table_id,
             target_role='operator_taught_map_pose_and_heading',
+            reference_mode=mode,
             lateral_tolerance_m=0.005,
             lateral_precision_status=LATERAL_PRECISION_STATUS,
             millimeter_accuracy_validated=False)
 
+    def _station_reference_enabled(self):
+        return (getattr(self, 'station_reference', None) is not None
+                or getattr(self, 'station_reference_mode', None) == 'map_pose_only')
+
+    def _map_station_reference(self):
+        """Project the taught map pose into odom using the current localization."""
+        if not self._navigation_ready(require_fresh_amcl=True):
+            return {'valid': False, 'reason': 'map_pose_localization_unavailable'}
+        try:
+            message = self.parking_tf.lookup_transform('odom', 'map', rclpy.time.Time())
+        except TransformException as error:
+            return {'valid': False, 'reason': 'map_pose_tf_lookup_failed',
+                    'detail': str(error)}
+        try:
+            now_s = self.get_clock().now().nanoseconds * 1e-9
+            stamp_s = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+            max_age = self.amcl_freshness_s
+            if (not math.isfinite(stamp_s) or stamp_s <= 0.0
+                    or not -max_age <= now_s - stamp_s <= max_age):
+                raise ValueError('map to odom transform is stale')
+            transform = message.transform
+            translation, rotation = transform.translation, transform.rotation
+            values = (translation.x, translation.y, rotation.x, rotation.y,
+                      rotation.z, rotation.w)
+            if (not all(math.isfinite(value) for value in values)
+                    or sum(value * value for value in values[2:]) < 1e-12):
+                raise ValueError('map to odom transform is invalid')
+            yaw = self._yaw(rotation)
+            x, y, heading = self.station_reference_taught_map_pose
+            cosine, sine = math.cos(yaw), math.sin(yaw)
+            goal = [translation.x + cosine * x - sine * y,
+                    translation.y + sine * x + cosine * y,
+                    math.atan2(math.sin(heading + yaw), math.cos(heading + yaw))]
+        except (AttributeError, TypeError, ValueError, OverflowError) as error:
+            return {'valid': False, 'reason': 'map_pose_transform_invalid',
+                    'detail': str(error)}
+        return {'valid': True, 'reason': 'registered_map_pose_using_amcl',
+                'goal_map': list(self.station_reference_taught_map_pose),
+                'goal_odom': goal, 'stamp_s': now_s,
+                'reference_mode': 'map_pose_only'}
+
     def _fresh_station_reference(self):
         """Return a valid recent estimate; keep invalidity visible to callers."""
+        if getattr(self, 'station_reference_mode', None) == 'map_pose_only':
+            return self._map_station_reference()
         if getattr(self, 'station_reference', None) is None:
             return None
         with self._station_reference_lock:
@@ -485,7 +558,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
 
     def _station_anchor_target(self, target, *, reference_frame='map'):
         """Keep the measured normal/gap and select only the taught tangent."""
-        if getattr(self, 'station_reference', None) is None:
+        if not self._station_reference_enabled():
             return target
         goal, reference = self._station_goal_reference()
         if reference_frame == 'odom':
@@ -498,15 +571,19 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             else:
                 return target
         anchored = anchor_face_to_taught_lateral(target, taught[:2])
-        anchored['rgbd_reference_valid'] = bool(reference and reference.get('valid'))
+        anchored['rgbd_reference_valid'] = bool(
+            reference and reference.get('valid')
+            and getattr(self, 'station_reference_mode', None) != 'map_pose_only')
         anchored['rgbd_reference_reason'] = (
             reference.get('reason') if reference else 'station_reference_not_observed')
+        if getattr(self, 'station_reference_mode', None) == 'map_pose_only':
+            anchored['lateral_reference_mode'] = 'map_pose_only'
         anchored['millimeter_accuracy_validated'] = False
         return anchored
 
     def _station_lateral_status(self):
         """Report only internal lateral evidence; external millimetres stay unvalidated."""
-        if getattr(self, 'station_reference', None) is None:
+        if not self._station_reference_enabled():
             return {}
         goal_reference, reference = self._station_goal_reference()
         status = {
@@ -522,10 +599,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             'internal_lateral_within_tolerance': False,
             'lateral_goal_valid': goal_reference is not None,
             'lateral_goal_basis': (
-                'accepted_rgbd_goal_in_odom' if goal_reference is not None else None),
+                ('registered_map_pose_in_odom'
+                 if getattr(self, 'station_reference_mode', None) == 'map_pose_only'
+                 else 'accepted_rgbd_goal_in_odom') if goal_reference is not None else None),
             'lateral_goal_observation_stamp_s': (
                 goal_reference.get('stamp_s') if goal_reference else None),
         }
+        if reference and reference.get('detail'):
+            status['lateral_reference_detail'] = reference['detail']
         if goal_reference is None or not status['lateral_reference_valid']:
             return status
         try:
@@ -542,6 +623,25 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         status['internal_lateral_error_m'] = error_m
         status['internal_lateral_within_tolerance'] = abs(error_m) <= 0.005
         return status
+
+    def _retry_station_lateral_reference(self, status, motion_revision):
+        """Retry a missing lateral observation briefly while the base remains stopped."""
+        if (not status or status.get('lateral_reference_valid') is True
+                or (getattr(self, 'station_reference', None) is None
+                    and getattr(self, 'station_reference_mode', None) != 'map_pose_only')):
+            return status, False
+        deadline = time.monotonic() + 1.0
+        task_deadline = getattr(self, 'run_deadline_s', None)
+        if task_deadline is not None:
+            deadline = min(deadline, task_deadline)
+        while time.monotonic() < deadline and not self.stop_requested:
+            spin_node(self, timeout_sec=min(0.05, max(0.0, deadline - time.monotonic())))
+            if getattr(self, 'parking_motion_revision', None) != motion_revision:
+                return status, True
+            status = self._station_lateral_status()
+            if status.get('lateral_reference_valid') is True:
+                break
+        return status, False
 
     def destroy_node(self):
         """Stop the station reference worker before destroying ROS entities."""
@@ -1800,6 +1900,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and gaps_confirmed
                 and yaw_error <= allowed_yaw_error_rad)
             lateral_status = self._station_lateral_status()
+            if gap_confirmed and lateral_status:
+                lateral_status, moved = self._retry_station_lateral_reference(
+                    lateral_status, getattr(self, 'parking_motion_revision', None))
+                if self.stop_requested:
+                    self.emit('failed', phase='final_approach', reason='operator_stop')
+                    return False
+                if moved:
+                    self.emit('box_target_discarded', phase='final_approach',
+                              reason='motion_during_station_reference_retry')
+                    continue
             lateral_confirmed = (
                 not lateral_status
                 or (lateral_status.get('lateral_reference_valid') is True
@@ -2198,7 +2308,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
         def station_goal_odom():
-            if getattr(self, 'station_reference', None) is None:
+            if not self._station_reference_enabled():
                 return None, None
             goal, reference = self._station_goal_reference()
             if goal is not None:
@@ -2292,7 +2402,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                             measured, goal_odom[:2])
                         measured['rgbd_reference_valid'] = bool(
                             station_observation
-                            and station_observation.get('valid') is True)
+                            and station_observation.get('valid') is True
+                            and getattr(self, 'station_reference_mode', None)
+                            != 'map_pose_only')
                         measured['rgbd_reference_reason'] = (
                             station_observation.get('reason')
                             if station_observation else 'station_reference_not_observed')
@@ -3023,11 +3135,6 @@ def run_attempt(args, active=None):
             node.operator_heartbeat = args.operator_heartbeat
             node.operator_link_timeout_s = args.operator_link_timeout_s
             node.final_gap_override_m = args.final_gap_m
-            if (args.station_profiles is not None
-                    and not args.home_only and not args.rear_box_only
-                    and args.resume_parked_from_log is None):
-                node.configure_station_reference(
-                    args.station_profiles, args.table_id)
             ok = True
             if getattr(args, 'rear_box_only', False):
                 ok = node.park_rear_box(
@@ -3065,6 +3172,8 @@ def run_attempt(args, active=None):
                 via_done = True
             elif args.resume_parked_from_log is None and args.via_id is not None:
                 # The via stop is a full box visit; its escape starts the table route.
+                if args.station_profiles is not None:
+                    node.configure_station_reference(args.station_profiles, args.via_id)
                 ok = node.visit_observed_box(
                     args.via_route, mount, geometry, args.via_id,
                     args.via_region_xy, args.via_region_radius_m, execute=args.execute,
@@ -3078,6 +3187,8 @@ def run_attempt(args, active=None):
                     node.go_home(execute=True, timeout_s=args.return_timeout_s)
                     return 1
             # A resume applies to the first stop of this run only.
+            if ok and args.station_profiles is not None:
+                node.configure_station_reference(args.station_profiles, args.table_id)
             ok = ok and node.visit_observed_box(
                 args.approach_route, mount, geometry, args.table_id,
                 args.region_xy, args.region_radius_m, execute=args.execute,

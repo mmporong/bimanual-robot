@@ -194,6 +194,7 @@ def _live_parameters(contract):
 
     flatten('', controller)
     costmap = document['local_costmap']['local_costmap']['ros__parameters']
+    smoother = document['velocity_smoother']['ros__parameters']
     footprint = {'footprint': costmap['footprint'],
                  'footprint_padding': float(costmap['footprint_padding']),
                  'robot_base_frame': 'base_footprint'}
@@ -201,7 +202,8 @@ def _live_parameters(contract):
     return {
         'controller_server': flat,
         'velocity_smoother': {'min_velocity': [-speed, 0.0, -0.2],
-                              'max_velocity': [speed, 0.0, 0.2]},
+                              'max_velocity': [speed, 0.0, 0.2],
+                              'max_decel': list(smoother['max_decel'])},
         'global_costmap/global_costmap': dict(footprint),
         'local_costmap/local_costmap': dict(footprint),
     }
@@ -439,6 +441,8 @@ class _World:
         node.compute = _Planner(self)
         node.validate_reverse_path = _PathValidator(self)
         node.parking_parameters = _ParameterClient(self, 'controller_server')
+        node.rear_collision_smoother_parameters = _ParameterClient(
+            self, 'velocity_smoother')
         node.create_client = self.create_client
         node.destroy_client = Mock(return_value=True)
         node.create_subscription = self.create_subscription
@@ -822,8 +826,9 @@ def _observe(node, timeout_s=12.0, gap_m=0.45):
                                timeout_s=timeout_s)
 
 
-def _service_world(monkeypatch, tmp_path, contract=CONTRACT, home_contract=None, **options):
-    node = _live_node(ServiceRoute, monkeypatch, contract, home_contract)
+def _service_world(monkeypatch, tmp_path, contract=CONTRACT, home_contract=None,
+                   route_cls=ServiceRoute, **options):
+    node = _live_node(route_cls, monkeypatch, contract, home_contract)
     world = _World(monkeypatch, tmp_path, node, **options)
     world.run(1.0)
     return node, world
@@ -1491,7 +1496,8 @@ def test_t24c_escape_tail_keeps_one_pose(monkeypatch, tmp_path):
 
 def _home_stub_node(monkeypatch, tmp_path, contract, home_contract):
     node, world = _service_world(monkeypatch, tmp_path, contract=contract,
-                                 home_contract=home_contract, home=HOME,
+                                 home_contract=home_contract, route_cls=BoxServiceRoute,
+                                 home=HOME,
                                  pose=(0.5, 0.0, 0.0))
     node.parking_command = None
     node.verify_live_maps = Mock()

@@ -71,6 +71,28 @@ def test_taught_pose_gains_heading_arrow(assets):
     assert any('DOCK_POSE_TAUGHT' in m.text for m in markers)
 
 
+def test_registered_table_without_annotation_draws_pose_arrow_and_label(assets):
+    registry, _ = assets
+    registry['tables'] = [{'table_id': 'table_01', 'service_poses': [
+        {'x_m': -0.734910483363684, 'y_m': -1.6068820918282494,
+         'yaw_rad': -0.03841021709958648}]}]
+
+    markers = build_markers(
+        registry, {'source_map_sha256': 'abc', 'markers': {}}).markers
+
+    arrows = [item for item in markers if item.type == Marker.ARROW]
+    table_arrow = next(item for item in arrows if item.id == 12)
+    assert table_arrow.pose.position.x == pytest.approx(-0.734910483363684)
+    assert table_arrow.pose.position.y == pytest.approx(-1.6068820918282494)
+    assert table_arrow.pose.orientation.z == pytest.approx(
+        math.sin(-0.03841021709958648 / 2))
+    assert any(item.text == 'TABLE_1_SELECTED\nDOCK_POSE_TAUGHT'
+               for item in markers)
+    assert not any(item.type == Marker.CYLINDER for item in markers)
+    assert [item.id for item in arrows] == [12, 100]
+    assert len({(item.ns, item.id) for item in markers}) == len(markers)
+
+
 def test_republish_removes_old_taught_pose(assets):
     registry, annotation = assets
     registry['tables'] = [{'table_id': 'table_01', 'service_poses': [

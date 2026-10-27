@@ -187,6 +187,27 @@ def _configure_fixture_session(tmp_path, monkeypatch):
     return fixture
 
 
+def _add_taught_table_01(fixture):
+    registry_path = fixture.runtime / 'service_destinations.yaml'
+    registry = yaml.safe_load(registry_path.read_text())
+    registry['tables'].append({
+        'table_id': 'table_01',
+        'service_poses': [{
+            'x_m': -.735, 'y_m': -1.607, 'yaw_rad': -.0384,
+            'approach_offset_m': .5,
+        }],
+    })
+    registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
+    destinations_path = fixture.runtime / 'destinations.json'
+    destinations = json.loads(destinations_path.read_text())
+    destinations['destinations']['table_01'] = {
+        'face_xy': [-.660, -1.610], 'normal_deg': 177.8,
+        'source': 'fixture taught table pose',
+    }
+    destinations_path.write_text(json.dumps(destinations))
+    fixture.profile['station_ids'] = ['water_station', 'table_01']
+
+
 def test_go_refuses_without_a_completed_init(env, monkeypatch):
     state = d.load_state()
     state['localized'] = False
@@ -873,6 +894,117 @@ def test_new_water_station_request_uses_profile_and_has_no_via(
     assert '--via-id' not in argv
     assert '--via-route' not in argv
     assert '--via-region-xy' not in argv
+
+
+def test_taught_map_table_cycle_visits_water_then_table_and_returns(
+        tmp_path, monkeypatch, capsys):
+    fixture = _map_session_fixture(tmp_path)
+    _add_taught_table_01(fixture)
+    for name in (
+            'ACTIVE_MAP_SESSION', 'BASE', 'P2', 'MAP_YAML', 'KEEPOUT_YAML',
+            'REGISTRY', 'ANNOTATION', 'CLICK', 'STATE', 'PI_BASE', 'PI_P2',
+            'PI_REGISTRY', 'DDS_PROFILE', 'DESTINATIONS', 'TABLES',
+            'STATION_PROFILES'):
+        monkeypatch.setattr(d, name, getattr(d, name))
+    monkeypatch.setattr(d, 'DATA_ROOT', fixture.data_root)
+    monkeypatch.setattr(d, 'prepare_reference_mount', lambda: False)
+    monkeypatch.setitem(
+        sys.modules, 'jdamr_cube_navigation.map_session_assets',
+        SimpleNamespace(prepare_map_session=lambda _pointer: fixture.profile))
+    d.configure_map_session(fixture.pointer)
+    d.write_routes((-.8, .4, .1))
+
+    water = json.loads((fixture.runtime / 'destinations.json').read_text())[
+        'destinations']['water_station']
+    normal = math.radians(water['normal_deg'])
+    expected_escape = {
+        'x': round(water['face_xy'][0] + d.ESCAPE_M * math.cos(normal), 3),
+        'y': round(water['face_xy'][1] + d.ESCAPE_M * math.sin(normal), 3),
+    }
+    table_route = yaml.safe_load((fixture.runtime / 'table_01_route.yaml').read_text())
+    direct_route = yaml.safe_load(
+        (fixture.runtime / 'table_01_direct_route.yaml').read_text())
+    assert table_route['start_pose'] == expected_escape
+    assert [point['id'] for point in table_route['waypoints']] == [
+        'table_01_pre', 'table_01_observation']
+    assert direct_route['start_pose'] == {'x': -.8, 'y': .4}
+    assert direct_route['waypoints'][0]['id'] == 'home_exit'
+
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
+    d.run_cycle(go_args(table_id='table_01'), d.load_state(), 'table_01')
+    argv = json.loads(next(value for value in pi.stdins if value))['argv']
+    assert argv[argv.index('--table-id') + 1] == 'table_01'
+    assert argv[argv.index('--approach-route') + 1] == str(
+        d.pi_path(fixture.runtime / 'table_01_route.yaml'))
+    assert argv[argv.index('--via-id') + 1] == 'water_station'
+    assert argv[argv.index('--via-route') + 1] == str(
+        d.pi_path(fixture.runtime / 'water_station_route.yaml'))
+    table_face = json.loads((fixture.runtime / 'destinations.json').read_text())[
+        'destinations']['table_01']['face_xy']
+    assert argv[argv.index('--region-xy') + 1:argv.index('--region-xy') + 3] == [
+        str(table_face[0]), str(table_face[1])]
+    assert 'SUBMITTED water_station -> table_01 -> dock:' in capsys.readouterr().out
+
+    direct_pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', direct_pi)
+    d.run_cycle(
+        go_args(table_id='table_01', skip_via=True), d.load_state(), 'table_01')
+    direct_argv = json.loads(next(value for value in direct_pi.stdins if value))['argv']
+    assert direct_argv[direct_argv.index('--approach-route') + 1] == str(
+        d.pi_path(fixture.runtime / 'table_01_direct_route.yaml'))
+    assert '--via-id' not in direct_argv
+
+
+def test_sync_skips_map_pose_only_null_reference_and_keeps_water_rgbd(
+        tmp_path, monkeypatch):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    references = []
+    for name, content in (
+            ('capture.json', b'{}\n'), ('rgb.ppm', b'P6\n1 1\n255\n\x00\x00\x00'),
+            ('depth.npz', b'fixture-depth')):
+        path = fixture.session / 'stations' / 'water_station' / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        references.append(path)
+    profiles = json.loads(fixture.station_profiles.read_text())
+    profiles['stations']['water_station']['rgbd_reference'] = dict(zip(
+        ('reference_capture_path', 'reference_rgb_path', 'reference_depth_path'),
+        map(str, references)))
+    profiles['stations']['table_01'] = {
+        'reference_mode': 'map_pose_only', 'rgbd_reference': None,
+    }
+    fixture.station_profiles.write_text(json.dumps(profiles))
+
+    shell_calls, pi_calls = [], []
+
+    def fake_sh(command, **_kwargs):
+        shell_calls.append(command)
+        return SimpleNamespace(returncode=0, stdout='')
+
+    local_by_name = {
+        name: fixture.runtime / name
+        for name in ('service_destinations.yaml', 'keepout.pgm', 'keepout.yaml')
+    }
+    local_by_name.update({path.name: path for path in references})
+
+    def fake_pi(command, **_kwargs):
+        pi_calls.append(command)
+        if command.startswith('sha256sum '):
+            remote_name = Path(command.split()[-1]).name
+            return SimpleNamespace(
+                returncode=0, stdout=d.sha256(local_by_name[remote_name]) + '  remote\n')
+        return SimpleNamespace(returncode=0, stdout='')
+
+    monkeypatch.setattr(d, 'sh', fake_sh)
+    monkeypatch.setattr(d, 'pi', fake_pi)
+    d.cmd_sync(None)
+
+    reference_syncs = [call for call in shell_calls if '--protect-args' in call]
+    assert len(reference_syncs) == 3
+    assert all(any(str(path) in call for call in reference_syncs) for path in references)
+    assert sum(command.startswith('sha256sum ') for command in pi_calls) == 6
 
 
 def test_observation_waypoint_uses_mount_profile_without_changing_aisle_point(

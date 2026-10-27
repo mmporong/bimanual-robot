@@ -50,6 +50,9 @@ def _node():
     node._station_reference_wake = threading.Event()
     node._station_reference_stop = threading.Event()
     node._station_reference_thread = None
+    node.stop_requested = False
+    node.parking_motion_revision = 0
+    node.run_deadline_s = None
     node.emit = Mock()
     node.create_subscription = Mock(side_effect=['info-sub', 'image-sub'])
     node.get_clock = Mock(return_value=_clock())
@@ -110,6 +113,138 @@ def test_profile_rejects_different_map_before_subscribing(tmp_path, monkeypatch)
     node.create_subscription.assert_not_called()
 
 
+def test_switch_from_water_rgbd_to_featureless_table_clears_the_old_reference(
+        tmp_path, monkeypatch):
+    node = _node()
+    node.registry['tables'].append({
+        'table_id': 'table_01', 'service_poses': [
+            {'priority': 1, 'x_m': 2., 'y_m': .3, 'yaw_rad': .2}],
+    })
+    profile_path = _profiles(tmp_path)
+    document = json.loads(profile_path.read_text())
+    document['stations']['water_station']['reference_mode'] = 'rgbd_auxiliary'
+    document['stations']['table_01'] = {
+        'target_priority': 'operator_taught_map_pose_and_heading',
+        'lateral_tolerance_m': .005,
+        'lateral_precision_status': 'NOT_VALIDATED',
+        'reference_mode': 'map_pose_only', 'rgbd_reference': None,
+    }
+    profile_path.write_text(json.dumps(document), encoding='utf-8')
+    constructor = Mock(return_value=Mock())
+    monkeypatch.setattr(box_service, 'TaughtStationReference', constructor)
+    node.configure_station_reference(profile_path, 'water_station')
+    worker = node._station_reference_thread
+    node.station_reference_goal = {'valid': True, 'goal_odom': [8., 8., 0.]}
+    node.station_reference_goal_frozen = True
+
+    node.configure_station_reference(profile_path, 'table_01')
+
+    assert not worker.is_alive()
+    assert node.station_reference is None
+    assert node.station_reference_mode == 'map_pose_only'
+    assert node.station_reference_taught_map_pose == pytest.approx((2., .3, .2))
+    assert node.station_reference_goal is None
+    assert node.station_reference_goal_frozen is False
+    constructor.assert_called_once_with({'immutable': 'reference'})
+    assert node.create_subscription.call_count == 2
+
+
+def test_map_pose_reference_uses_current_transform_and_does_not_claim_rgbd_precision():
+    node = _node()
+    node.station_reference_mode = 'map_pose_only'
+    node.station_reference_taught_map_pose = (1.2, -.4, .1)
+    node.amcl_freshness_s = 15.
+    node._navigation_ready = Mock(return_value=True)
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=10, nanosec=0)),
+        transform=_pose(2., 3., math.pi / 2))
+    node._odom_pose = Mock(return_value=(2.4, 4.2, math.pi / 2 + .1))
+
+    reference = node._fresh_station_reference()
+    status = node._station_lateral_status()
+    anchored = node._station_anchor_target({
+        'x_m': .4, 'y_m': .2, 'face_center_map_xy_m': [.5, .2],
+        'outward_normal_map_xy': [-1., 0.],
+    })
+
+    assert reference['goal_odom'] == pytest.approx((2.4, 4.2, math.pi / 2 + .1))
+    assert status['lateral_goal_basis'] == 'registered_map_pose_in_odom'
+    assert status['internal_lateral_within_tolerance'] is True
+    assert status['millimeter_accuracy_validated'] is False
+    assert anchored['rgbd_reference_valid'] is False
+    assert anchored['lateral_reference_mode'] == 'map_pose_only'
+
+
+def test_map_pose_reference_rejects_stale_localization_and_transform():
+    node = _node()
+    node.station_reference_mode = 'map_pose_only'
+    node.station_reference_taught_map_pose = (1., 2., 0.)
+    node.amcl_freshness_s = 1.
+    node._navigation_ready = Mock(return_value=False)
+    node.parking_tf = Mock()
+
+    assert node._fresh_station_reference()['reason'] == 'map_pose_localization_unavailable'
+    node.parking_tf.lookup_transform.assert_not_called()
+
+    node._navigation_ready.return_value = True
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=2, nanosec=0)),
+        transform=_pose())
+    assert node._fresh_station_reference()['reason'] == 'map_pose_transform_invalid'
+
+    node.parking_tf.lookup_transform.side_effect = box_service.TransformException('no transform')
+    failed = node._fresh_station_reference()
+    assert failed['reason'] == 'map_pose_tf_lookup_failed'
+    assert failed['detail'] == 'no transform'
+
+
+def test_invalid_rgbd_reference_can_recover_while_stopped(monkeypatch):
+    node = _node()
+    node.station_reference_mode = 'rgbd_auxiliary'
+    node.station_reference = Mock()
+    invalid = {'lateral_reference_valid': False}
+    recovered = {'lateral_reference_valid': True,
+                 'internal_lateral_within_tolerance': True}
+    node._station_lateral_status = Mock(return_value=recovered)
+    spin = Mock()
+    monkeypatch.setattr(box_service, 'spin_node', spin)
+
+    result, moved = node._retry_station_lateral_reference(invalid, 0)
+
+    assert result == recovered
+    assert moved is False
+    spin.assert_called_once()
+
+
+def test_lateral_reference_retry_never_hides_valid_error_or_motion(monkeypatch):
+    node = _node()
+    node.station_reference_mode = 'rgbd_auxiliary'
+    node.station_reference = Mock()
+    spin = Mock(side_effect=lambda *_args, **_kwargs: setattr(
+        node, 'parking_motion_revision', 1))
+    monkeypatch.setattr(box_service, 'spin_node', spin)
+    misaligned = {'lateral_reference_valid': True,
+                  'internal_lateral_within_tolerance': False}
+
+    assert node._retry_station_lateral_reference(misaligned, 0) == (misaligned, False)
+    spin.assert_not_called()
+    invalid = {'lateral_reference_valid': False}
+    assert node._retry_station_lateral_reference(invalid, 0) == (invalid, True)
+
+
+def test_map_lateral_reference_can_recover_without_an_rgbd_model(monkeypatch):
+    node = _node()
+    node.station_reference_mode = 'map_pose_only'
+    invalid = {'lateral_reference_valid': False}
+    recovered = {'lateral_reference_valid': True,
+                 'lateral_goal_basis': 'registered_map_pose_in_odom'}
+    node._station_lateral_status = Mock(return_value=recovered)
+    monkeypatch.setattr(box_service, 'spin_node', Mock())
+
+    assert node._retry_station_lateral_reference(invalid, 0) == (recovered, False)
+
+
 def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction(monkeypatch):
     # A fresh Jazzy process need not expose duration on the rclpy package.
     monkeypatch.delattr(box_service.rclpy, 'duration', raising=False)
@@ -158,6 +293,29 @@ def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction(mo
     assert stamp_s == 10.
     assert node.station_reference_result['goal_map'] == pytest.approx(
         (1.75, 4., math.pi / 2 + .2))
+
+
+def test_worker_preserves_tf_failure_detail_for_final_diagnostics():
+    node = _node()
+    node.station_reference = Mock()
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.side_effect = box_service.TransformException(
+        'image timestamp is newer than available TF')
+    node._station_reference_pending = (None, None, 10.)
+    worker = threading.Thread(target=node._station_reference_loop)
+    worker.start()
+    node._station_reference_wake.set()
+    deadline = time.monotonic() + 1.
+    while node.station_reference_result is None and time.monotonic() < deadline:
+        time.sleep(.005)
+    node._station_reference_stop.set()
+    node._station_reference_wake.set()
+    worker.join(timeout=1.)
+
+    assert node.station_reference_result['reason'] == 'station_reference_runtime:TransformException'
+    assert node.station_reference_result['detail'] == 'image timestamp is newer than available TF'
+    assert node._station_lateral_status()['lateral_reference_detail'] == (
+        'image timestamp is newer than available TF')
 
 
 def test_rgb_callback_is_nonblocking_and_replaces_pending_frame():

@@ -102,7 +102,21 @@ def build_markers(registry, annotation, selected='table_01', saved_station_poses
     for number in (1, 2):
         table_id = f'table_{number:02d}'
         region = annotation['markers'].get(f'table_{number}')
+        table = next((t for t in registry['tables'] if t['table_id'] == table_id), None)
         if region is None:
+            if table:
+                color = ((0.15, 0.5, 1.0, 1.0) if number == 1
+                         else (0.1, 0.8, 0.3, 1.0))
+                for index, pose in enumerate(table['service_poses']):
+                    result.append(pose_arrow(number * 10 + 2 + index, pose, color, frame))
+                pose = table['service_poses'][0]
+                label = marker(number * 10 + 4, Marker.TEXT_VIEW_FACING,
+                               pose['x_m'], pose['y_m'] + 0.35,
+                               (0.1, 0.15, 0.22, 1.0), frame)
+                label.pose.position.z, label.scale.z = 0.2, 0.14
+                label.text = f'TABLE_{number}' + (
+                    '_SELECTED' if selected == table_id else '') + '\nDOCK_POSE_TAUGHT'
+                result.append(label)
             continue
         x, y = region['approximate_map_xy_m']
         color = (0.15, 0.5, 1.0, 0.45) if number == 1 else (0.1, 0.8, 0.3, 0.45)
@@ -116,7 +130,6 @@ def build_markers(registry, annotation, selected='table_01', saved_station_poses
         label.text = f'TABLE_{number}' + ('_SELECTED' if selected == table_id else '')
         label.text += '\nAREA_ONLY'
         result.extend([area, label])
-        table = next((t for t in registry['tables'] if t['table_id'] == table_id), None)
         if table:
             label.text = label.text.replace('AREA_ONLY', 'DOCK_POSE_TAUGHT')
             for index, pose in enumerate(table['service_poses']):

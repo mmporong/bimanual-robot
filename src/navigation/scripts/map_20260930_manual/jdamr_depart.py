@@ -290,6 +290,28 @@ def approach_waypoints(dest_id):
              'yaw': round(facing, 4)}]
 
 
+def station_escape_xy(dest_id):
+    """Expected base position after the face-relative straight escape."""
+    spec = DESTINATIONS[dest_id]
+    normal = math.radians(spec['normal_deg'])
+    return (spec['face_xy'][0] + ESCAPE_M * math.cos(normal),
+            spec['face_xy'][1] + ESCAPE_M * math.sin(normal))
+
+
+def station_region(state, dest_id):
+    """Use a saved region, or the taught-map face when this map introduced the stop."""
+    region = state.get('regions', {}).get(dest_id)
+    if region is not None:
+        return region
+    if ACTIVE_MAP_SESSION is not None and dest_id in DESTINATIONS:
+        return {
+            'xy': list(DESTINATIONS[dest_id]['face_xy']),
+            'radius_m': REGION_RADIUS_M,
+            'basis': 'taught-map destination face',
+        }
+    fail(f'{dest_id} region is missing')
+
+
 REGION_RADIUS_M = 0.40
 # A box face seen from the dock appears as a 0.25-0.7 m unmapped LiDAR line; smaller
 # clusters (chair legs, bags) never move the region away from the user's marker.
@@ -415,21 +437,42 @@ def write_routes(home):
                'y': round(hy + HOME_EXIT_M * math.sin(hyaw), 3)}
     if ACTIVE_MAP_SESSION is not None:
         for dest_id in TABLES:
+            is_via = dest_id == VIA_ID
+            if is_via:
+                start = (hx, hy)
+                waypoints = [exit_wp, *approach_waypoints(dest_id)]
+                start_basis = 'registered dock pose'
+            else:
+                start = station_escape_xy(VIA_ID)
+                waypoints = approach_waypoints(dest_id)
+                start_basis = f'{VIA_ID} face-relative escape pose'
             route = {
                 'schema_version': 1, 'frame_id': 'map',
                 'map_yaml': str(MAP_YAML), 'keepout_mask_yaml': str(KEEPOUT_YAML),
                 'expected_mask_sha256': sha256(keepout_image),
-                'start_pose': {'x': hx, 'y': hy},
+                'start_pose': {'x': round(start[0], 3), 'y': round(start[1], 3)},
                 'max_route_start_distance_m': 0.3,
-                'waypoints': [exit_wp, *approach_waypoints(dest_id)],
-                'dock_departure_distance_m': HOME_EXIT_M,
+                'waypoints': waypoints,
                 'purpose': 'taught station observation; final parking follows in the same run',
                 'target_basis': 'operator taught pose; no old-map destinations',
+                'start_basis': start_basis,
                 'station_profiles': str(STATION_PROFILES),
             }
-            for suffix in ('', '_direct'):
-                (P2 / f'{dest_id}{suffix}_route.yaml').write_text(
-                    yaml.safe_dump(route, sort_keys=False, allow_unicode=True))
+            if is_via:
+                route['dock_departure_distance_m'] = HOME_EXIT_M
+                direct_route = route
+            else:
+                direct_route = {
+                    **route,
+                    'start_pose': {'x': round(hx, 3), 'y': round(hy, 3)},
+                    'waypoints': [exit_wp, *waypoints],
+                    'start_basis': 'registered dock pose; water stop omitted',
+                    'dock_departure_distance_m': HOME_EXIT_M,
+                }
+            (P2 / f'{dest_id}_route.yaml').write_text(
+                yaml.safe_dump(route, sort_keys=False, allow_unicode=True))
+            (P2 / f'{dest_id}_direct_route.yaml').write_text(
+                yaml.safe_dump(direct_route, sort_keys=False, allow_unicode=True))
         log(f'taught-map routes written: {", ".join(TABLES)}; reverse home retained')
         return
     escape = along_normal(VIA_ID, ESCAPE_M)
@@ -481,8 +524,12 @@ def cmd_sync(_args):
     if ACTIVE_MAP_SESSION is not None:
         profiles = json.loads(STATION_PROFILES.read_text())
         reference_paths = set()
-        for station in profiles['stations'].values():
-            config = station.get('rgbd_reference', {})
+        for station_id, station in profiles['stations'].items():
+            config = station.get('rgbd_reference')
+            if config is None:
+                continue
+            if not isinstance(config, dict):
+                fail(f'{station_id} rgbd_reference must be a mapping or null')
             for key in ('reference_capture_path', 'reference_rgb_path', 'reference_depth_path'):
                 if config.get(key):
                     reference_paths.add(Path(config[key]))
@@ -1073,14 +1120,12 @@ def execution_failure_cause(events):
 def run_cycle(args, state, table_id):
     """Start one box_service run on the Pi and follow its log until the unit ends."""
     requested_s = getattr(args, '_request_started_monotonic_s', time.monotonic())
-    region = state['regions'][table_id]
+    region = station_region(state, table_id)
     surface_mode = getattr(args, 'surface_mode', 'table_edge')
     rear_box_only = getattr(args, 'rear_box_only', False)
     include_via = (not rear_box_only and not args.dock_only and not args.skip_via
-                   and table_id != VIA_ID and ACTIVE_MAP_SESSION is None)
-    via = state['regions'].get(VIA_ID)
-    if include_via and via is None:
-        fail(f'{VIA_ID} region is required by the selected via mode')
+                   and table_id != VIA_ID)
+    via = station_region(state, VIA_ID) if include_via else None
     if args.region:
         region = {'xy': args.region[:2], 'radius_m': args.region[2],
                   'basis': f'operator-confirmed {surface_mode}'}

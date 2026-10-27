@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-10-27 | 급수대 → 테이블1 → 후면 도크 연속 주행 준비
+
+- 사용자가 등록한 `table_01.yaml`을 새 지도 실행 목적지에 연결했다. 한 번의 `go table_01`이 도크 전진 이탈 → 급수대 정밀주차·이탈 → 테이블1 정밀주차·이탈 → 후면 LiDAR 박스 도킹으로 이어진다. 급수대와 테이블에는 각기 다른 경로·관측 기준을 선택하며, 미등록 초안 테이블은 자동 활성화하지 않는다. `enabled_table_ids`로 추가 등록할 수 있고 기본은 테이블1이다.
+- 급수대는 기존 컵·물병 RGB-D 참조를 사용한다. 표식이 없는 테이블1은 교시한 map 자세와 AMCL/TF를 기준으로 좌우를 추종하고 깊이 영상의 테이블 경계로 앞 간격·면 방향을 계산한다. 양 지점의 차체 앞끝 목표 간격은 1 cm이고 좌우 ±5 mm는 외부 실측 전 목표다. 급수대 참조 worker·이전 목표를 종료·초기화한 뒤 테이블1 지도로 전환해 서로의 참조가 섞이지 않게 했다.
+- 어제 `water_station_20261026_194311_0d438f49`는 앞 모서리 내부 추정 11.69/9.05 mm에 도달했으나 마지막 RGB-D 보정이 `camera_pose_has_excess_pitch_roll`로 무효였다. 거리 조건을 맞춘 정지 상태에서만 무효 참조를 최대 1초 재관측한다. 유효하지만 좌우 오차가 큰 값을 성공으로 바꾸지 않으며, 그 사이 이동이나 사용자 정지를 우선한다. RGB-D/TF 예외의 종류와 상세 사유를 실행 기록에 남긴다. 1초 재관측이 반복 실패를 해결한다는 실차 증거는 아직 없다.
+- 파이 NavFn 경로 계산만 수행해 도크 이탈 후 급수대 전·관측점, 급수대 이탈 후 테이블1 전·관측점, 테이블1 이탈 후 도크 앞 명목 관측점의 5구간이 모두 목표 끝점 오차 0 m로 계산됐다. 이는 2D 지도상의 계획이며 실제 주행·후면 면 인식·충돌 회피 검증은 아니다. 라이다가 상판 높이를 보지 못하고 현 지도 킵아웃은 unknown-only여서 상판 및 양팔 돌출 충돌 대응은 별도 검증이 필요하다.
+- 도킹 관련 검사 네 건은 `ServiceRoute` 테스트 fixture에 실제 `BoxServiceRoute`의 LiDAR 보존 콜백과 velocity_smoother 파라미터가 빠져 회전 감시가 이동 전 차단되는 하네스 오류였다. 실제 실행기와 같은 콜백·설정으로 fixture를 고쳤고 운영 보호는 유지했다. 관련 12개 스위트 **859 PASS**, 네 오류가 포함된 입력 복구 스위트 155 PASS, 문법·diff 검사 PASS다. 별도 code-reviewer는 코드 수정 요청 0건으로 검토했고 LSP 도구가 없어 형식 판정은 COMMENT다.
+- `prepare`로 현재 지도·급수대·테이블1·후면 도크 자산을 생성해 Pi와 관련 6파일 SHA를 대조했다. Pi Python 설치 경로는 source symlink여서 변경 코드 4개를 파일별 컴파일·해시 확인 후 반영하고 대기 실행기 `jdamr-box-executor.service` PID 29775를 재시작했다. 이전 PC 자산은 `$HOME/.local/state/bimanual-robot/taught_mission_20261027_112325/runtime_before/`, 이전 Pi 코드·자산은 `$HOME/jdamr_deploy/taught_mission_backup_20261027_112325/`에 보존한다.
+- 새 Astra의 RGB 640×480과 깊이 320×240 수신 및 급수대 참조 초기화를 확인했다. 현재 전압은 12.284 V, odom 전진·회전 속도는 0이다. 도크 위치초기화 기록은 유지하고 새 이동·팔 명령은 제출하지 않았다. 실제 카메라 translation/yaw는 명목값이며 장착 보정과 1 cm·±5 mm 실차 반복 결과는 미확인이다.
+- 다음 요청을 위한 Pi 카메라 `jdamr-box-rgbd.service` PID 28154와 관측기 `jdamr-box-observer.service` PID 28155를 켜 둔다. 종료는 Pi에서 `sudo systemctl stop jdamr-box-rgbd.service jdamr-box-observer.service`다. 사용자 확인용 PC 표시 유닛 `jdamr-p2-mapserver`, `jdamr-p2-relay`, `jdamr-p2-markers`, `jdamr-p2-rviz`, `jdamr-p2-click`도 유지하며 종료는 `python3 "$HOME/bimanual-robot/tools/jdamr/jdamr_depart.py" display-stop`이다. 등록 테이블1·급수대·도크 마커 송출도 확인했다. 변경은 현재 작업 브랜치 로컬 커밋만 남긴다.
+
 ## 2026-10-27 | 저장된 테이블1 위치를 RViz에 표시
 
 - 테이블1의 `table_01.yaml`은 저장되어 있었지만 기존 RViz 표시기는 운영 목적지 등록부에 포함된 급수대와 도크만 읽고 있었다. 현재 지도의 YAML·이미지 해시와 좌표 프레임이 일치하는 저장 테이블 자세를 표시 목록에 추가해 `TABLE 1 / SAVED POSE` 라벨과 차체 방향 화살표로 송출한다. 자동 주행 목적지 등록이나 허용 오차를 추가하지 않았다.

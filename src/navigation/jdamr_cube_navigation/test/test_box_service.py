@@ -1750,7 +1750,8 @@ def test_t36_via_cli_is_all_or_nothing_and_ends_at_the_dock():
             parse_args(invalid)
 
 
-def _via_main(monkeypatch, tmp_path, via_ok=True, leave_ok=True, battery_low=False):
+def _via_main(monkeypatch, tmp_path, via_ok=True, leave_ok=True, battery_low=False,
+              profiles=False):
     for name in ('registry', 'mount', 'geometry', 'route', 'water'):
         (tmp_path / f'{name}.yaml').write_text('{}\n')
     argv = ['--registry', str(tmp_path / 'registry.yaml'),
@@ -1762,6 +1763,10 @@ def _via_main(monkeypatch, tmp_path, via_ok=True, leave_ok=True, battery_low=Fal
             '--return-home', '--return-timeout-s', '500',
             '--via-id', 'water_station', '--via-route', str(tmp_path / 'water.yaml'),
             '--via-region-xy', '-0.14', '-1.53']
+    if profiles:
+        profile_path = tmp_path / 'profiles.json'
+        profile_path.write_text('{}\n')
+        argv.extend(['--station-profiles', str(profile_path)])
     _parse_new('T36', [*argv, '--log', str(tmp_path / 'probe.jsonl')])
     monkeypatch.setattr(box_service, 'load_registry', lambda _path: {'home': {}})
     monkeypatch.setattr(box_service.rclpy, 'init', lambda **_kwargs: None)
@@ -1777,6 +1782,8 @@ def _via_main(monkeypatch, tmp_path, via_ok=True, leave_ok=True, battery_low=Fal
                 ('dwell_and_leave', dwell)) or leave_ok)
             self.dwell_and_return_home = Mock(side_effect=lambda dwell, timeout: calls.append(
                 ('dwell_and_return_home', dwell, timeout)) or True)
+            self.configure_station_reference = Mock(side_effect=lambda _path, station: calls.append(
+                ('configure_station_reference', station)))
             self._camera = Mock(return_value=True)
             self.finish_navigation = Mock(return_value=True)
             self.destroy_node, self.emit, self.request_stop = Mock(), Mock(), Mock()
@@ -1798,6 +1805,20 @@ def test_t36_water_station_then_table_then_dock(monkeypatch, tmp_path):
                      ('dwell_and_leave', 0.0),
                      ('visit', 'route.yaml', 'table_01', [1.5, -1.49], True),
                      ('dwell_and_return_home', 0.0, 500.0)]
+
+
+def test_via_selects_each_station_reference_before_its_own_visit(monkeypatch, tmp_path):
+    code, calls = _via_main(monkeypatch, tmp_path, profiles=True)
+
+    assert code == 0
+    assert calls == [
+        ('configure_station_reference', 'water_station'),
+        ('visit', 'water.yaml', 'water_station', [-0.14, -1.53], True),
+        ('dwell_and_leave', 0.0),
+        ('configure_station_reference', 'table_01'),
+        ('visit', 'route.yaml', 'table_01', [1.5, -1.49], True),
+        ('dwell_and_return_home', 0.0, 500.0),
+    ]
 
 
 def test_low_battery_after_the_water_stop_docks_without_an_operator_call(monkeypatch, tmp_path):
