@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import tempfile
 
 import yaml
@@ -29,6 +30,7 @@ DEFAULT_GEOMETRY = (
 TARGET_GAP_M = 0.01
 LATERAL_TOLERANCE_M = 0.005
 APPROACH_OFFSET_M = 0.5
+TABLE_ID_PATTERN = re.compile(r'table_\d+')
 
 
 def _sha256(path):
@@ -150,6 +152,64 @@ def _source_observation(document, source_path):
     }
 
 
+def _enabled_table_ids(pointer):
+    """Select tables explicitly, with table_01 as the compatible default."""
+    if 'enabled_table_ids' not in pointer:
+        return ('table_01',), False
+    value = pointer['enabled_table_ids']
+    if not isinstance(value, list):
+        raise ValueError('enabled_table_ids must be a list')
+    result = []
+    for station_id in value:
+        if not isinstance(station_id, str) or TABLE_ID_PATTERN.fullmatch(station_id) is None:
+            raise ValueError('enabled_table_ids must contain table IDs')
+        if station_id in result:
+            raise ValueError('enabled_table_ids must not contain duplicates')
+        result.append(station_id)
+    return tuple(result), True
+
+
+def _station_records(source_dir, source_identity, enabled_table_ids,
+                     require_enabled_files):
+    """Load the required water station and only selected map-bound tables."""
+    water_path = source_dir / 'water_station.yaml'
+    if not water_path.is_file():
+        raise ValueError(f'required water_station is missing: {water_path}')
+    table_paths = []
+    for station_id in enabled_table_ids:
+        path = source_dir / f'{station_id}.yaml'
+        if not path.is_file():
+            if require_enabled_files:
+                raise ValueError(f'enabled table record is missing: {path}')
+            continue
+        table_paths.append(path)
+    paths = [water_path, *table_paths]
+    records = []
+    station_ids = set()
+    for path in paths:
+        label = 'water station' if path == water_path else f'taught table {path.stem}'
+        document = _mapping(path, label)
+        _verify_bound_map(document, source_identity, label)
+        xyz = _finite_pose(document, label)
+        station_id = document.get('id')
+        if path == water_path:
+            if station_id != 'water_station':
+                raise ValueError('required dynamic station ID water_station is missing')
+        elif station_id != path.stem or TABLE_ID_PATTERN.fullmatch(station_id or '') is None:
+            raise ValueError(f'{label} ID must match its filename')
+        if station_id in station_ids:
+            raise ValueError(f'duplicate station ID: {station_id}')
+        station_ids.add(station_id)
+        try:
+            target_gap_m = float(document.get('target_front_gap_m', math.nan))
+        except (TypeError, ValueError):
+            target_gap_m = math.nan
+        if not math.isclose(target_gap_m, TARGET_GAP_M, abs_tol=1e-9):
+            raise ValueError(f'{station_id} target front gap must be 0.01 m')
+        records.append((station_id, path, document, xyz))
+    return records
+
+
 def _finite_triplet(value, label):
     if not isinstance(value, (list, tuple)) or len(value) != 3:
         raise ValueError(f'{label} must be a finite map pose')
@@ -235,13 +295,15 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
     """
     pointer_path = Path(pointer_path).expanduser().resolve()
     pointer = _mapping(pointer_path, 'manual mapping pointer')
+    departure_mode = pointer.get('dock_departure_mode', 'straight')
+    if departure_mode not in ('straight', 'nav2_waypoint'):
+        raise ValueError('dock_departure_mode must be straight or nav2_waypoint')
     source_dir = _path(pointer.get('directory'), pointer_path.parent)
     map_yaml = _path(pointer.get('map_yaml'), pointer_path.parent)
     home_path = _path(pointer.get('home_dock'), pointer_path.parent)
-    station_path = source_dir / 'water_station.yaml'
     geometry_path = Path(geometry_path).expanduser().resolve()
-    if not source_dir.is_dir() or not station_path.is_file():
-        raise ValueError(f'required water_station is missing: {station_path}')
+    if not source_dir.is_dir():
+        raise ValueError(f'map session directory does not exist: {source_dir}')
     if map_yaml.parent != source_dir:
         raise ValueError('pointer map must belong to its declared map directory')
 
@@ -249,22 +311,17 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
     map_metadata = _mapping(map_yaml, 'source map YAML')
     map_image = _path(map_metadata.get('image'), map_yaml.parent)
     home = _mapping(home_path, 'home dock')
-    station = _mapping(station_path, 'water station')
     _verify_bound_map(home, source_map, 'home dock')
-    _verify_bound_map(station, source_map, 'water station')
     home_xyz = _finite_pose(home, 'home dock')
-    station_xyz = _finite_pose(station, 'water station')
+    enabled_table_ids, require_enabled_files = _enabled_table_ids(pointer)
+    station_records = _station_records(
+        source_dir, source_map, enabled_table_ids, require_enabled_files)
     if home.get('id') != 'home_dock' or home.get('parking_direction') != 'reverse':
         raise ValueError('home dock must be the reverse-parking home_dock pose')
     dock_scan = _dock_scan_evidence(
         pointer, pointer_path, source_map, home, home_path, home_xyz)
-    station_id = station.get('id')
-    if not isinstance(station_id, str) or station_id != 'water_station':
-        raise ValueError('required dynamic station ID water_station is missing')
-    if not math.isclose(float(station.get('target_front_gap_m', math.nan)), TARGET_GAP_M,
-                        abs_tol=1e-9):
-        raise ValueError('water_station target front gap must be 0.01 m')
-    if not math.isclose(float(station.get('lateral_tolerance_m', math.nan)),
+    water_station = station_records[0][2]
+    if not math.isclose(float(water_station.get('lateral_tolerance_m', math.nan)),
                         LATERAL_TOLERANCE_M, abs_tol=1e-9):
         raise ValueError('water_station lateral tolerance must be 0.005 m')
 
@@ -273,8 +330,9 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
     if runtime == source_dir or runtime in (map_yaml.parent, home_path.parent):
         raise ValueError('runtime output must not overwrite the source map directory')
     source_paths = {path.resolve() for path in (
-        map_yaml, map_image, home_path, station_path,
+        map_yaml, map_image, home_path,
         Path(dock_scan['reference_path']), Path(dock_scan['scan_path']))}
+    source_paths.update(path.resolve() for _, path, _, _ in station_records)
     target_paths = {
         runtime / 'map.yaml', runtime / 'map.pgm', runtime / map_image.name,
         runtime / 'keepout.yaml', runtime / 'keepout.pgm',
@@ -313,50 +371,58 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
         'target_status': 'NOT_VALIDATED',
     })
     registry = set_home_pose(registry, home_pose)
-    station_pose = taught_pose(
-        station_id, station_xyz, _source_observation(station, station_path),
-        approach_offset_m=APPROACH_OFFSET_M,
-        target_front_gap_m=TARGET_GAP_M)
-    station_pose['teaching']['captured_at'] = station.get('captured_at')
-    station_pose.update({
-        'lateral_tolerance_m': LATERAL_TOLERANCE_M,
-        'lateral_precision_status': 'NOT_VALIDATED',
-        'target_gap_status': 'NOT_VALIDATED',
-        'source': station.get('source'),
-    })
-    registry = add_pose(registry, station_id, station_pose)
+    for station_id, station_path, station, station_xyz in station_records:
+        station_pose = taught_pose(
+            station_id, station_xyz, _source_observation(station, station_path),
+            approach_offset_m=APPROACH_OFFSET_M,
+            target_front_gap_m=TARGET_GAP_M)
+        station_pose['teaching']['captured_at'] = station.get('captured_at')
+        station_pose.update({
+            'lateral_tolerance_m': LATERAL_TOLERANCE_M,
+            'lateral_precision_status': 'NOT_VALIDATED',
+            'target_gap_status': 'NOT_VALIDATED',
+            'source': station.get('source'),
+            'runtime_registry_activated': True,
+            'source_record_operating_registry_activated': station.get(
+                'operating_registry_activated'),
+        })
+        for key in ('lateral_reference', 'registration_status',
+                    'object_reference_role'):
+            if station.get(key) is not None:
+                station_pose[key] = deepcopy(station[key])
+        registry = add_pose(registry, station_id, station_pose)
     service_path = runtime / 'service_destinations.yaml'
     _atomic_write(service_path, _yaml_bytes(registry))
     # Exercise the same reader used by the runtime before publishing companions.
     loaded = load_registry(service_path)
 
-    heading = station_xyz[2]
     face_distance = front_extent_m + TARGET_GAP_M
-    expected_face = [
-        station_xyz[0] + face_distance * math.cos(heading),
-        station_xyz[1] + face_distance * math.sin(heading),
-    ]
     destinations = {
         'schema_version': 1,
         'frame': 'map',
         'face_xy': 'expected search-region face; derived, not measured',
         'normal_deg': 'expected outward face normal; robot approaches from this side',
-        'destinations': {
-            station_id: {
-                'face_xy': expected_face,
-                'normal_deg': (math.degrees(heading) + 180.0) % 360.0,
-                'source': 'taught map pose plus physical front extent and requested gap',
-                'provenance': {
-                    'status': 'DERIVED_NOT_MEASURED',
-                    'taught_pose_xy_yaw': list(station_xyz),
-                    'front_extent_m': front_extent_m,
-                    'requested_gap_m': TARGET_GAP_M,
-                    'geometry_path': str(geometry_path),
-                    'front_extent': front_extent_provenance,
-                },
-            },
-        },
+        'destinations': {},
     }
+    for station_id, _, _, station_xyz in station_records:
+        heading = station_xyz[2]
+        expected_face = [
+            station_xyz[0] + face_distance * math.cos(heading),
+            station_xyz[1] + face_distance * math.sin(heading),
+        ]
+        destinations['destinations'][station_id] = {
+            'face_xy': expected_face,
+            'normal_deg': (math.degrees(heading) + 180.0) % 360.0,
+            'source': 'taught map pose plus physical front extent and requested gap',
+            'provenance': {
+                'status': 'DERIVED_NOT_MEASURED',
+                'taught_pose_xy_yaw': list(station_xyz),
+                'front_extent_m': front_extent_m,
+                'requested_gap_m': TARGET_GAP_M,
+                'geometry_path': str(geometry_path),
+                'front_extent': front_extent_provenance,
+            },
+        }
     profiles = {
         'schema_version': 1,
         'map': loaded['map'],
@@ -375,25 +441,41 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
             'target_rear_gap_m': TARGET_GAP_M,
             'target_status': 'NOT_VALIDATED',
         },
-        'stations': {
-            station_id: {
-                'source_record': str(station_path),
-                'capture_folder': station.get('capture_folder'),
-                'reference_capture': station.get('reference_capture'),
-                'rgbd_reference': station.get('rgbd_reference'),
-                'camera_mount_calibration': station.get('camera_mount_calibration'),
-                'target_priority': 'operator_taught_map_pose_and_heading',
-                'object_reference_role': station.get('object_reference_role'),
-                'target_front_gap_m': TARGET_GAP_M,
-                'target_gap_status': 'NOT_VALIDATED',
-                'lateral_tolerance_m': LATERAL_TOLERANCE_M,
-                'lateral_precision_status': 'NOT_VALIDATED',
-                'approach_offset_m': APPROACH_OFFSET_M,
-                'approach_offset_role': 'route_observation_only_not_final_parking_gap',
-                'actual_measured_gap_m': None,
-            },
-        },
+        'stations': {},
     }
+    for station_id, station_path, station, _ in station_records:
+        profile = {
+            'source_record': str(station_path),
+            'capture_folder': station.get('capture_folder'),
+            'reference_capture': station.get('reference_capture'),
+            'rgbd_reference': station.get('rgbd_reference'),
+            'camera_mount_calibration': station.get('camera_mount_calibration'),
+            'target_priority': 'operator_taught_map_pose_and_heading',
+            'object_reference_role': station.get('object_reference_role'),
+            'target_front_gap_m': TARGET_GAP_M,
+            'target_gap_status': 'NOT_VALIDATED',
+            'lateral_tolerance_m': LATERAL_TOLERANCE_M,
+            'lateral_precision_status': 'NOT_VALIDATED',
+            'approach_offset_m': APPROACH_OFFSET_M,
+            'approach_offset_role': 'route_observation_only_not_final_parking_gap',
+            'actual_measured_gap_m': None,
+            'runtime_registry_activated': True,
+            'source_record_operating_registry_activated': station.get(
+                'operating_registry_activated'),
+        }
+        if station_id == 'water_station':
+            profile['reference_mode'] = 'rgbd_auxiliary'
+        else:
+            profile.update({
+                'reference_mode': 'map_pose_only',
+                'rgbd_reference': None,
+            })
+        for key in ('lateral_reference', 'registration_status',
+                    'object_reference_role', 'pose_receipt', 'pose_receipt_sha256',
+                    'global_match_receipt', 'fresh_scan_match_receipt'):
+            if station.get(key) is not None:
+                profile[key] = deepcopy(station[key])
+        profiles['stations'][station_id] = profile
     destinations_path = runtime / 'destinations.json'
     profiles_path = runtime / 'station_profiles.json'
     _atomic_write(destinations_path, _json_bytes(destinations))
@@ -402,6 +484,7 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
     return {
         'session_directory': str(source_dir),
         'runtime_directory': str(runtime),
+        'dock_departure_mode': departure_mode,
         'output_dir': str(runtime),
         'assets': {
             'map_yaml': str(runtime / 'map.yaml'),
@@ -413,7 +496,7 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
             'destinations': str(destinations_path),
             'station_profiles': str(profiles_path),
         },
-        'station_ids': [station_id],
+        'station_ids': [station_id for station_id, _, _, _ in station_records],
         'map_hashes': {
             'source': source_map,
             'runtime': loaded['map'],

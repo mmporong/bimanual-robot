@@ -2703,25 +2703,19 @@ def test_only_blocking_nav2_codes_of_intermediate_legs_are_retried(code, final, 
     assert (node._retry_blocked_reason is not None) is tagged
 
 
-@pytest.mark.parametrize('failures, level, category', [
-    ([('interrupted', {'reason': 'emergency stop engaged'}), ('failed', {'phase': 'via_dwell'})],
-     'FATAL', 'emergency_stop'),
-    ([('path_blocked_give_up', {'reason': 'path blocked: nav2 error 105'})],
-     'CRITICAL', 'path_blocked'),
-    ([('battery_return', {'reason': 'battery below the departure reserve'})],
-     'URGENT', 'battery'),
-    ([('departure_blocked', {'reason': 'operator_link_lost'}),
-      ('interrupted', {'reason': 'scan stale: age=3.0s limit=2.5s'})], 'FATAL', 'sensor'),
-    ([('failed', {'phase': 'table_dwell'})], 'CRITICAL', 'task_failed'),
-    ([], 'CRITICAL', 'task_failed'),
+@pytest.mark.parametrize('event,reason', [
+    ('interrupted', 'emergency stop engaged'),
+    ('path_blocked_give_up', 'path blocked: nav2 error 105'),
+    ('battery_return', 'battery below the departure reserve'),
+    ('failed', 'scan stale: age=3.0s limit=2.5s'),
 ])
-def test_operator_call_names_the_most_severe_cause(failures, level, category):
+def test_failure_evidence_remains_without_a_separate_operator_call(event, reason):
     node = route()
-    for event, fields in failures:
-        node.emit(event, **fields)
-    assert node.call_operator() == level
-    call = _events(node)[-1]
-    assert (call['event'], call['level'], call['category']) == ('operator_call', level, category)
+    node.emit(event, reason=reason)
+    events = _events(node)
+    assert events[-1]['event'] == event
+    assert events[-1]['reason'] == reason
+    assert not any(item['event'] == 'operator_call' for item in events)
 
 
 def test_operator_link_blocks_the_next_goal_once_the_heartbeat_is_old(tmp_path):
@@ -3044,6 +3038,8 @@ def test_precision_zero_turn_fails_without_fresh_stopped_odometry(monkeypatch):
     assert node._drive_zero_turn(0.022, precision=True) is None
     stopped = [e for e in _events(node) if e['event'] == 'straight_drive_stopped']
     assert stopped[-1]['reason'] == 'odometry did not confirm stop'
+    assert stopped[-1]['fresh_odom_samples'] > 0
+    assert stopped[-1]['last_odom_linear_mps'] == pytest.approx(.02)
 
 
 @pytest.mark.parametrize('live_heading', [False, True])
@@ -3238,6 +3234,97 @@ def test_live_face_approach_aligns_while_advancing_and_stops_at_both_corners(
     assert all(w * offset_deg < 0.0 for w in angular)
     first_zero = commands.index((0.0, 0.0))
     assert all(command == (0.0, 0.0) for command in commands[first_zero:])
+
+
+def test_lateral_curve_passes_face_geometry_separately_without_a_false_alignment_stop(
+        monkeypatch):
+    node = route()
+    clock, x, velocity, commands = [0.], [0.], [0.], []
+    command_law = Mock(wraps=restaurant_service.face_approach_command)
+
+    def publish(message):
+        velocity[0] = message.linear.x
+        commands.append((message.linear.x, message.angular.z))
+
+    def spin(*_args, **_kwargs):
+        clock[0] += .02
+        x[0] += velocity[0] * .02
+        node.latest_motion = (clock[0], velocity[0], 0.)
+
+    def update(actual):
+        return {'remaining_m': .15 - actual[0], 'surface_gap_m': .16 - actual[0],
+                'heading_rad': .05, 'face_heading_rad': 0.,
+                'lateral_tracking': True, 'allow_near_alignment': True}
+
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=x[0], y=0.),
+            rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    monkeypatch.setattr(restaurant_service, 'face_approach_command', command_law)
+
+    assert node._drive_zero_turn(
+        .15, precision=True, hold_heading=True,
+        target_update=update, continuous_table=True) is not None
+    assert command_law.call_count > 0
+    assert all(call.kwargs['lateral_tracking'] is True
+               and call.kwargs['face_error_rad'] == 0.
+               for call in command_law.call_args_list)
+    first_stop = commands.index((0., 0.))
+    assert all(v > 0. for v, _w in commands[:first_stop])
+    assert any(w > 0. for _v, w in commands[:first_stop])
+
+
+def test_live_lateral_approach_replays_water_offset_without_precision_band_deadlock(monkeypatch):
+    node = route()
+    clock, pose = [0.], [0., -.055285, -.007085]
+    velocity, commands, gaps = [0., 0.], [], []
+    face_x = .3475
+
+    def publish(message):
+        velocity[:] = [message.linear.x, message.angular.z]
+        commands.append(tuple(velocity))
+
+    def spin(*_args, **_kwargs):
+        clock[0] += .02
+        pose[0] += velocity[0] * math.cos(pose[2]) * .02
+        pose[1] += velocity[0] * math.sin(pose[2]) * .02
+        pose[2] += velocity[1] * .02
+        node.latest_motion = (clock[0], *velocity)
+
+    def update(actual):
+        error = -actual[2]
+        center_gap = face_x - actual[0] - .065 * math.cos(error)
+        gap = center_gap - .225 * abs(math.sin(error))
+        gaps.append(gap)
+        return {
+            'remaining_m': (center_gap - .01) / math.cos(error),
+            'heading_rad': 0., 'face_heading_rad': 0., 'surface_gap_m': gap,
+            'lateral_tracking': True, 'lateral_error_m': -actual[1],
+            'lateral_tolerance_m': .005, 'target_gap_m': .01,
+            'allow_near_alignment': True,
+        }
+
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(
+        lookup_transform=lambda *_a, **_k: SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=pose[0], y=pose[1]),
+            rotation=SimpleNamespace(x=0., y=0., z=math.sin(pose[2] / 2),
+                                     w=math.cos(pose[2] / 2)))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+
+    assert node._drive_zero_turn(
+        .2824, precision=True, hold_heading=True, target_update=update,
+        continuous_table=True) is not None
+    assert node._last_direct_motion_failure is None
+    assert abs(pose[1]) <= .005
+    assert abs(pose[2]) <= math.radians(.3)
+    assert .007 <= gaps[-1] <= .014
+    assert min(gaps) > 0.
+    assert any(v > 0. and abs(w) > 0. for v, w in commands)
 
 
 def test_near_face_flip_holds_motion_until_heading_filter_agrees(monkeypatch):

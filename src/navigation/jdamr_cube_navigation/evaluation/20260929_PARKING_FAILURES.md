@@ -1922,3 +1922,29 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - **검증/한계:** 관련 rear profile/restaurant/rear box/reference 4스위트 561 PASS(5.82초), range_min=.28 밖의 live 단일 점과 안의 memory 점을 양쪽 회전에서 확인하는 강화 회귀 포함 7 targeted PASS(0.54초), fatal lint·compile·diff PASS. 기존 CM 복원/목표면/입력/stop 계약도 통과했고 독립 code-reviewer APPROVE다. 이 검증은 합성 입력과 코드 경로 검증이며 실제 의자 충돌 재현이나 원인 확정이 아니다. Nav2 RPP 이동 구간의 별도 회피 감시를 변경한 작업도 아니다. 도크 coarse 정적 지도 차단은 남아 있다.
 - **정지 반영/복원:** Pi rear_collision_profile.py/restaurant_service.py source/install 4경로 PC SHA·compile/import를 확인하고 idle executor PID83287만 재기동했다. base31767·Nav2 47789 유지, pending/running0, 배포 뒤 fresh odom3개 v/w0이다. 정지 후 새 실물 동작·위치초기화·충돌 검사 우회는 하지 않았다. 읽기 노드는 종료했고 base/Nav2/idle executor만 다음 요청을 위해 유지한다. 전체 종료는 Pi `sudo systemctl stop jdamr-box-executor jdamr-restaurant-navigation jdamr-base`다.
 - **근거:** Pi 원본 run `cycle_events.jsonl`, PC `$HOME/.local/state/bimanual-robot/chair_collision_20261021/`의 `run_and_journals.json`, `current_parameters.txt`, `cm_enabled_only.txt`, `deployment.json`, `after_deployment_state.json`, `after_deployment_scan.json`. 충돌 후 정지 scan은 `$HOME/.local/state/bimanual-robot/rear_no_terminal_replay_20261021/blocked_184007_scan.json`이다. 복원은 idle executor 정지 뒤 Pi `$HOME/.local/state/jdamr/rotation-blind-leg-watch/20261021_185720/`의 source/install 복사본을 원래 4경로에 돌린다. 브랜치 로컬 커밋만 남기며 push/main 병합은 하지 않는다.
+
+
+### 22.35 2026-10-27 수동 조종 ACK 공백·지도 기록 실패와 관측 셀 갱신
+
+- **기록 ID/증상:** `AMR-20261027-webteleop-ack-gap`, `AMR-20261027-manual-map-recorder`. 사용자는 수동 조종 중 간헐적 끊김을 보고했다. 조종 서비스 재시작은 0회였고 당시 명령별 수락 시각·충돌 감시 기록은 없어 개별 실물 정지의 단독 원인은 미확정이다. 별도 SQLite 기록기는 `SQLite error (5): database is locked`로 종료됐고 scan 259장·odom 1,386개, 약 27.70초의 정지 데이터만 남았다. 사용자 한 바퀴 주행 데이터가 있다고 기록하지 않는다.
+- **확인/수정:** 상태 GET RTT 15회는 129~620 ms·중앙값 약 246 ms였다. 기존 단일 ACK 대기가 100 ms keepalive를 지연시켜 350 ms deadman 정지를 만들 수 있는 코드를 분리된 편도/응답 지연으로 재현했다. 최대 3개 요청·역순 거절·긴급 정지 전체 취소·HTTP/1.1 지속 연결로 수정했다. 300 ms 요청 timeout과 350 ms deadman, 충돌 감시는 유지했다. 기록은 기존 표준 MCAP으로 전환해 약 40.86초·scan 396장·metadata 정상 마감을 확인했다. 실행 중 SQLite 조회와 잠금의 인과는 가설이며 기록기의 SQL 예외와 누락은 확정 사실이다.
+- **남은 데이터 반영:** 등록 테이블1 고정 자세와 실제 finite 광선으로 명시 ROI의 관측 셀만 갱신했다. 230셀 변경(기존 점유→free 82, 새 점유 21, unknown→free 127), ROI 밖 변경 0셀이다. 삭제된 점유 셀은 별도 검토에서도 hit 0회·free 28~259회였다. 지도 격자·좌표계·세 등록점·원본 지도·pbstream을 유지했다. 새 지도·keepout을 Pi에서 LoadMap하고 반환 전체 격자를 파일과 대조했다. 이는 부분 점유지도 갱신이며 포즈 그래프 재SLAM이나 미관측 테이블 뒤쪽 갱신은 아니다.
+- **검증/한계/복원:** 관련 27 PASS, fatal lint·문법·diff PASS, 별도 code-reviewer APPROVE. 수정 후 실차 연속 조종은 미확인이다. Pi 조종 소스 복원본은 `$HOME/jdamr_deploy/webteleop_ack_backup_20261027_101956/`, 지도/등록/런타임 복원본과 원시 캡처·처리/활성화 영수증은 PC·Pi `$HOME/jdamr_data/maps/20261026_manual_160135/local_updates/table_01_refresh_20261027_100353/`에 있다. 기록기 두 개와 읽기 노드는 종료했고 사용자 조종 화면·RViz 표시만 유지한다. 새 이동·도크 초기화는 하지 않았다.
+
+### 2026-10-27 새 지도 급수대 접근 재현과 조치
+
+- **도크 출발:** `table_01_20261027_115257_ab451911`은 0.7 m 직선 이탈의 정적 지도 검사에서 미이동 종료했다. 같은 날 `table_01_20261027_115429_48ed2937`은 동일한 `home_exit` 경유점을 Nav2로 통과해 급수대에 도착했다. 이 지도 세션에는 `nav2_waypoint` 이탈을 선택하고 다른 지도는 기존 직선 이탈 기본값을 유지한다. Nav2 경유점은 직선 이탈의 물리적 궤적과 동일하다고 확인된 것은 아니다.
+- **급수대:** 위 두 번째 실행에서 0.293 m 전진 뒤 새 깊이 관측의 앞 모서리 간격 추정은 25.03/16.35 mm, 좌우 참조 오차 추정은 -9.93 mm였다. 근접 보정은 `table approach preview did not converge`로 구동 전 멈췄다. `table_01_20261027_115932_4fe64a27`도 약 0.28 m 접근 명령을 내기 전 같은 오류로 멈췄다. 이 값은 내부 추정이며 외부 실측이 아니다.
+- **확인된 코드 원인:** 경로 미리보기가 근접 구간에서 좌우 목표를 향하는 조향과 면에 평행해지는 조향을 동시에 요구했다. 두 방향이 반대일 때 회전 명령이 0이 되어 같은 상태를 반복했다. 기록의 위치와 면을 재현한 계산에서도 원래 코드가 1,600회 후 같은 오류를 반환했다.
+- **조치:** 실시간 제어와 미리보기가 같은 곡률 기반 좌우 접근을 사용하고, 회전 속도에 맞춰 이동 속도를 계산한다. 근접한 상태에서 목표 좌우 오차를 줄일 공간이 없으면 이유를 분리해 기존 후진·재관측 경로를 사용한다. 최종 앞끝 1 cm, 양 코너·좌우 판정과 센서·충돌 감시는 유지한다. 로그에 실제 실패 이유가 남도록 상위 메시지도 수정했다.
+- **별도 미확정:** `table_01_20261027_115752_cb26a2f3`의 `odometry did not confirm stop`은 한 차례 확인됐다. 당시 로그에는 정지 확인 구간의 odom 표본 수와 속도가 없어 센서 누락과 실제 잔여 움직임 중 원인은 확정하지 못했다. 같은 경우 표본 수·나이·속도를 남기도록 진단만 추가했다.
+- **검증 범위:** 기록값 기반 경로 재현과 모의 제어에서 위 비수렴을 재현·수정했다. 새 깊이 카메라의 설치 보정과 실제 앞끝 1 cm·좌우 5 mm 정확도, 수정 후 전체 왕복은 실차 미검증이다. 사용자가 도크로 이동한 뒤 주행을 정지했으며 새 주행은 수행하지 않았다.
+
+### 2026-10-27 도크 정합 기준 덮어쓰기 수정
+
+- **관찰:** `init_20261027_121739`은 10:48의 지도 정합 fallback에서 파생된 스캔을 도크 기준으로 사용했다. 같은 입력 스캔을 등록 원본 도크 스캔으로 다시 정합한 결과는 해당 초기화와 약 4.6 cm 떨어졌다. 두 수치는 스캔에 근거한 추정이며 실제 절대 위치 오차의 실측은 아니다. 원본 대조는 matched support 143/124개, 평균 잔차 약 12 mm로 기준을 통과했다.
+- **확인된 원인:** taught-map 세션에서 지도 해시가 같으면 상태 파일에 남은 파생 기준을 계속 사용했고, 등록 도크의 지도 fallback이 성공하면 그 스캔과 추정 위치로 기준을 덮어썼다. 그 결과 등록된 원본 도크의 좌표 기준과 이후 기준이 달라질 수 있었다.
+- **조치:** taught-map 세션은 포인터에 등록된 원본 도크 스캔을 고정 기준으로 복원하며, 기존 상태의 기준이 달랐다면 한 번만 위치추정을 무효화해 다시 초기화한다. 지도 fallback도 원본을 갱신하지 않는다. 종전 legacy-map 경로는 유지한다.
+- **비이동 초기화:** `init_20261027_122859`에서 원본 도크 스캔을 사용했다. 현재/원본의 5 cm 안쪽 매칭 지지점은 134/116개, 현재 기준 비율은 69.8%였다. 정합 위치와 AMCL의 차이는 약 2 mm·0.5°다. HOME 좌표는 변경하지 않았고 새 주행은 하지 않았다. 수정된 기준의 전체 주행과 실측 도착 정확도는 미검증이다.
+- **정지 중 AMCL:** 정지 시 AMCL 메시지가 갱신되지 않을 수 있다. 갱신 서비스 호출 전후 위치 차이는 약 2.4 mm·0.009°였고 odom 속도는 0이었다. 실행기의 기존 정지 상태 예외와 유효 TF·스캔 검사는 유지한다. 원본 기록은 `$HOME/jdamr_data/maps/20261026_manual_160135/runtime/runs/init_20261027_122859/`이다.
+- **재계산한 경로:** 위 위치초기화 뒤 `ComputePathThroughPoses`의 `GridBased`로 도크 이탈점→급수대 관측점 경로만 비이동 계산했다. 결과 code 0, 94개 경로점, 마지막 경유점 오차 0 m다. 실제 추종이나 주차 성공을 뜻하지 않는다.

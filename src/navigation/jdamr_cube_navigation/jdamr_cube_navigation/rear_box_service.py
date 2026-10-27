@@ -67,6 +67,8 @@ def _rear_center_curve_available(observed, extent):
     try:
         reverse_curve_waypoints(observed['base_pose_odom'], _rear_center_target(observed, extent))
     except ValueError as error:
+        if str(error) == 'already at goal':
+            return True
         if str(error) in ('reverse curve is tighter than min_radius_m',
                           'start_pose must be in front of target_pose'):
             return False
@@ -474,7 +476,8 @@ class RearBoxParkingMixin:
         return {**observed, 'stamp_s': stamp}
 
     def _rear_coarse_step(self, geometry, extent, half_width, distance_m,
-                          command_watch=None, *, handoff_m=REAR_COARSE_HANDOFF_M):
+                          command_watch=None, *, handoff_m=REAR_COARSE_HANDOFF_M,
+                          stop_when_face_visible=False, face_half_width_m=None):
         start = self._odom_pose()
         target = (start[0] - distance_m * math.cos(start[2]),
                   start[1] - distance_m * math.sin(start[2]), start[2])
@@ -505,6 +508,15 @@ class RearBoxParkingMixin:
                 observed = self._rear_corridor_observation(geometry, extent, half_width)
                 if observed['gap_m'] <= handoff_m:
                     return 'rear box coarse handoff ready'
+                if stop_when_face_visible:
+                    try:
+                        self._rear_box_observation(
+                            geometry, extent,
+                            half_width if face_half_width_m is None else face_half_width_m)
+                    except RuntimeError:
+                        pass
+                    else:
+                        return 'rear box face available'
                 actual = self._odom_pose()
                 if (math.dist(actual[:2], validated_pose[0][:2]) >= 0.025
                         or abs(_angle(actual[2] - validated_pose[0][2])) >= math.radians(.3)):
@@ -518,7 +530,7 @@ class RearBoxParkingMixin:
         travelled = self._drive_zero_turn(
             -distance_m, watch=watch, hold_heading=True, **kwargs)
         failure = getattr(self, '_last_direct_motion_failure', None)
-        if failure == 'rear box coarse handoff ready':
+        if failure in ('rear box coarse handoff ready', 'rear box face available'):
             return True
         if travelled is None or failure or self.stop_requested:
             self.emit('rear_box_coarse_paused', reason=failure or 'coarse motion incomplete')
@@ -652,7 +664,9 @@ class RearBoxParkingMixin:
                                   handoff_m=range_handoff_m)
                         if not self._rear_coarse_step(
                                 geometry, extent, corridor_width, distance_m, command_watch,
-                                handoff_m=range_handoff_m):
+                                handoff_m=range_handoff_m,
+                                stop_when_face_visible=True,
+                                face_half_width_m=half_width):
                             reason = ('operator_stop' if self.stop_requested else
                                       'operator_link_lost' if not self._operator_link_ready() else
                                       getattr(self, '_last_direct_motion_failure', None)
@@ -705,11 +719,16 @@ class RearBoxParkingMixin:
             normal = state['normal_odom']
             heading = math.atan2(normal[1], normal[0])
             error = _angle(heading - actual[2])
-            gap = (sum((actual[i] - state['face_odom'][i]) * normal[i] for i in (0, 1))
-                   - extent * math.cos(error) - half_width * abs(math.sin(error)))
+            center_gap = (sum(
+                (actual[i] - state['face_odom'][i]) * normal[i] for i in (0, 1))
+                - extent * math.cos(error))
+            gap = center_gap - half_width * abs(math.sin(error))
             if abs(error) > math.radians(30.0):
                 raise RuntimeError('rear box heading outside approach range')
-            remaining = (gap - target_gap) / math.cos(error)
+            # Center the two rear-corner gaps on the requested distance. Using
+            # the nearest corner alone systematically leaves the far corner
+            # long whenever a small residual yaw remains.
+            remaining = (center_gap - target_gap) / math.cos(error)
             # A fresh same-face fit can already satisfy both final corners while
             # the filtered plane still asks for more travel. Finish this move;
             # the caller will confirm again from stopped scans.
@@ -726,6 +745,9 @@ class RearBoxParkingMixin:
                 raise RuntimeError('rear box approach exceeds bounded travel')
             return {'remaining_m': remaining, 'heading_rad': heading,
                     'target_confirmed': target_confirmed,
+                    'nearest_gap_m': gap,
+                    'center_gap_m': center_gap,
+                    'farthest_gap_m': center_gap + half_width * abs(math.sin(error)),
                     'allow_near_alignment': (gap > 0. and abs(error) < math.atan2(
                         half_width, extent))}
 
@@ -780,7 +802,12 @@ class RearBoxParkingMixin:
                         self.registry['home'], observed=initial, return_to_stage=False):
                     return False
         while not self.stop_requested and time.monotonic() < self.run_deadline_s:
-            initial = self._align_rear_face_before_clearance(initial, geometry, extent, half_width)
+            # A feasible reverse curve already removes heading and lateral error
+            # together. Reserve the separate in-place alignment for the fallback
+            # that needs forward clearance, avoiding a turn-stop-turn sequence.
+            if not _rear_center_curve_available(initial, extent):
+                initial = self._align_rear_face_before_clearance(
+                    initial, geometry, extent, half_width)
             tangent = -initial['normal_odom'][1], initial['normal_odom'][0]
             lateral = sum((initial['base_pose_odom'][i] - initial['midpoint_odom'][i]) * tangent[i]
                           for i in (0, 1))

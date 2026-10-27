@@ -125,6 +125,34 @@ def test_visible_face_is_centered_by_reverse_without_unnecessary_forward(lateral
     node._park_rear_face.assert_called_once()
 
 
+def test_feasible_reverse_curve_absorbs_heading_without_separate_rotation():
+    node = route_node()
+    node.verify_live_maps = Mock()
+    node.wait_until_ready = Mock(return_value=True)
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._confirm_collision_monitor_on = Mock()
+    angle = -.1
+    initial = face(.75, angle)
+    normal = math.cos(angle), math.sin(angle)
+    tangent = -normal[1], normal[0]
+    distance = .275 + .75
+    initial['midpoint_odom'] = (
+        -distance * normal[0] + .12 * tangent[0],
+        -distance * normal[1] + .12 * tangent[1])
+    node._observe_rear_box_recovering = Mock(return_value=initial)
+    node._align_rear_face_before_clearance = Mock(
+        side_effect=AssertionError('separate rotation is unnecessary'))
+    node._park_rear_face = Mock(return_value=True)
+    node.emit = Mock()
+
+    assert node.park_rear_box(
+        GEOMETRY, 'return-route', execute=True, timeout_s=90,
+        target_gap_m=.01)
+    node._align_rear_face_before_clearance.assert_not_called()
+    node._center_rear_box.assert_called_once_with(initial, pytest.approx(.275))
+
+
 @pytest.mark.parametrize('invalid', [math.nan, 3.])
 def test_invalid_or_excessive_center_curve_does_not_request_forward(invalid):
     observed = face(.85)
@@ -448,6 +476,34 @@ def test_coarse_range_reaches_handoff_without_a_plane(monkeypatch):
         return None
     node._drive_zero_turn = Mock(side_effect=drive)
     assert node._rear_coarse_step(GEOMETRY, .275, .275, .5)
+
+
+def test_range_reobserve_stops_as_soon_as_a_face_becomes_visible(monkeypatch):
+    node = route_node()
+    node.registry = {'map': {'yaml_path': '/map.yaml'},
+                     'keepout': {'yaml_path': '/mask.yaml'}}
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._frozen_in_odom = Mock(return_value=(
+        None, lambda x, y, yaw: (x, y, yaw)))
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    node._rear_corridor_observation = Mock(return_value={'gap_m': .75})
+    node._rear_box_observation = Mock(return_value=face(.7))
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'CachedStaticCorridorValidator',
+                        Mock(return_value=Mock(return_value=True)))
+
+    def drive(_distance, **kwargs):
+        reason = kwargs['watch']()
+        assert reason == 'rear box face available'
+        node._last_direct_motion_failure = reason
+        return None
+
+    node._drive_zero_turn = Mock(side_effect=drive)
+    assert node._rear_coarse_step(
+        GEOMETRY, .275, .275, .2, handoff_m=.2,
+        stop_when_face_visible=True, face_half_width_m=.225)
+    node._rear_box_observation.assert_called_once_with(
+        GEOMETRY, .275, .225)
 
 
 def test_temporary_face_loss_waits_in_same_task_then_recovers():
@@ -826,10 +882,27 @@ def test_one_noisy_close_range_scan_does_not_interrupt_an_aligned_approach(monke
     update = node._rear_box_update(face(.0274), GEOMETRY, .275, .225, .01)
     result = update((0., 0., 0.))
     assert abs(result['heading_rad']) < math.radians(.1)
-    assert 0.016 < result['remaining_m'] < 0.018
+    assert 0.017 < result['remaining_m'] < 0.018
     repeated = update((0., 0., 0.))
     assert repeated['heading_rad'] == result['heading_rad']
     assert repeated['remaining_m'] == result['remaining_m']
+
+
+def test_fine_rear_approach_centers_both_corner_gaps_on_target():
+    node = route_node()
+    angle = math.radians(.5)
+    initial = face(.02, angle, stamp=5.)
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._rear_box_observation = Mock(return_value=initial)
+    node.emit = Mock()
+
+    result = node._rear_box_update(
+        initial, GEOMETRY, .275, .225, .01)((0., 0., 0.))
+    expected = (result['center_gap_m'] - .01) / math.cos(
+        result['heading_rad'])
+    assert result['remaining_m'] == pytest.approx(expected)
+    assert result['center_gap_m'] == pytest.approx(
+        (result['nearest_gap_m'] + result['farthest_gap_m']) / 2.)
 
 
 def test_stopped_confirmation_uses_all_eight_scans_not_the_last_angle_outlier():

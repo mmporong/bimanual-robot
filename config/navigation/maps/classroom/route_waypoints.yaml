@@ -1,0 +1,31 @@
+schema_version: 1
+frame_id: map
+purpose: display/reference snapshot; not an executable route
+routes:
+  home_to_water_station:
+    start_pose:
+      x: -2.781
+      y: 0.568
+    waypoints:
+    - id: home_exit
+      x: -2.081
+      y: 0.556
+    - id: water_station_pre
+      x: -0.9750537975221845
+      y: -0.05096385294346553
+    - id: water_station_observation
+      x: -0.4752227426090533
+      y: -0.06396064271734671
+      yaw: -0.025996507601880273
+  water_station_to_table_01:
+    start_pose:
+      x: -0.465
+      y: -0.064
+    waypoints:
+    - id: table_01_pre
+      x: -1.7341729016638308
+      y: -1.5684813187508442
+    - id: table_01_observation
+      x: -1.2345416925137576
+      y: -1.5876817052895467
+      yaw: -0.03841021709958648

@@ -35,9 +35,9 @@ from jdamr_cube_navigation.service_destinations import (
     validate_registry, verify_identity,
 )
 from jdamr_cube_navigation.surface_approach import (
-    FACE_ALIGNMENT_GAP_M, face_approach_command, FACE_APPROACH_TIME_S, FACE_HEADING_TOLERANCE_RAD,
-    TABLE_APPROACH_SPEED_MPS,
-    filtered_face_heading,
+    FACE_ALIGNMENT_GAP_M, FACE_APPROACH_TIME_S, FACE_HEADING_TOLERANCE_RAD,
+    TABLE_APPROACH_SPEED_MPS, face_approach_command, filtered_face_heading,
+    lateral_face_approach_command,
 )
 from nav2_msgs.action import (
     ComputePathThroughPoses, FollowPath, NavigateThroughPoses, NavigateToPose, Spin)
@@ -92,28 +92,6 @@ REVERSE_PATH_UPDATE_S = 1.0
 REVERSE_PATH_CHECK_ATTEMPTS = 3
 ENTRY_HEADING_CHECKER = 'entry_heading_checker'
 ENTRY_HEADING_TOLERANCE_RAD = math.radians(ENTRY_HEADING_TOLERANCE_DEG)
-# Events whose reason may explain why a cycle stopped short (operator_call).
-FAILURE_EVENTS = frozenset({
-    'failed', 'interrupted', 'reverse_interrupted', 'departure_blocked',
-    'path_blocked_give_up', 'path_blocked_wait_aborted', 'dock_heading_out_of_tolerance',
-    'cancel_unconfirmed', 'emergency_stop_requested', 'battery_return'})
-# Operator call levels after VDA 5050 v3: FATAL needs a person before any motion,
-# CRITICAL stops the task, URGENT finishes safely and takes no new task. The first
-# rule whose text appears in a failure reason gives the category; the most severe
-# match over the run wins (evaluation/20261002_ANOMALY_HANDLING_RESEARCH.md 5.4).
-OPERATOR_CALL_RULES = (
-    ('emergency stop', 'emergency_stop', 'FATAL'),
-    ('cancel_unconfirmed', 'software', 'FATAL'),
-    ('AMCL', 'localization', 'FATAL'),
-    ('covariance', 'localization', 'FATAL'),
-    ('map', 'localization', 'FATAL'),
-    ('stale', 'sensor', 'FATAL'),
-    ('missing', 'sensor', 'FATAL'),
-    ('path blocked', 'path_blocked', 'CRITICAL'),
-    ('operator_link_lost', 'operator_link', 'URGENT'),
-    ('battery', 'battery', 'URGENT'),
-)
-OPERATOR_CALL_SEVERITY = {'URGENT': 1, 'CRITICAL': 2, 'FATAL': 3}
 # The PC refreshes the heartbeat on every 10 s poll; a missed poll stays inside this.
 OPERATOR_LINK_TIMEOUT_S = 30.0
 # A blocked base with an object right in front backs this far straight out before
@@ -522,10 +500,6 @@ class ServiceRoute(CorridorRoute):
                 yaw_covariance if yaw_covariance is not None
                 and math.isfinite(yaw_covariance) else None),
         }
-        if event in FAILURE_EVENTS:
-            text = ' '.join(str(fields[key]) for key in ('reason', 'phase') if fields.get(key))
-            self._failure_trail = [*getattr(self, '_failure_trail', []),
-                                   {'event': event, 'text': f'{event}: {text}'.rstrip(': ')}]
         payload = json.dumps(record, ensure_ascii=False, allow_nan=False)
         self.result_stream.write(payload + '\n')
         self.result_stream.flush()
@@ -1266,9 +1240,15 @@ class ServiceRoute(CorridorRoute):
                 spin_node(self, timeout_sec=0.02)
         stopped_s = time.monotonic()
         stationary_since_s = None
+        fresh_motion_samples = 0
+        last_motion_stamp_s = None
         stopped_confirmed = not confirm_stopped
         while time.monotonic() - stopped_s < DIRECT_SETTLE_S:
             motion = getattr(self, 'latest_motion', None)
+            if (motion is not None and motion[0] > stopped_s
+                    and motion[0] != last_motion_stamp_s):
+                last_motion_stamp_s = motion[0]
+                fresh_motion_samples += 1
             if (motion is not None and motion[0] > stopped_s
                     and abs(motion[1]) < 0.01 and abs(motion[2]) < 0.01):
                 if not confirm_stopped:
@@ -1284,7 +1264,13 @@ class ServiceRoute(CorridorRoute):
             spin_node(self, timeout_sec=0.02)
         if not stopped_confirmed:
             self._last_direct_motion_failure = 'odometry did not confirm stop'
-            self.emit(event, reason='odometry did not confirm stop')
+            motion = getattr(self, 'latest_motion', None)
+            self.emit(event, reason='odometry did not confirm stop',
+                      fresh_odom_samples=fresh_motion_samples,
+                      last_odom_age_s=(None if motion is None else
+                                       max(0.0, time.monotonic() - motion[0])),
+                      last_odom_linear_mps=(None if motion is None else motion[1]),
+                      last_odom_angular_radps=(None if motion is None else motion[2]))
             return None
         return measure()
 
@@ -1393,7 +1379,10 @@ class ServiceRoute(CorridorRoute):
                  'target_reached': False, 'face_heading': None, 'heading_updated_s': None,
                  'validate_control': None, 'allow_near_alignment': False,
                  'alignment_in_progress': False, 'observed_heading': None,
-                 'surface_gap_m': None, 'target_confirmed': False}
+                 'surface_gap_m': None, 'target_confirmed': False,
+                 'lateral_tracking': False, 'face_normal_heading': None,
+                 'lateral_error_m': None, 'lateral_tolerance_m': None,
+                 'target_gap_m': 0.01}
         command = Twist()
 
         def measure():
@@ -1422,6 +1411,31 @@ class ServiceRoute(CorridorRoute):
                         raise RuntimeError('invalid live target confirmation')
                     state['target_confirmed'] = confirmed
                     state['surface_gap_m'] = update.get('surface_gap_m')
+                    lateral_tracking = update.get('lateral_tracking', False)
+                    if not isinstance(lateral_tracking, bool):
+                        raise RuntimeError('invalid lateral tracking mode')
+                    face_heading = update.get('face_heading_rad')
+                    if lateral_tracking and (
+                            not continuous_table or isinstance(face_heading, bool)
+                            or not isinstance(face_heading, (int, float))
+                            or not math.isfinite(face_heading)):
+                        raise RuntimeError('lateral tracking requires a finite live face heading')
+                    state['lateral_tracking'] = lateral_tracking
+                    state['face_normal_heading'] = face_heading
+                    lateral_error = update.get('lateral_error_m')
+                    lateral_tolerance = update.get('lateral_tolerance_m')
+                    target_gap = update.get('target_gap_m', 0.01)
+                    if lateral_error is not None:
+                        if (not lateral_tracking or not continuous_table
+                                or any(isinstance(v, bool)
+                                       or not isinstance(v, (int, float))
+                                       or not math.isfinite(v)
+                                       for v in (lateral_error, lateral_tolerance, target_gap))
+                                or lateral_tolerance <= 0.0 or target_gap <= 0.0):
+                            raise RuntimeError('invalid lateral tracking error')
+                    state['lateral_error_m'] = lateral_error
+                    state['lateral_tolerance_m'] = lateral_tolerance
+                    state['target_gap_m'] = target_gap
                     allow_near = update.get('allow_near_alignment', False)
                     if not isinstance(allow_near, bool):
                         raise RuntimeError('invalid near alignment mode')
@@ -1462,9 +1476,14 @@ class ServiceRoute(CorridorRoute):
                 raw_error_rad = (error_rad if state['observed_heading'] is None else math.atan2(
                     math.sin(state['observed_heading'] - yaw),
                     math.cos(state['observed_heading'] - yaw)))
+                geometry_error_rad = (
+                    math.atan2(math.sin(state['face_normal_heading'] - yaw),
+                               math.cos(state['face_normal_heading'] - yaw))
+                    if state['lateral_tracking'] else raw_error_rad)
                 state['alignment_in_progress'] = (
                     state['allow_near_alignment']
-                    and max(abs(error_rad), abs(raw_error_rad)) > FACE_HEADING_TOLERANCE_RAD)
+                    and (abs(geometry_error_rad) if state['lateral_tracking'] else
+                         max(abs(error_rad), abs(raw_error_rad))) > FACE_HEADING_TOLERANCE_RAD)
                 command.angular.z = max(
                     -PRECISION_HEADING_MAX_RADPS,
                     min(PRECISION_HEADING_MAX_RADPS,
@@ -1473,18 +1492,29 @@ class ServiceRoute(CorridorRoute):
                     try:
                         if state['validate_control'] is not None:
                             state['validate_control']((x_m, y_m, yaw), heading)
-                        linear, angular = face_approach_command(
-                            state['remaining_m'], error_rad, approach_time_s=approach_time_s,
-                            allow_near_alignment=state['allow_near_alignment'],
-                            **({'continuous_table': True, 'surface_gap_m': state['surface_gap_m']}
-                               if continuous_table else {}))
+                        if state['lateral_error_m'] is not None:
+                            linear, angular = lateral_face_approach_command(
+                                state['remaining_m'], geometry_error_rad,
+                                state['lateral_error_m'], state['surface_gap_m'],
+                                state['lateral_tolerance_m'],
+                                target_gap_m=state['target_gap_m'],
+                                allow_near_alignment=state['allow_near_alignment'])
+                        else:
+                            linear, angular = face_approach_command(
+                                state['remaining_m'], error_rad, approach_time_s=approach_time_s,
+                                allow_near_alignment=state['allow_near_alignment'],
+                                **({'continuous_table': True, 'surface_gap_m': state['surface_gap_m']}
+                                   if continuous_table else {}),
+                                **({'lateral_tracking': True, 'face_error_rad': geometry_error_rad}
+                                   if state['lateral_tracking'] else {}))
                         command.linear.x = direction * linear
                         command.angular.z = angular
-                        if (state['allow_near_alignment']
+                        if (state['lateral_error_m'] is None and state['allow_near_alignment']
                                 and state['remaining_m'] <= FACE_ALIGNMENT_GAP_M - .01):
                             if state['alignment_in_progress']:
                                 command.linear.x = 0.
-                            if command.angular.z * raw_error_rad <= 0.:
+                            if ((not state['lateral_tracking'] or state['alignment_in_progress'])
+                                    and command.angular.z * geometry_error_rad <= 0.):
                                 command.angular.z = 0.
                     except (ValueError, RuntimeError) as error:
                         state['target_failure'] = str(error)
@@ -1671,7 +1701,7 @@ class ServiceRoute(CorridorRoute):
         return False
 
     def battery_return_due(self):
-        """Below the departure reserve between stops: skip the rest and dock (URGENT)."""
+        """Below the departure reserve between stops: skip the rest and dock."""
         voltage_v = self.battery_voltage
         reserve_v = self.service_contract['minimum_start_battery_v']
         if voltage_v is not None and math.isfinite(voltage_v) and voltage_v >= reserve_v:
@@ -1680,24 +1710,6 @@ class ServiceRoute(CorridorRoute):
                   voltage_v=voltage_v if voltage_v is not None and math.isfinite(voltage_v)
                   else None, minimum_start_battery_v=reserve_v)
         return True
-
-    def call_operator(self):
-        """Emit one operator_call for a cycle that stopped short, with its cause."""
-        trail = getattr(self, '_failure_trail', [])
-        best = None
-        for entry in trail:
-            for needle, category, level in OPERATOR_CALL_RULES:
-                if needle in entry['text']:
-                    if best is None or (OPERATOR_CALL_SEVERITY[level]
-                                        > OPERATOR_CALL_SEVERITY[best[1]]):
-                        best = (category, level, entry['text'])
-                    break
-        if best is None:
-            best = ('task_failed', 'CRITICAL', trail[-1]['text'] if trail else 'cycle failed')
-        category, level, reason = best
-        self.emit('operator_call', level=level, category=category, reason=reason,
-                  failures=[entry['text'] for entry in trail][-8:])
-        return level
 
     def _departure_battery_ready(self):
         """

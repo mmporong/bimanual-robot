@@ -1,0 +1,76 @@
+schema_version: 1
+frame_id: map
+robot_base_frame: base_link
+map:
+  yaml_path: map.yaml
+  yaml_sha256: fe44094511fd906a733a3cb295ba7d0262a15e8571cb210cc7da880b711eb81e
+  image_sha256: 038b49f8d9287210c218e8880c38d57db256e949fa36506f37365839d9ca7862
+keepout:
+  yaml_path: keepout.yaml
+  yaml_sha256: f8ef246e2bad5aa0ce162203e34058ffa5ba7a04d5e56d88eb49b341ad86c63c
+  image_sha256: fb526583ea63edd5dbcbdd555512e503ce7d0bc2ce11469b6440b5b2859f01c1
+home:
+  id: home_dock
+  priority: 1
+  x_m: -2.780726088075155
+  y_m: 0.5678760175806215
+  yaw_rad: -0.016969862913671082
+  approach_offset_m: 0.5
+  target_front_gap_m: null
+  parking_direction: reverse
+  rear_parking_reference: lidar_box
+  target_rear_gap_m: 0.01
+  source: operator_confirmed_dock_after_final_manual_movement_and_cartographer_tf
+  target_status: NOT_VALIDATED
+  teaching:
+    source: map_to_base_link_tf
+    captured_at: '2026-10-26T07:17:28.950747+00:00'
+    physical_accuracy: NOT_MEASURED
+    table_gap_m: null
+    gap_measurement_note: null
+tables:
+- table_id: water_station
+  enabled: true
+  service_poses:
+  - id: water_station
+    priority: 1
+    x_m: 0.024608312304077895
+    y_m: -0.07695743249122788
+    yaw_rad: -0.025996507601880273
+    approach_offset_m: 0.5
+    target_front_gap_m: 0.01
+    lateral_tolerance_m: 0.005
+    lateral_precision_status: NOT_VALIDATED
+    target_gap_status: NOT_VALIDATED
+    source: operator_selected_current_pose_map_to_base_link_tf
+    lateral_reference: operator_taught_physical_pose_and_heading
+    object_reference_role: auxiliary_only_do_not_redefine_destination
+    teaching:
+      source: map_to_base_link_tf
+      captured_at: '2026-10-26T08:17:18.610439+00:00'
+      physical_accuracy: NOT_MEASURED
+      table_gap_m: null
+      gap_measurement_note: null
+- table_id: table_01
+  enabled: true
+  service_poses:
+  - id: table_01
+    priority: 1
+    x_m: -0.734910483363684
+    y_m: -1.6068820918282494
+    yaw_rad: -0.03841021709958648
+    approach_offset_m: 0.5
+    target_front_gap_m: 0.01
+    lateral_tolerance_m: 0.005
+    lateral_precision_status: NOT_VALIDATED
+    target_gap_status: NOT_VALIDATED
+    source: operator_taught_physical_pose_global_lidar_match_then_current_map_to_base_link_tf
+    lateral_reference: operator_taught_map_pose_without_visual_landmark
+    registration_status: CONFIRMED_BY_OPERATOR
+    object_reference_role: none_featureless_table
+    teaching:
+      source: map_to_base_link_tf
+      captured_at: '2026-10-27T00:57:14.022089+00:00'
+      physical_accuracy: NOT_MEASURED
+      table_gap_m: null
+      gap_measurement_note: null

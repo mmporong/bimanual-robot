@@ -255,13 +255,58 @@ def test_lateral_heading_uses_minimum_lookahead_and_deadband():
         .4, (1., .01, 0.), (0., 0., 0.), 0., .005, .5,
         minimum_lookahead_m=.10)
     left_error = -math.sin(.4) * 1. + math.cos(.4) * .01
-    expected = math.atan2(left_error, .10)
+    current_heading_error = -.4
+    expected = math.atan(
+        2. * left_error / .10 - .25 * math.tan(current_heading_error))
     expected = max(-.5, min(.5, expected))
     assert bounded == pytest.approx(.4 + expected)
 
-    unchanged = station.lateral_approach_heading(
+    parallelizing = station.lateral_approach_heading(
         .4, (1., 0., 0.), (0., 0., 0.), .20, 2., .5)
-    assert unchanged == pytest.approx(.4)
+    expected = .4 + math.atan(-.25 * math.tan(-.4))
+    assert parallelizing == pytest.approx(expected)
+    assert (parallelizing - .4) * (0. - .4) < 0.
+    assert abs(parallelizing - .4) < abs(0. - .4)
+
+
+def test_lateral_heading_blends_current_yaw_toward_parallel_arrival():
+    current_yaw = math.radians(16.)
+
+    result = station.lateral_approach_heading(
+        0., (.4, 0., 0.), (0., 0., current_yaw), .4, .005,
+        math.radians(30.))
+
+    assert result * current_yaw < 0.
+    assert abs(result) < abs(current_yaw)
+
+
+@pytest.mark.parametrize(('start_y', 'start_yaw'), [
+    (-.04, math.radians(8.)),
+    (.04, math.radians(-8.)),
+    (-.06, 0.),
+])
+def test_lateral_heading_rollout_reaches_tolerance_and_parallel_heading(
+        start_y, start_yaw):
+    """A bounded forward rollout converges without a terminal turn-back."""
+    goal = (.4, 0., 0.)
+    x, y, yaw = 0., start_y, start_yaw
+    previous_abs_y = abs(y)
+    for _ in range(78):
+        remaining = max(0., goal[0] - x)
+        command = station.lateral_approach_heading(
+            0., goal, (x, y, yaw), remaining, .005,
+            math.radians(30.))
+        yaw = math.atan2(
+            math.sin(yaw + .5 * station._wrapped(command - yaw)),
+            math.cos(yaw + .5 * station._wrapped(command - yaw)))
+        x += .005 * math.cos(yaw)
+        y += .005 * math.sin(yaw)
+        if abs(y) > .005:
+            assert abs(y) <= previous_abs_y + 1e-12
+        previous_abs_y = abs(y)
+
+    assert abs(y) <= .005
+    assert abs(yaw) <= math.radians(.2)
 
 
 @pytest.mark.parametrize(('field', 'value', 'message'), [

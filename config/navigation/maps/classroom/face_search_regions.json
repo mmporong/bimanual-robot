@@ -1,0 +1,58 @@
+{
+  "destinations": {
+    "table_01": {
+      "face_xy": [
+        -0.659965801991173,
+        -1.6097621498090549
+      ],
+      "normal_deg": 177.79925667001248,
+      "provenance": {
+        "front_extent": {
+          "measured_at": "2026-09-15",
+          "source": "user_tape_measurement",
+          "unit": "m",
+          "valid_for": "current_bimanual_lower_frame_and_wheels",
+          "value": 0.065
+        },
+        "front_extent_m": 0.065,
+        "requested_gap_m": 0.01,
+        "status": "DERIVED_NOT_MEASURED",
+        "taught_pose_xy_yaw": [
+          -0.734910483363684,
+          -1.6068820918282494,
+          -0.03841021709958648
+        ]
+      },
+      "source": "taught map pose plus physical front extent and requested gap"
+    },
+    "water_station": {
+      "face_xy": [
+        0.09958297054104757,
+        -0.07890695095731005
+      ],
+      "normal_deg": 178.5105098323325,
+      "provenance": {
+        "front_extent": {
+          "measured_at": "2026-09-15",
+          "source": "user_tape_measurement",
+          "unit": "m",
+          "valid_for": "current_bimanual_lower_frame_and_wheels",
+          "value": 0.065
+        },
+        "front_extent_m": 0.065,
+        "requested_gap_m": 0.01,
+        "status": "DERIVED_NOT_MEASURED",
+        "taught_pose_xy_yaw": [
+          0.024608312304077895,
+          -0.07695743249122788,
+          -0.025996507601880273
+        ]
+      },
+      "source": "taught map pose plus physical front extent and requested gap"
+    }
+  },
+  "face_xy": "expected search-region face; derived, not measured",
+  "frame": "map",
+  "normal_deg": "expected outward face normal; robot approaches from this side",
+  "schema_version": 1
+}

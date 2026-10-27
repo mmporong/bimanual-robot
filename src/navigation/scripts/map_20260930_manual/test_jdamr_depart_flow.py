@@ -187,6 +187,40 @@ def _configure_fixture_session(tmp_path, monkeypatch):
     return fixture
 
 
+def _add_taught_table_01(fixture):
+    registry_path = fixture.runtime / 'service_destinations.yaml'
+    registry = yaml.safe_load(registry_path.read_text())
+    registry['tables'].append({
+        'table_id': 'table_01',
+        'service_poses': [{
+            'x_m': -.735, 'y_m': -1.607, 'yaw_rad': -.0384,
+            'approach_offset_m': .5,
+        }],
+    })
+    registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
+    destinations_path = fixture.runtime / 'destinations.json'
+    destinations = json.loads(destinations_path.read_text())
+    destinations['destinations']['table_01'] = {
+        'face_xy': [-.660, -1.610], 'normal_deg': 177.8,
+        'source': 'fixture taught table pose',
+    }
+    destinations_path.write_text(json.dumps(destinations))
+    fixture.profile['station_ids'] = ['water_station', 'table_01']
+
+
+@pytest.mark.parametrize('mode,has_straight_departure', [
+    ('straight', True), ('nav2_waypoint', False),
+])
+def test_taught_map_route_uses_its_configured_departure_mode(
+        tmp_path, monkeypatch, mode, has_straight_departure):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    fixture.profile['dock_departure_mode'] = mode
+    d.write_routes((-2., .5, 0.))
+    generated = yaml.safe_load((fixture.runtime / 'water_station_route.yaml').read_text())
+    assert generated['waypoints'][0]['id'] == 'home_exit'
+    assert ('dock_departure_distance_m' in generated) is has_straight_departure
+
+
 def test_go_refuses_without_a_completed_init(env, monkeypatch):
     state = d.load_state()
     state['localized'] = False
@@ -422,6 +456,31 @@ def test_display_start_starts_only_missing_units(env, monkeypatch):
     assert started == ['jdamr-p2-rviz']
 
 
+def test_taught_map_display_passes_saved_station_directory(env, monkeypatch):
+    commands = []
+    started = set()
+    monkeypatch.setattr(d, 'ACTIVE_MAP_SESSION', {'session_directory': str(env)})
+    monkeypatch.setattr(d, 'BASE', env / 'map session')
+
+    def sh(command, **_kwargs):
+        commands.append(command)
+        if command.startswith('systemd-run'):
+            started.add(command.split('--unit=')[1].split()[0])
+        if command.startswith('systemctl --user is-active'):
+            unit = command.split()[-1]
+            active = unit in started
+            return SimpleNamespace(
+                returncode=0 if active else 3,
+                stdout='active' if active else 'inactive')
+        return SimpleNamespace(returncode=0, stdout='active')
+
+    monkeypatch.setattr(d, 'sh', sh)
+    d.cmd_display_start(None)
+    marker = next(command for command in commands if '--unit=jdamr-p2-markers ' in command)
+    assert '--station-directory' in marker
+    assert str(env / 'map session') in marker
+
+
 def test_stop_during_the_map_wait_prevents_recovery(env, monkeypatch):
     """A stop makes the executor fail with the same map message; do not re-depart."""
     monkeypatch.setattr(d, 'pi', Pi())
@@ -600,24 +659,23 @@ def test_poll_pi_tells_a_failed_link_from_a_finished_cycle(monkeypatch):
     assert d.poll_pi('test -e result || echo running').stdout.strip() == ''
 
 
-def test_operator_call_event_alerts_the_pc(env, monkeypatch):
-    """An operator_call rings, notifies the desktop, and uses the optional extra channel."""
-    sent = []
+def test_historical_operator_call_never_sends_notifications(env, monkeypatch, capsys):
+    sent, messages = [], []
     monkeypatch.setattr(d, 'sh', lambda command, **kwargs: sent.append(command)
                         or SimpleNamespace(returncode=0, stdout=''))
-    monkeypatch.setattr(d, 'log', lambda message: sent.append(('log', message)))
-    monkeypatch.delenv('JDAMR_OPERATOR_NOTIFY_CMD', raising=False)
-    d.show_event({'event': 'interrupted', 'reason': 'scan stale'})
-    assert not any(isinstance(item, str) for item in sent)
-    d.show_event({'event': 'operator_call', 'level': 'FATAL', 'category': 'emergency_stop',
-                  'reason': 'interrupted: emergency stop engaged'})
-    assert any(isinstance(item, str) and item.startswith('notify-send') for item in sent)
-    assert ('log', 'OPERATOR CALL FATAL emergency_stop: interrupted: emergency stop engaged') \
-        in sent
-    monkeypatch.setenv('JDAMR_OPERATOR_NOTIFY_CMD', 'echo')
-    sent.clear()
-    d.alert_operator({'level': 'URGENT', 'category': 'battery', 'reason': 'low'})
-    assert any(isinstance(item, str) and item.startswith('echo ') for item in sent)
+    monkeypatch.setattr(d, 'log', messages.append)
+    monkeypatch.setenv('JDAMR_OPERATOR_NOTIFY_CMD', 'removed-notification-hook')
+    state = d.load_state()
+    state['operator_alerts'] = True
+    d.save_state(state)
+    d.show_event({'event': 'operator_call', 'level': 'FATAL', 'reason': 'old run'})
+    assert sent == []
+    assert messages == []
+    assert '\a' not in capsys.readouterr().out
+    d.show_event({'event': 'failed', 'reason': 'scan stale'})
+    assert len(messages) == 1
+    assert json.loads(messages[0])['reason'] == 'scan stale'
+    assert sent == []
 
 
 def test_go_passes_the_rpp_transit_switch_only_when_asked(env, monkeypatch):
@@ -688,19 +746,6 @@ def test_rear_box_success_does_not_require_map_home_arrival(env, monkeypatch):
     monkeypatch.setattr(d, 'run_cycle', lambda *a: [
         {'event': 'rear_box_parking_finished', 'confirmed': True}])
     d.cmd_go(go_args(rear_box_only=True))
-
-
-def test_operator_alerts_can_be_switched_off_for_test_runs(env, monkeypatch):
-    sent = []
-    monkeypatch.setattr(d, 'sh', lambda command, **k: sent.append(command) or
-                        SimpleNamespace(returncode=0, stdout=''))
-    event = {'level': 'CRITICAL', 'category': 'path_blocked', 'reason': 'give up'}
-    d.cmd_alerts(SimpleNamespace(mode='off'))
-    d.alert_operator(event)
-    assert sent == []
-    d.cmd_alerts(SimpleNamespace(mode='on'))
-    d.alert_operator(event)
-    assert any(command.startswith('notify-send') for command in sent)
 
 
 def test_go_passes_the_zero_turn_final_switch_only_when_asked(env, monkeypatch):
@@ -839,6 +884,59 @@ def test_configured_map_session_is_idempotent_and_generates_only_taught_routes(
     assert len({point['id'] for point in route['waypoints']}) == 3
 
 
+def test_taught_session_restores_registered_dock_anchor_after_derived_scan(tmp_path, monkeypatch):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    state = d.load_state()
+    original = state['dock_scan_reference']
+    state['dock_scan_reference'] = {
+        **original, 'scan_path': str(fixture.runtime / 'later_local_scan.json'),
+        'pose_map': [-.79, .35, .12],
+    }
+    state['localized'] = True
+    d.save_state(state)
+
+    d.configure_map_session(fixture.pointer)
+
+    restored = d.load_state()
+    assert restored['dock_scan_reference'] == original
+    assert restored['localized'] is False
+    assert restored['operator_owned'] == 'preserve'
+
+
+def test_taught_session_map_fallback_keeps_original_dock_anchor(tmp_path, monkeypatch):
+    import numpy as np
+
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    original = d.load_state()['dock_scan_reference']
+    home = {'x_m': -.8, 'y_m': .4, 'yaw_rad': .1}
+    monkeypatch.setattr(d, 'pi', Pi())
+    monkeypatch.setattr(d, 'sh', lambda *_a, **_kw: None)
+    monkeypatch.setattr(d, 'pull_registry', lambda: {'home': home})
+    monkeypatch.setattr(d, 'capture_scan', lambda _path: None)
+    monkeypatch.setattr(d, 'refine_at_registered_dock', lambda *_a: None)
+    monkeypatch.setattr(d, 'refine_pose', lambda *_a: {
+        'pose': [-.79, .35, .12], 'inlier_5cm': .5, 'global_agrees': False,
+        'click_offset_m': .05, 'click_offset_deg': 1., 'click': [-.8, .4, .1],
+    })
+    monkeypatch.setattr(d, 'read_events', lambda _path: [{
+        'event': 'navigation_activated_without_motion',
+        'stationary_pose': [-.79, .35, .12],
+    }])
+    monkeypatch.setattr(d.scan_match, 'load_map', lambda *_a: (
+        None, np.zeros((3, 3), dtype=bool), None, .05, [0., 0., 0.]))
+    monkeypatch.setattr(d.dock_survey, 'raw_points_map', lambda *_a: ([], 1))
+    monkeypatch.setattr(d.dock_survey, 'clusters', lambda *_a: [])
+
+    d.cmd_init(SimpleNamespace(
+        seed_from_state=False, click=False, local_only=True, keep_home=True))
+
+    assert d.load_state()['localized'] is True
+    assert d.load_state()['dock_scan_reference'] == original
+    d.configure_map_session(fixture.pointer)
+    assert d.load_state()['localized'] is True
+    assert d.load_state()['dock_scan_reference'] == original
+
+
 def test_new_water_station_request_uses_profile_and_has_no_via(
         tmp_path, monkeypatch):
     fixture = _configure_fixture_session(tmp_path, monkeypatch)
@@ -862,6 +960,117 @@ def test_new_water_station_request_uses_profile_and_has_no_via(
     assert '--via-id' not in argv
     assert '--via-route' not in argv
     assert '--via-region-xy' not in argv
+
+
+def test_taught_map_table_cycle_visits_water_then_table_and_returns(
+        tmp_path, monkeypatch, capsys):
+    fixture = _map_session_fixture(tmp_path)
+    _add_taught_table_01(fixture)
+    for name in (
+            'ACTIVE_MAP_SESSION', 'BASE', 'P2', 'MAP_YAML', 'KEEPOUT_YAML',
+            'REGISTRY', 'ANNOTATION', 'CLICK', 'STATE', 'PI_BASE', 'PI_P2',
+            'PI_REGISTRY', 'DDS_PROFILE', 'DESTINATIONS', 'TABLES',
+            'STATION_PROFILES'):
+        monkeypatch.setattr(d, name, getattr(d, name))
+    monkeypatch.setattr(d, 'DATA_ROOT', fixture.data_root)
+    monkeypatch.setattr(d, 'prepare_reference_mount', lambda: False)
+    monkeypatch.setitem(
+        sys.modules, 'jdamr_cube_navigation.map_session_assets',
+        SimpleNamespace(prepare_map_session=lambda _pointer: fixture.profile))
+    d.configure_map_session(fixture.pointer)
+    d.write_routes((-.8, .4, .1))
+
+    water = json.loads((fixture.runtime / 'destinations.json').read_text())[
+        'destinations']['water_station']
+    normal = math.radians(water['normal_deg'])
+    expected_escape = {
+        'x': round(water['face_xy'][0] + d.ESCAPE_M * math.cos(normal), 3),
+        'y': round(water['face_xy'][1] + d.ESCAPE_M * math.sin(normal), 3),
+    }
+    table_route = yaml.safe_load((fixture.runtime / 'table_01_route.yaml').read_text())
+    direct_route = yaml.safe_load(
+        (fixture.runtime / 'table_01_direct_route.yaml').read_text())
+    assert table_route['start_pose'] == expected_escape
+    assert [point['id'] for point in table_route['waypoints']] == [
+        'table_01_pre', 'table_01_observation']
+    assert direct_route['start_pose'] == {'x': -.8, 'y': .4}
+    assert direct_route['waypoints'][0]['id'] == 'home_exit'
+
+    pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', pi)
+    monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
+    d.run_cycle(go_args(table_id='table_01'), d.load_state(), 'table_01')
+    argv = json.loads(next(value for value in pi.stdins if value))['argv']
+    assert argv[argv.index('--table-id') + 1] == 'table_01'
+    assert argv[argv.index('--approach-route') + 1] == str(
+        d.pi_path(fixture.runtime / 'table_01_route.yaml'))
+    assert argv[argv.index('--via-id') + 1] == 'water_station'
+    assert argv[argv.index('--via-route') + 1] == str(
+        d.pi_path(fixture.runtime / 'water_station_route.yaml'))
+    table_face = json.loads((fixture.runtime / 'destinations.json').read_text())[
+        'destinations']['table_01']['face_xy']
+    assert argv[argv.index('--region-xy') + 1:argv.index('--region-xy') + 3] == [
+        str(table_face[0]), str(table_face[1])]
+    assert 'SUBMITTED water_station -> table_01 -> dock:' in capsys.readouterr().out
+
+    direct_pi = ExecutorPi()
+    monkeypatch.setattr(d, 'pi', direct_pi)
+    d.run_cycle(
+        go_args(table_id='table_01', skip_via=True), d.load_state(), 'table_01')
+    direct_argv = json.loads(next(value for value in direct_pi.stdins if value))['argv']
+    assert direct_argv[direct_argv.index('--approach-route') + 1] == str(
+        d.pi_path(fixture.runtime / 'table_01_direct_route.yaml'))
+    assert '--via-id' not in direct_argv
+
+
+def test_sync_skips_map_pose_only_null_reference_and_keeps_water_rgbd(
+        tmp_path, monkeypatch):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    references = []
+    for name, content in (
+            ('capture.json', b'{}\n'), ('rgb.ppm', b'P6\n1 1\n255\n\x00\x00\x00'),
+            ('depth.npz', b'fixture-depth')):
+        path = fixture.session / 'stations' / 'water_station' / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        references.append(path)
+    profiles = json.loads(fixture.station_profiles.read_text())
+    profiles['stations']['water_station']['rgbd_reference'] = dict(zip(
+        ('reference_capture_path', 'reference_rgb_path', 'reference_depth_path'),
+        map(str, references)))
+    profiles['stations']['table_01'] = {
+        'reference_mode': 'map_pose_only', 'rgbd_reference': None,
+    }
+    fixture.station_profiles.write_text(json.dumps(profiles))
+
+    shell_calls, pi_calls = [], []
+
+    def fake_sh(command, **_kwargs):
+        shell_calls.append(command)
+        return SimpleNamespace(returncode=0, stdout='')
+
+    local_by_name = {
+        name: fixture.runtime / name
+        for name in ('service_destinations.yaml', 'keepout.pgm', 'keepout.yaml')
+    }
+    local_by_name.update({path.name: path for path in references})
+
+    def fake_pi(command, **_kwargs):
+        pi_calls.append(command)
+        if command.startswith('sha256sum '):
+            remote_name = Path(command.split()[-1]).name
+            return SimpleNamespace(
+                returncode=0, stdout=d.sha256(local_by_name[remote_name]) + '  remote\n')
+        return SimpleNamespace(returncode=0, stdout='')
+
+    monkeypatch.setattr(d, 'sh', fake_sh)
+    monkeypatch.setattr(d, 'pi', fake_pi)
+    d.cmd_sync(None)
+
+    reference_syncs = [call for call in shell_calls if '--protect-args' in call]
+    assert len(reference_syncs) == 3
+    assert all(any(str(path) in call for call in reference_syncs) for path in references)
+    assert sum(command.startswith('sha256sum ') for command in pi_calls) == 6
 
 
 def test_observation_waypoint_uses_mount_profile_without_changing_aisle_point(
@@ -995,18 +1204,20 @@ def test_init_records_the_inlier_threshold_actually_used(env, monkeypatch):
     assert written['min_inlier_used'] == 0.3
 
 
-def test_status_and_departure_show_the_operator_alerts_state(env, monkeypatch):
+def test_status_and_departure_ignore_obsolete_operator_alert_settings(env, monkeypatch):
     pi = ExecutorPi()
     monkeypatch.setattr(d, 'pi', pi)
     messages = []
     monkeypatch.setattr(d, 'log', messages.append)
     monkeypatch.setattr(d, 'estop_state', lambda: 'released')
     monkeypatch.setattr(d, 'read_events', lambda _path: [{'event': 'home_arrived'}])
-    d.cmd_alerts(SimpleNamespace(mode='off'))
+    state = d.load_state()
+    state['operator_alerts'] = True
+    d.save_state(state)
     d.cmd_status(SimpleNamespace())
     d.run_cycle(go_args(), d.load_state(), 'table_02')
-    assert 'operator alerts: off' in messages
-    assert any(m.startswith('SUBMITTED') and m.endswith('operator alerts off') for m in messages)
+    assert not any('operator alerts' in m for m in messages)
+    assert any(m.startswith('SUBMITTED') for m in messages)
 
 
 @pytest.mark.parametrize('result', ['{"code": 1}', '{"code": 2}', '', '{', '{}',
@@ -1039,12 +1250,11 @@ MAP_FAILURE_EVENTS = [
 
 
 @pytest.mark.parametrize('recovered', [True, False])
-def test_real_map_failure_metadata_retries_once_and_alerts_only_terminal_failure(
+def test_real_map_failure_metadata_retries_once_without_notification_side_effects(
         env, monkeypatch, recovered):
     pi = ExecutorPi(result='{"code": 1}')
     monkeypatch.setattr(d, 'pi', pi)
-    alerts, restarts = [], []
-    monkeypatch.setattr(d, 'alert_operator', alerts.append)
+    restarts = []
     monkeypatch.setattr(d, 'read_events', lambda _path: (
         HOME_EVENTS.copy() if pi.result == '{"code": 0}' else MAP_FAILURE_EVENTS.copy()))
 
@@ -1060,7 +1270,6 @@ def test_real_map_failure_metadata_retries_once_and_alerts_only_terminal_failure
         with pytest.raises(SystemExit):
             d.cmd_go(go_args())
     assert restarts == [True]
-    assert len(alerts) == (0 if recovered else 1)
     assert len([c for c in pi.calls if is_submission(c)]) == 2
 
 

@@ -1,8 +1,12 @@
 """Ensure display-only assets cannot masquerade as taught table poses."""
 
 from copy import deepcopy
+import math
 
-from jdamr_cube_navigation.service_visualization import build_markers
+from jdamr_cube_navigation.service_visualization import (
+    build_markers,
+    load_saved_station_poses,
+)
 import pytest
 from visualization_msgs.msg import Marker
 
@@ -67,6 +71,28 @@ def test_taught_pose_gains_heading_arrow(assets):
     assert any('DOCK_POSE_TAUGHT' in m.text for m in markers)
 
 
+def test_registered_table_without_annotation_draws_pose_arrow_and_label(assets):
+    registry, _ = assets
+    registry['tables'] = [{'table_id': 'table_01', 'service_poses': [
+        {'x_m': -0.734910483363684, 'y_m': -1.6068820918282494,
+         'yaw_rad': -0.03841021709958648}]}]
+
+    markers = build_markers(
+        registry, {'source_map_sha256': 'abc', 'markers': {}}).markers
+
+    arrows = [item for item in markers if item.type == Marker.ARROW]
+    table_arrow = next(item for item in arrows if item.id == 12)
+    assert table_arrow.pose.position.x == pytest.approx(-0.734910483363684)
+    assert table_arrow.pose.position.y == pytest.approx(-1.6068820918282494)
+    assert table_arrow.pose.orientation.z == pytest.approx(
+        math.sin(-0.03841021709958648 / 2))
+    assert any(item.text == 'TABLE_1_SELECTED\nDOCK_POSE_TAUGHT'
+               for item in markers)
+    assert not any(item.type == Marker.CYLINDER for item in markers)
+    assert [item.id for item in arrows] == [12, 100]
+    assert len({(item.ns, item.id) for item in markers}) == len(markers)
+
+
 def test_republish_removes_old_taught_pose(assets):
     registry, annotation = assets
     registry['tables'] = [{'table_id': 'table_01', 'service_poses': [
@@ -95,3 +121,72 @@ def test_t39_water_station_marker_is_drawn_when_annotated(assets):
                 and (item.pose.position.x, item.pose.position.y) == (0.06, -1.21))
     assert area.action == Marker.ADD
     assert len(markers) == len(before) + 2
+
+
+def _write_saved_pose(path, *, station_id='table_01', frame='map',
+                      base_frame='base_link', yaml_sha='yaml-sha', image_sha='abc'):
+    path.write_text(
+        f'id: {station_id}\n'
+        f'frame_id: {frame}\n'
+        f'robot_base_frame: {base_frame}\n'
+        'x_m: -0.734910483363684\n'
+        'y_m: -1.6068820918282494\n'
+        'yaw_rad: -0.03841021709958648\n'
+        'map:\n'
+        f'  yaml_sha256: {yaml_sha}\n'
+        f'  image_sha256: {image_sha}\n')
+
+
+def test_saved_table_pose_draws_exact_arrow_and_table_label(tmp_path, assets):
+    registry, annotation = assets
+    registry['map']['yaml_sha256'] = 'yaml-sha'
+    _write_saved_pose(tmp_path / 'table_01.yaml')
+    saved = load_saved_station_poses(registry, tmp_path)
+    markers = build_markers(registry, annotation, saved_station_poses=saved).markers
+    arrow = next(item for item in markers if item.id == 10000)
+    assert arrow.type == Marker.ARROW
+    assert arrow.pose.position.x == pytest.approx(-0.734910483363684)
+    assert arrow.pose.position.y == pytest.approx(-1.6068820918282494)
+    assert arrow.pose.orientation.z == pytest.approx(math.sin(-0.03841021709958648 / 2))
+    assert arrow.pose.orientation.w == pytest.approx(math.cos(-0.03841021709958648 / 2))
+    assert any(item.text == 'TABLE 1\nSAVED POSE' for item in markers)
+    assert not any(item.type == Marker.CYLINDER
+                   and item.pose.position.x == pytest.approx(-0.734910483363684)
+                   for item in markers)
+
+
+@pytest.mark.parametrize('case', [
+    'missing', 'image_mismatch', 'yaml_mismatch', 'frame_mismatch',
+    'base_frame_mismatch', 'filename_mismatch',
+])
+def test_missing_or_stale_saved_pose_is_ignored(tmp_path, assets, case):
+    registry, annotation = assets
+    registry['map']['yaml_sha256'] = 'yaml-sha'
+    directory = tmp_path / 'stations'
+    if case != 'missing':
+        directory.mkdir()
+        _write_saved_pose(
+            directory / ('table_02.yaml' if case == 'filename_mismatch'
+                         else 'table_01.yaml'),
+            frame='odom' if case == 'frame_mismatch' else 'map',
+            base_frame=('base_footprint' if case == 'base_frame_mismatch'
+                        else 'base_link'),
+            yaml_sha='old-yaml' if case == 'yaml_mismatch' else 'yaml-sha',
+            image_sha='old-image' if case == 'image_mismatch' else 'abc')
+    saved = load_saved_station_poses(registry, directory)
+    markers = build_markers(registry, annotation, saved_station_poses=saved).markers
+    assert saved == []
+    assert [item.id for item in markers if item.type == Marker.ARROW] == [100]
+
+
+def test_registered_table_is_not_duplicated_by_saved_pose(tmp_path, assets):
+    registry, annotation = assets
+    registry['map']['yaml_sha256'] = 'yaml-sha'
+    registry['tables'] = [{'table_id': 'table_01', 'service_poses': [
+        {'x_m': 1.2, 'y_m': 2.2, 'yaw_rad': 0.0}]}]
+    _write_saved_pose(tmp_path / 'table_01.yaml')
+    saved = load_saved_station_poses(registry, tmp_path)
+    markers = build_markers(registry, annotation, saved_station_poses=saved).markers
+    assert saved == []
+    assert [item.id for item in markers if item.type == Marker.ARROW] == [12, 100]
+    assert len({item.id for item in markers}) == len(markers)
