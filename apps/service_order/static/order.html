@@ -7,13 +7,18 @@
   <meta name="theme-color" content="#ffffff">
   <title>MS 레스토랑</title>
   <style>
+    /* 캐주얼 레스토랑 톤: 제목·메뉴 이름은 배민 주아체(Jua), 본문은 고운돋움(Gowun Dodum). 둘 다 SIL OFL.
+       이 페이지에 쓰는 글자만 남긴 부분 글꼴(static/fonts, tools: subset_fonts.py)이다. 없는 글자는 아래 시스템 글꼴로 나온다. */
+    @font-face { font-family: "Jua"; src: url("/fonts/jua.woff") format("woff"); font-display: swap; }
+    @font-face { font-family: "Gowun Dodum"; src: url("/fonts/gowun_dodum.woff") format("woff"); font-display: swap; }
     :root {
       --bg: #ffffff; --bg-2: #f4f9fd; --card: #ffffff; --card-2: #e8f4fc; --line: #dbe7f1;
       --ink: #1f3553; --muted: #5a6b80; --faint: #9aa9ba;
       --accent: #1677c8; --accent-ink: #ffffff; --accent-soft: rgba(22,119,200,.10);
       --ok: #2b8a5a; --danger: #d63c3c;
       --radius: 18px;
-      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+      --display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+      font-family: "Gowun Dodum", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
@@ -29,7 +34,7 @@
       padding: 18px clamp(16px, 3vw, 32px); border-bottom: 1px solid var(--line); }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .brand-mark { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); flex: none; }
-    .brand-name { margin: 0; font-family: Georgia, "Noto Serif KR", "Batang", serif; font-size: 22px; letter-spacing: .04em; white-space: nowrap; }
+    .brand-name { margin: 0; font-family: var(--display); font-size: 24px; letter-spacing: .02em; white-space: nowrap; }
     .brand-sub { margin: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .table-pill { flex: none; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 700; font-size: 14px; }
     .table-pill:empty { display: none; }
@@ -48,7 +53,7 @@
     .tab[aria-selected="true"] .dot { background: var(--accent-ink); }
     .sec { padding-top: 22px; scroll-margin-top: 70px; }
     .sec + .sec { margin-top: 18px; border-top: 1px dashed var(--line); }
-    .section-title { margin: 0 0 4px; font-family: Georgia, "Noto Serif KR", serif; font-size: 24px; letter-spacing: .01em; }
+    .section-title { margin: 0 0 4px; font-family: var(--display); font-size: 27px; font-weight: 400; }
     .section-sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
     .items { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
@@ -104,7 +109,7 @@
       .menu { padding-bottom: 60px; }
       .cart { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
         padding: 24px; border-top: 0; border-left: 1px solid var(--line); background: var(--bg-2); box-shadow: none; }
-      .cart-title { display: block; margin: 0 0 18px; font-family: Georgia, "Noto Serif KR", serif; font-size: 22px; }
+      .cart-title { display: block; margin: 0 0 18px; font-family: var(--display); font-size: 24px; font-weight: 400; }
       .cart-lines { display: block; flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 12px; }
       .cart-lines:empty::before { content: "담은 메뉴가 없어요"; color: var(--faint); font-size: 14px; }
       .cart-row { flex-direction: column; align-items: stretch; }
@@ -156,6 +161,12 @@
     .actions { display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%); margin: 26px auto 0; }
     .offline { margin: 14px 0 0; color: var(--danger); font-size: 14px; }
     @media (max-width: 420px) { .steps li { font-size: 11px; } .ticket .no { font-size: 30px; } .items { gap: 10px; } .item .name { font-size: 15px; } }
+    /* 제목 글꼴(주아체는 한 굵기뿐이라 가짜 굵게를 막는다). 위 규칙보다 뒤에 둔다. */
+    .tab, .item .name, .primary, .status-title, .ticket .no, .sheet h2, .table-pill, .table-btn
+      { font-family: var(--display); font-weight: 400; }
+    /* 가격은 주아체의 쉼표가 마침표처럼 보여서(24,000 -> 24.000) 숫자가 또렷한 시스템 글꼴로 쓴다. */
+    .item .price, .line .lp, .sheet .total, .receipt .total
+      { font-family: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; font-weight: 800; }
   </style>
 </head>
 <body>

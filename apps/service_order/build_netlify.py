@@ -21,7 +21,7 @@ def build(out: Path, api_base: str) -> None:
     out.mkdir(parents=True)
     for name in PAGES:
         shutil.copy2(STATIC / name, out / name)
-    for folder in ("menu", "map"):  # 메뉴 사진, 관제 지도
+    for folder in ("menu", "map", "fonts"):  # 메뉴 사진, 관제 지도, 손님 화면 글꼴
         if (STATIC / folder).is_dir():
             shutil.copytree(STATIC / folder, out / folder)
     (out / "config.js").write_text(f"window.ORDER_API_BASE = {json.dumps(api_base)};\n", encoding="utf-8")
