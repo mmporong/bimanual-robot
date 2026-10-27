@@ -57,8 +57,13 @@ ckpt = LOGDIR / "outputs" / name / "checkpoints" / f"{best_step:06d}" / "pretrai
 if not (ckpt / "model.safetensors").is_file():  # 저장 중 죽으면 폴더만 남는다
     sys.exit(f"{name}: best step {best_step} 체크포인트 폴더 없음 {ckpt}")
 repo = f"jun-seo/{name}_{best_step}S"
-create_repo(repo, repo_type="model", private=True, exist_ok=True)
-HfApi().upload_folder(folder_path=str(ckpt), repo_id=repo, repo_type="model",
+# HF private 한도(약 100GB)가 차서 2026-10-27부터 새 모델은 public으로 올린다(사용자 결정).
+# 업로드 실패로 같은 이름의 빈 private 저장소가 먼저 생겼으면 public으로 바꾼 뒤 올린다.
+api = HfApi()
+if api.repo_exists(repo) and api.model_info(repo).private:
+    api.update_repo_settings(repo, private=False)
+create_repo(repo, repo_type="model", private=False, exist_ok=True)
+api.upload_folder(folder_path=str(ckpt), repo_id=repo, repo_type="model",
                       commit_message=f"best checkpoint ({name}, step {best_step}, eval_loss {best_loss})")
 print(f"{name}: BEST step={best_step} eval_loss={best_loss} -> {repo}")
 PYEOF
