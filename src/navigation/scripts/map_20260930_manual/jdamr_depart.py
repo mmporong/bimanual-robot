@@ -747,12 +747,18 @@ def refine_pose(scan_path, click):
     local_score, pose = scan_match.search(score, pts, seed, xy_half=MATCH_CLICK_XY_M,
                                           yaw_half=MATCH_CLICK_YAW_RAD)
     inlier = float((score(pts, *pose)[1] < 0.05).mean())
-    ranked = dock_survey.global_pose(score, pts, free, res, origin)
-    best = ranked[0]['pose']
-    agree = (math.dist(best[:2], pose[:2]) <= 0.1
-             and abs(wrap(best[2] - pose[2])) <= math.radians(3.0))
+    registered_dock = (ACTIVE_MAP_SESSION is not None
+                       and click.get('source') == 'registered_dock')
+    best, agree = None, False
+    if not registered_dock:
+        ranked = dock_survey.global_pose(score, pts, free, res, origin)
+        best = ranked[0]['pose']
+        agree = (math.dist(best[:2], pose[:2]) <= 0.1
+                 and abs(wrap(best[2] - pose[2])) <= math.radians(3.0))
     return {'pose': [float(v) for v in pose], 'mean_dist_m': float(local_score),
-            'inlier_5cm': float(inlier), 'global_best': [float(v) for v in best],
+            'inlier_5cm': float(inlier),
+            'global_best': None if best is None else [float(v) for v in best],
+            'global_search_performed': not registered_dock,
             'global_agrees': bool(agree), 'click': [float(v) for v in seed],
             'click_offset_m': float(math.dist(seed[:2], pose[:2])),
             'click_offset_deg': float(math.degrees(wrap(seed[2] - pose[2])))}
@@ -924,7 +930,10 @@ def cmd_init(args):
         refined = refine_pose(run_dir / 'scan.json', click)
     pose = refined['pose']
     basis = 'anchored dock scan' if dock_reference_used else 'map scan'
-    global_result = 'not evaluated for dock scan' if dock_reference_used else refined['global_agrees']
+    global_result = ('not evaluated for dock scan' if dock_reference_used else
+                     'not required for registered dock'
+                     if refined.get('global_search_performed') is False else
+                     refined['global_agrees'])
     log(f'{basis} match ({pose[0]:.3f}, {pose[1]:.3f}, {math.degrees(pose[2]):.1f} deg) '
         f'inlier {refined["inlier_5cm"]:.2f}, click offset {refined["click_offset_m"]:.2f} m / '
         f'{refined["click_offset_deg"]:.1f} deg, global agrees {global_result}')
@@ -937,12 +946,22 @@ def cmd_init(args):
         if not args.local_only or override < MATCH_OVERRIDE_FLOOR:
             fail(f'--min-inlier needs --local-only and >= {MATCH_OVERRIDE_FLOOR}')
         min_inlier = override
+    # A stated dock placement already supplies the global location. Keep the
+    # normal map inlier bound and the anchor's existing 20 cm / 15 deg window;
+    # an unrelated global winner must not veto this bounded local match.
+    dock_local_match = (
+        ACTIVE_MAP_SESSION is not None and click['source'] == 'registered_dock'
+        and refined['inlier_5cm'] >= MATCH_MIN_INLIER
+        and refined['click_offset_m'] <= .2
+        and abs(refined['click_offset_deg']) <= 15.)
+    refined['registered_dock_local_match'] = dock_local_match
     refined['min_inlier_used'] = None if dock_reference_used else min_inlier
-    refined['threshold_basis'] = 'anchored_dock_scan' if dock_reference_used else 'map_scan'
+    refined['threshold_basis'] = ('anchored_dock_scan' if dock_reference_used else
+                                  'registered_dock_local_map' if dock_local_match else 'map_scan')
     (run_dir / 'refine.json').write_text(json.dumps(refined, indent=1))
     if not dock_reference_used and (
             refined['inlier_5cm'] < min_inlier
-            or not (refined['global_agrees'] or args.local_only)):
+            or not (refined['global_agrees'] or args.local_only or dock_local_match)):
         fail('scan does not match the map near the click; check placement or click again')
     initial = {'frame_id': 'map', 'x_m': pose[0], 'y_m': pose[1], 'yaw_rad': pose[2],
                **INIT_COVARIANCE,
@@ -1442,7 +1461,8 @@ def go_one(args, table_id):
     fresh_departure = not any(getattr(args, flag, False) for flag in (
         'resume_at_observation', 'resume_at_final_approach', 'resume_parked_log',
         'dock_only', 'rear_box_only', 'route', 'region', 'skip_via'))
-    if (fresh_departure and state.get('init_pose_source') == 'anchored_dock_scan'
+    if (fresh_departure and state.get('init_pose_source') in (
+            'anchored_dock_scan', 'registered_dock_local_map')
             and state.get('init_local_only') is not True
             and controller_wait_failed(events)):
         log('controller unavailable before motion; restoring only Nav2/executor '

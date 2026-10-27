@@ -1963,3 +1963,10 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
 - **소프트웨어 검증:** 전면·교시 기준·곡률 접근·후면·카메라·URDF·출발 흐름·VSLAM 계약 관련 10개 파일 675 PASS. 좌우 목표에 새 AMCL 보정이 들어와도 접근 목표가 움직이지 않는 회귀와, 순간 면 검출이 후진을 끊지 않는 회귀를 포함한다. 실차 재주행과 실제 1 cm·좌우 정확도는 별도 확인이 필요하다.
 - **정지 반영:** Pi의 두 주차 모듈·카메라 설정·URDF·출발 도구와 활성 세션 장착값을 반영했다. `robot_state_publisher.robot_description`의 기존 카메라 관절 RPY만 갱신해 실제 `base_link→camera_link`의 높이 1.26 m와 선정 자세 일치를 확인했다. 베이스·Nav2는 재시작하지 않았고 odom 5표본은 선속도·각속도 모두 0이었다. 상주 실행기는 transient 유닛이라 일반 `systemctl start` 복원이 실패했으며 기존 `start_executor()` 경로로 재생성했다. 복원본·TF 변경 전 URDF·배포 영수증은 Pi `$HOME/.local/state/jdamr/parking-coordinate-and-mount/20261027_151558/`, PC 영수증은 `$HOME/.local/state/bimanual-robot/parking-coordinate-and-mount-20261027/deployment_result.json`에 남긴다. 실물 이동 명령·도크 좌표 변경·위치초기화는 수행하지 않았다.
 - **운영 선호 저장:** 이후 사용자 요청에 따라 `src/navigation/AGENTS.md`에 AMR 작업의 별도 리뷰·검수·검토 절차를 자동 실행하지 않고 기능 수정·실제 반영을 우선하도록 기록했다. 추가 리뷰나 반복 검사를 출발 조건으로 넣지 않는다.
+
+### 2026-10-27 도크 준비 중 전역 후보 불일치 거부 수정
+
+- **증상:** 사용자 도크 배치 확인 뒤 초기화에서 도크 주변 지도 정합은 등록점과 약 3 cm·2.8° 차이, 5 cm 내 지지율 0.49였지만 전역 탐색의 다른 후보 때문에 거부됐다. 수정 전 실행은 `runtime/runs/init_20261027_152523/`이다.
+- **수정:** 등록 도크로 시작하는 taught-map 초기화는 도크 주변 정합과 기존 원본 스캔을 사용한다. 원본 스캔을 못 쓰는 경우에도 정상 지도 지지율 0.45 이상과 기존 도크 범위 20 cm·15°를 만족하면 전역 후보 불일치만으로 거부하지 않는다. 이 경우 불필요한 전역 탐색도 수행하지 않으며 `registered_dock_local_map`으로 근거를 구분한다. 일반 임의 위치 초기화의 전역 탐색과 실제 정합 불량 거부는 유지한다. 기존 미이동 controller 복구도 이 도크 초기화 근거를 인정하도록 연결했다.
+- **실제 비이동 적용 결과:** `init_20261027_152820`에서 로컬 지지율 약 0.48, 등록점 차이 약 4 cm·2.3°로 초기화했다. AMCL과 정합 위치의 차이는 약 8 mm·0.3°였고 기존 activation 경로가 controller 응답·설정을 확인해 정상 종료했다. 등록 HOME 좌표는 변경하지 않았으며 두 테이블 경로를 갱신한 뒤 `localized=true`를 저장했다. 이동 명령은 보내지 않았다. 이는 주행 준비 완료이며 실제 주차 정확도 검증은 아니다.
+- **운영 규칙:** 오류 수정 후 도크 배치가 확인된 경우 지도 정합·위치초기화·controller 연결까지 수정 단계에서 완료하고, 이후 출발 요청에서는 준비된 실행 경로를 사용하도록 `src/navigation/AGENTS.md`에 기록했다.
