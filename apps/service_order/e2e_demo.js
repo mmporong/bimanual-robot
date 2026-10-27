@@ -1,4 +1,4 @@
-// 배포된 데모 화면 E2E 확인: 손님 주문 -> 관제 표시 -> 일시정지/한 단계 진행 -> 대리 주문·취소 -> 완료 -> 손님 취소.
+// 배포된 데모 화면 E2E 확인: 손님 메뉴 -> 주문 확인 창 -> 관제 표시 -> 일시정지/한 단계 진행 -> 대리 주문·취소 -> 완료 -> 손님 취소.
 // 준비: 빈 폴더에서 `npm i puppeteer-core@23.11.1` 후 이 파일을 복사해 실행한다(Edge 사용, Windows 경로).
 // 실행: node e2e_demo.js [사이트 주소] [스크린샷 폴더]
 const os = require("os");
@@ -24,8 +24,12 @@ const ok = (cond, msg) => { console.log(`${cond ? "PASS" : "FAIL"} ${msg}`); if 
   ok(await guest.$eval("#submit", (b) => b.disabled), "주문 버튼은 음료 선택 전 비활성");
   ok((await text(guest, "#table-label")) === "3번 테이블", "QR 테이블 번호 표시");
   ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "375px 가로 넘침 없음");
+  ok((await guest.$$(".item.disabled")).length === 0 && (await guest.$$("[data-drink]")).length === 2, "첫 화면은 로봇 서빙 메뉴 2개");
+  await guest.screenshot({ path: `${OUT}/0_guest_menu.png` });
   await guest.click('[data-drink="COLD_WATER"]');
   await guest.click("#submit");
+  await guest.waitForSelector("#confirm:not([hidden])");
+  await guest.click("#confirm-ok");
   await guest.waitForSelector("#track-view:not([hidden])");
   ok(guest.url().includes("order=WEB-"), `주소에 주문 번호 기록 (${guest.url().split("?")[1]})`);
   await guest.screenshot({ path: `${OUT}/1_guest_tracking.png` });
@@ -76,6 +80,8 @@ const ok = (cond, msg) => { console.log(`${cond ? "PASS" : "FAIL"} ${msg}`); if 
   await guest.click("#again");
   await guest.click('[data-drink="HOT_WATER"]');
   await guest.click("#submit");
+  await guest.waitForSelector("#confirm:not([hidden])");
+  await guest.click("#confirm-ok");
   await guest.waitForSelector("#track-view:not([hidden])");
   await sleep(1200);
   const queuedSub = await text(guest, "#status-sub");

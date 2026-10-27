@@ -2,98 +2,237 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <title>물 주문</title>
+  <meta name="theme-color" content="#ffffff">
+  <title>MS 레스토랑</title>
   <style>
     :root {
-      --bg: #f4f6f9; --card: #fff; --ink: #142538; --muted: #66768a; --line: #dbe2ea;
-      --accent: #1761c4; --accent-soft: #e8f1fd; --cold: #1f78c8; --hot: #c85a35;
-      --ok: #15805b; --danger: #b42332; --radius: 14px;
-      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+      --bg: #ffffff; --bg-2: #f4f9fd; --card: #ffffff; --card-2: #e8f4fc; --line: #dbe7f1;
+      --ink: #1f3553; --muted: #5a6b80; --faint: #9aa9ba;
+      --accent: #1677c8; --accent-ink: #ffffff; --accent-soft: rgba(22,119,200,.10);
+      --cold: #3a8fd6; --hot: #e8590c; --ok: #2b8a5a; --danger: #d63c3c;
+      --radius: 18px;
+      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 16px; line-height: 1.5; }
-    button { font: inherit; color: inherit; cursor: pointer; }
-    button:focus-visible { outline: 3px solid rgba(23,97,196,.35); outline-offset: 2px; }
-    main { width: min(480px, 100%); margin: 0 auto; padding: 20px 16px 40px; }
-    header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
-    h1 { margin: 0; font-size: 24px; letter-spacing: -.02em; }
-    .table-label { color: var(--muted); font-weight: 600; }
-    h2 { margin: 0 0 10px; font-size: 15px; color: var(--muted); font-weight: 600; }
-    section { margin-bottom: 22px; }
-    .grid { display: grid; gap: 10px; }
-    .grid.tables { grid-template-columns: repeat(4, 1fr); }
-    .grid.drinks { grid-template-columns: 1fr 1fr; }
-    .choice { padding: 14px 8px; background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); font-weight: 700; }
-    .choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-    .drink { padding: 22px 10px; font-size: 20px; }
-    .drink small { display: block; margin-top: 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
-    .drink[data-drink="COLD_WATER"][aria-pressed="true"] { border-color: var(--cold); color: var(--cold); background: #e6f3ff; }
-    .drink[data-drink="HOT_WATER"][aria-pressed="true"] { border-color: var(--hot); color: var(--hot); background: #fff0e9; }
-    .primary { width: 100%; padding: 16px; border: 0; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 18px; font-weight: 700; }
-    .primary:disabled { background: #a9b6c5; cursor: not-allowed; }
-    .secondary { width: 100%; padding: 14px; margin-top: 10px; background: transparent; border: 1px solid var(--line); border-radius: var(--radius); color: var(--muted); font-weight: 600; }
-    .error { min-height: 1.5em; margin: 10px 0 0; color: var(--danger); font-size: 14px; text-align: center; }
-    .card { padding: 22px 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
-    .status-title { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
-    .status-sub { margin: 6px 0 0; color: var(--muted); }
-    .summary { display: flex; gap: 8px; margin: 0 0 16px; color: var(--muted); font-size: 14px; }
-    .summary b { color: var(--ink); }
-    ol.steps { list-style: none; margin: 20px 0 0; padding: 0; }
-    .steps li { position: relative; padding: 0 0 18px 34px; color: var(--muted); }
-    .steps li:last-child { padding-bottom: 0; }
-    .steps li::before { content: ""; position: absolute; left: 6px; top: 4px; width: 14px; height: 14px; border: 2px solid var(--line); border-radius: 50%; background: var(--card); }
-    .steps li:not(:last-child)::after { content: ""; position: absolute; left: 13px; top: 22px; bottom: 2px; width: 2px; background: var(--line); }
-    .steps li.done { color: var(--ink); }
-    .steps li.done::before { border-color: var(--ok); background: var(--ok); }
-    .steps li.done::after { background: var(--ok); }
-    .steps li.now { color: var(--accent); font-weight: 700; }
-    .steps li.now::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
-    .card.ok { border-color: var(--ok); } .card.ok .status-title { color: var(--ok); }
-    .card.fail { border-color: var(--danger); } .card.fail .status-title { color: var(--danger); }
-    .offline { margin: 12px 0 0; color: var(--danger); font-size: 14px; text-align: center; }
-    .demo-note { margin: 0 0 16px; padding: 8px 12px; border-radius: 8px; background: #fff6df; color: #9d6818; font-size: 13px; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; flex-direction: column; color: var(--ink); font-size: 16px; line-height: 1.5;
+      background: var(--bg);
+      -webkit-tap-highlight-color: transparent;
+    }
+    button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+    button:focus-visible { outline: 3px solid rgba(22,119,200,.45); outline-offset: 2px; }
+    svg { display: block; }
     [hidden] { display: none !important; }
+
+    /* ---------- 상단 ---------- */
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 18px clamp(16px, 3vw, 32px); border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+      background: var(--accent); color: var(--accent-ink); flex: none; }
+    .brand-name { margin: 0; font-family: Georgia, "Noto Serif KR", "Batang", serif; font-size: 22px; letter-spacing: .04em; white-space: nowrap; }
+    .brand-sub { margin: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .table-pill { flex: none; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 700; font-size: 14px; }
+    .table-pill:empty { display: none; }
+    .demo-note { margin: 0; padding: 8px clamp(16px, 3vw, 32px); background: #e8f4fc; color: #155a94; font-size: 13px; }
+
+    /* ---------- 메뉴 화면 ---------- */
+    .shop { flex: 1; display: grid; grid-template-columns: 1fr; }
+    .menu { padding: 20px clamp(16px, 3vw, 32px) 140px; min-width: 0; }
+    .tabs { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -4px 20px; padding: 0 4px; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab { flex: none; padding: 10px 18px; border-radius: 999px; background: var(--card); color: var(--muted); font-weight: 600; border: 1px solid var(--line); }
+    .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    .tab .dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--ok); vertical-align: middle; }
+    .tab[aria-selected="true"] .dot { background: var(--accent-ink); }
+    .section-title { margin: 0 0 4px; font-family: Georgia, "Noto Serif KR", serif; font-size: 24px; letter-spacing: .01em; }
+    .section-sub { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+    .items { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .item { position: relative; display: flex; flex-direction: column; text-align: left; padding: 14px; min-width: 0;
+      background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); transition: border-color .15s, transform .15s; }
+    .item .art { height: 120px; margin: -2px -2px 12px; border-radius: 12px; display: grid; place-items: center;
+      background: var(--card-2); }
+    .item .art svg { width: 84px; height: 84px; }
+    .item .name { font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+    .item .desc { margin-top: 2px; color: var(--muted); font-size: 13px; min-height: 2.6em; }
+    .item .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+    .item .price { font-weight: 700; color: var(--accent); }
+    .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .badge.robot { background: rgba(43,138,90,.10); color: var(--ok); }
+    .badge.soon { background: #eef2f7; color: var(--faint); }
+    /* 로봇 서빙 탭: 데모에서 누를 메뉴라 크게 보여 준다 */
+    .items.feature { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .item[data-drink]:hover { border-color: #b9d6ee; box-shadow: 0 6px 18px rgba(31,53,83,.06); }
+    .item[aria-pressed="true"] { border-color: var(--accent); background: linear-gradient(180deg, rgba(22,119,200,.06), var(--card) 60%); }
+    .item[aria-pressed="true"]::after { content: "✓"; position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 800; }
+    .item.disabled { cursor: not-allowed; opacity: .6; }
+    .item.disabled .art { filter: grayscale(.35); }
+
+    /* ---------- 주문 패널 ---------- */
+    .cart { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+      background: rgba(255,255,255,.97); border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(31,53,83,.06); backdrop-filter: blur(8px); }
+    .cart-title { display: none; }
+    .cart-tables { margin-bottom: 12px; }
+    .cart-tables h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+    .table-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .table-btn { padding: 10px 0; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-weight: 700; }
+    .table-btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+    .cart-row { display: flex; align-items: center; gap: 12px; }
+    .cart-sel { flex: 1; min-width: 0; }
+    .cart-sel .what { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cart-sel .hint { color: var(--muted); font-size: 13px; }
+    .primary { padding: 16px 22px; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 17px; font-weight: 800; white-space: nowrap; }
+    .primary:disabled { background: #e3ebf3; color: #9aa9ba; cursor: not-allowed; }
+    .ghost { padding: 14px 18px; border-radius: 14px; border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
+    .error { margin: 8px 0 0; color: var(--danger); font-size: 14px; }
+    .error:empty { display: none; }
+
+    @media (min-width: 900px) {
+      .shop { grid-template-columns: minmax(0, 1fr) 340px; }
+      .items { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+      .items.feature { grid-template-columns: repeat(2, minmax(0, 300px)); gap: 20px; }
+      .items.feature .art { height: 200px; }
+      .items.feature .art svg { width: 130px; height: 130px; }
+      .items.feature .name { font-size: 22px; }
+      .menu { padding-bottom: 40px; }
+      .cart { position: static; display: flex; flex-direction: column;
+        padding: 24px; border-top: 0; border-left: 1px solid var(--line); background: var(--bg-2); }
+      .cart-title { display: block; margin: 0 0 18px; font-family: Georgia, "Noto Serif KR", serif; font-size: 22px; }
+      .cart-row { flex-direction: column; align-items: stretch; margin-top: auto; }
+      .cart-sel { padding: 16px; border-radius: 14px; background: var(--card); border: 1px dashed var(--line); }
+      .cart-sel .what { font-size: 18px; white-space: normal; }
+      .primary { width: 100%; padding: 18px; font-size: 19px; }
+    }
+
+    /* ---------- 확인 창 ---------- */
+    .modal { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; background: rgba(31,53,83,.45); }
+    .sheet { width: min(420px, 100%); padding: 26px 22px 20px; border-radius: 22px; background: var(--bg); border: 1px solid var(--line); text-align: center; box-shadow: 0 20px 50px rgba(31,53,83,.18); }
+    .sheet .art { width: 96px; height: 96px; margin: 0 auto 10px; }
+    .sheet h2 { margin: 0; font-size: 22px; }
+    .sheet p { margin: 6px 0 20px; color: var(--muted); }
+    .sheet .row { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
+
+    /* ---------- 진행 화면 ---------- */
+    .track { width: min(760px, 100%); margin: 0 auto; padding: 28px 16px 48px; text-align: center; }
+    .ticket { display: inline-flex; flex-direction: column; align-items: center; padding: 14px 28px; margin-bottom: 26px;
+      border: 1px dashed var(--accent); border-radius: 16px; background: var(--bg-2); }
+    .ticket .label { color: var(--muted); font-size: 13px; }
+    .ticket .no { font-family: Georgia, "Noto Serif KR", serif; font-size: 40px; line-height: 1.1; letter-spacing: .08em; color: var(--accent); }
+    .ticket .what { margin-top: 2px; font-weight: 600; }
+    .hero { width: 120px; height: 120px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; background: var(--card-2); border: 1px solid var(--line); }
+    .hero svg { width: 72px; height: 72px; }
+    .hero.live { animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(22,119,200,.30); } 50% { box-shadow: 0 0 0 16px rgba(22,119,200,0); } }
+    .status-title { margin: 0; font-size: clamp(24px, 5vw, 32px); font-weight: 800; letter-spacing: -.02em; }
+    .status-sub { margin: 6px 0 0; color: var(--muted); min-height: 1.5em; }
+    .card.ok .status-title { color: var(--ok); }
+    .card.fail .status-title { color: var(--danger); }
+    ol.steps { list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin: 30px 0 0; padding: 0; counter-reset: s; }
+    .steps li { position: relative; padding-top: 44px; color: var(--faint); font-size: 13px; font-weight: 600; }
+    .steps li::before { counter-increment: s; content: counter(s); position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--card); border: 2px solid var(--line); z-index: 1; }
+    .steps li:not(:first-child)::after { content: ""; position: absolute; top: 16px; right: 50%; width: 100%; height: 2px; background: var(--line); }
+    .steps li.done { color: var(--ink); }
+    .steps li.done::before { content: "✓"; background: var(--ok); border-color: var(--ok); color: #ffffff; }
+    .steps li.done::after, .steps li.now::after { background: var(--ok); }
+    .steps li.now { color: var(--accent); }
+    .steps li.now::before { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 5px var(--accent-soft); }
+    .actions { display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%); margin: 30px auto 0; }
+    .offline { margin: 14px 0 0; color: var(--danger); font-size: 14px; }
+    @media (max-width: 420px) { .steps li { font-size: 11px; } .ticket .no { font-size: 34px; } }
   </style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>물 주문</h1>
-    <span class="table-label" id="table-label"></span>
-  </header>
-
-  <p class="demo-note" id="demo-note" hidden>체험용 데모 화면입니다. 실제 로봇과 연결되어 있지 않습니다.</p>
-
-  <div id="order-view">
-    <section id="table-section">
-      <h2>테이블</h2>
-      <div class="grid tables" id="tables"></div>
-    </section>
-    <section>
-      <h2>음료</h2>
-      <div class="grid drinks">
-        <button type="button" class="choice drink" data-drink="COLD_WATER" aria-pressed="false">냉수<small>시원한 물 한 잔</small></button>
-        <button type="button" class="choice drink" data-drink="HOT_WATER" aria-pressed="false">온수<small>따뜻한 물 한 잔</small></button>
-      </div>
-    </section>
-    <button type="button" class="primary" id="submit" disabled>주문하기</button>
-    <p class="error" id="order-error" role="alert"></p>
-  </div>
-
-  <div id="track-view" hidden>
-    <p class="summary"><b id="track-drink"></b><span id="track-id"></span></p>
-    <div class="card" id="status-card" aria-live="polite">
-      <p class="status-title" id="status-title"></p>
-      <p class="status-sub" id="status-sub"></p>
-      <ol class="steps" id="steps"></ol>
+<header class="top">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v8a2 2 0 0 0 2 2v8M5 3v5M9 3v5"/><path d="M17 21V3c-2 1.5-3 4-3 7v3h3"/></svg>
     </div>
-    <button type="button" class="secondary" id="cancel" hidden>주문 취소</button>
-    <button type="button" class="primary" id="again" hidden style="margin-top:12px">새로 주문하기</button>
-    <p class="offline" id="offline" hidden>서버와 연결이 끊겼어요. 다시 연결하는 중…</p>
+    <div style="min-width:0">
+      <p class="brand-name">MS RESTAURANT</p>
+      <p class="brand-sub">서빙 로봇이 물을 따라 테이블까지 가져다드립니다</p>
+    </div>
   </div>
-</main>
+  <span class="table-pill" id="table-label"></span>
+</header>
+<p class="demo-note" id="demo-note" hidden>체험용 데모 화면입니다. 실제 로봇과 연결되어 있지 않습니다.</p>
+
+<div id="order-view" class="shop">
+  <main class="menu">
+    <nav class="tabs" id="tabs" role="tablist" aria-label="메뉴 분류"></nav>
+    <h1 class="section-title" id="section-title"></h1>
+    <p class="section-sub" id="section-sub"></p>
+    <div class="items" id="items"></div>
+  </main>
+
+  <aside class="cart" aria-label="주문 내역">
+    <h2 class="cart-title">주문 내역</h2>
+    <section class="cart-tables" id="table-section">
+      <h3>테이블을 선택해 주세요</h3>
+      <div class="table-grid" id="tables"></div>
+    </section>
+    <div class="cart-row">
+      <div class="cart-sel">
+        <div class="what" id="cart-what">메뉴를 골라 주세요</div>
+        <div class="hint" id="cart-hint">로봇은 한 번에 한 잔씩 서빙해요</div>
+      </div>
+      <button type="button" class="primary" id="submit" disabled>주문하기</button>
+    </div>
+    <p class="error" id="order-error" role="alert"></p>
+  </aside>
+</div>
+
+<div class="modal" id="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div class="sheet">
+    <div class="art" id="confirm-art"></div>
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-sub"></p>
+    <div class="row">
+      <button type="button" class="ghost" id="confirm-cancel">돌아가기</button>
+      <button type="button" class="primary" id="confirm-ok">주문 확정</button>
+    </div>
+  </div>
+</div>
+
+<div id="track-view" class="track" hidden>
+  <div class="ticket">
+    <span class="label">주문 번호</span>
+    <span class="no" id="track-no"></span>
+    <span class="what" id="track-drink"></span>
+  </div>
+  <div class="card" id="status-card" aria-live="polite">
+    <div class="hero" id="hero"></div>
+    <p class="status-title" id="status-title"></p>
+    <p class="status-sub" id="status-sub"></p>
+    <ol class="steps" id="steps"></ol>
+  </div>
+  <div class="actions">
+    <button type="button" class="ghost" id="cancel" hidden>주문 취소</button>
+    <button type="button" class="primary" id="again" hidden>새로 주문하기</button>
+  </div>
+  <p class="offline" id="offline" hidden>서버와 연결이 끊겼어요. 다시 연결하는 중…</p>
+  <p class="section-sub" style="margin-top:22px" id="track-id"></p>
+</div>
+<!-- 메뉴·진행 그림. order.js 가 복제해 쓴다(innerHTML 미사용). -->
+<template id="art-cold"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 12h32l-4 42a4 4 0 0 1-4 4H24a4 4 0 0 1-4-4z" stroke="#3a7fb8" stroke-width="2.5"/><path d="M19 26h26l-2.7 28a3 3 0 0 1-3 2.7H24.7a3 3 0 0 1-3-2.7z" fill="#7cc4ef" fill-opacity=".5"/><rect x="24" y="30" width="8" height="8" rx="1.5" transform="rotate(-12 28 34)" fill="#ffffff" stroke="#9fcbea" stroke-width="1.2"/><rect x="33" y="36" width="8" height="8" rx="1.5" transform="rotate(10 37 40)" fill="#ffffff" stroke="#9fcbea" stroke-width="1.2"/><path d="M22 18v6" stroke="#3a7fb8" stroke-width="2" stroke-opacity=".5"/></svg></template>
+<template id="art-hot"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 26h30v18a12 12 0 0 1-12 12h-6a12 12 0 0 1-12-12z" stroke="#b9653a" stroke-width="2.5"/><path d="M16 32h26v12a10 10 0 0 1-10 10h-6a10 10 0 0 1-10-10z" fill="#f6c9a8" fill-opacity=".45"/><path d="M44 30h4a6 6 0 0 1 0 12h-4" stroke="#b9653a" stroke-width="2.5"/><path d="M22 8c-3 4 3 6 0 10M30 6c-3 4 3 6 0 10M38 8c-3 4 3 6 0 10" stroke="#e8590c" stroke-width="2.2"/></svg></template>
+<template id="art-bowl"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 30h48a24 24 0 0 1-48 0z" stroke="#7a5a3a" stroke-width="2.5"/><path d="M12 30c2-8 10-12 20-12s18 4 20 12" fill="#f3e3c3" stroke="#c9a46a" stroke-width="2"/><path d="M20 24c3-3 7-3 10 0M34 22c3-3 7-3 10 1" stroke="#b5452a" stroke-width="2.5"/><circle cx="28" cy="26" r="2" fill="#4f9a4a"/><circle cx="40" cy="27" r="2" fill="#4f9a4a"/><path d="M24 54h16" stroke="#7a5a3a" stroke-width="2.5"/></svg></template>
+<template id="art-pasta"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="32" cy="40" rx="26" ry="12" stroke="#7a6a5a" stroke-width="2.5"/><path d="M16 38c4-10 28-10 32 0" fill="#f6e2a8" stroke="#d8b25a" stroke-width="2"/><path d="M20 36c4-4 8 2 12-2s8 2 12-2" stroke="#d8b25a" stroke-width="2"/><circle cx="28" cy="33" r="2" fill="#c0392b"/><circle cx="37" cy="34" r="2" fill="#4f9a4a"/><path d="M44 8l-8 26M50 10l-10 24" stroke="#8a8a8a" stroke-width="2.5"/></svg></template>
+<template id="art-steak"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="32" cy="40" rx="27" ry="14" stroke="#7a6a5a" stroke-width="2.5"/><path d="M18 36c0-8 10-12 18-10s12 6 10 12-10 8-18 6-10-4-10-8z" fill="#a8553a" stroke="#7d3a24" stroke-width="2"/><path d="M24 34l10 4M28 30l10 4" stroke="#e7b08c" stroke-width="1.8"/><circle cx="48" cy="42" r="3.5" fill="#4f9a4a"/><circle cx="44" cy="46" r="2.5" fill="#e0a43a"/></svg></template>
+<template id="art-salad"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 32h48a24 24 0 0 1-48 0z" stroke="#4a7a4a" stroke-width="2.5"/><path d="M14 32c-2-8 6-12 10-8 2-6 10-8 14-2 4-4 12-2 12 6 2 0 2 2 2 4" fill="#bfe3a5" stroke="#4f9a4a" stroke-width="2"/><circle cx="26" cy="28" r="3" fill="#e05a4f"/><circle cx="40" cy="27" r="3" fill="#e05a4f"/><path d="M24 54h16" stroke="#4a7a4a" stroke-width="2.5"/></svg></template>
+<template id="art-fries"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 28l-2-18M26 28l-1-20M32 28V6M38 28l1-20M44 28l2-18" stroke="#e7b84a" stroke-width="4"/><path d="M16 28h32l-4 28H20z" fill="#e8590c" stroke="#b9440a" stroke-width="2.5"/><path d="M24 40h16" stroke="#ffffff" stroke-width="2.5"/></svg></template>
+<template id="art-lemon"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 14h28l-3 42a3 3 0 0 1-3 3H24a3 3 0 0 1-3-3z" stroke="#8a7a4a" stroke-width="2.5"/><path d="M20 24h24l-2.3 31H22.3z" fill="#f2d16b" fill-opacity=".55"/><path d="M14 18a8 8 0 0 1 16 0z" fill="#f2d16b" stroke="#c9a42a" stroke-width="1.5"/><path d="M22 18v-7" stroke="#8a7a4a" stroke-width="1.5"/></svg></template>
+<template id="art-soda"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10h24l-3 46a3 3 0 0 1-3 3H26a3 3 0 0 1-3-3z" stroke="#6b5f55" stroke-width="2.5"/><path d="M21.7 26h20.6l-1.9 29H23.6z" fill="#7a4a2e" fill-opacity=".75"/><circle cx="28" cy="34" r="1.5" fill="#fff" fill-opacity=".7"/><circle cx="35" cy="42" r="1.5" fill="#fff" fill-opacity=".7"/><circle cx="31" cy="48" r="1.2" fill="#fff" fill-opacity=".6"/><path d="M36 4l-4 24" stroke="#e05a4f" stroke-width="2.5"/></svg></template>
+<template id="art-sparkling"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10h24l-3 46a3 3 0 0 1-3 3H26a3 3 0 0 1-3-3z" stroke="#4a7f9a" stroke-width="2.5"/><path d="M21.7 22h20.6l-2.2 33H23.9z" fill="#cdeaf5" fill-opacity=".8"/><circle cx="28" cy="32" r="1.6" stroke="#4a9fc2" stroke-width="1.2"/><circle cx="35" cy="40" r="1.6" stroke="#4a9fc2" stroke-width="1.2"/><circle cx="30" cy="47" r="1.3" stroke="#4a9fc2" stroke-width="1.2"/><path d="M38 14a5 5 0 0 1 6 6" stroke="#7cb342" stroke-width="2.5"/></svg></template>
+<template id="art-receipt"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8h28v48l-5-3-5 3-4-3-4 3-5-3-5 3z" stroke="#1677c8" stroke-width="2.5"/><path d="M25 20h14M25 28h14M25 36h8" stroke="#1677c8" stroke-width="2.5"/></svg></template>
+<template id="art-robot"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="14" y="20" width="36" height="26" rx="6" stroke="#1677c8" stroke-width="2.5"/><circle cx="25" cy="33" r="3.5" fill="#1677c8"/><circle cx="39" cy="33" r="3.5" fill="#1677c8"/><path d="M32 20v-8M28 10h8M14 33H8M56 33h-6" stroke="#1677c8" stroke-width="2.5"/><circle cx="22" cy="52" r="4" stroke="#1677c8" stroke-width="2.5"/><circle cx="42" cy="52" r="4" stroke="#1677c8" stroke-width="2.5"/></svg></template>
+<template id="art-pour"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 18l14-8 8 8-14 8z" stroke="#1677c8" stroke-width="2.5"/><path d="M28 22c2 6 4 10 4 14" stroke="#3a8fd6" stroke-width="2.5"/><path d="M22 36h22l-3 20a3 3 0 0 1-3 2.5H28a3 3 0 0 1-3-2.5z" stroke="#1677c8" stroke-width="2.5"/><path d="M24 44h18l-1.6 11H25.6z" fill="#7cc4ef" fill-opacity=".6"/></svg></template>
+<template id="art-done"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="32" r="22" stroke="#2b8a5a" stroke-width="3"/><path d="M21 33l7 7 15-16" stroke="#2b8a5a" stroke-width="3.5"/></svg></template>
+<template id="art-fail"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="32" r="22" stroke="#d63c3c" stroke-width="3"/><path d="M32 20v15M32 43v1" stroke="#d63c3c" stroke-width="3.5"/></svg></template>
 <script src="/config.js"></script>
 <script src="/api.js"></script>
 <script src="/order.js"></script>

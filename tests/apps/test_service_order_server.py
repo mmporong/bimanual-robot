@@ -157,7 +157,7 @@ def test_static_dashboard_has_no_external_runtime_dependencies():
 def test_guest_and_control_pages_are_served(server):
     _, base, _ = server
     pages = {
-        "/order": "물 주문",
+        "/order": "MS RESTAURANT",
         "/order.js": "STEP_BY_PHASE",
         "/control": "서빙 로봇 관제",
         "/control.js": "SERVICE_PHASES",
