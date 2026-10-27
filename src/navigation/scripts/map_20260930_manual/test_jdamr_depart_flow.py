@@ -422,6 +422,31 @@ def test_display_start_starts_only_missing_units(env, monkeypatch):
     assert started == ['jdamr-p2-rviz']
 
 
+def test_taught_map_display_passes_saved_station_directory(env, monkeypatch):
+    commands = []
+    started = set()
+    monkeypatch.setattr(d, 'ACTIVE_MAP_SESSION', {'session_directory': str(env)})
+    monkeypatch.setattr(d, 'BASE', env / 'map session')
+
+    def sh(command, **_kwargs):
+        commands.append(command)
+        if command.startswith('systemd-run'):
+            started.add(command.split('--unit=')[1].split()[0])
+        if command.startswith('systemctl --user is-active'):
+            unit = command.split()[-1]
+            active = unit in started
+            return SimpleNamespace(
+                returncode=0 if active else 3,
+                stdout='active' if active else 'inactive')
+        return SimpleNamespace(returncode=0, stdout='active')
+
+    monkeypatch.setattr(d, 'sh', sh)
+    d.cmd_display_start(None)
+    marker = next(command for command in commands if '--unit=jdamr-p2-markers ' in command)
+    assert '--station-directory' in marker
+    assert str(env / 'map session') in marker
+
+
 def test_stop_during_the_map_wait_prevents_recovery(env, monkeypatch):
     """A stop makes the executor fail with the same map message; do not re-depart."""
     monkeypatch.setattr(d, 'pi', Pi())

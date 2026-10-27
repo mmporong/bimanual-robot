@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-10-27 | 저장된 테이블1 위치를 RViz에 표시
+
+- 테이블1의 `table_01.yaml`은 저장되어 있었지만 기존 RViz 표시기는 운영 목적지 등록부에 포함된 급수대와 도크만 읽고 있었다. 현재 지도의 YAML·이미지 해시와 좌표 프레임이 일치하는 저장 테이블 자세를 표시 목록에 추가해 `TABLE 1 / SAVED POSE` 라벨과 차체 방향 화살표로 송출한다. 자동 주행 목적지 등록이나 허용 오차를 추가하지 않았다.
+- 실제 수신한 MarkerArray에서 map 좌표 x=-0.734910483 m, y=-1.606882092 m, yaw=-0.038410217 rad와 라벨, 도크·급수대 마커 유지를 확인했다. 관련 검사 172개 통과와 별도 code-reviewer APPROVE를 확인했다. RViz 화면 렌더링은 이 환경에서 별도로 확인하지 못했다.
+- 임시 표시 노드와 마커를 정리하고 정식 표시 유닛으로 전환했다. 확인용 PC 유닛 `jdamr-p2-mapserver`, `jdamr-p2-relay`, `jdamr-p2-markers`, `jdamr-p2-rviz`, `jdamr-p2-click`은 유지하며 종료는 `python3 "$HOME/bimanual-robot/tools/jdamr/jdamr_depart.py" display-stop`이다. 새 이동 명령은 보내지 않았으며 변경은 작업 브랜치에만 커밋한다.
+
 ## 2026-10-27 | 수동 조종 끊김 수정·남은 정지 스캔으로 테이블1 지도 부분 갱신
 
 - 수동 기록 `AMR-20261027-manual-map-recorder`는 SQLite `database is locked`로 약 27.70초 뒤 중단됐다. 남은 scan 259장·odom 1,386개의 이동 적산은 0 m이며 사용자 한 바퀴 주행 기록은 누락됐다. 실행 중 SQLite 조회가 겹친 점은 잠금 발생 가설이며 저장소 예외 자체는 journal로 확인했다. 기존 표준 MCAP 기록으로 전환해 약 40.86초의 scan 396장과 metadata 마감을 확인했고 임시 기록기 두 개는 종료됐다. 이 확인을 누락 주행의 복구로 기록하지 않는다.

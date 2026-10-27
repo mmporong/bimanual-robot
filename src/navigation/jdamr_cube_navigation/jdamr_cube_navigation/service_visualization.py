@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 
 from geometry_msgs.msg import Point
 from jdamr_cube_navigation.keepout_mask import _map_metadata
@@ -13,6 +14,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from visualization_msgs.msg import Marker, MarkerArray
+import yaml
 
 
 def marker(identifier, kind, x, y, color, frame='map'):
@@ -29,7 +31,65 @@ def marker(identifier, kind, x, y, color, frame='map'):
     return item
 
 
-def build_markers(registry, annotation, selected='table_01'):
+def _saved_station_label(station_id):
+    """Render operator-facing station names without changing their stored IDs."""
+    prefix, separator, suffix = station_id.rpartition('_')
+    if separator and suffix.isdigit():
+        return f'{prefix.replace("_", " ").upper()} {int(suffix)}'
+    return station_id.replace('_', ' ').upper()
+
+
+def load_saved_station_poses(registry, station_directory):
+    """Load display-only poses bound to the current registry map and frame.
+
+    Invalid, stale, missing, and already registered records are ignored.  These
+    source files are display inputs only and never become navigation registry
+    entries.
+    """
+    if station_directory is None:
+        return []
+    station_directory = Path(station_directory)
+    if not station_directory.is_dir():
+        return []
+    registered = {table['table_id'] for table in registry.get('tables', ())}
+    home = registry.get('home')
+    if home and isinstance(home.get('id'), str):
+        registered.add(home['id'])
+    expected_map = registry.get('map', {})
+    result = []
+    for path in sorted(station_directory.glob('table_*.yaml')):
+        try:
+            document = yaml.safe_load(path.read_text(encoding='utf-8'))
+            station_id = document.get('id')
+            bound_map = document.get('map')
+            values = [document.get(key) for key in ('x_m', 'y_m', 'yaw_rad')]
+            if (not isinstance(document, dict)
+                    or not isinstance(station_id, str) or not station_id.strip()
+                    or re.fullmatch(r'table_\d+', station_id) is None
+                    or path.stem != station_id
+                    or station_id in registered
+                    or document.get('frame_id') != registry.get('frame_id')
+                    or document.get('robot_base_frame') != 'base_link'
+                    or not isinstance(bound_map, dict)
+                    or any(bound_map.get(key) != expected_map.get(key)
+                           for key in ('yaml_sha256', 'image_sha256'))
+                    or any(isinstance(value, bool)
+                           or not isinstance(value, (int, float))
+                           or not math.isfinite(value) for value in values)):
+                continue
+        except (OSError, UnicodeError, yaml.YAMLError, AttributeError):
+            continue
+        result.append({
+            'station_id': station_id,
+            'x_m': float(values[0]),
+            'y_m': float(values[1]),
+            'yaw_rad': float(values[2]),
+            'source_path': str(path),
+        })
+    return result
+
+
+def build_markers(registry, annotation, selected='table_01', saved_station_poses=()):
     """Keep approximate table regions distinct from taught docking poses."""
     if annotation['source_map_sha256'] != registry['map']['image_sha256']:
         raise ValueError('table annotation belongs to a different map')
@@ -96,6 +156,20 @@ def build_markers(registry, annotation, selected='table_01'):
         label.pose.position.z, label.scale.z = 0.2, 0.14
         label.text = 'HOME_' + home.get('parking_direction', 'forward').upper()
         result.append(label)
+    registered = {table['table_id'] for table in registry.get('tables', ())}
+    for index, pose in enumerate(saved_station_poses):
+        station_id = pose['station_id']
+        if station_id in registered or (home and station_id == home.get('id')):
+            continue
+        identifier = 10000 + index * 2
+        color = (0.85, 0.2, 0.75, 1.0)
+        result.append(pose_arrow(identifier, pose, color, frame))
+        label = marker(identifier + 1, Marker.TEXT_VIEW_FACING,
+                       pose['x_m'], pose['y_m'] + 0.35,
+                       (0.35, 0.05, 0.3, 1.0), frame)
+        label.pose.position.z, label.scale.z = 0.2, 0.14
+        label.text = _saved_station_label(station_id) + '\nSAVED POSE'
+        result.append(label)
     return MarkerArray(markers=result)
 
 
@@ -135,6 +209,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--registry', type=Path, required=True)
     parser.add_argument('--annotation', type=Path, required=True)
+    parser.add_argument('--station-directory', type=Path)
     parser.add_argument('--selected', choices=('water_station', 'table_01', 'table_02'),
                         default='table_01')
     args = parser.parse_args()
@@ -143,7 +218,9 @@ def main():
     if hashlib.sha256(Path(registry['map']['yaml_path']).read_bytes()).hexdigest() != (
             registry['map']['yaml_sha256']):
         raise ValueError('map changed')
-    destinations = build_markers(registry, annotation, args.selected)
+    saved_station_poses = load_saved_station_poses(registry, args.station_directory)
+    destinations = build_markers(
+        registry, annotation, args.selected, saved_station_poses)
     keepout = build_keepout(registry)
     rclpy.init()
     node = Node('service_visualization')

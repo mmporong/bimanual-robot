@@ -525,7 +525,9 @@ def cmd_display_start(args):
             f'--host {shlex.quote(HOST)} --workspace {shlex.quote(PI_WS)}'),
         'jdamr-p2-markers': (
             f'{PC_SOURCE}; exec ros2 run jdamr_cube_navigation service_visualization '
-            f'--registry {REGISTRY} --annotation {ANNOTATION} --selected {TABLES[0]}'),
+            f'--registry {REGISTRY} --annotation {ANNOTATION} --selected {TABLES[0]}'
+            + (f' --station-directory {shlex.quote(str(BASE))}'
+               if ACTIVE_MAP_SESSION is not None else '')),
         'jdamr-p2-rviz': f'{PC_SOURCE}; exec rviz2 -d {P2}/restaurant_phase2.rviz',
         'jdamr-p2-click': f'{PC_SOURCE}; exec python3 {TOOLS}/initialpose_capture.py {CLICK}',
     }
