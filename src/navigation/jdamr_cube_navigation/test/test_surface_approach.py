@@ -12,6 +12,14 @@ import pytest
 import yaml
 
 
+def test_lateral_steering_is_continuous_across_arrival_tolerance():
+    errors = (.004999, .005, .005001)
+    commands = [lateral_face_approach_command(.3, 0., error, .31, .005)
+                for error in errors]
+    assert all(angular > 0. for _linear, angular in commands)
+    assert commands[-1][1] - commands[0][1] < 1e-4
+
+
 @pytest.mark.parametrize('angle_deg', [-30.0, -12.0, 12.0, 30.0])
 @pytest.mark.parametrize('heading', [0.0, math.pi - 0.01])
 def test_preview_aligns_before_precision_band(angle_deg, heading):

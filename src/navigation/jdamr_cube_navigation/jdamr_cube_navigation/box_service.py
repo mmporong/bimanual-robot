@@ -37,6 +37,7 @@ from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
 from jdamr_cube_navigation.station_parking_reference import (
     anchor_face_to_taught_lateral,
+    filter_station_goal_observations,
     LATERAL_PRECISION_STATUS,
     TaughtStationReference,
 )
@@ -251,7 +252,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.station_reference_result = None
         self.station_reference_result_received_s = None
         self.station_reference_goal = None
+        self.station_reference_control_goal = None
         self.station_reference_goal_frozen = False
+        self._station_reference_goal_samples = deque(maxlen=5)
         self.station_reference_image_subscription = None
         self.station_reference_info_subscription = None
         self._station_reference_pending = None
@@ -384,6 +387,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             with self._station_reference_lock:
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
+                if result.get('valid') is True:
+                    # Collect during transit/observation, not just when the
+                    # moving controller first asks for a destination.
+                    samples = getattr(self, '_station_reference_goal_samples', None)
+                    if samples is None:
+                        samples = self._station_reference_goal_samples = deque(maxlen=5)
+                    if not samples or stamp_s > samples[-1]['stamp_s']:
+                        samples.append(dict(result))
             remaining_s = STATION_REFERENCE_MIN_PERIOD_S - (
                 time.monotonic() - started_s)
             if remaining_s > 0.0:
@@ -454,6 +465,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.station_reference_result = None
             self.station_reference_result_received_s = None
         self.station_reference_goal = None
+        self.station_reference_control_goal = None
         self.station_reference_goal_frozen = False
         self._station_reference_goal_samples = deque(maxlen=5)
         self.station_reference = reference
@@ -547,13 +559,20 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         return result
 
     def _station_goal_reference(self, *, freeze=False):
-        """Carry an accepted fixed goal in odom across rejected RGB frames.
+        """Hold the reference anchor while steering on recent visual feedback.
 
-        The stored object is a destination, never obstacle or sensor evidence.
-        Its original stamp and current observation validity remain visible.
+        Both control and arrival use the same filtered goal in raw odom. The
+        frozen anchor remains diagnostic; it cannot disable later RGB-D input.
+        A carried destination is never fresh obstacle or sensor evidence.
         """
         reference = self._fresh_station_reference()
-        if getattr(self, 'station_reference_mode', None) == 'rgbd_auxiliary':
+        mode = getattr(self, 'station_reference_mode', None)
+        frozen = getattr(self, 'station_reference_goal_frozen', False)
+        anchor = getattr(self, 'station_reference_goal', None)
+        if (frozen and anchor and anchor.get('reason')
+                == 'operator_measured_relative_lateral_correction'):
+            return anchor, reference
+        if mode == 'rgbd_auxiliary':
             # The taught destination is primary. A rejected visual pose is
             # diagnostic evidence, not permission to move the goal or go home.
             if not getattr(self, 'station_reference_goal_frozen', False):
@@ -561,42 +580,45 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 if mapped.get('valid') is True:
                     self.station_reference_goal = dict(mapped)
             return getattr(self, 'station_reference_goal', None), reference
-        if (reference and reference.get('valid') is True
-                and not getattr(self, 'station_reference_goal_frozen', False)):
-            samples = getattr(self, '_station_reference_goal_samples', None)
-            if samples is None:
-                samples = self._station_reference_goal_samples = deque(maxlen=5)
-            stamp_s = reference['stamp_s']
-            if not samples or stamp_s > samples[-1]['stamp_s']:
-                samples.append(dict(reference))
-            while samples and stamp_s - samples[0]['stamp_s'] > STATION_REFERENCE_MAX_AGE_S:
-                samples.popleft()
-            # Every goal observes the same fixed destination in odom. A median
-            # suppresses individual PnP jumps without requiring extra frames or
-            # delaying the first usable observation.
-            filtered = dict(reference)
-            for frame in ('goal_odom', 'goal_map'):
-                poses = [sample[frame] for sample in samples if frame in sample]
-                if not poses:
-                    continue
-                heading = poses[-1][2]
-                yaw_delta = [math.atan2(math.sin(pose[2] - heading),
-                                        math.cos(pose[2] - heading)) for pose in poses]
-                filtered[frame] = [float(np.median([pose[0] for pose in poses])),
-                                   float(np.median([pose[1] for pose in poses])),
-                                   heading + float(np.median(yaw_delta))]
-            filtered['goal_filter'] = 'recent_valid_pose_median'
-            filtered['goal_filter_sample_count'] = len(samples)
-            self.station_reference_goal = filtered
-        goal = getattr(self, 'station_reference_goal', None)
+        if reference and reference.get('valid') is True:
+            if mode == 'map_pose_only':
+                if not frozen:
+                    self.station_reference_goal = dict(reference)
+            else:
+                with self._station_reference_lock:
+                    samples = getattr(self, '_station_reference_goal_samples', None)
+                    if samples is None:
+                        samples = self._station_reference_goal_samples = deque(maxlen=5)
+                    stamp_s = reference['stamp_s']
+                    if not samples or stamp_s > samples[-1]['stamp_s']:
+                        samples.append(dict(reference))
+                    recent = [dict(sample) for sample in samples
+                              if sample['stamp_s'] <= stamp_s] + [reference]
+                filtered = filter_station_goal_observations(
+                    recent, STATION_REFERENCE_MAX_AGE_S)
+                previous = getattr(self, 'station_reference_control_goal', None)
+                self.station_reference_control_goal = filtered
+                if not frozen:
+                    self.station_reference_goal = dict(filtered)
+                if previous is None or filtered['stamp_s'] > previous['stamp_s']:
+                    self.emit('table_station_feedback_updated',
+                              reference_frame='odom', goal_odom=filtered['goal_odom'],
+                              observation_stamp_s=filtered['stamp_s'],
+                              observation_odom_pose=reference.get('observation_odom_pose'),
+                              sample_count=filtered['goal_filter_sample_count'],
+                              xy_spread_m=filtered['goal_filter_xy_spread_m'],
+                              anchor_frozen=frozen)
+        anchor = getattr(self, 'station_reference_goal', None)
+        goal = (getattr(self, 'station_reference_control_goal', None) or anchor
+                if mode != 'map_pose_only' else anchor)
         if (freeze and goal is not None
                 and getattr(self, 'station_reference_mode', None) == 'rgbd'
                 and reference and reference.get('valid') is True
                 and not getattr(self, 'station_reference_goal_frozen', False)):
             self.station_reference_goal_frozen = True
             self.emit('table_station_goal_frozen', reference_frame='odom',
-                      reason='accepted_rgbd_goal_held_during_approach',
-                      goal_odom=list(goal['goal_odom']),
+                      reason='rgbd_anchor_held_live_feedback_continues',
+                      goal_odom=list(anchor['goal_odom']),
                       observation_stamp_s=goal.get('stamp_s'),
                       reference_capture_path=self.station_reference.assumptions.get(
                           'reference_capture_path'),
@@ -673,6 +695,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 getattr(self, 'station_reference_goal_frozen', False)),
             'lateral_goal_odom': None,
             'lateral_actual_odom': None,
+            'lateral_anchor_odom': (list(self.station_reference_goal['goal_odom'])
+                                    if getattr(self, 'station_reference_goal', None)
+                                    else None),
             'rgbd_observed_lateral_error_m': None,
             'rgbd_goal_lateral_difference_m': None,
         }
@@ -711,14 +736,19 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             error_m = ((goal[0] - actual[0]) * left[0]
                        + (goal[1] - actual[1]) * left[1])
             status.update(lateral_goal_odom=list(goal), lateral_actual_odom=list(actual),
-                          lateral_face_heading_odom_rad=heading)
+                          lateral_face_heading_odom_rad=heading,
+                          lateral_feedback_sample_count=goal_reference.get(
+                              'goal_filter_sample_count'),
+                          lateral_feedback_xy_spread_m=goal_reference.get(
+                              'goal_filter_xy_spread_m'))
             if (getattr(self, 'station_reference_mode', None) == 'rgbd'
                     and reference and reference.get('valid') is True):
                 observed_goal = reference['goal_odom']
                 status['rgbd_observed_lateral_error_m'] = sum(
                     (observed_goal[i] - actual[i]) * left[i] for i in (0, 1))
+                anchor = self.station_reference_goal['goal_odom']
                 status['rgbd_goal_lateral_difference_m'] = sum(
-                    (observed_goal[i] - goal[i]) * left[i] for i in (0, 1))
+                    (observed_goal[i] - anchor[i]) * left[i] for i in (0, 1))
         except (KeyError, RuntimeError, TypeError, ValueError):
             status['lateral_reference_valid'] = False
             status['lateral_goal_valid'] = False
@@ -1201,6 +1231,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         One recoverable input gap restarts the window from a new stationary
         capture. Each observer stamp is judged once. A verdict with fewer than
         stable_frames fresh frames after an input delay is latency-limited.
+        One motion-triggered recapture discards the old window without extending
+        the current deadline; repeated movement remains a failed observation.
         """
         if getattr(self, 'candidate_trial', False) is not True:
             raise RuntimeError(
@@ -1237,6 +1269,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         fresh_rejection_reasons = set()
         evaluated_stamps = set()
         counted_rejection_s = None
+        motion_recaptured = False
 
         def emit_evidence(reason, retryable):
             latency_limited = bool(latency_reasons) and (
@@ -1249,6 +1282,35 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 robot_pose=list(robot_pose), camera_mount=camera_mount,
                 region_xy=list(region_xy))
             return latency_limited
+
+        def recapture_after_motion():
+            nonlocal robot_pose, revision, cutoff_s, cutoff_monotonic_s
+            nonlocal motion_recaptured, fresh_since_latency
+            nonlocal last_failure, last_failure_retryable
+            if motion_recaptured or self.stop_requested:
+                raise RuntimeError('robot moved during stationary box observation')
+            remaining_s = deadline_s - time.monotonic()
+            if remaining_s <= 0.:
+                raise RuntimeError('stationary observation recapture timed out')
+            # Discard the moving window. A new hold and fresh TF are mandatory;
+            # the original observation deadline is never extended by motion.
+            robot_pose, _ = self.capture_stationary_pose(
+                timeout_s=remaining_s, intermediate=True)
+            revision = self.parking_motion_revision
+            now_monotonic_s = time.monotonic()
+            cutoff_s += now_monotonic_s - cutoff_monotonic_s
+            cutoff_monotonic_s = now_monotonic_s
+            motion_recaptured = True
+            latency_reasons.add('stationary_motion_recapture')
+            fresh_since_latency = 0
+            fresh_rejection_reasons.clear()
+            evaluated_stamps.clear()
+            rejected_observation_stamps.clear()
+            last_failure = 'no_stable_box'
+            last_failure_retryable = False
+            self.emit('box_observation_stationary_recaptured',
+                      motion_revision=revision, cutoff_s=cutoff_s,
+                      robot_pose=list(robot_pose), original_deadline_preserved=True)
 
         while not self.stop_requested and time.monotonic() < deadline_s:
             spin_node(self, timeout_sec=0.05)
@@ -1282,7 +1344,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 emit_evidence(reason, False)
                 raise RuntimeError(reason)
             if self.parking_motion_revision != revision:
-                raise RuntimeError('robot moved during stationary box observation')
+                recapture_after_motion()
+                continue
             observation = self.box_status
             received_s = getattr(self, 'box_status_received_s', None)
             if (isinstance(observation, dict) and received_s is not None
@@ -1340,7 +1403,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     })
                     retryable = False
                     if self.parking_motion_revision != revision:
-                        raise ValueError('robot moved during table edge observation')
+                        recapture_after_motion()
+                        continue
                     retryable = True
                     if math.dist(target['face_center_map_xy_m'], region_xy) > region_radius_m:
                         raise ValueError('observed_table_edge_outside_selected_table_region')
@@ -1432,7 +1496,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 })
                 retryable = False
                 if self.parking_motion_revision != revision:
-                    raise ValueError('robot moved during box sensor witness')
+                    recapture_after_motion()
+                    continue
                 retryable = True
                 if math.dist(target['face_center_map_xy_m'], region_xy) > region_radius_m:
                     raise ValueError('observed_box_outside_selected_table_region')
@@ -1721,6 +1786,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             raise ValueError('observation route must use map')
         self.table_id = table_id
         self.station_reference_goal = None
+        self.station_reference_control_goal = None
         self.station_reference_goal_frozen = False
         self._station_face_heading_odom_rad = None
         if reapproach_m is not None:
@@ -2532,6 +2598,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                  'occlusion_latched': False, 'precision_band_latched': False,
                  'validated_input': None, 'validated_pose': None,
                  'validated_heading': None, 'validated_goal': None,
+                 'control_goal': None,
                  'span_m': target.get('observed_face_span_m')}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
@@ -2547,7 +2614,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return to_odom(*taught), reference
 
         def validate_control(actual, filtered_heading):
-            goal, _reference = station_goal_odom()
+            # Validate precisely the goal used to compute this control tick,
+            # even if the RGB worker finishes another image in the meantime.
+            goal = state['control_goal']
             previous_goal = state['validated_goal']
             goal_changed = (
                 (goal is None) != (previous_goal is None)
@@ -2692,7 +2761,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             gap = center_gap - self.box_front_half_width_m * abs(math.sin(residual))
             remaining = (center_gap - self._final_gap_m()) / math.cos(residual)
             goal_odom, station_observation = station_goal_odom()
-            lateral_ready = True
+            state['control_goal'] = goal_odom
+            lateral_ready = not self._station_reference_enabled()
             lateral_error = None
             if goal_odom is not None:
                 left = (-math.sin(heading), math.cos(heading))

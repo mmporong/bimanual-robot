@@ -1315,8 +1315,53 @@ def test_motion_during_sensor_witness_discards_fused_target(monkeypatch):
     monkeypatch.setattr(
         box_service.rclpy, 'spin_once',
         lambda *_a, **_k: setattr(node, 'stop_requested', True))
-    with pytest.raises(RuntimeError, match='moved during box sensor witness'):
+    with pytest.raises(RuntimeError, match='moved during stationary box observation'):
         node.observe_target({}, 0.065, 0.05, (0.5, 0.0), 0.6)
+
+
+@pytest.mark.parametrize('repeated_motion', [False, True])
+def test_stationary_window_recaptures_once_and_discards_pre_motion_depth(
+        monkeypatch, repeated_motion):
+    node = _observer_node(monkeypatch, scan=False)
+    node.surface_mode = 'table_edge'
+    node._ensure_depth_info = Mock()
+    node._set_depth_window = Mock(return_value=True)
+    node._observation_pose_diagnostic = Mock()
+    node._station_anchor_target = lambda target: target
+    node._observer_stable_frame_quorum = Mock(return_value=1)
+    node.capture_stationary_pose.side_effect = [
+        ((0., 0., 0.), {}), ((.01, 0., 0.), {})]
+    clock = [10.]
+    node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(
+        nanoseconds=int(clock[0] * 1e9)))
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+    spins = [0]
+
+    def advance(*_args, **_kwargs):
+        spins[0] += 1
+        clock[0] += .1
+        if spins[0] == 1 or (spins[0] == 2 and repeated_motion):
+            node.parking_motion_revision += 1
+        if spins[0] >= 3:
+            node.box_status = {**node.box_status, 'stamp_s': clock[0] - .01}
+
+    monkeypatch.setattr(box_service, 'spin_node', advance)
+    target = {'x_m': .425, 'y_m': 0., 'yaw_rad': 0.,
+              'face_center_map_xy_m': [.5, 0.], 'outward_normal_map_xy': [-1., 0.]}
+    compute = Mock(return_value=target)
+    monkeypatch.setattr(box_service, 'compute_table_edge_docking_target', compute)
+
+    if repeated_motion:
+        with pytest.raises(RuntimeError, match='robot moved during stationary'):
+            node.observe_target({}, .065, .01, (.5, 0.), .6, timeout_s=1.)
+        compute.assert_not_called()
+    else:
+        result = node.observe_target({}, .065, .01, (.5, 0.), .6, timeout_s=1.)
+        assert spins[0] == 3
+        assert result['observation_robot_pose_map'] == [.01, 0., 0.]
+        assert compute.call_args.args[0]['stamp_s'] > 10.2
+    assert node.capture_stationary_pose.call_count == 2
+    assert node.capture_stationary_pose.call_args.kwargs['timeout_s'] <= 1.
 
 
 def test_stale_depth_observation_never_reaches_fusion(monkeypatch):
@@ -3392,6 +3437,45 @@ def test_moving_table_distance_uses_stamped_pose_and_revises_far_face(monkeypatc
     assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
     update((0.21, 0.0, 0.0))
     assert lookup.call_count == 1
+
+
+def test_live_lateral_feedback_and_preview_share_one_goal_per_control_tick(monkeypatch):
+    node, _clock, update, _lookup = _moving_table_route(monkeypatch)
+    node.station_reference = Mock()
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    first = {'valid': True, 'goal_odom': [.5, .02, 0.], 'stamp_s': 10.1}
+    second = {'valid': True, 'goal_odom': [.5, -.02, 0.], 'stamp_s': 10.2}
+    node.station_reference_goal = first
+    node._station_goal_reference = Mock(return_value=(first, first))
+
+    control = update((.2, 0., 0.))
+    calls = node._station_goal_reference.call_count
+    node._station_goal_reference.return_value = (second, second)
+    control['validate_control']((.2, 0., 0.), 0.)
+    validator = node._table_approach_validator.return_value
+
+    assert control['lateral_error_m'] == pytest.approx(.02)
+    assert node._station_goal_reference.call_count == calls
+    assert validator.call_args.args[0] == (.2, 0., 0.)
+    assert validator.call_args.kwargs['lateral_goal_odom'] == tuple(first['goal_odom'])
+    changed = update((.2, 0., 0.))
+    assert changed['lateral_error_m'] == pytest.approx(-.02)
+    assert changed['remaining_m'] == pytest.approx(control['remaining_m'])
+
+
+def test_missing_rgbd_goal_cannot_latch_the_final_precision_band(monkeypatch):
+    node, _clock, update, _lookup = _moving_table_route(monkeypatch)
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_goal = None
+    node._station_goal_reference = Mock(return_value=(None, {
+        'valid': False, 'reason': 'station_reference_not_observed'}))
+
+    control = update((.42, 0., 0.))
+
+    assert control['lateral_tracking'] is False
+    assert node._continuous_table_stop['basis'] != 'aligned_face_frozen_for_precision_band'
+    assert node._continuous_table_stop['lateral_reference_valid'] is False
 
 
 def test_map_station_goal_shares_the_faces_frozen_odom_transform(monkeypatch):

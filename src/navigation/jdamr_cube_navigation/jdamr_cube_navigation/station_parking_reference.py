@@ -59,6 +59,47 @@ def _wrapped(angle):
     return math.atan2(math.sin(angle), math.cos(angle))
 
 
+def filter_station_goal_observations(observations, max_age_s):
+    """Median one sample per image, expressed in the same odom frame.
+
+    The first valid image is usable immediately. Later images can correct its
+    error without changing the immutable taught reference or moving raw odom.
+    """
+    if _finite(max_age_s, 'max_age_s') <= 0.:
+        raise ValueError('max_age_s_must_be_positive')
+    by_stamp = {}
+    for observation in observations:
+        if observation.get('valid') is True:
+            stamp = _finite(observation['stamp_s'], 'stamp_s')
+            _pose(observation['goal_odom'], 'goal_odom')
+            by_stamp[stamp] = observation
+    if not by_stamp:
+        return None
+    latest_stamp = max(by_stamp)
+    samples = [by_stamp[stamp] for stamp in sorted(by_stamp)
+               if latest_stamp - stamp <= max_age_s]
+    result = deepcopy(samples[-1])
+    for frame in ('goal_odom', 'goal_map'):
+        poses = [sample[frame] for sample in samples if frame in sample]
+        if len(poses) != len(samples):
+            # Never combine an old map goal with a newly filtered odom goal.
+            result.pop(frame, None)
+            continue
+        heading = poses[-1][2]
+        result[frame] = [
+            float(np.median([pose[0] for pose in poses])),
+            float(np.median([pose[1] for pose in poses])),
+            _wrapped(heading + float(np.median([
+                _wrapped(pose[2] - heading) for pose in poses]))),
+        ]
+    result['goal_filter'] = 'recent_valid_pose_median'
+    result['goal_filter_sample_count'] = len(samples)
+    result['goal_filter_xy_spread_m'] = max(
+        math.dist(sample['goal_odom'][:2], result['goal_odom'][:2])
+        for sample in samples)
+    return result
+
+
 def _resolved_path(value, label):
     if not isinstance(value, (str, Path)) or not str(value):
         raise ValueError(f'{label}_path_missing')
@@ -315,6 +356,7 @@ class TaughtStationReference:
             'valid': True,
             'reason': 'observed_registered_reference_pose',
             'goal_odom': goal,
+            'observation_odom_pose': list(actual),
             'forward_m': error.forward_m,
             'left_m': error.left_m,
             'yaw_rad': error.yaw_rad,

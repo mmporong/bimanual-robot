@@ -17,6 +17,30 @@ from jdamr_cube_navigation.rgbd_parking_reference import (
 from jdamr_cube_navigation import station_parking_reference as station
 
 
+def test_live_goal_filter_rejects_one_jump_without_waiting_for_initial_frames():
+    def sample(stamp, y):
+        return {'valid': True, 'stamp_s': stamp, 'goal_odom': [.4, y, 0.]}
+
+    first = sample(10., .03)
+    assert station.filter_station_goal_observations([first], .5)['goal_odom'][1] == .03
+    history = [sample(9., -.8), first, sample(10.2, .031), sample(10.4, .09)]
+    filtered = station.filter_station_goal_observations(history + [history[-1]], .5)
+    assert filtered['goal_odom'][1] == pytest.approx(.031)
+    assert filtered['goal_filter_sample_count'] == 3
+    assert filtered['goal_filter_xy_spread_m'] == pytest.approx(.059)
+
+
+def test_live_goal_filter_handles_yaw_wrap_and_omits_incomplete_map_frame():
+    samples = [
+        {'valid': True, 'stamp_s': 10., 'goal_odom': [.4, 0., math.pi - .01],
+         'goal_map': [1., 0., 0.]},
+        {'valid': True, 'stamp_s': 10.2, 'goal_odom': [.4, 0., -math.pi + .01]},
+    ]
+    filtered = station.filter_station_goal_observations(samples, .5)
+    assert abs(abs(filtered['goal_odom'][2]) - math.pi) < 1e-9
+    assert 'goal_map' not in filtered
+
+
 def _reference_files(tmp_path):
     rgb = np.zeros((48, 64, 3), dtype=np.uint8)
     rgb[8:40, 4:28] = (30, 120, 210)

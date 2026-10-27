@@ -4,6 +4,7 @@ import json
 import math
 import threading
 import time
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -57,6 +58,67 @@ def _node():
     node.create_subscription = Mock(side_effect=['info-sub', 'image-sub'])
     node.get_clock = Mock(return_value=_clock())
     return node
+
+
+def test_live_feedback_corrects_the_first_anchor_and_arrival_uses_the_same_goal():
+    node = _node()
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    reference = {'valid': True, 'stamp_s': 10., 'goal_odom': [.4, 0., 0.]}
+    node._fresh_station_reference = Mock(return_value=reference)
+    first, _ = node._station_goal_reference(freeze=True)
+    assert first['goal_odom'] == [.4, 0., 0.]
+
+    # Later observations agree on a 28 mm correction. The initial estimate must
+    # not remain the steering goal merely because the anchor has been frozen.
+    reference.update(stamp_s=10.2, goal_odom=[.4, .028, 0.])
+    node._station_goal_reference()
+    reference.update(stamp_s=10.4)
+    control, _ = node._station_goal_reference()
+    node._odom_pose = Mock(return_value=(.4, 0., 0.))
+    status = node._station_lateral_status()
+
+    assert node.station_reference_goal['goal_odom'] == [.4, 0., 0.]
+    assert control['goal_odom'][1] == pytest.approx(.028)
+    assert status['lateral_goal_odom'] == control['goal_odom']
+    assert status['internal_lateral_error_m'] == pytest.approx(.028)
+    assert status['internal_lateral_within_tolerance'] is False
+    assert status['millimeter_accuracy_validated'] is False
+
+
+def test_first_control_call_uses_observations_already_processed_in_background():
+    node = _node()
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    observations = [
+        {'valid': True, 'stamp_s': 10. + index * .2,
+         'goal_odom': [.4, y, 0.]}
+        for index, y in enumerate((.030, .031, .070))]
+    node._station_reference_goal_samples = deque(observations, maxlen=5)
+    node._fresh_station_reference = Mock(return_value=observations[-1])
+
+    goal, _ = node._station_goal_reference(freeze=True)
+
+    assert goal['goal_odom'][1] == pytest.approx(.031)
+    assert goal['goal_filter_sample_count'] == 3
+
+
+def test_lost_video_keeps_steering_goal_but_cannot_confirm_precision():
+    node = _node()
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    node._fresh_station_reference = Mock(return_value={
+        'valid': True, 'stamp_s': 10., 'goal_odom': [.4, .02, 0.]})
+    node._station_goal_reference(freeze=True)
+    node._fresh_station_reference.return_value = {'valid': False, 'reason': 'station_reference_stale'}
+
+    goal, _ = node._station_goal_reference()
+    status = node._station_lateral_status()
+
+    assert goal['goal_odom'] == [.4, .02, 0.]
+    assert status['lateral_goal_valid'] is True
+    assert status['lateral_reference_valid'] is False
+    assert status['internal_lateral_within_tolerance'] is False
 
 
 def _profiles(tmp_path):

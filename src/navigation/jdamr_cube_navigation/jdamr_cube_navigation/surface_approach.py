@@ -138,7 +138,9 @@ def lateral_face_approach_command(remaining_m, face_error_rad, lateral_error_m,
         LATERAL_MIN_LOOKAHEAD_M,
         remaining_m - (max(FACE_ALIGNMENT_GAP_M, target_gap_m) - target_gap_m
                        + LATERAL_ALIGNMENT_LEAD_M) / math.cos(face_error_rad))
-    offset = 0.0 if abs(lateral_error_m) <= lateral_tolerance_m else lateral_error_m
+    # Tolerance decides arrival, not a discontinuous steering deadband. Dropping
+    # the offset while still angled makes the chassis drift across the band.
+    offset = lateral_error_m
     curvature = 6.0 * offset / lookahead ** 2 + 4.0 * math.tan(face_error_rad) / lookahead
     if not math.isfinite(curvature):
         raise ValueError('invalid lateral table curvature')
