@@ -189,7 +189,9 @@ Cartographer·Nav2·면 정렬·정밀 주차·베이스와 라이다 드라이�
 준비된 실차 세션에서 출발을 요청하면 기존 실행기로 이동·정렬·최종 접근을 이어간다.
 테스트·리뷰·문서 작업은 수정 단계에서 마치고 출발할 때 반복하지 않는다.
 기본 지도는 `$HOME/jdamr_data/maps/current_manual_mapping.json`이 가리키는 수동 SLAM
-지도다. 등록한 급수대를 `jdamr_depart.py go water_station`으로 방문한 뒤 도크에 후진 복귀한다.
+지도다. 강의실 지도와 도크·급수대·1번 테이블 좌표, ROS 네트워크 접속 방법은
+[지도·위치 인계](config/navigation/maps/classroom/README.md)에서 확인할 수 있다.
+등록한 급수대를 `jdamr_depart.py go water_station`으로 방문한 뒤 도크에 후진 복귀한다.
 도크에서는 먼저 전진 이탈하고, 이전 지도의 테이블 좌표·경유점·수동 킵아웃은 가져오지 않는다.
 예전 박스 기반 경로는 `--legacy-map`으로만 불러오는 보존 대상이다.
 급수대의 등록 위치·방향이 목표이며 컵·물병의 RGB-D 참조는 좌우 오차 보정에 사용한다.

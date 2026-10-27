@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 import re
+import signal
 
 from geometry_msgs.msg import Point
 from jdamr_cube_navigation.keepout_mask import _map_metadata
@@ -250,6 +251,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # A terminal and ros2 launch may both forward Ctrl-C; let cleanup finish.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
