@@ -19,9 +19,46 @@ camera_mount:
     camera_pitch_rad: 0.8414714126967582
     final_gap_unchanged_m: 0.01
   table_edge_calibration:
-    enabled: false
-    status: invalidated_by_camera_replacement
-    reason: 이전 Astra S와 이전 장착 자세에서 얻은 yaw·거리 보정은 새 Astra 기준면에 적용하지 않음
+    enabled: true
+    status: derived
+    yaw_offset_rad: 0.004432522739111133
+    plane_offset_bias_m: 0.06079043842230575
+    reference_transform:
+      x_m: -0.275
+      y_m: 0.0
+      z_m: 1.26
+      roll_rad: 0.01837857145491081
+      pitch_rad: 0.8414714126967582
+      yaw_rad: 0.0
+    provenance:
+      source: operator_report_and_matching_stationary_depth_observation
+      measured_at: '2026-10-27'
+      valid_for: current_Astra_mount_water_station_front_edge
+      operator_left_gap_m: 0.07
+      operator_right_gap_m: 0.07
+      raw_observed_center_gap_m: 0.009209561577694259
+      operator_lateral_error_right_m: 0.04
+      observation_stamp_s: 1793084475.450064
+      source_log: $HOME/jdamr_data/maps/20261026_manual_160135/runtime/runs/water_station_20261027_160027_9a8c634a/cycle_events.jsonl
+      source_log_sha256: 8d369c17f34b73f346832976f6926b0b3453ac7c3de030a549acbd66a6841531
+      method: plane_offset_bias_m = mean(operator_corner_gap_m) - raw_observed_center_gap_m
+      measurement_resolution_m: null
+      repeatability_validated: false
+      millimeter_accuracy_validated: false
+      invalidate_when: camera pose, camera model or observed front boundary changes
+      yaw_correction:
+        source: two_consecutive_operator_corner_gap_reports
+        left_gap_m: 0.009
+        right_gap_m: 0.011
+        corner_spacing_m: 0.45
+        internal_face_yaw_error_rad: 1.1892441848404545e-05
+        method: yaw_offset_rad = atan2(right_gap_m - left_gap_m, corner_spacing_m)
+          - internal_face_yaw_error_rad
+        run_ids:
+        - water_station_20261027_161840_dc83f76c
+        - water_station_20261027_162641_f2f2799a
+        status: derived_pending_reapproach
+        measurement_resolution_m: null
   provenance:
     selected_at: '2026-10-27'
     valid_for: 현재 4륜 차체 상판 뒤쪽의 새 Astra 장착 후보
@@ -33,7 +70,8 @@ camera_mount:
     plane_rms_m: 0.0015487961706078714
     translation_basis: existing_urdf_nominal_mount_geometry
     orientation_basis: reference_tabletop_plane_fit_with_nominal_yaw
-    camera_position_source: runtime URDF nominal mounting translation; unchanged rear mast placement
+    camera_position_source: runtime URDF nominal mounting translation; unchanged rear
+      mast placement
     camera_yaw_source: nominal forward-facing mount; external accuracy not measured
     mount_calibration_complete: false
     millimeter_accuracy_validated: false

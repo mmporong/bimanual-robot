@@ -449,6 +449,29 @@ def test_final_lateral_status_uses_current_observation_even_after_goal_freezes()
     assert status['internal_lateral_within_tolerance'] is False
 
 
+def test_auxiliary_rgb_rejection_does_not_replace_or_block_registered_goal():
+    node = _node()
+    node.station_reference_mode = 'rgbd_auxiliary'
+    node.station_reference = Mock()
+    node.station_reference_goal = {
+        'valid': True, 'goal_odom': [.4, .03, 0.], 'goal_map': [.4, .03, 0.],
+        'stamp_s': 9.8}
+    node.station_reference_goal_frozen = True
+    node._fresh_station_reference = Mock(return_value={
+        'valid': False, 'reason': 'camera_pose_has_excess_pitch_roll'})
+    node._navigation_ready = Mock(return_value=True)
+    node._odom_pose = Mock(return_value=(.4, .03, 0.))
+
+    status = node._station_lateral_status()
+
+    assert status['lateral_reference_valid'] is True
+    assert status['lateral_goal_basis'] == 'registered_map_pose_in_odom'
+    assert status['internal_lateral_within_tolerance'] is True
+    assert status['rgbd_reference_valid'] is False
+    assert status['rgbd_reference_reason'] == 'camera_pose_has_excess_pitch_roll'
+    assert status['millimeter_accuracy_validated'] is False
+
+
 def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
         monkeypatch):
     node = _node()

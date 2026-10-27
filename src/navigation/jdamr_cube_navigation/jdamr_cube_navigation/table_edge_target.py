@@ -45,10 +45,16 @@ def _optical_vector_to_base(vector, mount):
         optical_z, -optical_x, -optical_y, roll, pitch, yaw)
 
 
-def _validated_table_observation(document, mount, now_s):
+def _validated_table_observation(document, mount, now_s, *, require_stable=True):
+    if not isinstance(require_stable, bool):
+        raise ValueError('require_stable must be a bool')
+    tracking_candidate = (
+        require_stable is False and isinstance(document, dict)
+        and document.get('stable') is False
+        and document.get('reason') == 'collecting_stability')
     if (not isinstance(document, dict)
             or document.get('detected') is not True
-            or document.get('stable') is not True
+            or (document.get('stable') is not True and not tracking_candidate)
             or document.get('surface_kind') != 'table_edge'):
         raise ValueError('stable detected table_edge surface is required')
     stamp_s, confidence, table_height_m, edge_rms_m = _finite_fields(
@@ -137,7 +143,7 @@ def _calibrated_table_line(center, normal, camera_mount):
 
 def compute_table_edge_docking_target(
         observation, camera_mount, robot_pose, *, requested_gap_m,
-        front_extent_m, now_s):
+        front_extent_m, now_s, require_stable=True):
     """Estimate a map-frame base pose facing a visible table front edge."""
     gap_m = _finite_number(requested_gap_m, 'requested_gap_m')
     extent_m = _finite_number(front_extent_m, 'front_extent_m')
@@ -149,7 +155,8 @@ def compute_table_edge_docking_target(
         robot_pose, ('x_m', 'y_m', 'yaw_rad'), 'robot_pose')
     mount = _validated_mount(camera_mount)
     endpoints_base, table_height_m, edge_rms_m = (
-        _validated_table_observation(observation, mount, now_s))
+        _validated_table_observation(observation, mount, now_s,
+                                     require_stable=require_stable))
 
     center_x = 0.5 * (endpoints_base[0][0] + endpoints_base[1][0])
     center_y = 0.5 * (endpoints_base[0][1] + endpoints_base[1][1])

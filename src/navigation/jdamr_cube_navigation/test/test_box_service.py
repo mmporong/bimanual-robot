@@ -1653,10 +1653,7 @@ def test_failed_visit_returns_only_after_confirmed_incomplete_stop(
                 box_service.main([*argv, '--log', str(log)])
     failed, succeeded = created
     failed.dwell_and_return_home.assert_not_called()
-    if incomplete and not stopped and linked:
-        failed.go_home.assert_called_once_with(execute=True, timeout_s=500.0)
-    else:
-        failed.go_home.assert_not_called()
+    failed.go_home.assert_not_called()
     # Every attempt ends with the box camera off, the failed one included.
     for node in created:
         assert node.camera_on_demand is True
@@ -2844,6 +2841,25 @@ def test_logged_close_skew_corrects_nearby_once_without_a_full_escape(mission):
     assert mission.emit.call_args.kwargs['near_alignment_attempted'] is True
 
 
+def test_improving_near_alignment_continues_to_one_cm_in_same_visit(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    first = _table_edge_pose_for_corner_gaps(.0156, .0491)
+    improved = _table_edge_pose_for_corner_gaps(.0275, .0371)
+    mission.capture_stationary_pose.side_effect = [
+        ((0., 0., 0.), {}), (first, {}), (improved, {}), ((.925, 0., 0.), {})]
+    mission._leave_parked_pose = Mock(side_effect=AssertionError('unexpected retreat'))
+
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540},
+                      'frame_width': {'value': .450}},
+        'table_01', (1., 0.), .6, execute=True, candidate_trial=True)
+    assert mission._straight_final_approach.call_count == 3
+    mission._leave_parked_pose.assert_not_called()
+    assert mission.emit.call_args.args == ('box_approach_finished',)
+
+
 @pytest.mark.parametrize('case', ['success', 'still_skewed', 'approach_failed'])
 def test_logged_table_stop_uses_near_alignment_instead_of_reverse_reapproach(mission, case):
     mission.surface_mode = 'table_edge'
@@ -3391,10 +3407,8 @@ def test_map_station_goal_shares_the_faces_frozen_odom_transform(monkeypatch):
     node._odom_pose = Mock(return_value=(2.1, -1., 0.))
     # Keep the accepted face, so this test isolates localization movement rather
     # than a change to the observed table or robot odometry.
-    node.box_status = {'stamp_s': 10.1, 'detected': True, 'stable': False,
-                       'surface_kind': 'table_edge', 'control_ready': False,
-                       'frame_id': 'camera_color_optical_frame',
-                       'reason': 'collecting_stability'}
+    node.box_status = {'stamp_s': 10.1, 'detected': False, 'stable': False,
+                       'reason': 'no_table_edge_candidate'}
     update = node._table_approach_update(
         _table_edge_final_target(.5), .065,
         lambda x, y, yaw: (x + 2., y - 1., yaw))
@@ -3656,8 +3670,8 @@ def test_moving_table_healthy_occlusion_keeps_same_odom_face(monkeypatch):
     node.box_status = {**valid, 'stamp_s': clock[0],
                        'edge_endpoints_optical_m': [[-0.4, 0.25, 0.805], [0.4, 0.25, 0.805]]}
     node.box_status_received_s = clock[0]
-    assert update((0.35, 0.0, 0.0))['remaining_m'] == pytest.approx(0.105)
-    assert lookup.call_count == 1
+    assert update((0.35, 0.0, 0.0))['remaining_m'] == pytest.approx(0.205)
+    assert lookup.call_count == 2
 
 
 @pytest.mark.parametrize('failure', ['stale', 'latency', 'tf', 'range'])
@@ -3675,7 +3689,7 @@ def test_moving_table_rejects_unhealthy_inputs_and_unbounded_extension(monkeypat
         update((0.2, 0.0, 0.0))
 
 
-def test_moving_table_stability_reset_keeps_last_accepted_face(monkeypatch):
+def test_moving_table_stability_reset_updates_a_quality_same_surface(monkeypatch):
     node, clock, update, lookup = _moving_table_route(monkeypatch)
     valid = deepcopy(node.box_status)
     update((0.2, 0.0, 0.0))
@@ -3683,20 +3697,30 @@ def test_moving_table_stability_reset_keeps_last_accepted_face(monkeypatch):
         clock[0] = stamp
         node.box_status = {**valid, 'stamp_s': stamp, 'stable': False,
                            'reason': 'collecting_stability',
-                           'edge_endpoints_optical_m': [[-0.4, 0.25, 0.805],
-                                                        [0.4, 0.25, 0.805]]}
+                           'edge_endpoints_optical_m': [[-0.4, 0.25, 0.715],
+                                                        [0.4, 0.25, 0.715]]}
         node.box_status_received_s = stamp
         result = update((0.35, 0.0, 0.0))
-    assert result['remaining_m'] == pytest.approx(0.105)
-    assert result['basis'] == 'moving_stability_reset_carried_odom'
-    assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.53, 0.0))
+    assert result['remaining_m'] == pytest.approx(0.115)
+    assert result['basis'] == 'moving_candidate_at_stamped_odom'
+    assert node._continuous_table_stop['target']['face_center_map_xy_m'] == pytest.approx((0.54, 0.0))
     clock[0] = 12.2
     node.box_status = {**valid, 'stamp_s': 12.2,
                        'edge_endpoints_optical_m': [[-0.4, 0.25, 0.805],
                                                     [0.4, 0.25, 0.805]]}
     node.box_status_received_s = clock[0]
     assert update((0.35, 0.0, 0.0))['remaining_m'] == pytest.approx(0.205)
-    assert lookup.call_count == 2
+    assert lookup.call_count == 4
+
+
+def test_moving_table_candidate_still_rejects_a_different_surface(monkeypatch):
+    node, _clock, update, _lookup = _moving_table_route(monkeypatch)
+    update((.2, 0., 0.))
+    node.box_status = {**node.box_status, 'stamp_s': 10.15, 'stable': False,
+                       'reason': 'collecting_stability',
+                       'edge_endpoints_optical_m': [[-.4, .25, .805], [.4, .25, .805]]}
+    with pytest.raises(RuntimeError, match='candidate changed surface'):
+        update((.2, 0., 0.))
 
 
 def test_post_trim_reobservation_keeps_configuration_and_requires_fresh_face(monkeypatch):

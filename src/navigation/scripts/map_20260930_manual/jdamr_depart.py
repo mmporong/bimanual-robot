@@ -1160,6 +1160,7 @@ def run_cycle(args, state, table_id):
                    f'--log {pi_run_dir}/cycle_events.jsonl '
                    f'--candidate-trial --execute --task-timeout-s {TASK_TIMEOUT_S} '
                    + ('--rear-box-only ' if rear_box_only else
+                      '--search ' if getattr(args, 'park_only', False) else
                       f'--search --return-home --return-timeout-s {RETURN_TIMEOUT_S} ')
                    + f'--operator-heartbeat {heartbeat} '
                    f'--surface-mode {surface_mode} '
@@ -1177,6 +1178,12 @@ def run_cycle(args, state, table_id):
                       if getattr(args, 'dwell_s', None) is not None else '')
                    + (' --zero-turn-final ' if getattr(args, 'zero_turn_final', False) else '')
                    + (' --resume-at-observation ' if args.resume_at_observation else '')
+                   + (f' --reapproach-m {args.reapproach_m} '
+                      if getattr(args, 'reapproach_m', None) is not None else '')
+                   + (f' --station-left-correction-m {args.station_left_correction_m} '
+                      if getattr(args, 'station_left_correction_m', 0.0) else '')
+                   + (f' --reapproach-from-log {shlex.quote(str(pi_path(args.reapproach_from_log)))} '
+                      if getattr(args, 'reapproach_from_log', None) else '')
                    + (f' --resume-parked-from-log {shlex.quote(args.resume_parked_log)} '
                       if args.resume_parked_log else '')
                    + ('' if not include_via else
@@ -1249,7 +1256,8 @@ def run_cycle(args, state, table_id):
         stops = ('rear box only' if rear_box_only else 'dock only' if args.dock_only else
                  f'{VIA_ID} -> {table_id}' if include_via else f'{table_id}')
         submission_label = 'SUBMISSION_UNCONFIRMED' if submission_uncertain else 'SUBMITTED'
-        log(f'{submission_label} {stops} -> dock: unit {unit}, log {run_dir}/cycle_events.jsonl, '
+        ending = ' (hold at station)' if getattr(args, 'park_only', False) else ' -> dock'
+        log(f'{submission_label} {stops}{ending}: unit {unit}, log {run_dir}/cycle_events.jsonl, '
             f'request_submit_s={time.monotonic() - requested_s:.3f}')
         seen, bag_checked, departed_s, lost_since = 0, False, time.monotonic(), None
         first_event_reported = False
@@ -1404,6 +1412,19 @@ def cmd_go(args):
     if with_via and surface_mode != 'table_edge':
         fail('--with-via is only valid with --surface-mode table_edge')
     tables = list(getattr(args, 'table_ids', None) or [args.table_id])
+    reapproach_m = getattr(args, 'reapproach_m', None)
+    correction_m = getattr(args, 'station_left_correction_m', 0.0)
+    if reapproach_m is not None:
+        if not (math.isfinite(reapproach_m) and 0.2 <= reapproach_m <= 0.3
+                and len(tables) == 1 and args.park_only and surface_mode == 'table_edge'
+                and not (args.dock_only or args.rear_box_only or with_via
+                         or args.resume_parked_log or tables[0] != VIA_ID and not args.skip_via)):
+            fail('--reapproach-m requires one --park-only table_edge station, 0.2–0.3 m')
+    if (not math.isfinite(correction_m) or abs(correction_m) > 0.05
+            or correction_m and reapproach_m is None):
+        fail('--station-left-correction-m requires --reapproach-m and at most 0.05 m')
+    if getattr(args, 'reapproach_from_log', None) is not None and reapproach_m is None:
+        fail('--reapproach-from-log requires --reapproach-m')
     if getattr(args, 'rear_box_only', False) and (
             len(tables) != 1 or args.dock_only or with_via or args.resume_parked_log):
         fail('--rear-box-only requires one standalone parking attempt')
@@ -1481,6 +1502,12 @@ def go_one(args, table_id):
         if not parked or parked[-1].get('confirmed') is not True:
             fail('rear box parking not confirmed; see the run log')
         log('후면 박스 1cm 주차 완료(라이다 내부 추정)')
+        return
+    if getattr(args, 'park_only', False):
+        if not any(e.get('event') == 'box_approach_finished'
+                   and e.get('table_id') == table_id for e in events):
+            fail('selected station parking not confirmed; holding position')
+        log(f'{table_id}: 정밀주차 완료(센서 내부 추정), 현 위치 유지')
         return
     arrived = [e for e in events if e.get('event') == 'home_arrived']
     home = bool(arrived) and arrived[-1].get('confirmation', {}).get('confirmed') is True
@@ -1739,6 +1766,14 @@ def main():
     go.add_argument('--with-via', action='store_true',
                     help='explicitly include the water-station stop (already the default)')
     go.add_argument('--dock-only', action='store_true', help='return to the dock only (re-dock)')
+    go.add_argument('--park-only', action='store_true',
+                    help='park at the selected station and hold there without returning home')
+    go.add_argument('--reapproach-m', type=float,
+                    help='retreat from the current observed table, then approach it again')
+    go.add_argument('--station-left-correction-m', type=float, default=0.0,
+                    help='this reapproach only: shift the current lateral position left')
+    go.add_argument('--reapproach-from-log', type=Path,
+                    help='carry the previous confirmed parked face to the retreat')
     go.add_argument('--rear-box-only', action='store_true',
                     help='current-location rear LiDAR box parking, without transit')
     go.add_argument('--surface-mode', choices=('front', 'table_edge'), default='table_edge',

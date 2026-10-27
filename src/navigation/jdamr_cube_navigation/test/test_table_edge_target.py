@@ -106,6 +106,21 @@ def test_full_mount_geometry_produces_five_centimeter_table_gap():
     assert abs(result['edge_basis_map_xy'][1]) == pytest.approx(1.0)
 
 
+def test_fresh_tracking_candidate_is_allowed_only_after_explicit_tracking_handoff():
+    candidate = {**observation(), 'stable': False, 'reason': 'collecting_stability'}
+    with pytest.raises(ValueError, match='stable detected'):
+        target(observed=candidate)
+    tracked = compute_table_edge_docking_target(
+        candidate, mount(), {'x_m': 0., 'y_m': 0., 'yaw_rad': 0.},
+        requested_gap_m=.05, front_extent_m=.25, now_s=10.2, require_stable=False)
+    assert tracked == target()
+    candidate['confidence'] = .1
+    with pytest.raises(ValueError, match='confidence'):
+        compute_table_edge_docking_target(
+            candidate, mount(), {'x_m': 0., 'y_m': 0., 'yaw_rad': 0.},
+            requested_gap_m=.05, front_extent_m=.25, now_s=10.2, require_stable=False)
+
+
 def test_both_edge_ends_share_the_requested_line_gap():
     """The parallel robot-front line is five centimetres from both ends."""
     result = target()

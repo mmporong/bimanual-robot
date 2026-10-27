@@ -907,6 +907,33 @@ def test_final_confirmation_rejects_a_different_box_at_the_right_gap():
         module._same_target(face(.2), {**face(.01), 'face_odom': (-1., 0.)})
 
 
+@pytest.mark.parametrize('translation', [(0., 0.), (125., -84.)])
+def test_same_target_is_invariant_to_odom_origin_and_small_normal_noise(translation):
+    support = translation[0] - .475, translation[1] + .18
+
+    def fitted(angle):
+        observed = face(.2, angle)
+        normal = math.cos(angle), math.sin(angle)
+        offset = sum(normal[i] * support[i] for i in (0, 1))
+        observed.update(
+            normal_odom=normal,
+            face_odom=tuple(offset * value for value in normal),
+            midpoint_odom=support,
+        )
+        return observed
+
+    module._same_target(fitted(0.), fitted(math.radians(2.)))
+
+
+def test_same_target_rejects_a_locally_displaced_parallel_face():
+    reference = face(.2)
+    reference.update(face_odom=(10., -8.), midpoint_odom=(10., -8.))
+    observed = face(.2)
+    observed.update(face_odom=(10.08, -8.), midpoint_odom=(10.08, -8.))
+    with pytest.raises(RuntimeError, match='target changed'):
+        module._same_target(reference, observed)
+
+
 def test_one_noisy_close_range_scan_does_not_interrupt_an_aligned_approach(monkeypatch):
     node = route_node()
     node.registry = {'map': {'yaml_path': '/map.yaml'},
@@ -955,6 +982,26 @@ def test_stopped_confirmation_uses_all_eight_scans_not_the_last_angle_outlier():
     normal = result['normal_base_xy']
     point = result['face_center_base_xy_m']
     assert sum(normal[i]*point[i] for i in (0, 1)) == pytest.approx(result['line_offset_m'])
+
+
+def test_stopped_face_keeps_odom_plane_anchor_near_sensor_support():
+    support = (125., -84.)
+    observations = []
+    for index, angle in enumerate(math.radians(value) for value in (-1., -.5, .5, 1.)):
+        observed = face(.2, angle, stamp=5. + index * .1)
+        normal = math.cos(angle), math.sin(angle)
+        offset = sum(normal[i] * support[i] for i in (0, 1))
+        observed.update(
+            normal_odom=normal,
+            face_odom=tuple(offset * value for value in normal),
+            midpoint_odom=support,
+        )
+        observations.append(observed)
+
+    result = module._stationary_face(observations, .275, .225)
+
+    assert result['face_odom'] == pytest.approx(support)
+    assert result['midpoint_odom'] == pytest.approx(support)
 
 
 @pytest.mark.parametrize('raw_gap,angle,complete', [

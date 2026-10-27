@@ -1588,6 +1588,7 @@ class ServiceRoute(CorridorRoute):
             deadline_s = (time.monotonic() + abs(distance_m) / speed_mps
                           + STRAIGHT_ESCAPE_EXTRA_S)
         recoverable_depth_failures = {
+            'table approach stamped odom TF unavailable',
             'table approach observer silent',
             'table approach depth stale or future-dated',
             'table approach observer latency',

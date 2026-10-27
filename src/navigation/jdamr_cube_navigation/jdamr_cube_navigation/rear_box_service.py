@@ -106,9 +106,26 @@ def _same_target(reference, observed):
     normal, old_normal = observed['normal_odom'], reference['normal_odom']
     change = abs(_angle(math.atan2(normal[1], normal[0])
                         - math.atan2(old_normal[1], old_normal[0])))
-    displacement = abs(sum(
-        (observed['face_odom'][i] - reference['face_odom'][i]) * old_normal[i]
-        for i in (0, 1)))
+
+    def local_support(item, item_normal):
+        candidate = item.get('midpoint_odom')
+        if candidate is None:
+            return item['face_odom']
+        residual = abs(sum((candidate[i] - item['face_odom'][i]) * item_normal[i]
+                           for i in (0, 1)))
+        return candidate if residual <= MAX_CANDIDATE_PLANE_DISTANCE_M else item['face_odom']
+
+    old_support = local_support(reference, old_normal)
+    support = local_support(observed, normal)
+    # Compare each fitted plane at the other scan's local support centre.  A
+    # closest-point-to-odom representation moves by origin * normal_noise even
+    # when both fits pivot around the same physical box face.
+    displacement = max(
+        abs(sum((support[i] - reference['face_odom'][i]) * old_normal[i]
+                for i in (0, 1))),
+        abs(sum((old_support[i] - observed['face_odom'][i]) * normal[i]
+                for i in (0, 1))),
+    )
     if (change > MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD
             or displacement > MAX_CANDIDATE_PLANE_DISTANCE_M):
         raise RuntimeError('rear box target changed')
@@ -130,15 +147,26 @@ def _clear_collision_target(command_watch):
 def _stationary_face(observations, extent, half_width):
     """Use the stopped scan window rather than its last noisy line fit."""
     result = dict(observations[-1])
-    for normal_key, face_key in (
-            ('normal_base_xy', 'face_center_base_xy_m'),
-            ('normal_odom', 'face_odom')):
+    for midpoint in ('face_midpoint_base_xy_m', 'midpoint_odom'):
+        if all(midpoint in item for item in observations):
+            result[midpoint] = tuple(sum(item[midpoint][i] for item in observations)
+                                     / len(observations) for i in (0, 1))
+    for normal_key, face_key, support_key in (
+            ('normal_base_xy', 'face_center_base_xy_m', 'face_midpoint_base_xy_m'),
+            ('normal_odom', 'face_odom', 'midpoint_odom')):
         normals = [item[normal_key] for item in observations]
         angle = math.atan2(sum(n[1] for n in normals), sum(n[0] for n in normals))
         normal = math.cos(angle), math.sin(angle)
-        offset = sum(sum(item[normal_key][i] * item[face_key][i] for i in (0, 1))
-                     for item in observations) / len(observations)
-        result[normal_key], result[face_key] = normal, tuple(offset*n for n in normal)
+        supports = [item.get(support_key, item[face_key]) for item in observations]
+        support = tuple(sum(point[i] for point in supports) / len(supports)
+                        for i in (0, 1))
+        local_offset = sum(
+            sum(item[normal_key][i] * (item[face_key][i] - supports[index][i])
+                for i in (0, 1))
+            for index, item in enumerate(observations)) / len(observations)
+        result[normal_key] = normal
+        result[face_key] = tuple(support[i] + local_offset * normal[i]
+                                 for i in (0, 1))
     nx, ny = result['normal_base_xy']
     point = result['face_center_base_xy_m']
     offset = sum(point[i] * result['normal_base_xy'][i] for i in (0, 1))
@@ -149,10 +177,6 @@ def _stationary_face(observations, extent, half_width):
         center_gap_m=-offset / nx - extent,
         gap_m=-offset - extent * nx - half_width * abs(ny),
         averaged_frames=len(observations))
-    for midpoint in ('face_midpoint_base_xy_m', 'midpoint_odom'):
-        if all(midpoint in item for item in observations):
-            result[midpoint] = tuple(sum(item[midpoint][i] for item in observations)
-                                     / len(observations) for i in (0, 1))
     result['observation_roi_clipped'] = any(
         item.get('observation_roi_clipped', False) for item in observations)
     return result
