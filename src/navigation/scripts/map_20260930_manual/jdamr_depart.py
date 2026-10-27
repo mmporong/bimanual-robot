@@ -160,7 +160,10 @@ def configure_map_session(pointer):
     reference = json.loads(reference_path.read_text())
     if reference['map_identity'] != dock_map_identity():
         raise ValueError('dock scan reference belongs to a different map')
-    if state.get('map_session_identity') != reference['map_identity']:
+    if (state.get('map_session_identity') != reference['map_identity']
+            or state.get('dock_scan_reference') != reference):
+        # A taught session's registered capture is the fixed dock anchor.
+        # A later local scan-match must not silently replace that anchor.
         state['dock_scan_reference'] = reference
         state['localized'] = False
         state['map_session_identity'] = reference['map_identity']
@@ -949,9 +952,10 @@ def cmd_init(args):
         refined = refine_pose(run_dir / 'scan.json', click)
     pose = refined['pose']
     basis = 'anchored dock scan' if dock_reference_used else 'map scan'
+    global_result = 'not evaluated for dock scan' if dock_reference_used else refined['global_agrees']
     log(f'{basis} match ({pose[0]:.3f}, {pose[1]:.3f}, {math.degrees(pose[2]):.1f} deg) '
         f'inlier {refined["inlier_5cm"]:.2f}, click offset {refined["click_offset_m"]:.2f} m / '
-        f'{refined["click_offset_deg"]:.1f} deg, global agrees {refined["global_agrees"]}')
+        f'{refined["click_offset_deg"]:.1f} deg, global agrees {global_result}')
     # --local-only: the operator stated the placement (e.g. pulled straight back and
     # turned to face a box); nearby boxes can outrank it globally. AMCL agreement stays.
     min_inlier = 0.35 if args.local_only else MATCH_MIN_INLIER
@@ -1037,7 +1041,8 @@ def cmd_init(args):
                   'regions': regions, 'init_time': time.time(), 'localized': True,
                   'init_local_only': bool(args.local_only),
                   'init_pose_source': refined['threshold_basis']})
-    if click['source'] == 'registered_dock' and not dock_reference_used:
+    if (click['source'] == 'registered_dock' and not dock_reference_used
+            and ACTIVE_MAP_SESSION is None):
         state['dock_scan_reference'] = {
             'scan_path': str(run_dir / 'scan.json'), 'pose_map': list(pose),
             'home_pose': [home['x_m'], home['y_m'], home['yaw_rad']],

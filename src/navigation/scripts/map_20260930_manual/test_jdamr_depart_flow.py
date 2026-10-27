@@ -884,6 +884,59 @@ def test_configured_map_session_is_idempotent_and_generates_only_taught_routes(
     assert len({point['id'] for point in route['waypoints']}) == 3
 
 
+def test_taught_session_restores_registered_dock_anchor_after_derived_scan(tmp_path, monkeypatch):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    state = d.load_state()
+    original = state['dock_scan_reference']
+    state['dock_scan_reference'] = {
+        **original, 'scan_path': str(fixture.runtime / 'later_local_scan.json'),
+        'pose_map': [-.79, .35, .12],
+    }
+    state['localized'] = True
+    d.save_state(state)
+
+    d.configure_map_session(fixture.pointer)
+
+    restored = d.load_state()
+    assert restored['dock_scan_reference'] == original
+    assert restored['localized'] is False
+    assert restored['operator_owned'] == 'preserve'
+
+
+def test_taught_session_map_fallback_keeps_original_dock_anchor(tmp_path, monkeypatch):
+    import numpy as np
+
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    original = d.load_state()['dock_scan_reference']
+    home = {'x_m': -.8, 'y_m': .4, 'yaw_rad': .1}
+    monkeypatch.setattr(d, 'pi', Pi())
+    monkeypatch.setattr(d, 'sh', lambda *_a, **_kw: None)
+    monkeypatch.setattr(d, 'pull_registry', lambda: {'home': home})
+    monkeypatch.setattr(d, 'capture_scan', lambda _path: None)
+    monkeypatch.setattr(d, 'refine_at_registered_dock', lambda *_a: None)
+    monkeypatch.setattr(d, 'refine_pose', lambda *_a: {
+        'pose': [-.79, .35, .12], 'inlier_5cm': .5, 'global_agrees': False,
+        'click_offset_m': .05, 'click_offset_deg': 1., 'click': [-.8, .4, .1],
+    })
+    monkeypatch.setattr(d, 'read_events', lambda _path: [{
+        'event': 'navigation_activated_without_motion',
+        'stationary_pose': [-.79, .35, .12],
+    }])
+    monkeypatch.setattr(d.scan_match, 'load_map', lambda *_a: (
+        None, np.zeros((3, 3), dtype=bool), None, .05, [0., 0., 0.]))
+    monkeypatch.setattr(d.dock_survey, 'raw_points_map', lambda *_a: ([], 1))
+    monkeypatch.setattr(d.dock_survey, 'clusters', lambda *_a: [])
+
+    d.cmd_init(SimpleNamespace(
+        seed_from_state=False, click=False, local_only=True, keep_home=True))
+
+    assert d.load_state()['localized'] is True
+    assert d.load_state()['dock_scan_reference'] == original
+    d.configure_map_session(fixture.pointer)
+    assert d.load_state()['localized'] is True
+    assert d.load_state()['dock_scan_reference'] == original
+
+
 def test_new_water_station_request_uses_profile_and_has_no_via(
         tmp_path, monkeypatch):
     fixture = _configure_fixture_session(tmp_path, monkeypatch)
