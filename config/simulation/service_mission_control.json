@@ -10,6 +10,16 @@
       "label_ko": "온수",
       "station": "kitchen",
       "bottle_id": "hot_bottle"
+    },
+    "LEMONADE": {
+      "label_ko": "레몬에이드",
+      "station": "kitchen",
+      "bottle_id": "lemonade_bottle"
+    },
+    "COLA": {
+      "label_ko": "콜라",
+      "station": "kitchen",
+      "bottle_id": "cola_bottle"
     }
   },
   "battery": {

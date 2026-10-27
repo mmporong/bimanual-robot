@@ -24,6 +24,7 @@ DEFAULT_ORDERS = ROOT / "config/simulation/service_orders_demo.json"
 DEFAULT_LAYOUT = ROOT / "config/simulation/restaurant_layout.json"
 
 ORDER_STATES = {"QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELED"}
+# 로봇이 반드시 다룰 수 있어야 하는 기본 음료. config 의 supported_drinks 에 다른 병 음료를 더할 수 있다.
 DRINKS = {"COLD_WATER", "HOT_WATER"}
 ORDER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 SERVICE_PHASES = (
@@ -96,8 +97,8 @@ def load_control_config(path: Path = DEFAULT_CONFIG) -> dict:
     if config.get("schema") != "service_mission_control_v1":
         raise ValueError("service mission control schema mismatch")
     drinks = config.get("supported_drinks")
-    if not isinstance(drinks, dict) or set(drinks) != DRINKS:
-        raise ValueError("exactly COLD_WATER and HOT_WATER drink definitions are required")
+    if not isinstance(drinks, dict) or not DRINKS <= set(drinks):
+        raise ValueError("COLD_WATER and HOT_WATER drink definitions are required")
     for name, drink in drinks.items():
         if not isinstance(drink, dict) or drink.get("station") != "kitchen":
             raise ValueError(f"{name} must use the kitchen station")
@@ -211,7 +212,7 @@ class MissionController:
                 raise ValueError("snapshot order fields are invalid") from exc
             if not ORDER_ID_PATTERN.fullmatch(order.order_id) or order.order_id in restored:
                 raise ValueError("snapshot order_id is invalid or duplicated")
-            if order.table_id not in controller.table_ids or order.drink not in DRINKS:
+            if order.table_id not in controller.table_ids or order.drink not in controller.config["supported_drinks"]:
                 raise ValueError("snapshot order destination or drink is invalid")
             if order.state not in ORDER_STATES:
                 raise ValueError("snapshot order state is invalid")
