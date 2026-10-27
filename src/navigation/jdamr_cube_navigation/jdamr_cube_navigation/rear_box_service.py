@@ -502,21 +502,43 @@ class RearBoxParkingMixin:
 
         validate(start)
         validated_pose = [start]
+        face_tracker = RearBoxFaceTracker(required_frames=8)
+        last_face_stamp = [None]
+
+        def stable_face_visible():
+            """Require one odom-stationary face, not a one-frame base-frame fit.
+
+            The base-frame line offset changes while reversing.  The same
+            physical face is stationary in odom, so track that line instead.
+            This keeps a transient furniture/edge fit from repeatedly stopping
+            a bounded range reapproach after only a few millimetres.
+            """
+            try:
+                observed = self._rear_box_observation(
+                    geometry, extent,
+                    half_width if face_half_width_m is None else face_half_width_m)
+            except RuntimeError:
+                face_tracker.update(None)
+                return False
+            if observed['stamp_s'] == last_face_stamp[0]:
+                return False
+            last_face_stamp[0] = observed['stamp_s']
+            normal = observed['normal_odom']
+            tracked = {
+                'normal_base_xy': normal,
+                'tangent_base_xy': (-normal[1], normal[0]),
+                'line_offset_m': sum(
+                    normal[i] * observed['face_odom'][i] for i in (0, 1)),
+            }
+            return face_tracker.update(tracked)
 
         def watch():
             try:
                 observed = self._rear_corridor_observation(geometry, extent, half_width)
                 if observed['gap_m'] <= handoff_m:
                     return 'rear box coarse handoff ready'
-                if stop_when_face_visible:
-                    try:
-                        self._rear_box_observation(
-                            geometry, extent,
-                            half_width if face_half_width_m is None else face_half_width_m)
-                    except RuntimeError:
-                        pass
-                    else:
-                        return 'rear box face available'
+                if stop_when_face_visible and stable_face_visible():
+                    return 'rear box face stable'
                 actual = self._odom_pose()
                 if (math.dist(actual[:2], validated_pose[0][:2]) >= 0.025
                         or abs(_angle(actual[2] - validated_pose[0][2])) >= math.radians(.3)):
@@ -530,7 +552,7 @@ class RearBoxParkingMixin:
         travelled = self._drive_zero_turn(
             -distance_m, watch=watch, hold_heading=True, **kwargs)
         failure = getattr(self, '_last_direct_motion_failure', None)
-        if failure in ('rear box coarse handoff ready', 'rear box face available'):
+        if failure in ('rear box coarse handoff ready', 'rear box face stable'):
             return True
         if travelled is None or failure or self.stop_requested:
             self.emit('rear_box_coarse_paused', reason=failure or 'coarse motion incomplete')

@@ -6,13 +6,37 @@ camera_mount:
     x_m: -0.275
     y_m: 0.0
     z_m: 1.26
-    roll_rad: 0.011934068034722573
-    pitch_rad: 0.41246669799099545
-    yaw_rad: -0.0007507445375463481
+    roll_rad: 0.01837857145491081
+    pitch_rad: 0.8414714126967582
+    yaw_rad: 0.0
+  table_observation:
+    base_offset_m: 0.5
+    unit: m
+    valid_for: 2026-10-26 새 Astra 기준 교시 관측 위치
+    source: $HOME/jdamr_data/maps/20261026_manual_160135/stations/water_station_081718/reference_capture.json
+    method: 교시 참조면을 확보한 관측 거리. 최종 1cm 간격과 별도
+    camera_height_m: 1.26
+    camera_pitch_rad: 0.8414714126967582
+    final_gap_unchanged_m: 0.01
+  table_edge_calibration:
+    enabled: false
+    status: invalidated_by_camera_replacement
+    reason: 이전 Astra S와 이전 장착 자세에서 얻은 yaw·거리 보정은 새 Astra 기준면에 적용하지 않음
   provenance:
-    derived_at: '2026-10-14'
-    valid_for: 현재 4륜 차체의 상판 뒤쪽 깊이 카메라
+    selected_at: '2026-10-27'
+    valid_for: 현재 4륜 차체 상판 뒤쪽의 새 Astra 장착 후보
+    selection_status: reference_derived_candidate_selected_for_runtime_consistency
     camera_reference: 렌즈 중심. camera_link 원점과 광학 프레임 원점은 일치
+    source: $HOME/jdamr_data/maps/20261026_manual_160135/stations/water_station_081718/reference_capture.json
+    source_sha256: 6dca3c2e8bed9e0653f871186a9cec2a123b6e7c33cf87d407da4673ed3b1546
+    basis_source: reference_tabletop_plane_candidate
+    plane_rms_m: 0.0015487961706078714
+    translation_basis: existing_urdf_nominal_mount_geometry
+    orientation_basis: reference_tabletop_plane_fit_with_nominal_yaw
+    camera_position_source: runtime URDF nominal mounting translation; unchanged rear mast placement
+    camera_yaw_source: nominal forward-facing mount; external accuracy not measured
+    mount_calibration_complete: false
+    millimeter_accuracy_validated: false
     lens_height_above_chassis_tabletop:
       value: 0.54
       unit: m
@@ -33,22 +57,15 @@ camera_mount:
       measured_at: '2026-10-13'
       valid_for: 앞뒤 위치를 유지한 현재 카메라 장착
       source: operator_confirmation
-    front_to_wheel_axis:
-      value: 0.065
-      unit: m
-      measured_at: '2026-09-15'
-      valid_for: 현재 차체 앞끝과 전륜축
-      source: jdamr_cube_description/config/new_base_geometry.yaml
-    orientation_status: 이전 설정의 roll/pitch/yaw를 초기 추정으로 유지. 높이 변경 후 독립 확인 전
-    orientation_source: camera_mount_table_candidate_20261013.yaml transform (prior
-      only)
-    parking_range_bias_compensation:
-      applied: false
-      superseded_value_m: -0.0076183596449993125
-      reason: 장착 높이 변경으로 이전 근거리 보정의 적용 범위가 달라짐
-    supersedes_active_mount: camera_mount_table_candidate_20261013.yaml
-    physical_parking_accuracy: NOT_VALIDATED_AFTER_HEIGHT_CHANGE
-    invalidate_when: 상판 높이, 렌즈 위치 또는 각도 변경
+    superseded_astra_s_profile:
+      valid: false
+      previous_roll_rad: -0.039023134986489794
+      previous_pitch_rad: 0.9171698002732518
+      previous_yaw_rad: -0.0007507445375463481
+      previous_table_edge_yaw_offset_rad: -0.04392325219698101
+      previous_table_edge_plane_offset_bias_m: 0.04960505180184195
+      reason: 센서와 장착 자세가 바뀌어 이전 자세 추정·주차 보정의 적용 범위를 폐기함
+    invalidate_when: 렌즈 위치 또는 장착 각도 변경
 usage_gate:
   camera_only_rgbd_slam: allowed
   wheel_odom_fusion: blocked_until_current_mount_measurement

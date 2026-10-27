@@ -499,7 +499,9 @@ def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
     control = update((0., 0., 0.))
 
     assert control['remaining_m'] == pytest.approx(.425)
-    assert control['heading_rad'] > 0.
+    assert control['heading_rad'] == pytest.approx(0.)
+    assert control['lateral_tracking'] is True
+    assert control['lateral_error_m'] == pytest.approx(.10)
     stop = node._continuous_table_stop
     assert stop['target']['face_center_map_xy_m'] == pytest.approx((.50, .10))
     assert stop['target']['outward_normal_map_xy'] == pytest.approx((-1., 0.))
@@ -510,7 +512,8 @@ def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
     # Entering the old 5 cm precision band must not discard a remaining
     # lateral error simply because the chassis is currently face-parallel.
     near = update((.39, 0., 0.))
-    assert near['heading_rad'] > 0.
+    assert near['heading_rad'] == pytest.approx(0.)
+    assert near['lateral_error_m'] == pytest.approx(.10)
     assert node._continuous_table_stop['basis'] != 'aligned_face_frozen_for_precision_band'
 
     aligned = update((.39, .10, 0.))

@@ -18,7 +18,8 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 # dock_survey and scan_match are the Phase 2 tools the departure tool imports.
-sys.path[:0] = [str(HERE), str(HERE.parent / 'phase2_20260930')]
+sys.path[:0] = [str(HERE), str(HERE.parent / 'phase2_20260930'),
+                str(HERE.parents[1] / 'jdamr_cube_navigation')]
 # Import with a disposable copy of bundled inputs; CI never needs a host's map
 # or live localization state, and every SSH interaction remains mocked below.
 _test_data = tempfile.TemporaryDirectory(prefix='jdamr-departure-flow-')
@@ -206,6 +207,65 @@ def _add_taught_table_01(fixture):
     }
     destinations_path.write_text(json.dumps(destinations))
     fixture.profile['station_ids'] = ['water_station', 'table_01']
+
+
+def test_prepare_reference_mount_copies_selected_mount_independent_of_teaching_reference(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(d, 'P2', tmp_path)
+    station_profiles = tmp_path / 'station_profiles.json'
+    monkeypatch.setattr(d, 'STATION_PROFILES', station_profiles)
+    canonical = yaml.safe_load((HERE.parents[1] / 'jdamr_cube_navigation/config' /
+                                'camera_mount_current.yaml').read_text())
+
+    generated = []
+    for pitch in (0.1, 1.4):
+        station_profiles.write_text(json.dumps({
+            'stations': {'water_station': {'rgbd_reference': {
+                'camera_position_m': [-0.1, 0.2, 0.8],
+                'camera_yaw_rad': pitch,
+                'reference_capture_path': f'/changed/reference/{pitch}.json',
+            }}},
+        }))
+        assert d.prepare_reference_mount()
+        generated.append(yaml.safe_load((tmp_path / 'camera_mount.yaml').read_text()))
+
+    assert generated == [canonical, canonical]
+    mount = generated[0]['camera_mount']
+    assert mount['provenance']['mount_calibration_complete'] is False
+    assert mount['provenance']['millimeter_accuracy_validated'] is False
+    assert mount['table_edge_calibration']['enabled'] is False
+
+
+def test_prepare_reference_mount_preserves_future_measured_validation_state(
+        tmp_path, monkeypatch):
+    tools = tmp_path / 'scripts' / 'map_tools'
+    tools.mkdir(parents=True)
+    canonical_path = (tools.parents[1] / 'jdamr_cube_navigation/config' /
+                      'camera_mount_current.yaml')
+    canonical_path.parent.mkdir(parents=True)
+    measured = {
+        'camera_mount': {
+            'status': 'measured',
+            'parent_frame': 'base_link',
+            'child_frame': 'camera_link',
+            'transform': {
+                'x_m': -0.275, 'y_m': 0.0, 'z_m': 1.26,
+                'roll_rad': 0.01, 'pitch_rad': 0.84, 'yaw_rad': 0.0,
+            },
+            'table_edge_calibration': {'enabled': True, 'status': 'measured'},
+            'provenance': {
+                'mount_calibration_complete': True,
+                'millimeter_accuracy_validated': True,
+            },
+        },
+    }
+    canonical_path.write_text(yaml.safe_dump(measured, sort_keys=False))
+    monkeypatch.setattr(d, 'TOOLS', tools)
+    monkeypatch.setattr(d, 'P2', tmp_path / 'runtime')
+    d.P2.mkdir()
+
+    assert d.prepare_reference_mount()
+    assert yaml.safe_load((d.P2 / 'camera_mount.yaml').read_text()) == measured
 
 
 @pytest.mark.parametrize('mode,has_straight_departure', [

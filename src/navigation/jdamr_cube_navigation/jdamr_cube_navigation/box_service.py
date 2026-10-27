@@ -610,7 +610,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return status
         try:
             actual = self._odom_pose()
-            goal = reference['goal_odom']
+            goal = (goal_reference if getattr(self, 'station_reference_mode', None)
+                    == 'map_pose_only' else reference)['goal_odom']
             left = (-math.sin(goal[2]), math.cos(goal[2]))
             error_m = ((goal[0] - actual[0]) * left[0]
                        + (goal[1] - actual[1]) * left[1])
@@ -2266,6 +2267,13 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         'max_lateral_heading_rad': FINAL_TRIM_MAX_RAD}
                        if lateral_goal_odom is not None else {}))
             except ValueError as error:
+                self.emit('table_approach_preview_rejected', reason=str(error),
+                          reference_frame='odom', start_pose_odom=list(actual),
+                          face_center_odom=list(face), outward_normal_odom=list(normal),
+                          front_extent_m=front_extent_m,
+                          half_width_m=self.box_front_half_width_m,
+                          lateral_goal_odom=(None if lateral_goal_odom is None
+                                             else list(lateral_goal_odom)))
                 raise RuntimeError(str(error)) from error
             if len(preview) == 1:
                 # The observed-face precision band already closes beyond the
@@ -2302,6 +2310,25 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         normal = target['outward_normal_map_xy']
         frozen_face = to_odom(*face, 0.0)[:2]
         tip = to_odom(face[0] + normal[0], face[1] + normal[1], 0.0)
+        if getattr(self, 'station_reference_mode', None) == 'map_pose_only':
+            # The face and the taught tangent must share this one map→odom
+            # snapshot. Later AMCL corrections cannot move just the destination
+            # against an already frozen face during a centimetre approach.
+            taught = self.station_reference_taught_map_pose
+            self.station_reference_goal = {
+                'valid': True, 'reason': 'registered_map_pose_frozen_with_table_face',
+                'goal_map': list(taught), 'goal_odom': list(to_odom(*taught)),
+                'stamp_s': self.get_clock().now().nanoseconds * 1e-9,
+                'reference_mode': 'map_pose_only'}
+            self.station_reference_goal_frozen = True
+            self.emit('table_station_goal_frozen', reference_frame='odom',
+                      map_to_odom_anchor=list(anchor),
+                      start_pose_odom=list(self._odom_pose()),
+                      face_center_odom=list(frozen_face),
+                      outward_normal_odom=[tip[i] - frozen_face[i] for i in (0, 1)],
+                      goal_odom=self.station_reference_goal['goal_odom'],
+                      front_extent_m=front_extent_m,
+                      half_width_m=self.box_front_half_width_m)
         initial = getattr(self, 'box_status', {}) or {}
         state = {'face': frozen_face,
                  'normal': (tip[0] - frozen_face[0], tip[1] - frozen_face[1]),

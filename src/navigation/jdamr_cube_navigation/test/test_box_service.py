@@ -3378,6 +3378,40 @@ def test_moving_table_distance_uses_stamped_pose_and_revises_far_face(monkeypatc
     assert lookup.call_count == 1
 
 
+def test_map_station_goal_shares_the_faces_frozen_odom_transform(monkeypatch):
+    node, _clock, _update, _lookup = _moving_table_route(monkeypatch)
+    node.station_reference_mode = 'map_pose_only'
+    node.station_reference_taught_map_pose = (.5, 0., 0.)
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.station_reference_goal = None
+    node.station_reference_goal_frozen = False
+    node._fresh_station_reference = Mock(return_value={
+        'valid': True, 'reason': 'registered_map_pose_using_amcl',
+        'goal_map': [.5, 0., 0.], 'goal_odom': [2.5, -.985, 0.], 'stamp_s': 10.2})
+    node._odom_pose = Mock(return_value=(2.1, -1., 0.))
+    # Keep the accepted face, so this test isolates localization movement rather
+    # than a change to the observed table or robot odometry.
+    node.box_status = {'stamp_s': 10.1, 'detected': True, 'stable': False,
+                       'surface_kind': 'table_edge', 'control_ready': False,
+                       'frame_id': 'camera_color_optical_frame',
+                       'reason': 'collecting_stability'}
+    update = node._table_approach_update(
+        _table_edge_final_target(.5), .065,
+        lambda x, y, yaw: (x + 2., y - 1., yaw))
+
+    first = update((2.1, -1., 0.))
+    node._fresh_station_reference.return_value['goal_odom'] = [2.5, -.95, 0.]
+    second = update((2.1, -1., 0.))
+    second['validate_control']((2.1, -1., 0.), 0.)
+
+    assert first['lateral_error_m'] == pytest.approx(0.)
+    assert second['lateral_error_m'] == pytest.approx(0.)
+    validator = node._table_approach_validator.return_value
+    assert validator.call_args.kwargs['lateral_goal_odom'] == pytest.approx((2.5, -1., 0.))
+    assert node.station_reference_goal_frozen is True
+    assert node._station_lateral_status()['internal_lateral_error_m'] == pytest.approx(0.)
+
+
 def test_moving_table_centres_both_corner_gaps_instead_of_stopping_at_the_nearer_one(
         monkeypatch):
     node, _clock, update, _lookup = _moving_table_route(monkeypatch)

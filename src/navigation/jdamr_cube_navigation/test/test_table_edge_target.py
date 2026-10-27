@@ -276,42 +276,16 @@ def test_task_calibration_rejects_malformed_input(calibration, message):
         target(mounted=mounted)
 
 
-def test_current_task_calibration_replays_its_reference_faces():
-    """Replay recorded fit/reference geometry; this is not new physical evidence."""
+def test_current_mount_disables_superseded_astra_s_task_calibration():
+    """A replaced camera must not inherit the previous sensor's task correction."""
     mounted = yaml.safe_load((Path(__file__).resolve().parents[1]
                               / 'config/camera_mount_current.yaml').read_text())
-    transform = mounted['camera_mount']['transform']
-    provenance = mounted['camera_mount']['table_edge_calibration']['provenance']
-    rotation = tuple(transform[key] for key in (
-        'roll_rad', 'pitch_rad', 'yaw_rad'))
-    front = provenance['reference_front_extent_m']
-    half_width = provenance['reference_width_m'] / 2.0
-    for view in provenance['reference_views']:
-        normal = view['raw_normal_xy']
-        center = tuple(-view['raw_offset_m'] * value for value in normal)
-        tangent = (-normal[1], normal[0])
-        observed = observation(mounted)
-        observed['table_height_m'] = 0.78
-        observed['edge_endpoints_optical_m'] = [
-            _base_to_optical((
-                center[0] + side * tangent[0] - transform['x_m'],
-                center[1] + side * tangent[1] - transform['y_m'],
-                observed['table_height_m'] - transform['z_m']), *rotation)
-            for side in (-0.20, 0.20)]
-        result = target(observed=observed, mounted=mounted, gap=0.01, extent=front)
-        actual_normal = result['outward_normal_map_xy']
-        actual_face = result['face_center_map_xy_m']
-        actual_offset = -sum(a * b for a, b in zip(actual_normal, actual_face))
-        for side in (-half_width, half_width):
-            actual_gap = actual_normal[0] * front + actual_normal[1] * side + actual_offset
-            expected_gap = (view['reference_normal_xy'][0] * front
-                            + view['reference_normal_xy'][1] * side
-                            + view['reference_offset_m'])
-            assert actual_gap == pytest.approx(expected_gap, abs=0.002)
-        # At the generated final pose, both front corners have the requested gap.
-        heading = result['yaw_rad']
-        for side in (-half_width, half_width):
-            corner = (result['x_m'] + front * math.cos(heading) - side * math.sin(heading),
-                      result['y_m'] + front * math.sin(heading) + side * math.cos(heading))
-            assert sum(a * b for a, b in zip(actual_normal, corner)) + actual_offset == (
-                pytest.approx(0.01))
+    calibration = mounted['camera_mount']['table_edge_calibration']
+    superseded = mounted['camera_mount']['provenance']['superseded_astra_s_profile']
+    assert calibration['enabled'] is False
+    assert calibration['status'] == 'invalidated_by_camera_replacement'
+    assert superseded['valid'] is False
+
+    without_calibration = deepcopy(mounted)
+    without_calibration['camera_mount'].pop('table_edge_calibration')
+    assert target(mounted=mounted) == target(mounted=without_calibration)

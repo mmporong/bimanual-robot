@@ -183,41 +183,13 @@ def select_stop_state(pointer):
 
 
 def prepare_reference_mount():
-    """Derive a candidate tilt from the new reference, retaining nominal translation."""
-    import numpy as np
-    from jdamr_cube_navigation.station_parking_reference import TaughtStationReference
+    """Copy the selected mount; teaching references must not redefine hardware TF."""
+    from jdamr_cube_navigation.box_docking_target import _validated_mount
 
-    profiles = json.loads(STATION_PROFILES.read_text())
-    config = profiles['stations'][TABLES[0]].get('rgbd_reference')
-    if config is None:
-        raise ValueError('taught station requires an explicit RGB-D reference configuration')
-    model = TaughtStationReference(config)
-    position = config['camera_position_m']
-    if (len(position) != 3 or not all(
-            isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value) for value in position)):
-        raise ValueError('nominal camera position must have three finite metre values')
-    optical_to_unpitched = np.asarray([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
-    rotation = model.R_base_from_optical @ optical_to_unpitched.T
-    roll = math.atan2(rotation[2, 1], rotation[2, 2])
-    pitch = math.atan2(-rotation[2, 0], math.hypot(rotation[0, 0], rotation[1, 0]))
-    yaw = math.atan2(rotation[1, 0], rotation[0, 0])
-    document = {'camera_mount': {
-        'status': 'derived', 'parent_frame': 'base_link', 'child_frame': 'camera_link',
-        'transform': dict(zip(('x_m', 'y_m', 'z_m', 'roll_rad', 'pitch_rad', 'yaw_rad'),
-                              [*map(float, position), roll, pitch, yaw])),
-        'table_observation': {'base_offset_m': 0.5},
-        'table_edge_calibration': {'enabled': False},
-        'provenance': {'source': config['reference_capture_path'],
-                       'basis_source': model.basis.basis_source,
-                       'plane_rms_m': model.basis.plane_rms_m,
-                       'camera_position_source': config.get('camera_position_source'),
-                       'camera_yaw_source': config.get('camera_yaw_source'),
-                       'translation_basis': 'existing_urdf_nominal_mount_geometry',
-                       'orientation_basis': 'reference_tabletop_plane_fit_with_nominal_yaw',
-                       'mount_calibration_complete': False,
-                       'millimeter_accuracy_validated': False},
-    }}
+    canonical = (TOOLS.parents[1]
+                 / 'jdamr_cube_navigation/config/camera_mount_current.yaml')
+    document = yaml.safe_load(canonical.read_text())
+    _validated_mount(document)
     (P2 / 'camera_mount.yaml').write_text(yaml.safe_dump(document, sort_keys=False))
     return True
 
