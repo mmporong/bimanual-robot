@@ -265,6 +265,7 @@ class TaughtStationReference:
             'reference_rgb_stamp_s': rgb_stamp,
             'reference_depth_stamp_s': depth_stamp,
             'reference_rgb_depth_delta_s': recorded_delta,
+            'reference_goal_binding': deepcopy(capture.get('goal_binding')),
             'mount_calibration_complete': self.basis.mount_calibration_complete,
             'millimeter_accuracy_validated': False,
             'registered_lateral_tolerance_m': REGISTERED_LATERAL_TOLERANCE_M,

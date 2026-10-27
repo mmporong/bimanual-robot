@@ -455,6 +455,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.station_reference_result_received_s = None
         self.station_reference_goal = None
         self.station_reference_goal_frozen = False
+        self._station_reference_goal_samples = deque(maxlen=5)
         self.station_reference = reference
         self.station_reference_mode = mode
         self.station_reference_profile = profile
@@ -562,7 +563,31 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return getattr(self, 'station_reference_goal', None), reference
         if (reference and reference.get('valid') is True
                 and not getattr(self, 'station_reference_goal_frozen', False)):
-            self.station_reference_goal = dict(reference)
+            samples = getattr(self, '_station_reference_goal_samples', None)
+            if samples is None:
+                samples = self._station_reference_goal_samples = deque(maxlen=5)
+            stamp_s = reference['stamp_s']
+            if not samples or stamp_s > samples[-1]['stamp_s']:
+                samples.append(dict(reference))
+            while samples and stamp_s - samples[0]['stamp_s'] > STATION_REFERENCE_MAX_AGE_S:
+                samples.popleft()
+            # Every goal observes the same fixed destination in odom. A median
+            # suppresses individual PnP jumps without requiring extra frames or
+            # delaying the first usable observation.
+            filtered = dict(reference)
+            for frame in ('goal_odom', 'goal_map'):
+                poses = [sample[frame] for sample in samples if frame in sample]
+                if not poses:
+                    continue
+                heading = poses[-1][2]
+                yaw_delta = [math.atan2(math.sin(pose[2] - heading),
+                                        math.cos(pose[2] - heading)) for pose in poses]
+                filtered[frame] = [float(np.median([pose[0] for pose in poses])),
+                                   float(np.median([pose[1] for pose in poses])),
+                                   heading + float(np.median(yaw_delta))]
+            filtered['goal_filter'] = 'recent_valid_pose_median'
+            filtered['goal_filter_sample_count'] = len(samples)
+            self.station_reference_goal = filtered
         goal = getattr(self, 'station_reference_goal', None)
         return goal, reference
 
@@ -1709,6 +1734,27 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.emit('failed', phase='box_camera_ready')
             return False
         search_budget = BoxSearchBudget(target_directed=surface_mode == 'table_edge')
+        if (reapproach_m is not None and reapproach_from_log is None
+                and not station_left_correction_m
+                and getattr(self, 'station_reference_mode', None) == 'rgbd'):
+            binding = self.station_reference.assumptions.get('reference_goal_binding') or {}
+            goal, observation = self._station_goal_reference()
+            if (binding.get('kind') == 'operator_confirmed_registered_station_goal'
+                    and binding.get('robot_pose_equals_goal') is True
+                    and observation and observation.get('valid') is True):
+                # The requested retreat uses the existing guarded straight
+                # controller. A table edge hidden at the parked pose is not
+                # needed to move away; fresh depth is acquired after retreat.
+                self.emit('station_reapproach_started', retreat_m=reapproach_m,
+                          station_left_correction_m=0.0,
+                          lateral_goal_reference=goal,
+                          registered_station_unchanged=True,
+                          retreat_basis='observed_operator_bound_rgbd_goal',
+                          near_table_edge_required=False)
+                if not self._drive_straight(
+                        -reapproach_m, 'station_reapproach_retreat_finished'):
+                    return False
+                reapproach_m = None
         if reapproach_m is not None:
             if reapproach_from_log is None:
                 target = self.observe_target(

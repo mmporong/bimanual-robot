@@ -464,7 +464,23 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
                 'operating_registry_activated'),
         }
         if station_id == 'water_station':
-            profile['reference_mode'] = 'rgbd_auxiliary'
+            mode = station.get('reference_mode', 'rgbd_auxiliary')
+            if mode not in ('rgbd_auxiliary', 'rgbd'):
+                raise ValueError('unsupported water station reference mode')
+            if mode == 'rgbd':
+                capture = _mapping(
+                    _path(station['reference_capture'], station_path.parent),
+                    'station RGB-D capture')
+                binding = capture.get('goal_binding', {})
+                if (binding.get('kind') != 'operator_confirmed_registered_station_goal'
+                        or binding.get('station_id') != station_id
+                        or binding.get('robot_pose_equals_goal') is not True
+                        or binding.get('registered_goal_map_pose') != list(
+                            _finite_pose(station, station_id))):
+                    raise ValueError('RGB-D capture must represent the registered station goal')
+                _verify_bound_map({'map': binding.get('map_identity')},
+                                  loaded['map'], 'RGB-D goal binding')
+            profile['reference_mode'] = mode
         else:
             profile.update({
                 'reference_mode': 'map_pose_only',
