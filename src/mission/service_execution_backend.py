@@ -587,6 +587,9 @@ class RolloutServiceBackend:
             "require_alignment": self.require_alignment,
             "manipulation_service_state": status.get("state"),
             "manipulation_service_timings": status.get("timings"),
+            "manipulation_service_current": status.get("current"),
+            "manipulation_last_result": status.get("last_result"),
+            "manipulation_idle_read_failures": status.get("idle_read_failures"),
             "hardware_accessed": True,
         }
 

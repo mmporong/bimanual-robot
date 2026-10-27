@@ -159,7 +159,7 @@ def test_guest_and_control_pages_are_served(server):
     pages = {
         "/order": "MS RESTAURANT",
         "/order.js": "STEP_BY_PHASE",
-        "/control": "서빙 로봇 관제",
+        "/control": "로봇 운영 콘솔",
         "/control.js": "SERVICE_PHASES",
         "/api.js": "orderApi",
         "/config.js": "ORDER_API_BASE",
@@ -214,6 +214,18 @@ def test_new_order_numbers_skip_slots_shown_for_legacy_orders(server):
     assert created["order"]["order_id"].endswith("002")
 
 
+def test_backend_commands_are_logged_for_the_console(tmp_path):
+    app = ServiceApplication(MissionController(), tmp_path / "state")
+    try:
+        app.submit({"table_id": "table_1", "drink": "COLD_WATER"})
+        app.execute_next()
+        log = app.state()["recent_commands"]
+        assert log[-1]["phase"] == "NAVIGATE_KITCHEN" and log[-1]["success"] is True
+        assert log[-1]["duration_s"] >= 0 and app.state()["server"]["pid"] > 0
+    finally:
+        app.close()
+
+
 def test_menu_photos_and_map_assets_are_served(server):
     _, base, _ = server
     with urlopen(base + "/map/classroom.json", timeout=3) as response:
@@ -221,6 +233,8 @@ def test_menu_photos_and_map_assets_are_served(server):
     assert meta["resolution_m"] == 0.05 and {s["id"] for s in meta["stations"]} >= {"dock", "kitchen", "table_1"}
     with urlopen(base + "/map/classroom.png", timeout=3) as response:
         assert response.headers["Content-Type"] == "image/png"
+    with urlopen(base + "/fonts/jua.woff", timeout=3) as response:
+        assert response.headers["Content-Type"] == "font/woff"
     with pytest.raises(HTTPError) as error:
         urlopen(base + "/map/..%2Fsecret.json", timeout=3)
     assert error.value.code == 404
@@ -255,6 +269,8 @@ def test_robot_pose_feed_reads_navigation_dashboard(tmp_path):
             time.sleep(0.05)
         pose = app.state()["robot_pose"]
         assert pose["live"] and pose["x_m"] == 0.02 and pose["yaw_deg"] == -1.5
+        nav = app.state()["robot_nav"]
+        assert nav["connected"] and nav["snapshot"]["navigation"]["localization"]["x_m"] == 0.02
         dashboard.shutdown()
         dashboard.server_close()
         deadline = time.time() + 5

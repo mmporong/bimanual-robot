@@ -3,139 +3,200 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>서빙 로봇 관제</title>
+  <meta name="color-scheme" content="dark">
+  <title>MS AMMR 로봇 관제</title>
   <style>
     :root {
-      --bg: #f4f6f9; --card: #fff; --ink: #142538; --muted: #66768a; --line: #dbe2ea;
-      --accent: #1761c4; --accent-soft: #e8f1fd; --ok: #15805b; --ok-soft: #e9f7f1;
-      --warn: #9d6818; --warn-soft: #fff6df; --danger: #b42332; --danger-soft: #fff0f1; --radius: 10px;
-      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+      --bg: #0b1220; --panel: #111a2c; --panel-2: #16223a; --line: #23324f; --ink: #e6edf7; --muted: #8fa0ba; --faint: #5d6e8a;
+      --accent: #4aa3ff; --accent-soft: rgba(74,163,255,.14); --ok: #3ccf8e; --ok-soft: rgba(60,207,142,.14);
+      --warn: #f5b84a; --warn-soft: rgba(245,184,74,.14); --danger: #ff6b6b; --danger-soft: rgba(255,107,107,.14);
+      --mono: "JetBrains Mono", "Cascadia Code", Consolas, "D2Coding", monospace;
+      --radius: 10px;
+      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
-    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.45; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.45; }
     button, select { font: inherit; color: inherit; }
     button { cursor: pointer; }
-    button:disabled { cursor: not-allowed; opacity: .5; }
-    button:focus-visible, select:focus-visible { outline: 3px solid rgba(23,97,196,.3); outline-offset: 2px; }
-    main { width: min(1200px, 100%); margin: 0 auto; padding: 16px 16px 40px; }
-    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
-    h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
-    h2 { margin: 0 0 10px; font-size: 14px; }
-    .conn { color: var(--muted); font-size: 12px; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    main { width: min(1480px, 100%); margin: 0 auto; padding: 14px 16px 40px; }
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .title { display: flex; align-items: center; gap: 10px; }
+    .logo { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+    h1 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+    h2 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .sub { color: var(--muted); font-size: 12px; font-family: var(--mono); }
     .conn.bad { color: var(--danger); font-weight: 700; }
-    .btn { padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-weight: 600; }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-    .btn.small { padding: 4px 10px; font-size: 12px; }
+    .btn { padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font-weight: 600; }
+    .btn:hover:not(:disabled) { border-color: var(--accent); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #06111f; }
+    .btn.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+    .btn.small { padding: 3px 9px; font-size: 12px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
-    .stat { padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
-    .stat span { display: block; color: var(--muted); font-size: 12px; }
-    .stat strong { display: block; margin-top: 2px; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-    .layout { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
-    .col { display: grid; gap: 12px; align-content: start; min-width: 0; }
-    .card { padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
-    .banner { margin-bottom: 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--warn-soft); color: var(--warn); font-weight: 700; }
-    .banner.align { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; background: var(--accent-soft); color: var(--accent); }
-    .current-head { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 12px; }
-    .current-head b { font-size: 16px; }
+    .banner { margin-bottom: 10px; padding: 9px 12px; border-radius: var(--radius); border: 1px solid; font-weight: 600; }
+    .banner.demo { border-color: rgba(245,184,74,.4); background: var(--warn-soft); color: var(--warn); }
+    .banner.warn { border-color: rgba(245,184,74,.4); background: var(--warn-soft); color: var(--warn); }
+    .banner.align { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; border-color: rgba(74,163,255,.45); background: var(--accent-soft); color: var(--accent); }
+
+    /* 상태 칩 */
+    .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .kpi { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+    .kpi span { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    .kpi strong { display: block; margin-top: 4px; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .kpi small { display: block; color: var(--faint); font-family: var(--mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+    .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+    .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+    .dot.bad { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+    .dot.run { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+    .grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 10px; }
+    .col { display: grid; gap: 10px; align-content: start; min-width: 0; }
+    .card { padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .tag { padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; font-family: var(--mono); border: 1px solid var(--line); color: var(--muted); }
+    .tag.ok { color: var(--ok); border-color: rgba(60,207,142,.4); }
+    .tag.warn { color: var(--warn); border-color: rgba(245,184,74,.4); }
+    .tag.bad { color: var(--danger); border-color: rgba(255,107,107,.4); }
+    .tag.run { color: var(--accent); border-color: rgba(74,163,255,.45); }
     .muted { color: var(--muted); }
-    .phases { display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px; }
-    .phase { padding: 8px 2px; border-radius: 6px; background: var(--bg); color: var(--muted); font-size: 11px; text-align: center; overflow-wrap: anywhere; }
-    .phase.done { background: var(--ok-soft); color: var(--ok); }
-    .phase.now { background: var(--accent); color: #fff; font-weight: 700; }
-    .phase.fail { background: var(--danger); color: #fff; font-weight: 700; }
+    .mono { font-family: var(--mono); }
+
+    /* 미션 상태기계 */
+    .current-head { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 10px; font-family: var(--mono); font-size: 12px; }
+    .current-head b { font-family: inherit; color: var(--ink); }
+    .fsm { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 4px; }
+    .ph { position: relative; padding: 7px 4px 6px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); text-align: center; min-width: 0; }
+    .ph b { display: block; font-size: 10px; font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ph span { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ph i { display: block; font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+    .ph.done { border-color: rgba(60,207,142,.35); }
+    .ph.done b, .ph.done i { color: var(--ok); }
+    .ph.now { border-color: var(--accent); background: var(--accent-soft); }
+    .ph.now b, .ph.now span, .ph.now i { color: var(--accent); }
+    .ph.fail { border-color: var(--danger); background: var(--danger-soft); }
+    .ph .layer { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); padding: 0 5px; border-radius: 4px; font-size: 9px; font-weight: 800; background: var(--bg); }
+    .layer.nav { color: #7dd3fc; } .layer.manip { color: #c4b5fd; }
+    .cmd { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: #070d18; border: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: #b6c6dd; white-space: pre-wrap; word-break: break-all; max-height: 130px; overflow: auto; }
+
     table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
-    th { color: var(--muted); font-size: 12px; font-weight: 600; }
+    th, td { padding: 6px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+    th { color: var(--faint); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    td { font-size: 12.5px; }
     tr:last-child td { border-bottom: 0; }
-    td.num { font-variant-numeric: tabular-nums; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+    td.mono, td .mono { font-family: var(--mono); font-size: 12px; }
+    .table-wrap { overflow-x: auto; }
+    .empty { color: var(--faint); padding: 6px 0; }
+    .st { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; font-weight: 700; }
+    .st.ok { color: var(--ok); } .st.warn { color: var(--warn); } .st.bad { color: var(--danger); } .st.off { color: var(--faint); }
+    .badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; font-family: var(--mono); }
     .badge.QUEUED { background: var(--warn-soft); color: var(--warn); }
     .badge.RUNNING { background: var(--accent-soft); color: var(--accent); }
     .badge.SUCCEEDED { background: var(--ok-soft); color: var(--ok); }
     .badge.FAILED { background: var(--danger-soft); color: var(--danger); }
-    .badge.CANCELED { background: var(--bg); color: var(--muted); }
-    .empty { color: var(--muted); padding: 6px 0; }
-    .form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
-    select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-    .links { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
-    .links a { color: var(--accent); }
-    .events { max-height: 300px; overflow: auto; font-size: 12px; }
-    .events li { padding: 4px 0; border-bottom: 1px solid var(--line); }
-    .events ol { margin: 0; padding: 0; list-style: none; }
-    .table-wrap { overflow-x: auto; }
+    .badge.CANCELED { background: var(--panel-2); color: var(--muted); }
+
+    /* 지도 */
     .map-wrap { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
     .map-wrap canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
-    .map-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
-    .map-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 50%; vertical-align: -1px; }
+    .map-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 11px; color: var(--muted); }
+    .map-legend i { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%; vertical-align: -1px; }
     .pose-live { color: var(--ok); font-weight: 700; }
     .pose-est { color: var(--warn); font-weight: 700; }
-    .items-text { color: var(--muted); font-size: 12px; }
-    @media (max-width: 860px) {
-      .layout { grid-template-columns: 1fr; }
-      .stats { grid-template-columns: repeat(2, 1fr); }
-      .phases { grid-template-columns: repeat(4, 1fr); }
-    }
+    .kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+    .kv div { padding: 6px 8px; background: var(--panel-2); border-radius: 6px; min-width: 0; }
+    .kv span { display: block; color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+    .kv b { display: block; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .kv.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .log { max-height: 260px; overflow: auto; margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 11.5px; }
+    .log li { padding: 3px 0; border-bottom: 1px dashed var(--line); color: #b6c6dd; }
+    .log li .t { color: var(--faint); margin-right: 8px; }
+    .log li .k { color: var(--accent); margin-right: 6px; }
+    .log li.fail .k { color: var(--danger); }
+    .log li.ok .k { color: var(--ok); }
+    .form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+    select { padding: 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+    details summary { cursor: pointer; color: var(--muted); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    details[open] summary { margin-bottom: 10px; }
+    .links { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+    .links a { color: var(--accent); }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 1100px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 700px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .fsm { grid-template-columns: repeat(4, 1fr); } .split { grid-template-columns: 1fr; } .kv { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
 <body>
 <main>
   <header>
-    <div>
-      <h1>서빙 로봇 관제</h1>
-      <span class="conn" id="conn">연결 중…</span>
+    <div class="title">
+      <div class="logo" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="10" rx="2"/><path d="M12 8V4M9 4h6M8 13h.01M16 13h.01M7 18v2M17 18v2"/></svg>
+      </div>
+      <div>
+        <h1>MS AMMR · 로봇 운영 콘솔</h1>
+        <div class="sub"><span id="conn" class="conn">connecting…</span> · <span id="srv"></span></div>
+      </div>
     </div>
     <div class="actions">
       <button type="button" class="btn" id="pause">자동 진행 일시정지</button>
-      <button type="button" class="btn danger" id="abort" disabled>현재 주문 중단</button>
+      <button type="button" class="btn danger" id="abort" disabled>현재 미션 중단</button>
     </div>
   </header>
 
-  <div class="banner" id="demo-note" hidden>체험용 데모 화면입니다. 실제 로봇과 연결되어 있지 않으며, 주문은 이 브라우저 안에서만 공유됩니다.</div>
+  <div class="banner demo" id="demo-note" hidden>DEMO · 브라우저 안 시뮬레이션입니다. 토픽·조작·위치 값은 실제 로봇 값이 아닌 데모 값이며 화면에 DEMO로 표시합니다.</div>
   <div class="banner align" id="align-banner" hidden>
     <span id="align-text"></span>
     <button type="button" class="btn primary" id="align-confirm">정렬 완료</button>
   </div>
-  <div class="banner" id="paused-banner" hidden>자동 진행이 일시정지되었습니다. 진행 중인 단계는 끝까지 수행한 뒤 멈춥니다.</div>
+  <div class="banner warn" id="paused-banner" hidden>AUTO-STEP PAUSED · 진행 중인 단계는 끝까지 수행한 뒤 멈춥니다.</div>
 
-  <div class="stats">
-    <div class="stat"><span>로봇 상태</span><strong id="s-mission">-</strong></div>
-    <div class="stat"><span>현재 위치</span><strong id="s-location">-</strong></div>
-    <div class="stat"><span>배터리</span><strong id="s-battery">-</strong></div>
-    <div class="stat"><span>실행 모드</span><strong id="s-mode">-</strong></div>
+  <div class="kpis">
+    <div class="kpi"><span><i class="dot" id="k-mission-dot"></i>Mission FSM</span><strong id="s-mission">-</strong><small id="s-mission-sub">-</small></div>
+    <div class="kpi"><span><i class="dot" id="k-manip-dot"></i>Manipulation</span><strong id="s-manip">-</strong><small id="s-manip-sub">-</small></div>
+    <div class="kpi"><span><i class="dot" id="k-nav-dot"></i>Navigation (ROS 2)</span><strong id="s-nav">-</strong><small id="s-nav-sub">-</small></div>
+    <div class="kpi"><span><i class="dot" id="k-loc-dot"></i>Localization</span><strong id="s-location">-</strong><small id="s-loc-sub">-</small></div>
+    <div class="kpi"><span><i class="dot" id="k-bat-dot"></i>Battery</span><strong id="s-battery">-</strong><small id="s-bat-sub">-</small></div>
+    <div class="kpi"><span><i class="dot ok" id="k-api-dot"></i>Order API</span><strong id="s-mode">-</strong><small id="s-api-sub">-</small></div>
   </div>
 
-  <div class="layout">
+  <div class="grid">
     <div class="col">
       <section class="card">
-        <h2>현재 작업</h2>
+        <div class="card-head"><h2>Mission state machine</h2><span class="tag" id="fsm-tag">IDLE</span></div>
         <div class="current-head" id="current-head"></div>
-        <div class="phases" id="phases"></div>
+        <div class="fsm" id="phases"></div>
+        <pre class="cmd" id="cmd"></pre>
       </section>
 
       <section class="card">
-        <h2>대기 주문 <span class="muted" id="queue-count"></span></h2>
+        <div class="card-head"><h2>ROS 2 topic monitor</h2><span class="tag" id="topic-tag">-</span></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>순서</th><th>주문 번호</th><th>테이블</th><th>메뉴</th><th>접수 시각</th><th></th></tr></thead>
+          <thead><tr><th>Topic</th><th>Type</th><th>Status</th><th>Age</th><th>Detail</th></tr></thead>
+          <tbody id="topics"></tbody>
+        </table></div>
+        <p class="muted" id="topic-note" style="margin:8px 0 0"></p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Backend command log</h2><span class="tag" id="cmd-count">0</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Time</th><th>Phase</th><th>Command</th><th>Result</th><th>Duration</th><th>Adapter</th></tr></thead>
+          <tbody id="commands"></tbody>
+        </table></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Job queue <span class="muted" id="queue-count"></span></h2><span class="tag">FIFO · priority</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Job (order)</th><th>Target</th><th>Payload</th><th>Queued</th><th></th></tr></thead>
           <tbody id="queue"></tbody>
         </table></div>
-      </section>
-
-      <section class="card">
-        <h2>직원 서빙 (음식) <span class="muted" id="staff-count"></span></h2>
+        <h2 style="margin:14px 0 8px">Recent missions</h2>
         <div class="table-wrap"><table>
-          <thead><tr><th>주문 번호</th><th>테이블</th><th>메뉴</th><th>접수 시각</th><th></th></tr></thead>
-          <tbody id="staff"></tbody>
-        </table></div>
-      </section>
-
-      <section class="card">
-        <h2>최근 주문</h2>
-        <div class="table-wrap"><table>
-          <thead><tr><th>주문 번호</th><th>테이블</th><th>메뉴</th><th>상태</th><th>완료 시각</th><th>실패 원인</th></tr></thead>
+          <thead><tr><th>Job (order)</th><th>Target</th><th>Payload</th><th>Result</th><th>Finished</th><th>Failure</th></tr></thead>
           <tbody id="history"></tbody>
         </table></div>
       </section>
@@ -143,50 +204,63 @@
 
     <div class="col">
       <section class="card">
-        <h2>로봇 위치 <span id="map-src"></span></h2>
-        <div class="map-wrap"><canvas id="map" width="372" height="508" aria-label="교실 지도와 로봇 위치"></canvas></div>
+        <div class="card-head"><h2>Map · pose <span id="map-src"></span></h2><span class="tag mono">frame: map</span></div>
+        <div class="map-wrap"><canvas id="map" width="460" height="628" aria-label="교실 지도와 로봇 위치"></canvas></div>
         <ul class="map-legend">
-          <li><i style="background:#1677c8"></i>로봇</li>
-          <li><i style="background:#2b8a5a"></i>충전소</li>
-          <li><i style="background:#e8590c"></i>급수대</li>
-          <li><i style="background:#7a4fd1"></i>테이블</li>
+          <li><i style="background:#1677c8"></i>robot (base_link)</li>
+          <li><i style="background:#2b8a5a"></i>home_dock</li>
+          <li><i style="background:#e8590c"></i>water_station</li>
+          <li><i style="background:#7a4fd1"></i>table</li>
         </ul>
+        <div class="kv" id="pose-kv"></div>
         <p class="muted" id="map-note" style="margin:6px 0 0"></p>
       </section>
 
       <section class="card">
-        <h2>직원 대리 주문</h2>
-        <div class="form">
-          <select id="f-table" aria-label="테이블"></select>
-          <select id="f-drink" aria-label="음료">
-            <option value="COLD_WATER">냉수</option>
-            <option value="HOT_WATER">온수</option>
-            <option value="LEMONADE">레몬에이드</option>
-            <option value="COLA">콜라</option>
-          </select>
-          <button type="button" class="btn primary" id="f-submit">등록</button>
-        </div>
-        <p class="muted" id="f-msg" style="margin:8px 0 0"></p>
+        <div class="card-head"><h2>Manipulation · LeRobot rollout service</h2><span class="tag" id="manip-tag">-</span></div>
+        <div class="kv three" id="manip-kv"></div>
+        <p class="muted" id="manip-note" style="margin:8px 0 0"></p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>ROS graph · system</h2><span class="tag" id="graph-tag">-</span></div>
+        <div class="kv" id="graph-kv"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Event stream</h2><span class="tag mono">events.jsonl</span></div>
+        <ol class="log" id="events"></ol>
       </section>
 
       <section class="card" id="test-tools" hidden>
-        <h2>시험 도구 <span class="muted">(dry-run·데모 전용)</span></h2>
-        <p class="muted" style="margin:0 0 8px">일시정지 상태에서 단계를 한 칸씩 진행하거나 실패를 주입합니다.</p>
+        <div class="card-head"><h2>Fault injection · stepping</h2><span class="tag">dry-run / demo</span></div>
         <div class="actions">
           <button type="button" class="btn" id="t-step">한 단계 진행</button>
-          <button type="button" class="btn" id="t-fail">현재 단계 실패</button>
+          <button type="button" class="btn" id="t-fail">현재 단계 실패 주입</button>
           <button type="button" class="btn" id="t-reset" hidden>데모 초기화</button>
         </div>
       </section>
 
       <section class="card">
-        <h2>손님 주문 링크</h2>
-        <ul class="links" id="links"></ul>
-      </section>
-
-      <section class="card">
-        <h2>이벤트 기록</h2>
-        <div class="events"><ol id="events"></ol></div>
+        <details id="ops" open>
+          <summary>Operator tools · 대리 주문 / 직원 서빙 <span class="muted" id="staff-count"></span></summary>
+          <div class="form">
+            <select id="f-table" aria-label="테이블"></select>
+            <select id="f-drink" aria-label="음료">
+              <option value="COLD_WATER">냉수</option>
+              <option value="HOT_WATER">온수</option>
+              <option value="LEMONADE">레몬에이드</option>
+              <option value="COLA">콜라</option>
+            </select>
+            <button type="button" class="btn primary" id="f-submit">미션 등록</button>
+          </div>
+          <p class="muted" id="f-msg" style="margin:6px 0 10px"></p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Order</th><th>Table</th><th>Staff items</th><th>Queued</th><th></th></tr></thead>
+            <tbody id="staff"></tbody>
+          </table></div>
+          <ul class="links" id="links"></ul>
+        </details>
       </section>
     </div>
   </div>

@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import re
 import threading
+import time
+from collections import deque
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -42,15 +44,27 @@ STATIC_FILES = {
 }
 ORDER_PATH = re.compile(r"^/api/orders/([A-Za-z0-9._:-]{1,64})/cancel$")
 TICKET_PATH = re.compile(r"^/api/tickets/([A-Za-z0-9._:-]{1,64})/served$")
-# 메뉴 사진(static/menu/*.jpg)과 관제 지도(static/map/*.png|json)
-ASSET_PATH = re.compile(r"^/(menu|map)/([a-z0-9_]{1,40})\.(jpg|png|json)$")
-ASSET_TYPES = {"jpg": "image/jpeg", "png": "image/png", "json": "application/json; charset=utf-8"}
+# 메뉴 사진(static/menu/*.jpg), 관제 지도(static/map/*.png|json), 손님 화면 글꼴(static/fonts/*.woff)
+ASSET_PATH = re.compile(r"^/(menu|map|fonts)/([a-z0-9_]{1,40})\.(jpg|png|json|woff)$")
+ASSET_TYPES = {"jpg": "image/jpeg", "png": "image/png", "json": "application/json; charset=utf-8", "woff": "font/woff"}
 CLIENT_REF_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 ORDER_NO_DIGITS = 3  # 주문 번호 = YYMMDD + 일련번호 3자리 (예: 261027001)
 
 
+def _trim(value, depth: int = 0):
+    """Keep the dashboard snapshot small for the browser: drop long arrays (scan ranges, path points)."""
+    if isinstance(value, dict):
+        return {k: _trim(v, depth + 1) for k, v in value.items() if depth < 4}
+    if isinstance(value, list):
+        return value if len(value) <= 60 else {"count": len(value)}
+    return value
+
+
 class RobotPoseFeed:
-    """Polls the Pi navigation dashboard (ammr_dashboard /api/state) for the live map pose.
+    """Polls the Pi navigation dashboard (ammr_dashboard /api/state) for the live map pose and ROS status.
+
+    Besides the pose it keeps a trimmed copy of the dashboard snapshot (topic freshness, ROS graph,
+    battery, odometry, Nav2 goal) for the developer console on /control.
 
     The dashboard listens on the Pi loopback only, so reach it through an SSH tunnel:
     `ssh -N -L 8090:127.0.0.1:8090 lim@<pi>` (or pass --robot-ssh to let this server open it).
@@ -61,6 +75,7 @@ class RobotPoseFeed:
         self.interval_s = interval_s
         self.ssh_target = ssh_target
         self.pose: dict = {"live": False, "error": "not polled yet"}
+        self.nav: dict = {"connected": False, "error": "not polled yet", "url": url}
         self._stop = threading.Event()
         self._tunnel = None
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -83,8 +98,11 @@ class RobotPoseFeed:
 
         while not self._stop.is_set():
             try:
+                started = time.perf_counter()
                 with urllib.request.urlopen(self.url, timeout=2.0) as response:
                     data = json.loads(response.read().decode("utf-8"))
+                self.nav = {"connected": True, "error": None, "url": self.url, "received_at": time.time(),
+                            "latency_ms": round((time.perf_counter() - started) * 1000, 1), "snapshot": _trim(data)}
                 loc = (data.get("navigation") or {}).get("localization") or {}
                 if not all(isinstance(loc.get(k), (int, float)) for k in ("x_m", "y_m", "yaw_deg")):
                     raise ValueError("dashboard has no map pose yet")
@@ -93,6 +111,9 @@ class RobotPoseFeed:
                     "frame_id": loc.get("frame_id", "map"), "age_s": loc.get("age_s"), "received_at": time.time(),
                 }
             except Exception as exc:  # noqa: BLE001 - 위치는 보조 정보다. 실패해도 주문 처리는 계속한다.
+                if not isinstance(exc, ValueError) or "map pose" not in str(exc):
+                    self.nav = {"connected": False, "error": str(exc)[:160], "url": self.url,
+                                "last_snapshot_at": self.nav.get("received_at") or self.nav.get("last_snapshot_at")}
                 self.pose = {"live": False, "error": str(exc)[:160], "last": self.pose if self.pose.get("x_m") is not None else self.pose.get("last")}
             self._stop.wait(self.interval_s)
 
@@ -149,6 +170,9 @@ class ServiceApplication:
         # 주문표: 주문 번호별 메뉴 줄(로봇 음료 + 직원이 가져다주는 음식). 로봇 미션은 음료만 맡는다.
         self.tickets: dict[str, dict] = self._load_tickets()
         self.pose_feed: RobotPoseFeed | None = None
+        self.started_at = datetime.now().astimezone()
+        # 개발자 콘솔용 최근 실행 명령(단계별 backend 호출, 결과, 걸린 시간)
+        self.recent_commands: deque[dict] = deque(maxlen=40)
         self._persist()
 
     def _load_tickets(self) -> dict[str, dict]:
@@ -250,6 +274,15 @@ class ServiceApplication:
             snapshot["auto_paused"] = self.auto_paused
             snapshot["tickets"] = list(self.tickets.values())
             snapshot["robot_pose"] = self.pose_feed.pose if self.pose_feed is not None else None
+            snapshot["robot_nav"] = self.pose_feed.nav if self.pose_feed is not None else None
+            snapshot["recent_commands"] = list(self.recent_commands)
+            snapshot["server"] = {
+                "started_at": self.started_at.isoformat(timespec="seconds"),
+                "uptime_s": round((datetime.now().astimezone() - self.started_at).total_seconds(), 1),
+                "pid": os.getpid(),
+                "auto_paused": self.auto_paused,
+                "busy": self.execution_lock.locked(),
+            }
             return snapshot
 
     def set_auto_paused(self, paused: bool) -> dict:
@@ -339,6 +372,16 @@ class ServiceApplication:
             return {"order": order.__dict__ if order else None, "ticket": ticket,
                     "state": self.controller.snapshot()}, created
 
+    def _record_command(self, command: dict, elapsed_s: float) -> None:
+        result = command.get("backend_result") or {}
+        self.recent_commands.append({
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "phase": command.get("phase"), "kind": command.get("kind"), "name": command.get("name"),
+            "order_id": command.get("order_id"), "success": result.get("success"),
+            "failure_code": result.get("failure_code") or None, "adapter": result.get("adapter") or result.get("mode"),
+            "duration_s": round(elapsed_s, 3), "superseded": command.get("superseded", False),
+        })
+
     def mark_served(self, order_id: str) -> dict:
         """Staff brought the food lines of a ticket to the table."""
         with self.lock:
@@ -386,6 +429,7 @@ class ServiceApplication:
                     "adapter": "manual_api_step",
                 }
                 self.last_backend_result = stored_command["backend_result"]
+                self._record_command(stored_command, 0.0)
                 self._persist(stored_command)
                 return {"executed_command": command, "state": self.controller.snapshot()}
         finally:
@@ -415,11 +459,13 @@ class ServiceApplication:
                     command = {**command, "phase": phase_before}
                 self.runtime.commands.append(command)
 
+            started = time.perf_counter()
             result = self.backend.execute(
                 command,
                 mission_id=mission_id,
                 phase_attempt=phase_attempt,
             )
+            elapsed_s = time.perf_counter() - started
 
             with self.lock:
                 superseded = (
@@ -437,6 +483,7 @@ class ServiceApplication:
                 stored_command["backend_result"] = result.to_dict()
                 stored_command["superseded"] = superseded
                 self.last_backend_result = result.to_dict()
+                self._record_command(stored_command, elapsed_s)
                 self._persist(stored_command)
                 return {
                     "executed_command": command,
