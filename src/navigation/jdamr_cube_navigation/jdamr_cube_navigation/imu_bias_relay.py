@@ -7,6 +7,8 @@ sensor axes and declares frame imu_link; the URDF imu_joint gives the base_link-
 rotation (z down, board y forward, board x left; new_base_geometry.yaml imu_rotation_rpy).
 """
 
+import math
+
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -42,16 +44,24 @@ class GyroBias:
         self.bias = [0.0, 0.0, 0.0]
         self.learned_s = 0.0
         self.last_t = None
+        self.last_wheels_t = None
 
     def wheels(self, t, moving):
         """Record whether the wheels moved at time t."""
         self.still_since = None if moving else (
             self.still_since if self.still_since is not None else t)
+        self.last_wheels_t = t
 
     def gyro(self, t, rates):
         """Return the rates minus the bias, learning it while the wheels are still."""
+        if not math.isfinite(t) or not all(math.isfinite(rate) for rate in rates):
+            raise ValueError('nonfinite IMU sample')
         dt = 0.0 if self.last_t is None else max(0.0, t - self.last_t)
         self.last_t = t
+        if (self.last_wheels_t is None or not 0.0 <= t - self.last_wheels_t <= 0.2
+                or dt > 0.2):
+            self.still_since = None
+            return [r - b for r, b in zip(rates, self.bias)]
         if self.still_since is None or t - self.still_since < self.still_min_s or dt == 0.0:
             return [r - b for r, b in zip(rates, self.bias)]
         # Average over the first tau seconds, then an exponential window of tau.
@@ -83,7 +93,11 @@ class ImuBiasRelay(Node):
         """Remove the bias and republish in imu_link."""
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         w = msg.angular_velocity
-        w.x, w.y, w.z = self.estimator.gyro(t, [w.x, w.y, w.z])
+        try:
+            w.x, w.y, w.z = self.estimator.gyro(t, [w.x, w.y, w.z])
+        except ValueError as error:
+            self.get_logger().warning(str(error), throttle_duration_sec=5.0)
+            return
         msg.header.frame_id = self.frame_id
         msg.angular_velocity_covariance[8] = GYRO_Z_VARIANCE
         self.publisher.publish(msg)

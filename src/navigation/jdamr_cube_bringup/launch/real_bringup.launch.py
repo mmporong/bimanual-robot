@@ -27,6 +27,7 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetEnvironment
 import launch.logging
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 import yaml
 
 
@@ -70,6 +71,9 @@ def generate_launch_description():
                               description=(
                                   '오른쪽/왼쪽 유효 바퀴 반지름 비. '
                                   '측정 주행 전에는 1.0 유지')),
+        DeclareLaunchArgument('publish_odom_tf', default_value='true',
+                              choices=['true', 'false']),
+        DeclareLaunchArgument('wheel_odom_topic', default_value='odom'),
 
         # URDF 가 모든 고정 TF(base_footprint→base_link→laser_link…)의 단일 출처
         Node(
@@ -103,9 +107,12 @@ def generate_launch_description():
                 'base_frame': 'base_footprint',
                 # 보드는 z 아래·y 앞·x 왼쪽으로 달려 있다. 회전은 URDF imu_joint가 낸다.
                 'imu_frame': 'imu_link',
+                'publish_tf': ParameterValue(
+                    LaunchConfiguration('publish_odom_tf'), value_type=bool),
                 # /odom은 50Hz 유지, TF만 20Hz로 제한해 Pi의 Nav2 fan-out 부하를 줄인다.
                 'tf_publish_hz': 20.0,
             }],
+            remappings=[('odom', LaunchConfiguration('wheel_odom_topic'))],
         ),
 
         DeclareLaunchArgument(

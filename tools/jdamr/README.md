@@ -56,6 +56,13 @@ tools/jdamr/jdamr_depart.py go water_station
 Nav2를 이동 전 준비 상태로 기동한다. `init`은 등록 도크를 다시 가르치지 않고 위치를 초기화한다.
 충전 중에는 `go`를 실행하지 않는다.
 
+Pi 베이스 서비스는 `jdamr_cube_navigation/real_bringup_imu.launch.py`로 바퀴 속도와
+바이어스 보정 자이로를 합친다. 원시 바퀴 odom은 `/wheel/odom`, 보정 IMU는 `/imu/data`,
+제어에 쓰는 odom은 EKF의 `/odom`이다. 드라이버의 odom TF 발행은 끄고 EKF만
+`odom→base_footprint`를 발행한다. 가속도는 융합하지 않으며 AMCL의 `map→odom` 역할은 유지한다.
+기존 `jdamr_cube_bringup/real_bringup.launch.py`는 바퀴 odom 단독 구성으로 남아 있다.
+IMU는 회전 추정을 보완하며, 면을 따라 움직인 실제 좌우 위치를 독립 측정하지 않는다.
+
 실행기는 새 지도·도크·급수대 참조의 해시를 대조한 뒤
 `src/navigation/scripts/map_20260930_manual/jdamr_depart.py`를 불러온다. 주행·위치초기화
 알고리즘의 관리 대상은 이 파일 하나다. `status`는 상태 조회, `init`은 위치초기화,
@@ -63,7 +70,9 @@ Nav2를 이동 전 준비 상태로 기동한다. `init`은 등록 도크를 다
 
 기본 `go water_station`은 도크 → 등록 급수대 → 도크를 수행한다.
 급수대를 목적지와 경유점으로 중복 방문하지 않는다. 이전 지도의 박스·테이블 경로는
-`--legacy-map`으로만 불러온다. 등록 위치가 우선이며 RGB-D 참조는 좌우 보정에 사용한다.
+`--legacy-map`으로만 불러온다. 등록 위치가 우선이며 현행 `rgbd_auxiliary` 모드의
+RGB-D 참조는 진단용이다. 좌우 제어는 등록 목표를 odom에 고정한 내부 오차를 사용하므로
+실제 횡위치 오차를 독립 확인하는 영상 제어가 적용된 것으로 해석하지 않는다.
 목표는 차체 앞끝 1 cm와 좌우 ±5 mm다. 새 참조의 상판 앞 경계 검출과 실제 정확도 검증은
 남아 있으며, `NOT_VALIDATED` 상태를 소프트웨어 테스트 통과로 바꾸지 않는다.
 등록된 도크 방향이 `reverse`이면
