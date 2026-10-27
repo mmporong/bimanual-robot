@@ -546,7 +546,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return {'valid': False, 'reason': 'station_reference_stale'}
         return result
 
-    def _station_goal_reference(self):
+    def _station_goal_reference(self, *, freeze=False):
         """Carry an accepted fixed goal in odom across rejected RGB frames.
 
         The stored object is a destination, never obstacle or sensor evidence.
@@ -589,6 +589,19 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             filtered['goal_filter_sample_count'] = len(samples)
             self.station_reference_goal = filtered
         goal = getattr(self, 'station_reference_goal', None)
+        if (freeze and goal is not None
+                and getattr(self, 'station_reference_mode', None) == 'rgbd'
+                and reference and reference.get('valid') is True
+                and not getattr(self, 'station_reference_goal_frozen', False)):
+            self.station_reference_goal_frozen = True
+            self.emit('table_station_goal_frozen', reference_frame='odom',
+                      reason='accepted_rgbd_goal_held_during_approach',
+                      goal_odom=list(goal['goal_odom']),
+                      observation_stamp_s=goal.get('stamp_s'),
+                      reference_capture_path=self.station_reference.assumptions.get(
+                          'reference_capture_path'),
+                      reference_capture_sha256=self.station_reference.assumptions.get(
+                          'reference_capture_sha256'))
         return goal, reference
 
     def _station_anchor_target(self, target, *, reference_frame='map'):
@@ -601,6 +614,17 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         else:
             taught = goal.get('goal_map') if goal else None
         if taught is None:
+            if getattr(self, 'station_reference_mode', None) == 'rgbd':
+                # The observed face still supplies its normal and gap. Until
+                # the current taught RGB-D goal is available, no old map point
+                # may stand in for that goal's lateral coordinate.
+                return {**target, 'lateral_reference_mode': 'rgbd',
+                        'lateral_goal_pending': True,
+                        'rgbd_reference_valid': False,
+                        'rgbd_reference_reason': (
+                            reference.get('reason') if reference
+                            else 'station_reference_not_observed'),
+                        'millimeter_accuracy_validated': False}
             if reference_frame == 'map':
                 taught = self.station_reference_taught_map_pose
             else:
@@ -645,7 +669,23 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                  else 'accepted_rgbd_goal_in_odom') if goal_reference is not None else None),
             'lateral_goal_observation_stamp_s': (
                 goal_reference.get('stamp_s') if goal_reference else None),
+            'lateral_goal_frozen': bool(
+                getattr(self, 'station_reference_goal_frozen', False)),
+            'lateral_goal_odom': None,
+            'lateral_actual_odom': None,
+            'rgbd_observed_lateral_error_m': None,
+            'rgbd_goal_lateral_difference_m': None,
         }
+        if getattr(self, 'station_reference_mode', None) == 'rgbd':
+            status.update(
+                rgbd_reference_valid=bool(reference and reference.get('valid') is True),
+                rgbd_reference_reason=(reference.get('reason') if reference else
+                                       'station_reference_not_observed'),
+                rgbd_observation_stamp_s=(reference.get('stamp_s') if reference else None),
+                reference_capture_path=self.station_reference.assumptions.get(
+                    'reference_capture_path'),
+                reference_capture_sha256=self.station_reference.assumptions.get(
+                    'reference_capture_sha256'))
         if auxiliary:
             status.update(
                 lateral_reference_reason='registered_map_pose_with_auxiliary_rgbd',
@@ -662,7 +702,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return status
         try:
             actual = self._odom_pose()
-            goal = (goal_reference if registered_goal else reference)['goal_odom']
+            goal = goal_reference['goal_odom']
             # Use the same measured face tangent as the moving controller.
             heading = getattr(self, '_station_face_heading_odom_rad', None)
             if heading is None:
@@ -670,6 +710,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             left = (-math.sin(heading), math.cos(heading))
             error_m = ((goal[0] - actual[0]) * left[0]
                        + (goal[1] - actual[1]) * left[1])
+            status.update(lateral_goal_odom=list(goal), lateral_actual_odom=list(actual),
+                          lateral_face_heading_odom_rad=heading)
+            if (getattr(self, 'station_reference_mode', None) == 'rgbd'
+                    and reference and reference.get('valid') is True):
+                observed_goal = reference['goal_odom']
+                status['rgbd_observed_lateral_error_m'] = sum(
+                    (observed_goal[i] - actual[i]) * left[i] for i in (0, 1))
+                status['rgbd_goal_lateral_difference_m'] = sum(
+                    (observed_goal[i] - goal[i]) * left[i] for i in (0, 1))
         except (KeyError, RuntimeError, TypeError, ValueError):
             status['lateral_reference_valid'] = False
             status['lateral_goal_valid'] = False
@@ -2352,6 +2401,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         self.parking_contract['yaw_tolerance_rad'], FINAL_HEADING_TRIM_RAD)):
                 # Centre the two corner gaps on the unchanged final target.
                 # The leading corner alone would leave the far corner too far out.
+                self._station_goal_reference(freeze=True)
                 return self._zero_turn_final_approach(
                     target, front_extent_m, gap_m=self._final_gap_m() - span_m / 2,
                     allow_trim=False, continuous_table=False)
@@ -2488,17 +2538,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         def station_goal_odom():
             if not self._station_reference_enabled():
                 return None, None
-            goal, reference = self._station_goal_reference()
+            goal, reference = self._station_goal_reference(freeze=True)
             if goal is not None:
-                if (getattr(self, 'station_reference_mode', None) == 'rgbd'
-                        and reference and reference.get('valid') is True
-                        and not getattr(self, 'station_reference_goal_frozen', False)):
-                    self.station_reference_goal_frozen = True
-                    self.emit('table_station_goal_frozen', reference_frame='odom',
-                              reason='accepted_rgbd_goal_held_during_approach',
-                              goal_odom=list(goal['goal_odom']),
-                              observation_stamp_s=reference.get('stamp_s'))
                 return tuple(goal['goal_odom']), reference
+            if getattr(self, 'station_reference_mode', None) == 'rgbd':
+                return None, reference
             taught = self.station_reference_taught_map_pose
             return to_odom(*taught), reference
 
