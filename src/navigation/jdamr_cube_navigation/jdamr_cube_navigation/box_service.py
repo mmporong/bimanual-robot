@@ -1740,16 +1740,19 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             binding = self.station_reference.assumptions.get('reference_goal_binding') or {}
             goal, observation = self._station_goal_reference()
             if (binding.get('kind') == 'operator_confirmed_registered_station_goal'
-                    and binding.get('robot_pose_equals_goal') is True
-                    and observation and observation.get('valid') is True):
+                    and binding.get('robot_pose_equals_goal') is True):
                 # The requested retreat uses the existing guarded straight
-                # controller. A table edge hidden at the parked pose is not
-                # needed to move away; fresh depth is acquired after retreat.
+                # controller. Neither the parked edge nor the first visual
+                # match is needed for an explicitly requested retreat. Fresh
+                # depth and visual feedback are acquired after moving away.
                 self.emit('station_reapproach_started', retreat_m=reapproach_m,
                           station_left_correction_m=0.0,
                           lateral_goal_reference=goal,
                           registered_station_unchanged=True,
                           retreat_basis='observed_operator_bound_rgbd_goal',
+                          rgbd_reference_valid=bool(observation and observation.get('valid')),
+                          rgbd_reference_reason=(observation.get('reason')
+                                                 if observation else 'not_observed_yet'),
                           near_table_edge_required=False)
                 if not self._drive_straight(
                         -reapproach_m, 'station_reapproach_retreat_finished'):
@@ -2487,6 +2490,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 return None, None
             goal, reference = self._station_goal_reference()
             if goal is not None:
+                if (getattr(self, 'station_reference_mode', None) == 'rgbd'
+                        and reference and reference.get('valid') is True
+                        and not getattr(self, 'station_reference_goal_frozen', False)):
+                    self.station_reference_goal_frozen = True
+                    self.emit('table_station_goal_frozen', reference_frame='odom',
+                              reason='accepted_rgbd_goal_held_during_approach',
+                              goal_odom=list(goal['goal_odom']),
+                              observation_stamp_s=reference.get('stamp_s'))
                 return tuple(goal['goal_odom']), reference
             taught = self.station_reference_taught_map_pose
             return to_odom(*taught), reference

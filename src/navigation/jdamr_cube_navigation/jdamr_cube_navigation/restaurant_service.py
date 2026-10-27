@@ -1604,6 +1604,19 @@ class ServiceRoute(CorridorRoute):
                 command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
                 watch=motion_watch if hold_heading or target_update is not None else watch,
                 confirm_stopped=precision)
+            if (travelled_m is None and not self.stop_requested
+                    and target_update is not None
+                    and state['target_failure'] in recoverable_target_failures
+                    and getattr(self, '_last_direct_motion_failure', None)
+                    == 'odometry did not confirm stop'):
+                self.emit('precision_input_pause_waiting_for_stop',
+                          reason=state['target_failure'], target_preserved=True)
+                try:
+                    self.capture_stationary_pose(intermediate=True)
+                except (RuntimeError, ValueError, TransformException):
+                    break
+                travelled_m = state['travelled']
+                self._last_direct_motion_failure = None
             if (target_update is None or travelled_m is None or self.stop_requested
                     or state['tf_failure'] is not None
                     or state['target_failure'] not in recoverable_target_failures):
