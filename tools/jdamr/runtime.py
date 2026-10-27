@@ -15,10 +15,11 @@ import time
 
 from _common import (
     ASSET_SOURCE,
+    DATA_ROOT,
     PC_WORKSPACE,
     REPO_ROOT,
-    RUNTIME_ASSETS,
     bootstrap_assets,
+    runtime_assets,
 )
 
 
@@ -115,13 +116,13 @@ def build_command(workspace: Path, *, all_packages: bool) -> list[str]:
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> None:
-    report = bootstrap_assets(refresh=args.refresh)
-    print(json.dumps({"asset_root": str(RUNTIME_ASSETS), **report}, indent=2))
+    report = bootstrap_assets(refresh=args.refresh,
+                              map_session=args.map_session, legacy=args.legacy_map)
+    print(json.dumps(report, indent=2))
 
 
 def cmd_build(args: argparse.Namespace) -> None:
     if not args.dry_run:
-        bootstrap_assets()
         PC_WORKSPACE.mkdir(parents=True, exist_ok=True)
     run(build_command(PC_WORKSPACE, all_packages=args.all), dry_run=args.dry_run)
 
@@ -130,8 +131,13 @@ def deploy_commands(args: argparse.Namespace, *, stamp: str | None = None) -> li
     host = validate_host(args.host)
     pi_home = validate_remote_path(args.pi_home, "Pi home")
     pi_ws = validate_remote_path(args.pi_ws or f"{pi_home}/jdamr_ws", "Pi workspace")
-    remote_tools = f"{pi_home}/jdamr_data/map_20260930_manual/tools"
-    remote_assets = f"{pi_home}/jdamr_data/map_20260930_manual/aligned"
+    legacy = getattr(args, "legacy_map", False)
+    assets = runtime_assets(map_session=getattr(args, "map_session", None), legacy=legacy)
+    relative_assets = assets.resolve().relative_to(DATA_ROOT.resolve())
+    remote_assets = str(PurePosixPath(pi_home) / "jdamr_data" / str(relative_assets))
+    remote_tools = (f"{pi_home}/jdamr_data/map_20260930_manual/tools" if legacy
+                    else f"{pi_home}/jdamr_data/tools")
+    asset_source = ASSET_SOURCE if legacy else assets
     remote_deploy = f"{pi_home}/jdamr_deploy"
     stamp = stamp or time.strftime("%Y%m%d_%H%M%S")
     if not re.fullmatch(r"[0-9]{8}_[0-9]{6}|[A-Za-z0-9._-]+", stamp):
@@ -156,7 +162,9 @@ def deploy_commands(args: argparse.Namespace, *, stamp: str | None = None) -> li
             "--exclude", "build/", "--exclude", "install/", "--exclude", "log/",
         ),
         rsync_argv(f"{TOOLS_ROOT}/", host, f"{stage_tools}/", "--exclude", "__pycache__/"),
-        rsync_argv(f"{ASSET_SOURCE}/", host, f"{stage_assets}/"),
+        rsync_argv(f"{asset_source}/", host, f"{stage_assets}/",
+                   "--exclude", "runs/", "--exclude", "state.json",
+                   "--exclude", "rviz_initialpose.json"),
         rsync_argv(str(CAMERA_MOUNT), host, stage_mount),
         rsync_argv(str(REMOTE_PROMOTE), host, stage_promote),
     ]
@@ -188,7 +196,7 @@ def deploy_commands(args: argparse.Namespace, *, stamp: str | None = None) -> li
 
 def cmd_deploy(args: argparse.Namespace) -> None:
     if not args.dry_run:
-        bootstrap_assets()
+        bootstrap_assets(map_session=args.map_session, legacy=args.legacy_map)
     for command in deploy_commands(args):
         run(command, dry_run=args.dry_run)
     if not args.dry_run:
@@ -209,10 +217,17 @@ def cmd_plan(args: argparse.Namespace) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
-    bootstrap = sub.add_parser("bootstrap", help="누락된 지도·등록부·route 자산만 생성")
+    def map_arguments(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--map-session", type=Path,
+                             help="현재 지도 포인터를 대신할 지도 세션 JSON")
+        command.add_argument("--legacy-map", action="store_true",
+                             help="보존된 이전 지도 번들을 명시적으로 선택")
+
+    bootstrap = sub.add_parser("bootstrap", help="현재 지도에서 실행 자산 생성")
+    map_arguments(bootstrap)
     bootstrap.add_argument(
         "--refresh", action="store_true",
-        help="다른 기존 자산을 백업한 뒤 저장소 번들로 갱신",
+        help="--legacy-map에서 다른 기존 자산을 백업한 뒤 보존 번들로 갱신",
     )
     bootstrap.set_defaults(handler=cmd_bootstrap)
 
@@ -225,6 +240,7 @@ def parser() -> argparse.ArgumentParser:
     build.set_defaults(handler=cmd_build)
 
     def deployment_arguments(command: argparse.ArgumentParser) -> None:
+        map_arguments(command)
         command.add_argument(
             "--host", default=os.environ.get("JDAMR_HOST", "lim@192.168.0.159")
         )

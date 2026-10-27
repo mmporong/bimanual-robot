@@ -13,14 +13,19 @@ tools/jdamr/runtime.py bootstrap
 tools/jdamr/runtime.py build-pc
 ```
 
-`bootstrap`은 지도·keepout·목적지 등록부·route 등 누락된 정적 자산만
-`$HOME/jdamr_data/map_20260930_manual/aligned/`에 생성한다. 기존 파일이 다르면 유지한다.
-번들 값으로 갱신해야 할 때만 `bootstrap --refresh`를 사용하며, 기존 파일은
-`.runtime/jdamr/asset_backups/`에 먼저 보존된다.
+`bootstrap`은 `$HOME/jdamr_data/maps/current_manual_mapping.json`이 선택한 현재 지도에서
+map·keepout·목적지 등록부·station 프로파일을 만든다. 도크·급수대·테이블 원본 등록값과
+`state.json`은 유지한다. 경유점 생성과 Pi 동기화는 출발 도구의 `prepare`를 사용한다.
+다른 포인터는 `--map-session <전체 경로>` 또는 `JDAMR_MAP_SESSION`으로 선택한다.
+이전 지도 번들은 `bootstrap --legacy-map`으로만 복원한다. 보존 번들의 기존 파일을
+교체할 때는 `--legacy-map --refresh`를 사용하고 `.runtime/jdamr/asset_backups/`에 백업한다.
 
 `build-pc`는 기본적으로 실차 런타임 9개 ROS 패키지를
 `.runtime/jdamr/pc_ws/`에 빌드한다. 편입된 모든 ROS 패키지가 필요하면 `--all`을
 추가한다. 실행하지 않고 명령만 확인하려면 `--dry-run`을 사용한다.
+코드 빌드는 지도 생성·선택을 바꾸지 않으며 지도 포인터 없이도 수행할 수 있다.
+현재 지도·등록·센서 참조가 없는 새 PC에서는 코드를 먼저 빌드하고, 해당 자료를 준비한
+뒤 `bootstrap`과 출발 도구의 `prepare`를 사용한다.
 
 ## Pi 배포
 
@@ -36,8 +41,11 @@ Pi의 타임스탬프 stage에 전체 소스를 복사하고 빌드하는 것까
 보존하고, 안정 경로를 그 절대경로를 가리키는 링크로 교체한다. 기존 슬롯은 Pi의
 `$HOME/jdamr_deploy/bimanual_backup_*`에 이동하며 중간 실패 시 원래 슬롯으로 복구한다.
 live 경로에서 다시 빌드하지 않으며 서비스 재시작과 로봇 이동도 수행하지 않는다.
-기존 원격 정적 자산과 카메라 설정은 기본적으로 유지한다. 번들 파일로 바꿀 때만
-`--replace-assets`를 함께 지정하며, 이 파일 교체도 같은 승격 작업에서 백업·복구한다.
+배포 자산도 현재 지도 포인터의 runtime에서 가져온다. 실행 상태·초기 위치 클릭·run 로그는
+복사하지 않는다. 기존 원격 정적 자산과 카메라 설정은 기본적으로 유지하며,
+선택한 자산으로 바꿀 때만 `--replace-assets`를 지정한다. 교체는 같은 승격 작업에서
+백업·복구한다. 이전 지도 자산의 배포는 `--legacy-map`을 명시해야 한다.
+지도 선택 포인터·원본 등록·센서 참조의 Pi 동기화는 출발 도구의 `prepare`를 사용한다.
 
 ## 출발 도구
 
@@ -51,7 +59,8 @@ tools/jdamr/jdamr_depart.py go water_station
 
 기본 지도는 `$HOME/jdamr_data/maps/current_manual_mapping.json`에서 선택한다.
 다른 포인터는 전역 옵션 `--map-session <전체 경로>` 또는 `JDAMR_MAP_SESSION`으로 지정한다.
-`prepare`는 등록 도크·급수대로 실행 자산을 만들고 참조 파일과 함께 Pi에 동기화한다.
+`prepare`는 현재 등록 도크·급수대·테이블로 실행 자산을 만들고, 원본 지도·등록 파일·
+도크 스캔·RGB-D 참조를 Pi에 동기화한 뒤 지도 포인터를 마지막에 반영한다.
 `session-start`는 기존 Astra 드라이버 한 개에서 RGB와 깊이를 함께 받도록 설정하고,
 Nav2를 이동 전 준비 상태로 기동한다. `init`은 등록 도크를 다시 가르치지 않고 위치를 초기화한다.
 충전 중에는 `go`를 실행하지 않는다.
@@ -67,6 +76,9 @@ IMU는 회전 추정을 보완하며, 면을 따라 움직인 실제 좌우 위�
 `src/navigation/scripts/map_20260930_manual/jdamr_depart.py`를 불러온다. 주행·위치초기화
 알고리즘의 관리 대상은 이 파일 하나다. `status`는 상태 조회, `init`은 위치초기화,
 `go`는 실물 이동 명령이므로 운영 상황에 맞게 사용한다.
+스크립트 폴더의 날짜는 관리 코드의 기존 위치이며 선택 지도 날짜를 뜻하지 않는다.
+출발 도구를 함수로 불러도 현재 지도에 연결되며, 현재 지도에서의 면 탐색은 오래된
+`state.json`의 영역 대신 현재 등록 좌표를 사용한다.
 
 기본 `go water_station`은 도크 → 등록 급수대 → 도크를 수행한다.
 급수대를 목적지와 경유점으로 중복 방문하지 않는다. 이전 지도의 박스·테이블 경로는

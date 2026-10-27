@@ -79,9 +79,6 @@ ROS_ENV = ('export ROS_DOMAIN_ID=12 ROS_LOCALHOST_ONLY=0 '
 # Nav2 session and every short-lived Pi participant use loopback UDP without shared
 # memory: under LOCALHOST rmw_fastrtps always adds shared memory, and a joining
 # participant froze the Nav2 container by invalidating its port (2026-09-30).
-DDS_PROFILE = P2 / 'fastdds_udp_loopback.xml'
-PI_DDS_ENV = ('export ROS_DOMAIN_ID=12 ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET '
-              f'FASTRTPS_DEFAULT_PROFILES_FILE={DDS_PROFILE}; unset FASTDDS_BUILTIN_TRANSPORTS')
 # Loopback UDP did not stop the container deadlock (churn test 2026-09-30 10:55);
 # keep the project-standard LOCALHOST transport and test per-process Nav2 nodes.
 PI_SOURCE = f'set +u; source /opt/ros/jazzy/setup.bash; source {PI_WS}/install/setup.bash; {ROS_ENV}'
@@ -105,6 +102,7 @@ DESTINATIONS = (json.loads((P2 / 'destinations.json').read_text())['destinations
 VIA_ID = 'water_station'
 TABLES = ('table_01', 'table_02')
 ACTIVE_MAP_SESSION = None
+ACTIVE_MAP_POINTER = None
 STATION_PROFILES = None
 # Nominal observation and escape distances from destinations.json's face.
 # Table_01 joins its observation point along the aisle instead of returning
@@ -126,13 +124,13 @@ def configure_map_session(pointer):
     pi_base = Path(PI_HOME) / 'jdamr_data' / relative
     pi_runtime = pi_base / runtime.relative_to(base)
     paths = {
-        'ACTIVE_MAP_SESSION': profile, 'BASE': base, 'P2': runtime,
+        'ACTIVE_MAP_SESSION': profile, 'ACTIVE_MAP_POINTER': Path(pointer).expanduser().resolve(),
+        'BASE': base, 'P2': runtime,
         'MAP_YAML': runtime / 'map.yaml', 'KEEPOUT_YAML': runtime / 'keepout.yaml',
         'REGISTRY': runtime / 'service_destinations.yaml',
         'ANNOTATION': runtime / 'annotation.json', 'CLICK': runtime / 'rviz_initialpose.json',
         'STATE': runtime / 'state.json', 'PI_BASE': pi_base, 'PI_P2': pi_runtime,
         'PI_REGISTRY': pi_runtime / 'service_destinations.yaml',
-        'DDS_PROFILE': runtime / 'fastdds_udp_loopback.xml',
         'DESTINATIONS': json.loads((runtime / 'destinations.json').read_text())['destinations'],
         'TABLES': tuple(profile['station_ids']),
         'STATION_PROFILES': runtime / 'station_profiles.json',
@@ -155,8 +153,8 @@ def configure_map_session(pointer):
             'markers': {},
         }) + '\n')
     state = load_state()
-    pointer_doc = json.loads(Path(pointer).expanduser().read_text())
-    reference_path = Path(pointer_doc['dock_scan_reference']).expanduser()
+    profiles = json.loads(STATION_PROFILES.read_text())
+    reference_path = Path(profiles['home']['dock_scan']['reference_path'])
     reference = json.loads(reference_path.read_text())
     if reference['map_identity'] != dock_map_identity():
         raise ValueError('dock scan reference belongs to a different map')
@@ -274,16 +272,16 @@ def station_escape_xy(dest_id):
 
 
 def station_region(state, dest_id):
-    """Use a saved region, or the taught-map face when this map introduced the stop."""
-    region = state.get('regions', {}).get(dest_id)
-    if region is not None:
-        return region
+    """Derive current-map regions from current teaching, not a cached old pose."""
     if ACTIVE_MAP_SESSION is not None and dest_id in DESTINATIONS:
         return {
             'xy': list(DESTINATIONS[dest_id]['face_xy']),
             'radius_m': REGION_RADIUS_M,
             'basis': 'taught-map destination face',
         }
+    region = state.get('regions', {}).get(dest_id)
+    if region is not None:
+        return region
     fail(f'{dest_id} region is missing')
 
 
@@ -500,8 +498,16 @@ def cmd_sync(_args):
             fail(f'{name} differs after sync')
     if ACTIVE_MAP_SESSION is not None:
         profiles = json.loads(STATION_PROFILES.read_text())
-        reference_paths = set()
+        source_map = Path(ACTIVE_MAP_SESSION['map_hashes']['source']['yaml_path'])
+        reference_paths = {
+            source_map,
+            source_map.parent / yaml.safe_load(source_map.read_text())['image'],
+            Path(profiles['home']['source_record']),
+            Path(profiles['home']['dock_scan']['reference_path']),
+            Path(profiles['home']['dock_scan']['scan_path']),
+        }
         for station_id, station in profiles['stations'].items():
+            reference_paths.add(Path(station['source_record']))
             config = station.get('rgbd_reference')
             if config is None:
                 continue
@@ -517,6 +523,14 @@ def cmd_sync(_args):
                f'{HOST}:{shlex.quote(str(remote))}')
             if pi(f'sha256sum {shlex.quote(str(remote))}').stdout.split()[0] != sha256(source):
                 fail(f'{source.name} reference differs after sync')
+        # Publish selection after its inputs, including departure mode and IDs.
+        remote_pointer = Path(PI_HOME) / 'jdamr_data' / ACTIVE_MAP_POINTER.relative_to(DATA_ROOT)
+        pi(f'mkdir -p {shlex.quote(str(remote_pointer.parent))}')
+        sh(f'rsync -a --protect-args {shlex.quote(str(ACTIVE_MAP_POINTER))} '
+           f'{HOST}:{shlex.quote(str(remote_pointer))}')
+        if pi(f'sha256sum {shlex.quote(str(remote_pointer))}').stdout.split()[0] != sha256(
+                ACTIVE_MAP_POINTER):
+            fail('map session pointer differs after sync')
     log('map assets and taught references synced to the Pi (hashes match)')
 
 
@@ -1717,7 +1731,8 @@ def cmd_status(_args):
 def main():
     context = argparse.ArgumentParser(add_help=False)
     context.add_argument('--map-session', type=Path,
-                         default=os.environ.get('JDAMR_MAP_SESSION'))
+                         default=os.environ.get('JDAMR_MAP_SESSION', str(
+                             DATA_ROOT / 'maps/current_manual_mapping.json')))
     context.add_argument('--legacy-map', action='store_true',
                          help='Explicit archival access to the previous map; never selected by default')
     selected, remaining = context.parse_known_args()
@@ -1726,7 +1741,7 @@ def main():
         if remaining and remaining[0] in (
                 'stop', 'estop', 'session-stop', 'display-stop', 'status'):
             select_stop_state(selected.map_session)
-        else:
+        elif ACTIVE_MAP_POINTER != selected.map_session.expanduser().resolve():
             configure_map_session(selected.map_session)
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
