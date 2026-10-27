@@ -76,9 +76,9 @@ ros2 launch "$HOME/bimanual-robot/config/navigation/maps/classroom/view.launch.p
    노트북의 연결 SSID `aicampus_286`, Pi 주소 `192.168.0.159`, 기존 노트북 주소
    `192.168.0.217`이다. Pi의 SSID는 확인하지 못했으며 IP 주소는 DHCP나 Wi-Fi
    변경으로 달라질 수 있다. Wi-Fi 비밀번호는 팀 내부에서 공유한다.
-2. Pi의 로그인 계정은 현재 `lim`이다. Pi IP를 알고 있을 때 아래처럼 연결한다.
-   비밀번호나 SSH 키는 GitHub에 올리지 않고 팀 내부에서 전달하거나 팀원의 공개키를
-   Pi 계정에 등록한다.
+2. Pi 로그인 계정은 `lim`, 로그인 비밀번호는 `9828`이다. Pi IP를 알고 있을 때
+   아래처럼 연결한다. 이 비밀번호는 Wi-Fi 비밀번호와 다르다. SSH 개인키는 공유하지
+   않고 팀원의 공개키를 Pi 계정에 등록한다.
 
    ```bash
    export JDAMR_HOST='lim@192.168.0.159'
