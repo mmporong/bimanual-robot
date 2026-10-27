@@ -119,6 +119,7 @@ def test_prepares_loadable_runtime_without_mutating_sources(tmp_path):
     assert before == after
     assert result['session_directory'] == str(source)
     assert result['runtime_directory'] == str(tmp_path / 'runtime')
+    assert result['dock_departure_mode'] == 'straight'
     assert result['station_ids'] == ['water_station', 'table_01']
     assert set(Path(result['output_dir']).iterdir()) == {
         tmp_path / 'runtime/map.yaml', tmp_path / 'runtime/map.pgm',
@@ -140,6 +141,19 @@ def test_prepares_loadable_runtime_without_mutating_sources(tmp_path):
     keepout_yaml = yaml.safe_load((tmp_path / 'runtime/keepout.yaml').read_text())
     assert keepout_yaml['generation']['scope'] == 'unknown-only'
     assert keepout_yaml['generation']['no_table_keepout_inferred'] is True
+
+
+def test_map_session_can_select_guarded_nav2_departure(tmp_path):
+    pointer, geometry, _, _, _, _ = _write_fixture(tmp_path)
+    data = json.loads(pointer.read_text())
+    data['dock_departure_mode'] = 'nav2_waypoint'
+    pointer.write_text(json.dumps(data))
+    assert prepare_map_session(pointer, tmp_path / 'runtime', geometry)[
+        'dock_departure_mode'] == 'nav2_waypoint'
+    data['dock_departure_mode'] = 'invalid'
+    pointer.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='dock_departure_mode'):
+        prepare_map_session(pointer, tmp_path / 'other-runtime', geometry)
 
 
 def test_registry_preserves_taught_poses_and_goal_metadata(tmp_path):

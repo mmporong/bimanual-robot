@@ -35,9 +35,9 @@ from jdamr_cube_navigation.service_destinations import (
     validate_registry, verify_identity,
 )
 from jdamr_cube_navigation.surface_approach import (
-    FACE_ALIGNMENT_GAP_M, face_approach_command, FACE_APPROACH_TIME_S, FACE_HEADING_TOLERANCE_RAD,
-    TABLE_APPROACH_SPEED_MPS,
-    filtered_face_heading,
+    FACE_ALIGNMENT_GAP_M, FACE_APPROACH_TIME_S, FACE_HEADING_TOLERANCE_RAD,
+    TABLE_APPROACH_SPEED_MPS, face_approach_command, filtered_face_heading,
+    lateral_face_approach_command,
 )
 from nav2_msgs.action import (
     ComputePathThroughPoses, FollowPath, NavigateThroughPoses, NavigateToPose, Spin)
@@ -1240,9 +1240,15 @@ class ServiceRoute(CorridorRoute):
                 spin_node(self, timeout_sec=0.02)
         stopped_s = time.monotonic()
         stationary_since_s = None
+        fresh_motion_samples = 0
+        last_motion_stamp_s = None
         stopped_confirmed = not confirm_stopped
         while time.monotonic() - stopped_s < DIRECT_SETTLE_S:
             motion = getattr(self, 'latest_motion', None)
+            if (motion is not None and motion[0] > stopped_s
+                    and motion[0] != last_motion_stamp_s):
+                last_motion_stamp_s = motion[0]
+                fresh_motion_samples += 1
             if (motion is not None and motion[0] > stopped_s
                     and abs(motion[1]) < 0.01 and abs(motion[2]) < 0.01):
                 if not confirm_stopped:
@@ -1258,7 +1264,13 @@ class ServiceRoute(CorridorRoute):
             spin_node(self, timeout_sec=0.02)
         if not stopped_confirmed:
             self._last_direct_motion_failure = 'odometry did not confirm stop'
-            self.emit(event, reason='odometry did not confirm stop')
+            motion = getattr(self, 'latest_motion', None)
+            self.emit(event, reason='odometry did not confirm stop',
+                      fresh_odom_samples=fresh_motion_samples,
+                      last_odom_age_s=(None if motion is None else
+                                       max(0.0, time.monotonic() - motion[0])),
+                      last_odom_linear_mps=(None if motion is None else motion[1]),
+                      last_odom_angular_radps=(None if motion is None else motion[2]))
             return None
         return measure()
 
@@ -1368,7 +1380,9 @@ class ServiceRoute(CorridorRoute):
                  'validate_control': None, 'allow_near_alignment': False,
                  'alignment_in_progress': False, 'observed_heading': None,
                  'surface_gap_m': None, 'target_confirmed': False,
-                 'lateral_tracking': False, 'face_normal_heading': None}
+                 'lateral_tracking': False, 'face_normal_heading': None,
+                 'lateral_error_m': None, 'lateral_tolerance_m': None,
+                 'target_gap_m': 0.01}
         command = Twist()
 
         def measure():
@@ -1408,6 +1422,20 @@ class ServiceRoute(CorridorRoute):
                         raise RuntimeError('lateral tracking requires a finite live face heading')
                     state['lateral_tracking'] = lateral_tracking
                     state['face_normal_heading'] = face_heading
+                    lateral_error = update.get('lateral_error_m')
+                    lateral_tolerance = update.get('lateral_tolerance_m')
+                    target_gap = update.get('target_gap_m', 0.01)
+                    if lateral_error is not None:
+                        if (not lateral_tracking or not continuous_table
+                                or any(isinstance(v, bool)
+                                       or not isinstance(v, (int, float))
+                                       or not math.isfinite(v)
+                                       for v in (lateral_error, lateral_tolerance, target_gap))
+                                or lateral_tolerance <= 0.0 or target_gap <= 0.0):
+                            raise RuntimeError('invalid lateral tracking error')
+                    state['lateral_error_m'] = lateral_error
+                    state['lateral_tolerance_m'] = lateral_tolerance
+                    state['target_gap_m'] = target_gap
                     allow_near = update.get('allow_near_alignment', False)
                     if not isinstance(allow_near, bool):
                         raise RuntimeError('invalid near alignment mode')
@@ -1464,16 +1492,24 @@ class ServiceRoute(CorridorRoute):
                     try:
                         if state['validate_control'] is not None:
                             state['validate_control']((x_m, y_m, yaw), heading)
-                        linear, angular = face_approach_command(
-                            state['remaining_m'], error_rad, approach_time_s=approach_time_s,
-                            allow_near_alignment=state['allow_near_alignment'],
-                            **({'continuous_table': True, 'surface_gap_m': state['surface_gap_m']}
-                               if continuous_table else {}),
-                            **({'lateral_tracking': True, 'face_error_rad': geometry_error_rad}
-                               if state['lateral_tracking'] else {}))
+                        if state['lateral_error_m'] is not None:
+                            linear, angular = lateral_face_approach_command(
+                                state['remaining_m'], geometry_error_rad,
+                                state['lateral_error_m'], state['surface_gap_m'],
+                                state['lateral_tolerance_m'],
+                                target_gap_m=state['target_gap_m'],
+                                allow_near_alignment=state['allow_near_alignment'])
+                        else:
+                            linear, angular = face_approach_command(
+                                state['remaining_m'], error_rad, approach_time_s=approach_time_s,
+                                allow_near_alignment=state['allow_near_alignment'],
+                                **({'continuous_table': True, 'surface_gap_m': state['surface_gap_m']}
+                                   if continuous_table else {}),
+                                **({'lateral_tracking': True, 'face_error_rad': geometry_error_rad}
+                                   if state['lateral_tracking'] else {}))
                         command.linear.x = direction * linear
                         command.angular.z = angular
-                        if (state['allow_near_alignment']
+                        if (state['lateral_error_m'] is None and state['allow_near_alignment']
                                 and state['remaining_m'] <= FACE_ALIGNMENT_GAP_M - .01):
                             if state['alignment_in_progress']:
                                 command.linear.x = 0.

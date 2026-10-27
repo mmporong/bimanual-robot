@@ -295,6 +295,9 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
     """
     pointer_path = Path(pointer_path).expanduser().resolve()
     pointer = _mapping(pointer_path, 'manual mapping pointer')
+    departure_mode = pointer.get('dock_departure_mode', 'straight')
+    if departure_mode not in ('straight', 'nav2_waypoint'):
+        raise ValueError('dock_departure_mode must be straight or nav2_waypoint')
     source_dir = _path(pointer.get('directory'), pointer_path.parent)
     map_yaml = _path(pointer.get('map_yaml'), pointer_path.parent)
     home_path = _path(pointer.get('home_dock'), pointer_path.parent)
@@ -481,6 +484,7 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
     return {
         'session_directory': str(source_dir),
         'runtime_directory': str(runtime),
+        'dock_departure_mode': departure_mode,
         'output_dir': str(runtime),
         'assets': {
             'map_yaml': str(runtime / 'map.yaml'),

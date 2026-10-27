@@ -2,10 +2,6 @@
 
 import math
 
-from jdamr_cube_navigation.station_parking_reference import (
-    lateral_approach_heading,
-)
-
 
 FACE_HEADING_TOLERANCE_RAD = math.radians(0.3)
 FACE_HEADING_DEADBAND_RAD = math.radians(0.1)
@@ -15,6 +11,9 @@ FACE_HEADING_FILTER_S = 0.35
 FACE_APPROACH_TIME_S = 0.5
 TABLE_APPROACH_SPEED_MPS = 0.1
 TABLE_ALIGNMENT_MAX_RADPS = 0.08
+# Finish the lateral curve before the existing near-face alignment band.
+LATERAL_ALIGNMENT_LEAD_M = 0.03
+LATERAL_MIN_LOOKAHEAD_M = 0.02
 
 
 def filtered_face_heading(previous, observed, elapsed_s):
@@ -101,6 +100,56 @@ def face_approach_command(remaining_m, error_rad, target_gap_m=0.01, *,
     return linear, angular
 
 
+def lateral_face_approach_command(remaining_m, face_error_rad, lateral_error_m,
+                                  surface_gap_m, lateral_tolerance_m, *,
+                                  target_gap_m=0.01, allow_near_alignment=False):
+    """Track a lateral goal while reaching the near-face band parallel to it.
+
+    The cubic path's curvature is limited by the available yaw rate, so a
+    lateral correction cannot demand more steering than the base can produce.
+    This is the same command used by the corridor preview and live controller.
+    """
+    values = (remaining_m, face_error_rad, lateral_error_m, surface_gap_m,
+              lateral_tolerance_m, target_gap_m)
+    if (not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                and math.isfinite(v) for v in values)
+            or lateral_tolerance_m <= 0.0 or target_gap_m <= 0.0):
+        raise ValueError('invalid lateral table approach')
+    if surface_gap_m <= 0.0:
+        raise ValueError('table approach crosses surface')
+    if abs(face_error_rad) > math.radians(30.0) + 1e-9:
+        raise ValueError('table approach heading out of range')
+    band = max(FACE_ALIGNMENT_GAP_M, target_gap_m) + FACE_ALIGNMENT_ENTRY_MARGIN_M
+    if surface_gap_m <= band:
+        if abs(lateral_error_m) > lateral_tolerance_m:
+            raise ValueError('table lateral alignment requires more clearance')
+        if abs(face_error_rad) > FACE_HEADING_TOLERANCE_RAD:
+            if not allow_near_alignment:
+                raise ValueError('table alignment requires more clearance')
+            return 0.0, max(-0.02, min(0.02, face_error_rad))
+        return face_approach_command(
+            remaining_m, face_error_rad, target_gap_m, allow_near_alignment=True,
+            continuous_table=True, surface_gap_m=surface_gap_m,
+            lateral_tracking=True, face_error_rad=face_error_rad)
+
+    # A Hermite curve with the current heading and a face-parallel end tangent
+    # has start curvature 6*offset/L^2 - 4*tan(start_heading)/L.
+    lookahead = max(
+        LATERAL_MIN_LOOKAHEAD_M,
+        remaining_m - (max(FACE_ALIGNMENT_GAP_M, target_gap_m) - target_gap_m
+                       + LATERAL_ALIGNMENT_LEAD_M) / math.cos(face_error_rad))
+    offset = 0.0 if abs(lateral_error_m) <= lateral_tolerance_m else lateral_error_m
+    curvature = 6.0 * offset / lookahead ** 2 + 4.0 * math.tan(face_error_rad) / lookahead
+    if not math.isfinite(curvature):
+        raise ValueError('invalid lateral table curvature')
+    linear = min(TABLE_APPROACH_SPEED_MPS, max(0.01, remaining_m))
+    if abs(curvature) > 1e-12:
+        linear = min(linear, TABLE_ALIGNMENT_MAX_RADPS / abs(curvature))
+    if remaining_m <= 0.0:
+        linear = 0.0
+    return linear, linear * curvature
+
+
 def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
                             target_gap_m=0.01, *, command_heading_rad=None,
                             approach_time_s=FACE_APPROACH_TIME_S, allow_near_alignment=False,
@@ -141,15 +190,14 @@ def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
     else:
         lateral_goal = None
     heading = math.atan2(-normal[1], -normal[0])
-    command_heading = (
-        command_heading_rad if lateral_tracking else
-        filtered_face_heading(command_heading_rad, heading, 0.0))
+    command_heading = (None if lateral_tracking else
+                       filtered_face_heading(command_heading_rad, heading, 0.0))
     pose = tuple(start)
     poses = [pose]
-    heading_elapsed_s = 0.0
     for _step in range(1600):
         error = math.atan2(math.sin(heading - pose[2]), math.cos(heading - pose[2]))
-        if abs(error) > math.radians(30.0) + 1e-9:
+        heading_limit = max_lateral_heading_rad if lateral_tracking else math.radians(30.0)
+        if abs(error) > heading_limit + 1e-9:
             raise ValueError('table approach preview heading out of range')
         projected_distance = sum(
             (pose[i] - face[i]) * normal[i] for i in (0, 1))
@@ -160,14 +208,24 @@ def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
         remaining_gap = center_gap if lateral_tracking else gap
         remaining = (remaining_gap - target_gap_m) / math.cos(error)
         if lateral_tracking:
-            observed_heading = lateral_approach_heading(
-                heading, lateral_goal, pose, max(0.0, remaining),
-                lateral_tolerance_m, max_lateral_heading_rad)
-            command_heading = filtered_face_heading(
-                command_heading, observed_heading, heading_elapsed_s)
-        command_error = math.atan2(math.sin(command_heading - pose[2]),
-                                   math.cos(command_heading - pose[2]))
+            left = (-math.sin(heading), math.cos(heading))
+            lateral_error = sum((lateral_goal[i] - pose[i]) * left[i] for i in (0, 1))
+            command_error = None
+        else:
+            command_error = math.atan2(math.sin(command_heading - pose[2]),
+                                       math.cos(command_heading - pose[2]))
         if gap <= max(FACE_ALIGNMENT_GAP_M, target_gap_m) + FACE_ALIGNMENT_ENTRY_MARGIN_M:
+            if lateral_tracking:
+                linear, angular = lateral_face_approach_command(
+                    remaining, error, lateral_error, gap, lateral_tolerance_m,
+                    target_gap_m=target_gap_m, allow_near_alignment=allow_near_alignment)
+                if abs(error) <= FACE_HEADING_TOLERANCE_RAD:
+                    return poses
+                if abs(error) >= math.atan2(half_width_m, front_extent_m):
+                    raise ValueError('table alignment requires more clearance')
+                pose = (*pose[:2], pose[2] + angular * .05)
+                poses.append(pose)
+                continue
             if (target_gap_m <= FACE_ALIGNMENT_GAP_M and
                     (abs(error) if lateral_tracking else
                      max(abs(error), abs(command_error)))
@@ -182,19 +240,19 @@ def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
                     angular = 0.
                 pose = (*pose[:2], pose[2] + angular * .05)
                 poses.append(pose)
-                if lateral_tracking:
-                    heading_elapsed_s = .05
-                else:
-                    command_heading = filtered_face_heading(
-                        command_heading, heading, .05)
+                command_heading = filtered_face_heading(command_heading, heading, .05)
                 continue
             return poses
         if math.dist(start[:2], pose[:2]) + remaining > 0.6 + 1e-9:
             raise ValueError('table approach preview exceeds bounded travel')
-        linear, angular = face_approach_command(
-            remaining, command_error, target_gap_m, approach_time_s=approach_time_s,
-            continuous_table=continuous_table, surface_gap_m=gap,
-            lateral_tracking=lateral_tracking, face_error_rad=error)
+        if lateral_tracking:
+            linear, angular = lateral_face_approach_command(
+                remaining, error, lateral_error, gap, lateral_tolerance_m,
+                target_gap_m=target_gap_m, allow_near_alignment=allow_near_alignment)
+        else:
+            linear, angular = face_approach_command(
+                remaining, command_error, target_gap_m, approach_time_s=approach_time_s,
+                continuous_table=continuous_table, surface_gap_m=gap)
         closing_speed_bound = linear + abs(angular) * (front_extent_m + half_width_m)
         step_s = min(0.05, (gap - max(FACE_ALIGNMENT_GAP_M, target_gap_m))
                      / max(closing_speed_bound, 1e-9))
@@ -202,9 +260,7 @@ def face_approach_waypoints(start, face, normal, front_extent_m, half_width_m,
                 pose[1] + linear * math.sin(pose[2]) * step_s,
                 pose[2] + angular * step_s)
         poses.append(pose)
-        if lateral_tracking:
-            heading_elapsed_s = step_s
-        else:
+        if not lateral_tracking:
             command_heading = filtered_face_heading(
                 command_heading, heading, step_s)
     raise ValueError('table approach preview did not converge')

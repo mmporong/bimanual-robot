@@ -34,7 +34,6 @@ from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
 from jdamr_cube_navigation.station_parking_reference import (
     anchor_face_to_taught_lateral,
-    lateral_approach_heading,
     LATERAL_PRECISION_STATUS,
     TaughtStationReference,
 )
@@ -1773,7 +1772,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     if not approached:
                         if not self._final_failure_reported:
                             self.emit('failed', phase=phase,
-                                      reason='nav2_or_stop_confirmation')
+                                      reason=(getattr(self, '_last_direct_motion_failure', None)
+                                              or 'nav2_or_stop_confirmation'))
                         return False
                     continue
                 # Live map callbacks keep checking the verified identity throughout
@@ -2099,7 +2099,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     target, front_extent_m)
             if not approached:
                 if not self._final_failure_reported:
-                    self.emit('failed', phase='final_approach', reason='nav2_or_stop_confirmation')
+                    self.emit('failed', phase='final_approach',
+                              reason=('operator_stop' if self.stop_requested else
+                                      getattr(self, '_last_direct_motion_failure', None)
+                                      or 'nav2_or_stop_confirmation'))
                 return False
 
     def _rebase_stopped_table_target(self, target, parked):
@@ -2189,6 +2192,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._continuous_table_stop = None
         observed = target.get('observation_robot_pose_map')
         if observed is not None:
+            lateral_status = self._station_lateral_status()
+            lateral_ready = (not lateral_status
+                             or lateral_status.get('internal_lateral_within_tolerance') is True)
             residual = math.atan2(math.sin(target['yaw_rad'] - observed[2]),
                                   math.cos(target['yaw_rad'] - observed[2]))
             span_m = 2 * self.box_front_half_width_m * abs(math.sin(residual))
@@ -2197,7 +2203,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 * target['outward_normal_map_xy'][i] for i in (0, 1))
             nearest_m = distance_m - front_lead_m(
                 front_extent_m, self.box_front_half_width_m, residual)
-            if (0 < nearest_m <= FINAL_PLAN_GAP_M
+            if (lateral_ready and 0 < nearest_m <= FINAL_PLAN_GAP_M
                     and span_m <= 2 * TABLE_FINE_GAP_TOLERANCE_M
                     and abs(residual) <= min(
                         self.parking_contract['yaw_tolerance_rad'], FINAL_HEADING_TRIM_RAD)):
@@ -2208,8 +2214,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     allow_trim=False, continuous_table=False)
         result = self._zero_turn_final_approach(
             target, front_extent_m, allow_trim=False, continuous_table=True)
-        if (result[0] or getattr(self, '_last_direct_motion_failure', None)
-                != 'table alignment requires more clearance'):
+        if (result[0] or getattr(self, '_last_direct_motion_failure', None) not in {
+                'table alignment requires more clearance',
+                'table lateral alignment requires more clearance'}):
             return result
         if (self.stop_requested or not self._operator_link_ready()
                 or not self._navigation_ready(require_fresh_amcl=False)):
@@ -2450,6 +2457,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             remaining = (center_gap - self._final_gap_m()) / math.cos(residual)
             goal_odom, station_observation = station_goal_odom()
             lateral_ready = True
+            lateral_error = None
             if goal_odom is not None:
                 left = (-math.sin(heading), math.cos(heading))
                 lateral_error = sum(
@@ -2469,11 +2477,6 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if travelled + max(0.0, remaining) > LIVE_APPROACH_MAX_M:
                 raise RuntimeError('live table approach exceeds bounded travel')
             command_heading = heading
-            if goal_odom is not None and not state['precision_band_latched']:
-                command_heading = lateral_approach_heading(
-                    heading, goal_odom, actual, max(0.0, remaining),
-                    self.station_reference_profile['lateral_tolerance_m'],
-                    FINAL_TRIM_MAX_RAD)
             face_map = to_map(state['face'])
             normal_map = (cosine * state['normal'][0] + sine * state['normal'][1],
                           -sine * state['normal'][0] + cosine * state['normal'][1])
@@ -2490,6 +2493,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return {'remaining_m': remaining, 'heading_rad': command_heading,
                     'face_heading_rad': heading,
                     'lateral_tracking': goal_odom is not None,
+                    'lateral_error_m': lateral_error,
+                    'lateral_tolerance_m': (self.station_reference_profile['lateral_tolerance_m']
+                                            if goal_odom is not None else None),
+                    'target_gap_m': self._final_gap_m(),
                     'basis': state['basis'],
                     'surface_gap_m': gap,
                     'allow_near_alignment': (gap > 0. and abs(residual) < math.atan2(

@@ -3002,14 +3002,18 @@ def test_default_parking_routes_one_centimetre_table_to_precision_approach():
 
 
 @pytest.mark.parametrize('escape', [False, True])
-def test_near_skewed_table_backs_out_once_before_continuous_reapproach(escape):
+@pytest.mark.parametrize('reason', [
+    'table alignment requires more clearance',
+    'table lateral alignment requires more clearance',
+])
+def test_near_skewed_table_backs_out_once_before_continuous_reapproach(escape, reason):
     node = object.__new__(BoxServiceRoute)
     node._table_observation_context = ({}, (1.0, 0.0), 0.6)
     node._final_gap_m = Mock(return_value=0.01)
     node.stop_requested = False
     node._operator_link_ready = Mock(return_value=True)
     node._navigation_ready = Mock(return_value=True)
-    node._last_direct_motion_failure = 'table alignment requires more clearance'
+    node._last_direct_motion_failure = reason
     node._zero_turn_final_approach = Mock(side_effect=[(False, None), (True, 'odom')])
     node._leave_parked_pose = Mock(return_value=escape)
     node.observe_target = Mock(return_value=_table_edge_final_target(1.0))
@@ -3053,6 +3057,21 @@ def test_near_feasible_corner_spread_uses_centred_straight_gap():
     assert options['continuous_table'] is False
     assert options['allow_trim'] is False
     assert options['gap_m'] == pytest.approx(.01 - (gaps[1] - gaps[0]) / 2)
+
+
+def test_near_straight_correction_does_not_bypass_unaligned_station_reference():
+    node = object.__new__(BoxServiceRoute)
+    node.box_front_half_width_m = .225
+    node.parking_contract = {'yaw_tolerance_rad': math.radians(1)}
+    node._final_gap_m = Mock(return_value=.01)
+    node._station_lateral_status = Mock(return_value={
+        'internal_lateral_within_tolerance': False})
+    node._zero_turn_final_approach = Mock(return_value=(True, 'odom'))
+    target = _table_edge_final_target(1.0)
+    target['observation_robot_pose_map'] = [.915, 0., 0.]
+
+    assert node._table_fine_approach(target, .065) == (True, 'odom')
+    assert node._zero_turn_final_approach.call_args.kwargs['continuous_table'] is True
 
 
 def test_alignment_reobserve_retreat_keeps_current_camera_view():

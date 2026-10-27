@@ -208,6 +208,19 @@ def _add_taught_table_01(fixture):
     fixture.profile['station_ids'] = ['water_station', 'table_01']
 
 
+@pytest.mark.parametrize('mode,has_straight_departure', [
+    ('straight', True), ('nav2_waypoint', False),
+])
+def test_taught_map_route_uses_its_configured_departure_mode(
+        tmp_path, monkeypatch, mode, has_straight_departure):
+    fixture = _configure_fixture_session(tmp_path, monkeypatch)
+    fixture.profile['dock_departure_mode'] = mode
+    d.write_routes((-2., .5, 0.))
+    generated = yaml.safe_load((fixture.runtime / 'water_station_route.yaml').read_text())
+    assert generated['waypoints'][0]['id'] == 'home_exit'
+    assert ('dock_departure_distance_m' in generated) is has_straight_departure
+
+
 def test_go_refuses_without_a_completed_init(env, monkeypatch):
     state = d.load_state()
     state['localized'] = False

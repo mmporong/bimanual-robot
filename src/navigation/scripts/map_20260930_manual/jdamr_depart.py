@@ -459,7 +459,8 @@ def write_routes(home):
                 'station_profiles': str(STATION_PROFILES),
             }
             if is_via:
-                route['dock_departure_distance_m'] = HOME_EXIT_M
+                if ACTIVE_MAP_SESSION.get('dock_departure_mode', 'straight') == 'straight':
+                    route['dock_departure_distance_m'] = HOME_EXIT_M
                 direct_route = route
             else:
                 direct_route = {
@@ -467,8 +468,9 @@ def write_routes(home):
                     'start_pose': {'x': round(hx, 3), 'y': round(hy, 3)},
                     'waypoints': [exit_wp, *waypoints],
                     'start_basis': 'registered dock pose; water stop omitted',
-                    'dock_departure_distance_m': HOME_EXIT_M,
                 }
+                if ACTIVE_MAP_SESSION.get('dock_departure_mode', 'straight') == 'straight':
+                    direct_route['dock_departure_distance_m'] = HOME_EXIT_M
             (P2 / f'{dest_id}_route.yaml').write_text(
                 yaml.safe_dump(route, sort_keys=False, allow_unicode=True))
             (P2 / f'{dest_id}_direct_route.yaml').write_text(
