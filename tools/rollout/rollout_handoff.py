@@ -45,6 +45,12 @@ lerobot-rollout을 그대로 실행하되 세 가지를 덧붙인다. lerobot �
    도착 후 저장값과 start.tol도 넘게 차이 나는 관절이 있으면 그 자리에 멈추고(현재 위치를
    목표로 고정) 추론을 시작하지 않는다. 이때 끝 자세는 --end.pose와 상관없이 "그대로 유지"다.
 
+6) GR00T 저메모리 로딩 (정책이 groot면 자동, --groot.fp32로 끔)
+   GR00T N1.7 체크포인트는 Qwen3-VL 백본을 fp32로 들고 있어 그대로 올리면 GPU 약 9.4GB(+로딩 중
+   가중치 12.6GB)라 노트북 RTX 5050(8GB)에서 메모리 부족이 나거나 공유 메모리로 넘쳐 추론 1회가
+   2초를 넘는다. 그래서 CPU에서 불러와 모델 전체를 bf16으로 바꾼 뒤 GPU로 옮긴다(약 6.3GB, 추론 약 0.55초).
+   학습 forward도 bf16 autocast였으므로 계산 정밀도는 같고, 가중치만 bf16으로 반올림된다.
+
 사용법 (평소 lerobot-rollout 플래그를 그대로 붙인다, --strategy.type=base 전용):
     python tools/rollout/rollout_handoff.py --end.pose=final ...물따르기 플래그...
     python tools/rollout/rollout_handoff.py --end.pose=pour_start ...컵배치 플래그...
@@ -351,6 +357,43 @@ def install_end_pose(pose: str, margin: int, move_s: float, saved: dict[str, flo
             make_pose_mover(saved, move_s, f"저장 자세 '{pose}'", max_speed))
 
 
+def is_groot_policy(policy_path: str | None) -> bool:
+    if not policy_path:
+        return False
+    cfg = Path(policy_path) / "config.json"
+    if not cfg.is_file():
+        try:
+            from huggingface_hub import hf_hub_download
+            cfg = Path(hf_hub_download(policy_path, "config.json"))
+        except Exception:
+            return False
+    return json.loads(cfg.read_text(encoding="utf-8")).get("type") == "groot"
+
+
+def install_groot_bf16() -> None:
+    """GrootPolicy.from_pretrained를 감싸 CPU에서 불러오고 bf16으로 바꾼 뒤 원래 장치로 옮긴다(6번)."""
+    import torch
+    from lerobot.policies.groot.modeling_groot import GrootPolicy
+
+    original = GrootPolicy.from_pretrained.__func__
+
+    def from_pretrained(cls, pretrained_name_or_path, *, config=None, **kwargs):
+        if config is None:
+            return original(cls, pretrained_name_or_path, **kwargs)
+        device = config.device
+        config.model_params_fp32 = False
+        config.device = "cpu"
+        try:
+            policy = original(cls, pretrained_name_or_path, config=config, **kwargs)
+        finally:
+            config.device = device
+        policy.to(torch.bfloat16).to(device)
+        print(f"[groot] bf16으로 불러옴 (GPU {torch.cuda.memory_allocated() / 1e9:.2f}GB)")
+        return policy
+
+    GrootPolicy.from_pretrained = classmethod(from_pretrained)
+
+
 def arg_value(args: list[str], key: str) -> str | None:
     for a in args:
         if a.startswith(key + "="):
@@ -375,6 +418,7 @@ def main() -> None:
     ap.add_argument("--start.move_s", dest="start_move_s", type=float, default=5.0)
     ap.add_argument("--start.max_speed", dest="start_max_speed", type=float, default=20.0)
     ap.add_argument("--start.tol", dest="start_tol", type=float, default=10.0)
+    ap.add_argument("--groot.fp32", dest="groot_fp32", action="store_true")
     ns, rest = ap.parse_known_args(sys.argv[1:])
     hook_params, _, rest = parse_hook_args(rest)
     rest = fill_camera_indices(rest)
@@ -406,6 +450,8 @@ def main() -> None:
         install_done(DoneDetector(ns.auto, ns.tol, ns.settle_s, ns.place_tol))
     print(f"[end] 끝 자세 = {ns.end_pose}, 자동 종료 = {ns.auto}")
 
+    if not ns.groot_fp32 and is_groot_policy(arg_value(rest, "--policy.path")):
+        install_groot_bf16()
     sys.argv = ["lerobot-rollout", *rest]
     from lerobot.scripts.lerobot_rollout import main as rollout_main
 
