@@ -1,30 +1,30 @@
-"""물따르기 -> 컵배치 한 라운드를 연결을 끊지 않고 이어 녹화한다.
+"""물따르기 -> 컵배치 라운드를 연결을 끊지 않고 Ctrl+C까지 연속 녹화한다.
 
 기존 방식(두 개의 lerobot-record를 따로 실행)은 물따르기 프로세스가 끝나고
 컵배치 프로세스가 새로 연결을 맺는 구간에서 계속 문제가 났다(포트 재연결
 실패, 그 사이 리더를 손으로 붙잡고 있어야 하는 번거로움, 업로드 대기).
-이 스크립트는 명령어 한 번 실행 = 한 라운드다:
+로봇·리더 연결은 실행 동안 한 번만 맺고, 라운드마다:
 
-  1. 물따르기 에피소드 녹화 (-> 또는 n으로 종료) -> water-pour 데이터셋에 저장
-  2. 끊김 없이 바로 이어서 컵배치 에피소드 녹화 -> cup-place 데이터셋에 저장
-  3. 두 데이터셋 모두 로컬에 저장 + 각자의 HF 레포에 업로드
+  1. 물따르기 에피소드 녹화 (-> 또는 n으로 종료)
+  2. 끊김 없이 바로 이어서 컵배치 에피소드 녹화 (-> 또는 n으로 종료)
+  3. 둘 다 끝났으면 둘 다 저장 -> 로컬 확정 + 각자의 HF 레포에 업로드
+     (업로드 중엔 리더를 움직이지 말 것)
+  4. 리셋 구간(녹화 없음, 텔레옵만): 병·컵 재배치 + 팔 시작 자세 -> -> 로 다음 라운드
 
-다음 라운드는 병·컵을 재배치한 뒤 이 스크립트를 다시 실행하면 된다 - 로컬
-root가 이미 있으면 자동으로 resume되어 이어서 쌓인다. 재녹화(r)는 각
-단계(물따르기/컵배치) 안에서 기존과 동일하게 동작한다.
+Ctrl+C를 누르면 세션이 끝난다. 진행 중이던 라운드는 저장하지 않고, 이미
+완료된 라운드는 각 라운드 끝에서 업로드돼 있다. 로컬 root가 이미 있으면
+자동으로 resume되어 이어서 쌓인다.
 
 카메라 인덱스는 매 실행 시 resolve_camera_indices.py로 새로 찾는다.
 
 사용법:
     python tools/recording/record_handoff_combined.py
-    (2회차 이후 재실행 시에도 로컬 root가 이미 있으면 자동으로 resume)
 
-키 안내 (각 단계 공통):
-    -> 또는 n : 이 단계 종료하고 저장, 다음 단계로
+키 안내:
+    -> 또는 n : 이 단계 종료(물따르기 -> 컵배치 -> 저장/업로드), 리셋 구간 종료
     r         : 이 단계 버리고 다시 녹화
-    ESC 또는 q: 지금 단계를 중단 (저장 안 됨). 물따르기 중 중단 시 컵배치는
-                건너뛴다. 어느 경우든 그때까지 저장된 에피소드는 로컬+HF로
-                업로드된다.
+    ESC 또는 q: 이번 라운드 폐기(저장 안 됨) 후 리셋 구간으로. 세션은 계속됨
+    Ctrl+C    : 세션 종료
 """
 
 import logging
@@ -53,8 +53,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CALIB_FOLLOWER = REPO_ROOT / "calibration" / "bi_follower"
 CALIB_LEADER = REPO_ROOT / "calibration" / "bi_leader"
 
-POUR_REPO_ID = "jun-seo/water-pour-position-jitter-gravel-tabletop-handoff-v1"
-POUR_ROOT = Path(r"C:\Users\USER\lerobot-data\water-pour-position-jitter-gravel-tabletop-handoff-v1")
+# 2026-10-23: 팔을 실제 로봇 차체에 결합한 뒤 수집분은 별도 레포로 쌓는다(이전 v2 = 테이블 거치 상태).
+DATA_DIR = Path(r"C:\Users\USER\lerobot-data")
+# 2026-10-25: part2(23개)를 -v1 뒤에 병합(87개)한 뒤 7개 삭제·20개를 -part2로 옮겨 -v1 60개, -part2 20개.
+# 이후 수집은 -v1에 이어 쌓는다(다음 에피소드 60번).
+# HF 시각화 사이트는 에피소드 목록 파일을 64개까지만 읽는다(라운드마다 1개씩 생김).
+# 넘으면 수집을 마친 뒤 lerobot-edit-dataset으로 다시 묶어 올리면 된다.
+DATASET_SUFFIX = "position-jitter-gravel-chassis-mounted-handoff-v1"
+
+POUR_REPO_ID = f"jun-seo/water-pour-{DATASET_SUFFIX}"
+POUR_ROOT = DATA_DIR / f"water-pour-{DATASET_SUFFIX}"
 POUR_TASK = (
     "Pick up the cup with the left arm, pick up the water bottle with the right arm, "
     "pour water from the bottle into the cup, set the bottle down to the right of where "
@@ -63,8 +71,8 @@ POUR_TASK = (
 )
 POUR_EPISODE_TIME_S = 100
 
-PLACE_REPO_ID = "jun-seo/cup-place-position-jitter-gravel-tabletop-handoff-v1"
-PLACE_ROOT = Path(r"C:\Users\USER\lerobot-data\cup-place-position-jitter-gravel-tabletop-handoff-v1")
+PLACE_REPO_ID = f"jun-seo/cup-place-{DATASET_SUFFIX}"
+PLACE_ROOT = DATA_DIR / f"cup-place-{DATASET_SUFFIX}"
 PLACE_TASK = (
     "While holding the cup already loaded on the robot chassis with the left arm, "
     "move it to the table and place it down."
@@ -72,6 +80,7 @@ PLACE_TASK = (
 PLACE_EPISODE_TIME_S = 50
 
 FPS = 30
+RESET_TIME_S = 120  # 라운드 사이 리셋 최대 시간. 준비되면 -> 로 바로 넘어간다
 
 
 # lerobot-record CLI 기본값(RecordConfig.num_image_writer_threads_per_camera)과 동일.
@@ -201,11 +210,10 @@ def main():
         ),
     )
 
-    dataset_pour = make_dataset(POUR_REPO_ID, POUR_ROOT, POUR_TASK, robot, dataset_features)
-    dataset_place = make_dataset(PLACE_REPO_ID, PLACE_ROOT, PLACE_TASK, robot, dataset_features)
+    procs = (teleop_action_processor, robot_action_processor, robot_observation_processor)
 
     listener = None
-    round_saved = False
+    round_idx = 0
     try:
         teleop.connect()
         robot.connect()
@@ -213,62 +221,89 @@ def main():
         listener, events = init_keyboard_listener()
         init_visualization(DISPLAY_MODE, session_name="recording")
 
-        with VideoEncodingManager(dataset_pour), VideoEncodingManager(dataset_place):
-            log_say("Round: pour", True)
-            pour_ok = run_phase(
-                robot, teleop, events, POUR_EPISODE_TIME_S, POUR_TASK, dataset_pour,
-                teleop_action_processor, robot_action_processor, robot_observation_processor,
-                display_data=True, label="pour",
+        # Ctrl+C를 누를 때까지 라운드를 반복한다.
+        while True:
+            round_idx += 1
+            # 라운드마다 데이터셋을 새로 연다(2라운드부터는 자동 resume). 라운드가
+            # 끝나면 VideoEncodingManager가 finalize()해 파일을 완전히 닫으므로,
+            # 쓰는 중인 데이터셋을 업로드하는 일이 없다.
+            dataset_pour = make_dataset(POUR_REPO_ID, POUR_ROOT, POUR_TASK, robot, dataset_features)
+            dataset_place = make_dataset(PLACE_REPO_ID, PLACE_ROOT, PLACE_TASK, robot, dataset_features)
+
+            with VideoEncodingManager(dataset_pour), VideoEncodingManager(dataset_place):
+                round_saved = run_round(robot, teleop, events, dataset_pour, dataset_place, procs, round_idx)
+
+            if round_saved:
+                upload_round(dataset_pour, dataset_place)
+
+            # 다음 라운드 전 리셋: 녹화 없이 텔레옵만. 병·컵을 재배치하고 팔을 시작
+            # 자세로 돌려놓은 뒤 -> 를 누르면 바로 다음 라운드가 시작된다.
+            reset_events(events)
+            log_say("Reset the environment, then press right arrow", True)
+            logging.info(f"[리셋] 병·컵 재배치 + 팔을 시작 자세로. 준비되면 -> (최대 {RESET_TIME_S}s). 종료는 Ctrl+C")
+            record_loop(
+                robot=robot, events=events, fps=FPS,
+                teleop_action_processor=teleop_action_processor,
+                robot_action_processor=robot_action_processor,
+                robot_observation_processor=robot_observation_processor,
+                teleop=teleop, control_time_s=RESET_TIME_S,
+                display_data=True, display_mode=DISPLAY_MODE,
             )
-
-            place_ok = False
-            if pour_ok:
-                log_say("Round: cup place", True)
-                place_ok = run_phase(
-                    robot, teleop, events, PLACE_EPISODE_TIME_S, PLACE_TASK, dataset_place,
-                    teleop_action_processor, robot_action_processor, robot_observation_processor,
-                    display_data=True, label="cup place",
-                )
-
-            # 원자적 저장: 물따르기·컵배치 둘 다 ->로 완료됐을 때만 둘 다 저장한다.
-            # 어느 하나라도 중간에 끊기면(ESC/q) 둘 다 버린다 - 짝 없는 에피소드나
-            # 반쪽짜리 라운드가 절대 저장되지 않는다.
-            if pour_ok and place_ok:
-                dataset_pour.save_episode()
-                dataset_place.save_episode()
-                round_saved = True
-                log_say("Round saved", True)
-            else:
-                dataset_pour.clear_episode_buffer()
-                dataset_place.clear_episode_buffer()
-                log_say("Round discarded - nothing saved", True)
+            reset_events(events)
+    except KeyboardInterrupt:
+        logging.info("Ctrl+C - 세션 종료. 진행 중이던 라운드는 저장하지 않는다(완료된 라운드는 이미 업로드됨).")
     finally:
         log_say("Stop recording", True, blocking=True)
-
-        dataset_pour.finalize()
-        dataset_place.finalize()
-
         if robot.is_connected:
             robot.disconnect()
         if teleop.is_connected:
             teleop.disconnect()
         if listener is not None:
             listener.stop()
-
         shutdown_visualization(DISPLAY_MODE)
-
-        # 이번 라운드가 실제로 저장됐을 때만 업로드한다. 중간에 끊긴 라운드는
-        # 로컬에도 저장이 안 됐으니 HF도 건드리지 않는다(아무 일도 안 일어남).
-        if round_saved:
-            logging.info(f"물따르기 총 {dataset_pour.num_episodes}개, 컵배치 총 {dataset_place.num_episodes}개 - HF 업로드 시작")
-            dataset_pour.push_to_hub(private=True)
-            logging.info("물따르기 업로드 완료")
-            dataset_place.push_to_hub(private=True)
-            logging.info("컵배치 업로드 완료")
-        else:
-            logging.info("이번 라운드는 저장 안 됨 - 로컬·HF 모두 변경 없음, 업로드 생략")
-
         log_say("Exiting", True)
+
+
+def reset_events(events):
+    events["exit_early"] = False
+    events["rerecord_episode"] = False
+    events["stop_recording"] = False
+
+
+def run_round(robot, teleop, events, dataset_pour, dataset_place, procs, round_idx):
+    """물따르기 -> 컵배치 한 라운드. 둘 다 -> 로 끝났을 때만 둘 다 저장(원자적)."""
+    reset_events(events)
+    log_say(f"Round {round_idx}: pour", True)
+    pour_ok = run_phase(robot, teleop, events, POUR_EPISODE_TIME_S, POUR_TASK, dataset_pour,
+                        *procs, display_data=True, label="pour")
+    place_ok = False
+    if pour_ok:
+        log_say(f"Round {round_idx}: cup place", True)
+        place_ok = run_phase(robot, teleop, events, PLACE_EPISODE_TIME_S, PLACE_TASK, dataset_place,
+                             *procs, display_data=True, label="cup place")
+
+    if pour_ok and place_ok:
+        dataset_pour.save_episode()
+        dataset_place.save_episode()
+        log_say("Round saved", True)
+        return True
+    dataset_pour.clear_episode_buffer()
+    dataset_place.clear_episode_buffer()
+    log_say("Round discarded - nothing saved", True)
+    return False
+
+
+def upload_round(dataset_pour, dataset_place):
+    """완전히 닫힌 두 데이터셋을 HF에 올린다. 실패해도 로컬은 안전하고 다음 라운드
+    업로드 때 함께 올라가므로, 세션을 끊지 않고 경고만 남긴다."""
+    log_say("Uploading - keep the leader still", True)
+    logging.info(f"물따르기 총 {dataset_pour.num_episodes}개, 컵배치 총 {dataset_place.num_episodes}개 - HF 업로드 (리더 움직이지 말 것)")
+    for name, ds in (("물따르기", dataset_pour), ("컵배치", dataset_place)):
+        try:
+            ds.push_to_hub(private=True)
+            logging.info(f"{name} 업로드 완료")
+        except Exception as e:  # noqa: BLE001
+            logging.warning(f"{name} 업로드 실패({e}) - 로컬엔 저장됨, 다음 라운드에 다시 올라감")
 
 
 if __name__ == "__main__":

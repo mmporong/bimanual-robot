@@ -387,3 +387,211 @@ class Ros2PlannedRoundtripBackend(Ros2PlannedSessionBackend):
             "world_resume_supported": False,
         })
         return info
+
+
+class RolloutServiceBackend:
+    """Runs the two manipulation policies through the resident rollout service (tools/rollout/rollout_service.py).
+
+    The service keeps both policies loaded and the arms and cameras connected for the whole scenario,
+    so a call only waits for the start-pose move and the policy itself.  One policy run covers several
+    mission phases, and each policy runs at most once per mission:
+
+        ALIGN_KITCHEN / ALIGN_TABLE   wait for the "alignment done" signal (operator button or navigation)
+        GRASP_CUP                     run the pour policy (grasp, pour, return bottle, load cup on deck)
+        GRASP_BOTTLE .. PLACE_DECK    report the cached pour result
+        REGRASP_CUP                   run the place policy (regrasp cup, place it on the guest table)
+        SERVE                         report the cached place result
+
+    A retried phase reports the cached result instead of moving the arms again.  Navigation and charge
+    stay immediate mocks until the real-vehicle adapter exists.
+    """
+
+    mode = "rollout_service"
+    POLICY_PHASES = {
+        "GRASP_CUP": ("pour", True), "GRASP_BOTTLE": ("pour", False), "POUR": ("pour", False),
+        "RETURN_BOTTLE": ("pour", False), "PLACE_DECK": ("pour", False),
+        "REGRASP_CUP": ("place", True), "SERVE": ("place", False),
+    }
+    ALIGN_PHASES = {"ALIGN_KITCHEN": "kitchen", "ALIGN_TABLE": "table"}
+    FAILURE_BY_REASON = {
+        "duration": "END_NOT_DETECTED",
+        "stopped": "STOPPED",
+        "start_pose_failed": "START_POSE_FAILED",
+        "pour_hook_fault": "POUR_HOOK_FAULT",
+    }
+
+    def __init__(
+        self,
+        *,
+        url: str = "http://127.0.0.1:8770",
+        require_alignment: bool = True,
+        accept_duration: bool = False,
+        run_timeout_s: float = 600.0,
+        alignment_timeout_s: float = 3600.0,
+    ) -> None:
+        for name, value in (("run_timeout_s", run_timeout_s), ("alignment_timeout_s", alignment_timeout_s)):
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be a positive finite number")
+        self.url = url.rstrip("/")
+        self.require_alignment = require_alignment
+        self.accept_duration = accept_duration
+        self.run_timeout_s = float(run_timeout_s)
+        self.alignment_timeout_s = float(alignment_timeout_s)
+        self._lock = threading.Lock()
+        self._aligned = threading.Event()
+        self._cancel = threading.Event()
+        self._waiting: dict | None = None
+        self._running: str | None = None
+        self._results: dict[tuple[str, str], dict] = {}
+        self._status_cache: tuple[float, dict] = (0.0, {})
+
+    def _request(self, method: str, path: str, timeout: float) -> tuple[int, dict]:
+        import urllib.error
+        import urllib.request
+
+        request = urllib.request.Request(self.url + path, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.status, json.loads(response.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            try:
+                return exc.code, json.loads(exc.read() or b"{}")
+            except ValueError:
+                return exc.code, {}
+
+    def service_status(self, max_age_s: float = 2.0) -> dict:
+        """Rollout service /status, cached briefly because the web dashboard polls every second."""
+        import time
+
+        checked, cached = self._status_cache
+        if time.monotonic() - checked < max_age_s:
+            return cached
+        try:
+            status = self._request("GET", "/status", timeout=0.5)[1]
+        except OSError as exc:
+            status = {"state": "unreachable", "error": str(exc)}
+        self._status_cache = (time.monotonic(), status)
+        return status
+
+    def confirm_alignment(self, station: str | None = None) -> dict:
+        """Release the waiting ALIGN_* phase (operator button now, navigation signal later)."""
+        with self._lock:
+            waiting = self._waiting
+            if waiting is None:
+                return {"confirmed": False, "reason": "not_waiting"}
+            if station and station != waiting["station"]:
+                return {"confirmed": False, "reason": "station_mismatch", "waiting_for": waiting["station"]}
+            self._aligned.set()
+            return {"confirmed": True, "station": waiting["station"]}
+
+    def _wait_alignment(self, station: str, phase: str, order_id: str | None) -> BackendResult:
+        with self._lock:
+            self._aligned.clear()
+            self._cancel.clear()
+            self._waiting = {"station": station, "phase": phase, "order_id": order_id}
+        try:
+            remaining = self.alignment_timeout_s
+            while remaining > 0:
+                if self._aligned.wait(0.2):
+                    return BackendResult(True, adapter=self.mode, action_result={"alignment": station})
+                if self._cancel.is_set():
+                    return BackendResult(False, "CANCELED_WHILE_WAITING_ALIGNMENT", self.mode)
+                remaining -= 0.2
+            return BackendResult(False, "ALIGNMENT_TIMEOUT", self.mode)
+        finally:
+            with self._lock:
+                self._waiting = None
+
+    def _run_policy(self, task: str) -> dict:
+        import time
+
+        with self._lock:
+            self._running = task
+            self._cancel.clear()
+        try:
+            # Right after scenario start the service may still be loading policies (409, state=loading): wait.
+            deadline = time.monotonic() + self.run_timeout_s
+            while True:
+                status, body = self._request("POST", f"/run/{task}", timeout=self.run_timeout_s)
+                loading = status == 409 and body.get("error") == "not_ready" and body.get("state") == "loading"
+                if not loading or time.monotonic() > deadline or self._cancel.wait(1.0):
+                    break
+        except OSError as exc:
+            return {"ok": False, "failure_code": "ROLLOUT_SERVICE_UNREACHABLE", "message": str(exc)}
+        finally:
+            with self._lock:
+                self._running = None
+        if status != 200:
+            error = str(body.get("error", status)).upper()
+            return {"ok": False, "failure_code": f"ROLLOUT_SERVICE_{error}", "service": body}
+        reason = str(body.get("reason", ""))
+        if body.get("ok") or (reason == "duration" and self.accept_duration):
+            return {"ok": True, "result": body}
+        code = self.FAILURE_BY_REASON.get(reason, "POLICY_ERROR")
+        return {"ok": False, "failure_code": f"{task.upper()}_{code}", "result": body}
+
+    def execute(self, command: dict, *, mission_id: str | None, phase_attempt: int) -> BackendResult:
+        del phase_attempt
+        if command.get("kind") != "manipulate":
+            return BackendResult(True, adapter="simulation_immediate_non_manipulation")
+        phase = str(command.get("phase", ""))
+        if phase in self.ALIGN_PHASES:
+            if not self.require_alignment:
+                return BackendResult(True, adapter=self.mode)
+            return self._wait_alignment(self.ALIGN_PHASES[phase], phase, command.get("order_id"))
+        if phase not in self.POLICY_PHASES:
+            return BackendResult(False, "UNSUPPORTED_PHASE", self.mode, {"phase": phase})
+        task, runs_policy = self.POLICY_PHASES[phase]
+        key = (str(mission_id or command.get("order_id") or ""), task)
+        with self._lock:
+            cached = self._results.get(key)
+        if cached is None:
+            if not runs_policy:
+                return BackendResult(False, f"{task.upper()}_NOT_RUN", self.mode)
+            cached = self._run_policy(task)
+            with self._lock:
+                self._results[key] = cached
+        detail = {"policy": task, "covered_phase": phase, **{k: v for k, v in cached.items() if k != "ok"}}
+        if cached["ok"]:
+            return BackendResult(True, adapter=self.mode, action_result=detail)
+        return BackendResult(False, cached["failure_code"], self.mode, detail)
+
+    def cancel_active(self) -> bool:
+        with self._lock:
+            waiting, running = self._waiting, self._running
+        if waiting is not None:
+            self._cancel.set()
+            return True
+        if running is not None:
+            self._cancel.set()
+            try:
+                self._request("POST", "/stop", timeout=3.0)
+                return True
+            except OSError:
+                return False
+        return False
+
+    def info(self) -> dict:
+        with self._lock:
+            waiting = dict(self._waiting) if self._waiting else None
+            running = self._running
+        status = self.service_status()
+        return {
+            "mode": self.mode,
+            "manipulation": f"rollout_service {self.url}",
+            "navigation": "immediate_success_mock",
+            "charge": "immediate_success_mock",
+            "active_goal": running is not None,
+            "running_policy": running,
+            "waiting_alignment": waiting,
+            "require_alignment": self.require_alignment,
+            "manipulation_service_state": status.get("state"),
+            "manipulation_service_timings": status.get("timings"),
+            "manipulation_service_current": status.get("current"),
+            "manipulation_last_result": status.get("last_result"),
+            "manipulation_idle_read_failures": status.get("idle_read_failures"),
+            "hardware_accessed": True,
+        }
+
+    def close(self) -> None:
+        self._cancel.set()

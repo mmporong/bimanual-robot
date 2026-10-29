@@ -12,7 +12,12 @@ pyvirtualcam(OBS Virtual Camera 백엔드)으로 계속 송출해서, lerobot의
     - Astra S가 연결돼 있고 장치 관리자에 "ORBBEC Depth Sensor"가 정상(OK)으로 떠 있어야 한다.
 
 사용법:
-    python astra_rgb_virtualcam_bridge.py
+    python astra_rgb_virtualcam_bridge.py                 # 자동 수렴 후 그 값으로 고정 (기존 동작)
+    python astra_rgb_virtualcam_bridge.py --exposure 83   # 노출 직접 고정 (단위 0.1 ms)
+
+천장 형광등 같은 60Hz 조명 아래에서는 화면에 가로 줄무늬가 흘러간다. 노출을 83의 정수배로
+고정하면 사라진다. 값 고르기는 astra_flicker_sweep.py 로 측정한다(2026-10-23: Astra S, 실내
+형광등 기준 노출 83에서 줄무늬 24.2 -> 0.15, 다만 그 조명에선 너무 밝아 투명 병이 날아갔다).
 
 데이터 수집 전에 이 스크립트를 띄워두고, lerobot 쪽 카메라 설정에서
 "OBS Virtual Camera"가 잡히는 index(`tools/camera/capture_indexed.py`로 재확인)를
@@ -28,6 +33,7 @@ pyvirtualcam(OBS Virtual Camera 백엔드)으로 계속 송출해서, lerobot의
 lerobot 쪽에서는 index가 끊기지 않는다.
 """
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -43,6 +49,8 @@ SDK_BIN = (
 )
 
 FPS = 30
+# --exposure/--gain 으로 지정하면 자동 수렴값 대신 이 값으로 고정한다(재연결 때도 동일 적용).
+MANUAL: dict[str, int | None] = {"exposure": None, "gain": None}
 # 이만큼 연속으로 완전히 동일한 프레임이 오면 "센서가 멈췄다"고 판단한다.
 # 30fps 기준 약 2초치.
 STALE_FRAME_LIMIT = FPS * 2
@@ -68,6 +76,18 @@ def _connect_color_stream():
     if color_stream.camera is not None:
         color_stream.camera.auto_exposure = False
         color_stream.camera.auto_white_balance = False
+        # 드라이버는 자기가 기억하는 값과 같은 값을 쓰면 무시한다(읽기는 그 값으로 나오는데
+        # 센서는 자동 노출 값 그대로). 그래서 한 칸 다른 값을 먼저 쓰고 목표값을 쓴다.
+        for key in ("gain", "exposure"):
+            value = MANUAL[key]
+            if value is None:
+                continue
+            setattr(color_stream.camera, key, value + 1)
+            for _ in range(5):
+                color_stream.read_frame()
+            setattr(color_stream.camera, key, value)
+            for _ in range(10):
+                color_stream.read_frame()
         print(
             "노출/화이트밸런스 고정 완료 "
             f"(gain={color_stream.camera.gain}, exposure={color_stream.camera.exposure}). "
@@ -95,6 +115,12 @@ def _disconnect(device, color_stream) -> None:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--exposure", type=int, default=None,
+                    help="노출 고정값(단위 0.1 ms). 60Hz 조명 줄무늬는 83의 정수배(83/167/250)에서 사라진다")
+    ap.add_argument("--gain", type=int, default=None, help="gain 고정값. 이 장치는 32 이하가 모두 같은 밝기")
+    args = ap.parse_args()
+    MANUAL["exposure"], MANUAL["gain"] = args.exposure, args.gain
     if not Path(SDK_BIN).is_dir():
         sys.exit(f"SDK bin 폴더를 찾을 수 없습니다: {SDK_BIN}")
 
@@ -109,6 +135,10 @@ def main() -> None:
         try:
             while True:
                 try:
+                    # 센서가 프레임을 아예 안 보내면 read_frame()이 영원히 막혀 아래 동일프레임
+                    # 감시가 동작하지 않는다(가상 카메라는 마지막 화면을 계속 내보냄). 2초 넘게 안 오면 재연결.
+                    if openni2.wait_for_any_stream([color_stream], timeout=2.0) is None:
+                        raise TimeoutError("2초 동안 새 프레임 없음")
                     frame = color_stream.read_frame()
                     buf = frame.get_buffer_as_triplet()
                     rgb = np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3)
