@@ -3495,7 +3495,17 @@ def parse_args(argv=None):
                         help='this reapproach only: shift the current lateral position left')
     parser.add_argument('--reapproach-from-log', type=Path,
                         help='carry a confirmed parked face when it is hidden at close range')
+    parser.add_argument('--station-capture-retreat-m', type=float,
+                        help='one guarded straight reverse step between station reference '
+                             'captures; the camera and the capture stay outside this task')
     args = parser.parse_args(argv)
+    if args.station_capture_retreat_m is not None and not (
+            math.isfinite(args.station_capture_retreat_m)
+            and 0.0 < args.station_capture_retreat_m <= 0.05 and args.execute
+            and args.reapproach_m is None
+            and not (args.return_home or args.via_id or args.home_only
+                     or args.rear_box_only or args.resume_parked_from_log)):
+        parser.error('--station-capture-retreat-m requires one executed step of at most 0.05 m')
     if args.reapproach_m is not None and not (
             math.isfinite(args.reapproach_m) and 0.2 <= args.reapproach_m <= 0.3
             and args.execute and args.surface_mode == 'table_edge'
@@ -3617,6 +3627,24 @@ def run_attempt(args, active=None):
             node.operator_link_timeout_s = args.operator_link_timeout_s
             node.final_gap_override_m = args.final_gap_m
             ok = True
+            if getattr(args, 'station_capture_retreat_m', None) is not None:
+                # The same guarded reverse as a station reapproach, one short step,
+                # so a stationary reference can be captured at each stop.
+                node.verify_live_maps()
+                node._mission_started = True
+                with node._localization_bound(True):
+                    if not node.wait_until_ready(timeout=10.0):
+                        raise RuntimeError(node.readiness_failure_reason())
+                    if not node._parking_parameters_ready():
+                        raise RuntimeError(
+                            getattr(node, 'last_parking_parameters_failure', None)
+                            or 'parking controller parameters unavailable')
+                    if not node._precision_collision_ready(geometry):
+                        raise RuntimeError('precision collision-monitor profile unavailable')
+                    node.capture_stationary_pose(intermediate=True)
+                ok = node._drive_straight(-args.station_capture_retreat_m,
+                                          'station_capture_retreat_finished')
+                return 0 if ok else 1
             if getattr(args, 'rear_box_only', False):
                 ok = node.park_rear_box(
                     geometry, args.approach_route,
