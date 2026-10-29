@@ -35,8 +35,9 @@ MS Team의 공용 저장소이며, 이동·양팔 조작·관제를 하나의 �
 
 실차 시나리오 제어는 Windows 주문 서버의 팔 준비·완료 신호를 받아 급수대 → 테이블 1 → 도크로 연결한다.
 [운영 방법](tools/jdamr/README.md)에 실행 API를 정리했다. Windows에 연결한 Astra의 RGB·깊이를
-Pi에 전달하는 [AST1 TCP 수신기](tools/jdamr/ASTRA_TCP.md)도 제공한다. 수신기는 Pi에서 대기 중이며,
-Windows 송신기 구현과 실제 RGB-D 수신·보정값 대조, 주행기의 카메라 기동 경로 전환은 남아 있다.
+Pi에 전달하는 [AST1 TCP 수신기](tools/jdamr/ASTRA_TCP.md)도 제공한다. 실제 Windows RGB-D 수신과 ROS 발행,
+교시 CameraInfo 일치를 확인했다. 무선 PNG 전송의 지연 완화, 주행기의 카메라 기동 경로 전환과
+실제 면 검출·전체 시나리오 확인은 남아 있다. RGB는 PNG/JPEG, 깊이는 PNG16을 지원한다.
 
 <!-- AUTO:PROJECT-STATUS:START -->
 ## 단일 원본 자동 요약
