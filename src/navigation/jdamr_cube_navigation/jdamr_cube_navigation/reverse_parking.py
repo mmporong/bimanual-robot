@@ -625,6 +625,7 @@ def _corridor_blockage(
         pieces: Sequence[tuple[Sequence[Sequence[float]], float]],
         ignored_keepout_cells=frozenset(),
         *, skip_clearly_free_cells: bool = False,
+        ignored_unknown_cells=frozenset(),
 ) -> dict | None:
     resolution = source['resolution']
     origin_x, origin_y, _origin_yaw = source['origin']
@@ -669,6 +670,10 @@ def _corridor_blockage(
                         ('map', source), ('keepout', keepout)):
                     if (grid_name == 'keepout'
                             and (column, map_row) in ignored_keepout_cells):
+                        continue
+                    if (grid_name == 'map'
+                            and (column, map_row) in ignored_unknown_cells
+                            and metadata['pixels'][row * width + column] == 205):
                         continue
                     if not _clearly_free(metadata, row, column):
                         index = row * width + column
@@ -723,7 +728,7 @@ def _cell_overlap_polygon(polygon, bounds, padding):
 
 
 def _observed_surface_corridor_clear(source, keepout, poses, footprint, surface):
-    """Resolve only black target-mask cells protruding outside a measured plane."""
+    """Resolve target raster cells outside a measured plane, never occupied cells."""
     face = tuple(_finite_number(v, 'surface point') for v in surface['point_xy_m'])
     normal = tuple(_finite_number(v, 'surface normal') for v in surface['normal_xy'])
     half_span_m = _finite_number(surface['half_span_m'], 'surface half span')
@@ -744,13 +749,19 @@ def _observed_surface_corridor_clear(source, keepout, poses, footprint, surface)
                for point in polygon) <= padding for polygon, padding in pieces):
         return False
     ignored = set()
+    ignored_unknown = set()
     while True:
         blocked = _corridor_blockage(source, keepout, pieces, ignored,
-                                     skip_clearly_free_cells=True)
+                                     skip_clearly_free_cells=True,
+                                     ignored_unknown_cells=ignored_unknown)
         if blocked is None:
             return True
-        if (blocked.get('grid') != 'keepout' or keepout['negate'] != 0
-                or blocked.get('pixel') != 0):
+        target_mask = (blocked.get('grid') == 'keepout'
+                       and keepout['negate'] == 0 and blocked.get('pixel') == 0)
+        target_unknown = (surface.get('allow_precision_unknown') is True
+                          and blocked.get('grid') == 'map'
+                          and source['negate'] == 0 and blocked.get('pixel') == 205)
+        if not (target_mask or target_unknown):
             return False
         outward_m, lateral_m = [], []
         for polygon, padding in pieces:
@@ -765,7 +776,8 @@ def _observed_surface_corridor_clear(source, keepout, poses, footprint, surface)
                 or max(outward_m) > 2. * source['resolution']
                 or max(lateral_m) > half_span_m + half_cell_tangent_m):
             return False
-        ignored.add((blocked['column'], blocked['map_row']))
+        (ignored_unknown if target_unknown else ignored).add(
+            (blocked['column'], blocked['map_row']))
 
 
 class CachedStaticCorridorValidator:

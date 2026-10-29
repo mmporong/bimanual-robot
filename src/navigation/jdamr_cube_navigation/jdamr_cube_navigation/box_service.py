@@ -2542,11 +2542,31 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if span_m is not None:
                 center = to_map_pose((*face, 0.))
                 tip = to_map_pose((face[0] + normal[0], face[1] + normal[1], 0.))
+                heading = math.atan2(-normal[1], -normal[0])
+                residual = math.atan2(math.sin(heading - actual[2]),
+                                      math.cos(heading - actual[2]))
+                corner_span = 2 * self.box_front_half_width_m * abs(math.sin(residual))
+                gap = (sum((actual[i] - face[i]) * normal[i] for i in (0, 1))
+                       - front_lead_m(front_extent_m, self.box_front_half_width_m, residual))
+                lateral_ready = lateral_goal_odom is None or abs(sum(
+                    (lateral_goal_odom[i] - actual[i]) * (-math.sin(heading), math.cos(heading))[i]
+                    for i in (0, 1))) <= self.station_reference_profile['lateral_tolerance_m']
                 kwargs['target_surface'] = {
                     'point_xy_m': center[:2],
                     'normal_xy': (tip[0] - center[0], tip[1] - center[1]),
-                    'half_span_m': span_m / 2.}
+                    'half_span_m': span_m / 2.,
+                    # Match the near-face contract already used by _table_fine_approach.
+                    # Only the target's raster fringe is resolved by its measured plane.
+                    'allow_precision_unknown': (
+                        0. < gap <= FINAL_PLAN_GAP_M
+                        and corner_span <= 2 * TABLE_FINE_GAP_TOLERANCE_M
+                        and abs(residual) <= min(
+                            self.parking_contract['yaw_tolerance_rad'], FINAL_HEADING_TRIM_RAD)
+                        and lateral_ready)}
             if not check(mapped, **kwargs):
+                self.emit('table_approach_static_blocked',
+                          blockage=check.last_blockage, reference_frame='map',
+                          start_pose_map=list(mapped[0]), end_pose_map=list(mapped[-1]))
                 raise RuntimeError('table approach static corridor blocked')
 
         return validate
