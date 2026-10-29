@@ -166,23 +166,30 @@ RGB-D 매칭이 성공했더라도 완료 시각에 기존 영상 신선도 범�
 
 ## 웹 버튼과 대화 명령의 공통 실행 API
 
-기존 웹의 백엔드 또는 이 PC의 CLI가 `water_service_api.py`를 호출한다. 이 PC가 Pi에는
-기존 SSH 주행 요청을, Windows에는 기존 상주 추론 서비스의 HTTP 요청을 보낸다.
-Windows 추론 명령을 Pi로 중계하지 않는다.
+기존 웹 또는 이 PC의 출발 명령이 같은 실행 API를 사용한다. 이 PC는 Pi에 SSH 주행 요청을,
+Windows 주문 서버(8765)에 상태 조회·정렬 완료 알림을 보낸다. 노트북 내부 조작 실행기
+8770을 호출하지 않는다.
 
 ```bash
 cd "$HOME/bimanual-robot"
-# 주행 전용: 도크 → 급수대 → 테이블1 → 도크
-python3 tools/jdamr/water_service_api.py serve --navigation-only
-
-# Windows 서비스와 RGB-D 연결이 준비된 뒤 선택하는 추론 포함 모드
-python3 tools/jdamr/water_service_api.py serve --inference-url http://WINDOWS_IP:8770
+python3 tools/jdamr/water_service_api.py serve --order-url http://192.168.0.15:8765
 ```
 
-추론 포함 모드는 급수대 정밀주차 → Windows `POST /run/pour` → `ok=true` 확인 →
-급수대 이탈·테이블1 주차·도크 복귀 순서다. Windows의 모델·카메라는 출발 전에 준비한다.
-추론 실패·전송 결과 불명·사용자 정지 뒤에는 다음 주행 단계를 자동 시작하지 않는다.
-`--navigation-only`를 명시한 경우에만 Windows 없이 기존 전체 경로를 한 요청으로 실행한다.
+출발 요청에서 진행 중인 테이블1 주문이 있으면 그 주문에 연결한다. 없으면 테이블1
+`COLD_WATER` 주문을 한 번 등록한다. 준비·상태 조회만으로는 주문이나 팔 동작을 시작하지 않는다.
+순서는 도크 → 급수대 주차 → `POST /api/align/confirm {"station":"kitchen"}` →
+물따르기·오른팔 접기 완료 대기 → 테이블1 주차 → 같은 API의 `station=table` →
+컵배치 완료 대기 → 도크 복귀다. 정차는 시간 만료로 풀지 않고 기존 `--park-only`와
+`--resume-parked-log`로 구간을 연결한다. 테이블1은 표식 없이 면 정렬을 사용한다.
+
+`GET /api/state`의 동일 주문과 `execution_backend.drive.next`, `arms_ready=true`,
+`running_policy=null`, 팔 자세를 확인한다. 주행 중에도 이 조건을 감시한다.
+급수대·테이블 출발은 `waiting_alignment`의 주문·지점이 맞아야 하고, 도크 복귀는
+해당 주문 `SUCCEEDED`와 `arms=stowed`가 필요하다. 주문 실패·취소·통신 오류·사용자 정지는
+다음 주행을 시작하지 않는다. 완료 알림 POST의 결과가 불명확하면 자동 재전송하지 않는다.
+주문 서버의 성공은 컵배치 완료이며, 실제 도크 복귀 완료는 이 API의 `state=succeeded`로 구분한다.
+
+`--navigation-only`를 명시한 경우에만 팔 연동 없이 기존 전체 경로를 실행한다.
 
 서버 기본 주소는 `http://127.0.0.1:8771`이다. 외부 웹 백엔드에서 접근할 때는 해당 PC의
 주소로 접근할 수 있도록 `--host`를 지정한다. API는 Bearer 토큰을 사용하며 기본 토큰

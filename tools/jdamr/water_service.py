@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Coordinate one water-service mission across the AMR and Windows rollout host.
+"""Coordinate one water-service mission across the AMR and Windows order server host.
 
 This module deliberately delegates all robot movement to ``jdamr_depart.py``.  It
-adds only the sequencing contract required by the web facade: park at the water
-station, run the existing Windows inference service once, then resume the exact
-parked run, visit table 1, and return to the dock.
+uses only the Windows order server: bind one order, wait for arm-ready drive
+permission, confirm each parked station, and resume after manipulation finishes.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
-import http.client
 import json
 import os
 from pathlib import Path
@@ -20,7 +18,7 @@ import threading
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, quote
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -42,7 +40,7 @@ class WaterServiceController:
         inference_url: str | None,
         state_directory: Path,
         map_session: Path | None = None,
-        inference_timeout_s: float = 180.0,
+        inference_timeout_s: float = 300.0,
         run_inference: bool = True,
     ) -> None:
         self.inference_url = inference_url.rstrip("/") if inference_url else None
@@ -75,7 +73,7 @@ class WaterServiceController:
     def start(self, request_id: str | None = None) -> dict[str, Any]:
         """Accept a mission and run it on a background thread."""
         if self.run_inference and not self.inference_url:
-            raise ValueError("inference_url is not configured; refusing to move the robot")
+            raise ValueError("order_url is not configured; refusing to move the robot")
         if not self.map_session.is_file():
             raise ValueError(f"map session pointer is missing: {self.map_session}")
 
@@ -109,7 +107,11 @@ class WaterServiceController:
                 finished_unix_s=None,
                 mission_directory=str(mission_dir),
                 parking_run=None,
+                order_id=None,
                 windows_result=None,
+                table_parking_run=None,
+                table_parking_log_on_pi=None,
+                windows_place_result=None,
             )
             self._state["requests"][request_id] = {
                 "mission_id": mission_id,
@@ -139,7 +141,10 @@ class WaterServiceController:
     def status(self) -> dict[str, Any]:
         with self._lock:
             view = deepcopy(self._state)
+            view["last_mission_mode"] = view.get("mode")
+            view["mode"] = "inference" if self.run_inference else "navigation_only"
             view["inference_url"] = self.inference_url
+            view["order_url"] = self.inference_url
             view["configured"] = bool(self.inference_url) if self.run_inference else True
             return view
 
@@ -156,18 +161,22 @@ class WaterServiceController:
             self._save_state()
 
         errors: list[str] = []
-        if phase == "inferencing":
-            try:
-                # Order /stop after a concurrently starting /run/pour request.
-                with self._inference_gate:
-                    self._http_json("POST", "/stop", timeout_s=10.0, body={})
-            except Exception as error:  # the local stop still remains authoritative
-                errors.append(f"Windows stop: {error}")
-        if phase in ("parking", "table_one_and_dock", "navigation_cycle"):
+        if phase in ("parking", "table_one_and_dock", "parking_table_one",
+                     "returning_to_dock", "navigation_cycle"):
             try:
                 self._run_stop_helper()
             except Exception as error:
                 errors.append(f"AMR stop: {error}")
+
+        if self.run_inference:
+            try:
+                # Order cancellation after an in-flight alignment/order request.
+                with self._inference_gate:
+                    if self._state.get("order_id"):
+                        self._http_json("POST", "/api/orders/" + quote(str(self._state["order_id"]), safe="")
+                                        + "/cancel", timeout_s=10.0, body={})
+            except Exception as error:  # the local stop still remains authoritative
+                errors.append(f"Windows stop: {error}")
 
         with self._lock:
             if errors:
@@ -184,11 +193,8 @@ class WaterServiceController:
                 self._finish("succeeded", "complete", None)
                 return
             self._check_stopped()
-            ready = self._http_json("GET", "/status", timeout_s=10.0)
-            if ready.get("state") != "ready":
-                raise RuntimeError(
-                    f"Windows rollout service is not ready: state={ready.get('state')!r}"
-                )
+            self._bind_order()
+            self._wait_drive("kitchen")
 
             self._check_stopped()
             self._set_phase("parking")
@@ -205,26 +211,37 @@ class WaterServiceController:
 
             self._check_stopped()
             self._set_phase("inferencing")
-            # The run endpoint is intentionally submitted once.  A transport error
-            # is ambiguous, so retrying could execute the learned action twice.
-            raw, result = self._run_inference()
-            result_path = mission_dir / "windows_result.json"
-            result_path.write_bytes(raw)
-            with self._lock:
-                self._state["windows_result"] = str(result_path)
-                self._save_state()
-            if result.get("ok") is not True:
-                raise RuntimeError("Windows rollout returned without ok=true")
+            self._confirm_alignment("kitchen")
+            self._wait_drive("table")
 
             self._check_stopped()
-            self._set_phase("table_one_and_dock")
+            self._set_phase("parking_table_one")
+            before = self._read_navigation_state()
+            parking_started = time.time()
             self._run_helper([
                 "go",
                 "table_01",
                 "--resume-parked-log",
                 remote_log,
+                "--park-only",
                 "--dwell-s",
                 "0",
+            ])
+            self._check_stopped()
+            table_run = self._new_parking_run(before, parking_started, table_id="table_01")
+            table_log = self._remote_cycle_log(table_run)
+            with self._lock:
+                self._state["table_parking_run"] = str(table_run)
+                self._state["table_parking_log_on_pi"] = table_log
+                self._save_state()
+            self._set_phase("placing_cup")
+            self._confirm_alignment("table")
+            self._wait_drive("dock")
+            self._check_stopped()
+            self._set_phase("returning_to_dock")
+            self._run_helper([
+                "go", "table_01", "--skip-via", "--resume-parked-log",
+                table_log, "--dwell-s", "0",
             ])
             self._check_stopped()
             self._finish("succeeded", "complete", None)
@@ -256,10 +273,22 @@ class WaterServiceController:
                     text=True,
                 )
                 self._process = process
+            checked_s = 0.0
+            destination = {"parking": "kitchen", "parking_table_one": "table",
+                           "returning_to_dock": "dock"}.get(self._state.get("phase"))
             while process.poll() is None:
                 if self._stop_event.wait(0.25):
                     # stop() sends the maintained helper's cancellation command.
                     continue
+                if self.run_inference and destination and time.monotonic() - checked_s >= 1.0:
+                    checked_s = time.monotonic()
+                    try:
+                        state = self._http_json("GET", "/api/state", timeout_s=3.0)
+                        if not self._drive_ready(state, destination):
+                            raise RuntimeError("arm-ready drive permission withdrawn")
+                    except Exception:
+                        self._run_stop_helper()
+                        raise
             with self._lock:
                 if self._process is process:
                     self._process = None
@@ -301,7 +330,8 @@ class WaterServiceController:
             if code != 0:
                 raise RuntimeError(f"jdamr_depart.py stop exited with code {code}")
 
-    def _new_parking_run(self, before: dict[str, Any], started_s: float) -> Path:
+    def _new_parking_run(self, before: dict[str, Any], started_s: float,
+                         table_id: str = "water_station") -> Path:
         after = self._read_navigation_state()
         previous = before.get("last_run")
         current = after.get("last_run")
@@ -316,8 +346,9 @@ class WaterServiceController:
         if not command.is_file() or command.stat().st_mtime < started_s - 1.0:
             raise RuntimeError("new last_run has no command file matching this request")
         text = command.read_text(encoding="utf-8")
-        if "--table-id water_station" not in text or "--search" not in text:
-            raise RuntimeError("new last_run is not this water-station parking request")
+        if (f"--table-id {table_id}" not in text or "--search" not in text
+                or "--return-home" in text):
+            raise RuntimeError(f"new last_run is not this {table_id} parking-only request")
         return run
 
     def _read_navigation_state(self) -> dict[str, Any]:
@@ -379,58 +410,85 @@ class WaterServiceController:
             with urlopen(request, timeout=timeout_s) as response:
                 raw = response.read()
         except (HTTPError, URLError, TimeoutError, OSError) as error:
-            raise RuntimeError(f"Windows rollout {method} {path} failed: {error}") from error
+            raise RuntimeError(f"Windows order server {method} {path} failed: {error}") from error
         try:
             value = json.loads(raw)
         except (UnicodeDecodeError, ValueError) as error:
-            raise RuntimeError(f"Windows rollout {method} {path} returned invalid JSON") from error
+            raise RuntimeError(f"Windows order server {method} {path} returned invalid JSON") from error
         if not isinstance(value, dict):
-            raise RuntimeError(f"Windows rollout {method} {path} returned a non-object JSON value")
+            raise RuntimeError(f"Windows order server {method} {path} returned a non-object JSON value")
         return raw, value
 
-    def _run_inference(self) -> tuple[bytes, dict[str, Any]]:
-        """Submit once, ordering a concurrent cancellation after request send."""
-        assert self.inference_url is not None
-        target = urlsplit(urljoin(self.inference_url + "/", "run/pour"))
-        if target.scheme not in ("http", "https") or not target.hostname:
-            raise RuntimeError(f"invalid Windows rollout URL: {self.inference_url}")
-        connection_type = (
-            http.client.HTTPSConnection
-            if target.scheme == "https"
-            else http.client.HTTPConnection
-        )
-        path = target.path or "/"
-        if target.query:
-            path += "?" + target.query
-        connection = connection_type(target.hostname, target.port, timeout=10.0)
-        try:
-            with self._inference_gate:
-                self._check_stopped()
-                connection.request(
-                    "POST",
-                    path,
-                    body=b"{}",
-                    headers={"Accept": "application/json", "Content-Type": "application/json"},
-                )
-            if connection.sock is not None:
-                connection.sock.settimeout(self.inference_timeout_s)
-            response = connection.getresponse()
-            raw = response.read()
-            if not 200 <= response.status < 300:
-                raise RuntimeError(
-                    f"Windows rollout POST /run/pour failed: HTTP {response.status}"
-                )
-        except (TimeoutError, OSError, http.client.HTTPException) as error:
-            raise RuntimeError(f"Windows rollout POST /run/pour failed: {error}") from error
-        finally:
-            connection.close()
-        try:
-            value = json.loads(raw)
-        except (UnicodeDecodeError, ValueError) as error:
-            raise RuntimeError("Windows rollout POST /run/pour returned invalid JSON") from error
-        if not isinstance(value, dict):
-            raise RuntimeError("Windows rollout POST /run/pour returned a non-object JSON value")
-        return raw, value
+    def _bind_order(self) -> None:
+        with self._inference_gate:
+            self._check_stopped()
+            self._bind_order_locked()
+
+    def _bind_order_locked(self) -> None:
+        state = self._http_json("GET", "/api/state", timeout_s=3.0)
+        active = [order for order in state.get("orders", [])
+                  if order.get("state") in ("RUNNING", "QUEUED")]
+        if active:
+            if len(active) != 1 or active[0].get("table_id") != "table_1":
+                raise RuntimeError("active order is not the registered table_1 mission")
+            order = active[0]
+        else:
+            # Only called by an explicit start request, never during readiness.
+            # One submission; an ambiguous response is never retried automatically.
+            result = self._http_json("POST", "/api/orders", timeout_s=5.0, body={
+                "table_id": "table_1", "drink": "COLD_WATER",
+                "client_ref": self._state["mission_id"],
+            })
+            order = result.get("order") or {}
+        order_id = order.get("order_id")
+        if not isinstance(order_id, str) or not order_id:
+            raise RuntimeError("order server did not return an order_id")
+        with self._lock:
+            self._state["order_id"] = order_id
+            self._save_state()
+
+    def _drive_ready(self, state: dict[str, Any], destination: str) -> bool:
+        backend = state.get("execution_backend") or {}
+        drive = backend.get("drive") or {}
+        order_id = self._state.get("order_id")
+        order = next((o for o in state.get("orders", [])
+                      if o.get("order_id") == order_id), None)
+        if order is None:
+            raise RuntimeError("bound order disappeared from order server")
+        if order.get("state") in ("FAILED", "CANCELED", "CANCELLED"):
+            raise RuntimeError(f"order {order_id} ended: {order.get('failure') or order['state']}")
+        if ("running_policy" not in backend or backend["running_policy"] is not None
+                or drive.get("arms_ready") is not True or drive.get("next") != destination
+                or backend.get("arms") not in ("stowed", "carrying_cup")):
+            return False
+        if destination == "dock":
+            return order.get("state") == "SUCCEEDED" and backend.get("arms") == "stowed"
+        waiting = backend.get("waiting_alignment") or {}
+        return (order.get("state") == "RUNNING"
+                and waiting.get("station") == destination
+                and waiting.get("order_id") == order_id)
+
+    def _wait_drive(self, destination: str) -> None:
+        deadline = time.monotonic() + self.inference_timeout_s
+        while time.monotonic() < deadline:
+            self._check_stopped()
+            state = self._http_json("GET", "/api/state", timeout_s=3.0)
+            if self._drive_ready(state, destination):
+                return
+            self._stop_event.wait(1.0)
+        raise RuntimeError(f"order server did not release drive to {destination}")
+
+    def _confirm_alignment(self, station: str) -> None:
+        # Validate the same order immediately before authorizing arm motion.
+        state = self._http_json("GET", "/api/state", timeout_s=3.0)
+        if not self._drive_ready(state, station):
+            raise RuntimeError(f"order changed before alignment confirmation at {station}")
+        with self._inference_gate:
+            self._check_stopped()
+            result = self._http_json("POST", "/api/align/confirm", timeout_s=5.0,
+                                     body={"station": station})
+        if result.get("confirmed") is not True or result.get("station") != station:
+            raise RuntimeError(f"alignment confirmation rejected: {result}")
 
     def _check_stopped(self) -> None:
         if self._stop_event.is_set():

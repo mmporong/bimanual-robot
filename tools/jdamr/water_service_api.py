@@ -219,8 +219,9 @@ def _parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="run the mission HTTP API")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8771)
-    serve.add_argument("--inference-url", default=os.environ.get("JDAMR_INFERENCE_URL"))
-    serve.add_argument("--inference-timeout-s", type=float, default=180.0)
+    serve.add_argument("--order-url", dest="inference_url", default=os.environ.get("JDAMR_ORDER_URL"),
+                       help="Windows order server, e.g. http://192.168.0.15:8765")
+    serve.add_argument("--inference-timeout-s", type=float, default=300.0)
     serve.add_argument(
         "--navigation-only",
         action="store_true",
