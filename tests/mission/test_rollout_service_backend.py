@@ -21,6 +21,9 @@ class FakeRolloutService:
                         "place": {"task": "place", "ok": True, "reason": "auto_done"}}
         self.loading_polls = 0
         self.stops = 0
+        self.stow_pose = None  # e.g. "place_end" to behave like --stow.pose
+        self.stow_ok = True
+        self.arms = "unknown"
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -35,7 +38,8 @@ class FakeRolloutService:
                 self.wfile.write(data)
 
             def do_GET(self):
-                self._json(200, {"state": "loading" if fake.loading_polls else "ready"})
+                self._json(200, {"state": "loading" if fake.loading_polls else "ready",
+                                 "stow_pose": fake.stow_pose, "arms": fake.arms})
 
             def do_POST(self):
                 if self.path == "/stop":
@@ -43,11 +47,20 @@ class FakeRolloutService:
                     self._json(200, {"stopped": True})
                     return
                 task = self.path.rsplit("/", 1)[-1]
+                if task == "stow" and fake.stow_pose is None:
+                    self._json(404, {"error": "stow_not_configured"})
+                    return
                 if fake.loading_polls:
                     fake.loading_polls -= 1
                     self._json(409, {"error": "not_ready", "state": "loading"})
                     return
                 fake.calls.append(task)
+                if task == "stow":
+                    fake.arms = "stowed" if fake.stow_ok else "hold"
+                    self._json(200, {"task": "stow", "ok": fake.stow_ok,
+                                     "reason": "stowed" if fake.stow_ok else "stow_failed"})
+                    return
+                fake.arms = "carrying_cup" if task == "pour" else "stowed"
                 self._json(200, fake.results[task])
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -138,6 +151,7 @@ def test_waits_while_service_is_loading_and_reports_unreachable(fake):
 
 
 def test_order_runs_end_to_end_with_alignment_button(fake, tmp_path):
+    fake.stow_pose = "place_end"
     backend = RolloutServiceBackend(url=fake.url)
     app = ServiceApplication(MissionController(), tmp_path / "state", backend)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(app))
@@ -163,14 +177,16 @@ def test_order_runs_end_to_end_with_alignment_button(fake, tmp_path):
         for station in ("kitchen", "table"):
             for _ in range(50):
                 waiting = app.state()["execution_backend"]["waiting_alignment"]
-                if waiting:
+                # right after a confirm the previous wait stays visible for up to one poll (0.2 s)
+                if waiting and waiting["station"] == station:
                     break
                 time.sleep(0.1)
             assert waiting["station"] == station
             assert post("/api/align/confirm", {"station": station})["confirmed"]
         assert done.wait(5)
         assert app.state()["orders"][0]["state"] == "SUCCEEDED"
-        assert fake.calls == ["pour", "place"]
+        # arms fold before the first drive, then pour and place each run once
+        assert fake.calls == ["stow", "pour", "place"]
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -191,3 +207,70 @@ def test_alignment_endpoint_rejects_backends_without_gate(tmp_path):
         httpd.shutdown()
         httpd.server_close()
         app.close()
+
+
+def nav(destination):
+    return {"kind": "navigate", "destination": destination}
+
+
+def test_arms_fold_once_before_driving_to_the_kitchen(fake):
+    fake.stow_pose = "place_end"
+    backend = RolloutServiceBackend(url=fake.url, require_alignment=False)
+    assert backend.execute(nav("kitchen"), mission_id="M1", phase_attempt=1).success
+    # a retried kitchen drive does not move the arms again
+    assert backend.execute(nav("kitchen"), mission_id="M1", phase_attempt=2).success
+    assert fake.calls == ["stow"]
+    info = backend.info()
+    assert info["drive"] == {"next": "kitchen", "arms_ready": True}
+    assert info["stow_pose"] == "place_end"
+    # the table and dock legs do not fold the arms (the service already did it after pour / place)
+    assert backend.execute(nav("table_2"), mission_id="M1", phase_attempt=1).success
+    assert backend.execute(nav("dock"), mission_id="M1", phase_attempt=1).success
+    assert fake.calls == ["stow"]
+    # next mission folds again
+    assert backend.execute(nav("kitchen"), mission_id="M2", phase_attempt=1).success
+    assert fake.calls == ["stow", "stow"]
+
+
+def test_failed_fold_blocks_the_drive(fake):
+    fake.stow_pose = "place_end"
+    fake.stow_ok = False
+    backend = RolloutServiceBackend(url=fake.url, require_alignment=False)
+    result = backend.execute(nav("kitchen"), mission_id="M1", phase_attempt=1)
+    assert (result.success, result.failure_code) == (False, "STOW_FAILED")
+    assert backend.info()["drive"]["arms_ready"] is False
+
+
+def test_service_without_stow_pose_keeps_old_behavior(fake):
+    backend = RolloutServiceBackend(url=fake.url, require_alignment=False)
+    result = backend.execute(nav("kitchen"), mission_id="M1", phase_attempt=1)
+    assert result.success and result.action_result["stow"] == "not_configured"
+    assert fake.calls == []
+    dead = RolloutServiceBackend(url="http://127.0.0.1:9", require_alignment=False)
+    assert dead.execute(nav("kitchen"), mission_id="M1", phase_attempt=1).failure_code ==         "ROLLOUT_SERVICE_UNREACHABLE"
+
+
+def test_drive_hint_follows_the_mission(fake):
+    fake.stow_pose = "place_end"
+    backend = RolloutServiceBackend(url=fake.url)
+    seen = []
+    done = threading.Event()
+
+    def run():
+        for phase in ("ALIGN_KITCHEN", "GRASP_CUP", "ALIGN_TABLE", "REGRASP_CUP"):
+            backend.execute(manip(phase), mission_id="M1", phase_attempt=1)
+        done.set()
+
+    assert backend.execute(nav("kitchen"), mission_id="M1", phase_attempt=1).success
+    threading.Thread(target=run, daemon=True).start()
+    for station in ("kitchen", "table"):
+        for _ in range(50):
+            info = backend.info()
+            if info["waiting_alignment"] and info["waiting_alignment"]["station"] == station:
+                break
+            time.sleep(0.1)
+        seen.append(info["drive"])
+        backend.confirm_alignment(station)
+    assert done.wait(5)
+    assert seen == [{"next": "kitchen", "arms_ready": True}, {"next": "table", "arms_ready": True}]
+    assert fake.calls == ["stow", "pour", "place"]
