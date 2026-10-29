@@ -186,53 +186,18 @@ class TableContactReference:
     def restore_tracking(self, checkpoint):
         self._last_centers_px, self._last_yaw_rad = checkpoint
 
-    def observe(self, image, *, prediction_pose=None):
-        """Observe contacts, optionally predicting them from robot odom motion.
-
-        ``prediction_pose`` is the current base pose relative to the base pose of
-        the previous successful observation, expressed as
-        ``(forward_m, left_m, yaw_rad)`` in that previous base frame.  A fixed
-        tabletop contact is transformed by the inverse robot motion before the
-        bounded tracking search.  Failed tracking is cleared for a full search
-        on the next image; the same image is never processed twice.
-        """
+    def observe(self, image):
         started_s = time.perf_counter()
-        tracking_centers_px = self._last_centers_px
-        tracking_yaw_rad = self._last_yaw_rad
-        prediction_used = False
-        if prediction_pose is not None:
-            if (not isinstance(prediction_pose, (tuple, list))
-                    or len(prediction_pose) != 3
-                    or any(isinstance(value, bool) or not isinstance(value, (float, int))
-                           or not math.isfinite(value) for value in prediction_pose)):
-                raise ValueError('invalid_contact_prediction_pose')
-            forward_m, left_m, yaw_rad = (float(value) for value in prediction_pose)
-        if prediction_pose is not None and tracking_centers_px is not None:
-            cosine, sine = math.cos(yaw_rad), math.sin(yaw_rad)
-            predicted = {}
-            for name, (x_px, y_px) in tracking_centers_px.items():
-                point_m = self._base_xy(x_px, y_px) - np.array((forward_m, left_m))
-                current_m = np.array((cosine * point_m[0] + sine * point_m[1],
-                                      -sine * point_m[0] + cosine * point_m[1]))
-                predicted[name] = (
-                    (self.left_max_m - current_m[1]) / self.resolution_m,
-                    (self.forward_max_m - current_m[0]) / self.resolution_m)
-            tracking_centers_px = predicted
-            prediction_used = True
-            if tracking_yaw_rad is not None:
-                tracking_yaw_rad = math.atan2(
-                    math.sin(tracking_yaw_rad - yaw_rad),
-                    math.cos(tracking_yaw_rad - yaw_rad))
         quality = {'observation_method': 'table_contact_edges', 'contact_matches': {},
-                   'contact_tracking': tracking_centers_px is not None,
-                   'contact_prediction_used': prediction_used}
+                   'contact_tracking': self._last_centers_px is not None}
 
         def invalid(reason):
             if self._last_centers_px is not None:
                 self._last_centers_px = None
-                self._last_yaw_rad = None
-                quality['contact_reacquisition'] = True
-                quality['contact_reacquisition_deferred'] = True
+                estimate, retry_quality = self.observe(image)
+                retry_quality['contact_reacquisition'] = True
+                retry_quality['processing_s'] = time.perf_counter() - started_s
+                return estimate, retry_quality
             quality['processing_s'] = time.perf_counter() - started_s
             return PlanarBaseErrorEstimate(False, reason), quality
 
@@ -243,22 +208,20 @@ class TableContactReference:
             side_px = template['side_px']
             sx, sy, ex, ey = template['bounds_px']
             original_sx, original_sy = sx, sy
-            if tracking_centers_px is not None:
-                center_x, center_y = tracking_centers_px[name]
+            if self._last_centers_px is not None:
+                center_x, center_y = self._last_centers_px[name]
                 radius_px = math.ceil(self.tracking_radius_m / self.resolution_m)
                 sx = max(sx, math.floor(center_x - side_px / 2) - radius_px)
                 sy = max(sy, math.floor(center_y - side_px / 2) - radius_px)
                 ex = min(ex, math.ceil(center_x + side_px / 2) + radius_px)
                 ey = min(ey, math.ceil(center_y + side_px / 2) + radius_px)
-                if ex - sx < side_px or ey - sy < side_px:
-                    return invalid('table_contact_match_unavailable')
             search = gradients[sy:ey, sx:ex]
             search_energy = gradient_energy[sy:ey, sx:ex]
             aggregate = None
             rotations = template['rotations']
-            if tracking_centers_px is not None and tracking_yaw_rad is not None:
+            if self._last_centers_px is not None and self._last_yaw_rad is not None:
                 angle_deg = min(
-                    rotations, key=lambda r: abs(r[4] - math.degrees(tracking_yaw_rad)))[4]
+                    rotations, key=lambda r: abs(r[4] - math.degrees(self._last_yaw_rad)))[4]
                 nearby = [r for r in rotations if abs(r[4] - angle_deg)
                           <= self.tracking_rotation_radius_deg]
                 rotations = nearby or [min(rotations, key=lambda r: abs(r[4] - angle_deg))]

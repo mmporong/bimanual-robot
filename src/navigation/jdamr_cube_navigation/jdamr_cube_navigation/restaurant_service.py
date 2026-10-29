@@ -135,7 +135,7 @@ TRIM_EXTRA_S = 4.0
 # A direct move's stop is sent this much early on top of the deceleration: one
 # 20 Hz smoother cycle plus odometry delay (reviewed 2026-10-06; not measured).
 DIRECT_STOP_LATENCY_S = 0.05
-# Normal settle window; precision moves may use the bounded deceleration grace below.
+# After the stop, wait at most this long for odometry to show the base at rest.
 DIRECT_SETTLE_S = 0.5
 DIRECT_STOP_CONFIRM_S = 0.08
 DIRECT_STOP_CONFIRM_SAMPLES = 2
@@ -1229,7 +1229,15 @@ class ServiceRoute(CorridorRoute):
                 if now_s - published_s >= 0.05:
                     publisher.publish(command)
                     published_s = time.monotonic()
-                spin_node(self, timeout_sec=0.02)
+                # Drain inputs over this control interval before running the
+                # geometry again; one callback per measurement can leave TF,
+                # depth and odometry queued behind expensive path previews.
+                input_deadline_s = time.monotonic() + 0.02
+                while not self.stop_requested:
+                    input_remaining_s = input_deadline_s - time.monotonic()
+                    if input_remaining_s <= 0.0:
+                        break
+                    spin_node(self, timeout_sec=min(0.002, input_remaining_s))
                 value = measure()
             if self.stop_requested:
                 self._last_direct_motion_failure = 'operator_stop'
@@ -1296,7 +1304,6 @@ class ServiceRoute(CorridorRoute):
                                        max(0.0, time.monotonic() - motion[0])),
                       last_odom_linear_mps=(None if motion is None else motion[1]),
                       last_odom_angular_radps=(None if motion is None else motion[2]),
-                      consecutive_stopped_odom_samples=stationary_samples,
                       stopped_linear_mps=stopped_linear_mps,
                       stopped_angular_radps=stopped_angular_radps)
             return None

@@ -822,10 +822,15 @@ def dock_map_identity():
     return [sha256(MAP_YAML), sha256(MAP_YAML.parent / meta['image'])]
 
 
-def refine_at_registered_dock(scan_path, click, reference):
+def refine_at_registered_dock(scan_path, click, reference, *, diagnostics=None):
     """Match a stated dock placement to its anchored scan, never to a rolling seed."""
-    if click.get('source') != 'registered_dock' or not isinstance(reference, dict):
+    def reject(reason, **values):
+        if diagnostics is not None:
+            diagnostics.update(accepted=False, reason=reason, **values)
         return None
+
+    if click.get('source') != 'registered_dock' or not isinstance(reference, dict):
+        return reject('registered_dock_reference_not_selected')
     import numpy as np
     try:
         for key in ('home_pose', 'pose_map'):
@@ -833,11 +838,11 @@ def refine_at_registered_dock(scan_path, click, reference):
             if (not isinstance(values, (tuple, list)) or len(values) != 3
                     or not all(isinstance(v, (float, int)) and not isinstance(v, bool)
                                and math.isfinite(v) for v in values)):
-                return None
+                return reject('dock_reference_pose_invalid', field=key)
         if (reference['map_identity'] != dock_map_identity()
                 or math.dist(reference['home_pose'][:2], (click['x_m'], click['y_m'])) > .001
                 or abs(wrap(reference['home_pose'][2] - click['yaw_rad'])) > .001):
-            return None
+            return reject('dock_reference_identity_mismatch')
         current, *_c, laser, _data = scan_match.laser_points(str(scan_path))
         anchored, *_a, old_laser, _old = scan_match.laser_points(reference['scan_path'])
         minimum_matched_points = 80
@@ -845,18 +850,24 @@ def refine_at_registered_dock(scan_path, click, reference):
                 or math.dist(laser[:2], old_laser[:2]) > .001
                 or abs(wrap(laser[2] - old_laser[2])) > .001
                 or not np.isfinite(current).all() or not np.isfinite(anchored).all()):
-            return None
+            return reject('dock_scan_geometry_or_support_invalid',
+                          current_points=len(current), reference_points=len(anchored),
+                          current_laser=list(laser), reference_laser=list(old_laser))
 
         def transformed(pose):
             c, s = math.cos(pose[2]), math.sin(pose[2])
             return current @ np.array([[c, s], [-s, c]]) + pose[:2]
 
-        def score(_points, x_m, y_m, yaw_rad):
-            moved = transformed((x_m, y_m, yaw_rad))
+        def support_distances(relative_pose):
+            moved = transformed(relative_pose)
             squared = np.sum(
                 (moved[:, None, :] - anchored[None, :, :]) ** 2, axis=2)
             distances = np.sqrt(np.min(squared, axis=1))
             reverse_distances = np.sqrt(np.min(squared, axis=0))
+            return distances, reverse_distances
+
+        def score(_points, x_m, y_m, yaw_rad):
+            distances, reverse_distances = support_distances((x_m, y_m, yaw_rad))
             # Fit the common support required below in both directions. New
             # chairs/occlusions can change most returns without moving the dock;
             # scoring 65% of all current returns forced those outliers into the fit.
@@ -869,11 +880,10 @@ def refine_at_registered_dock(scan_path, click, reference):
             score, current, (0., 0., 0.), xy_half=.15, yaw_half=math.radians(10))
         if (math.hypot(*relative[:2]) >= .145 or abs(relative[2]) >= math.radians(9.5)
                 or best > .02):
-            return None
-        _, distances = score(current, *relative)
+            return reject('dock_match_residual_or_search_boundary',
+                          relative_pose=list(relative), common_mean_m=best)
+        distances, reverse_distances = support_distances(relative)
         inliers = distances < .05
-        reverse_distances = np.sqrt(np.min(np.sum(
-            (anchored[:, None, :] - transformed(relative)[None, :, :]) ** 2, axis=2), axis=1))
         sectors = np.floor((np.arctan2(current[inliers, 1], current[inliers, 0])
                             + math.pi) / (math.pi / 2)).astype(int) % 4
         supported_sectors = sum(np.count_nonzero(sectors == i) >= 8 for i in range(4))
@@ -884,35 +894,92 @@ def refine_at_registered_dock(scan_path, click, reference):
         if (min(np.count_nonzero(inliers), np.count_nonzero(reference_inliers))
                 < minimum_matched_points
                 or supported_sectors < 3):
-            return None
-        # A corridor wall or rotationally symmetric landmark cannot anchor a pose.
+            return reject('dock_match_common_support_insufficient',
+                          current_support=int(np.count_nonzero(inliers)),
+                          reference_support=int(np.count_nonzero(reference_inliers)),
+                          supported_sectors=supported_sectors)
+        # Compare the same support in every uniqueness trial. Reselecting the
+        # nearest 80 points lets a different wall fragment replace the dock and
+        # makes a distinct anchored placement appear ambiguous.
+        fixed_support_mean = max(
+            float(np.mean(distances[inliers])),
+            float(np.mean(reverse_distances[reference_inliers])))
+        uniqueness_trials = []
+        ambiguous_translations = []
+        origin = reference['pose_map']
+        c, s = math.cos(origin[2]), math.sin(origin[2])
+
+        def registered_pose(relative_pose):
+            return [float(origin[0] + c * relative_pose[0] - s * relative_pose[1]),
+                    float(origin[1] + s * relative_pose[0] + c * relative_pose[1]),
+                    float(wrap(origin[2] + relative_pose[2]))]
+
+        def inside_registered_region(candidate):
+            return (math.dist(candidate[:2], (click['x_m'], click['y_m'])) <= .2
+                    and abs(wrap(candidate[2] - click['yaw_rad'])) <= math.radians(15))
+
         for axis, delta in ((0, .06), (1, .06), (2, math.radians(3))):
             for sign in (-1, 1):
                 trial = list(relative)
                 trial[axis] += sign * delta
-                if score(current, *trial)[0] <= best + .003:
-                    return None
-        origin = reference['pose_map']
-        c, s = math.cos(origin[2]), math.sin(origin[2])
-        pose = [float(origin[0] + c * relative[0] - s * relative[1]),
-                float(origin[1] + s * relative[0] + c * relative[1]),
-                float(wrap(origin[2] + relative[2]))]
-        if (math.dist(pose[:2], (click['x_m'], click['y_m'])) > .2
-                or abs(wrap(pose[2] - click['yaw_rad'])) > math.radians(15)):
-            return None
+                forward_trial, reverse_trial = support_distances(trial)
+                trial_mean = max(
+                    float(np.mean(forward_trial[inliers])),
+                    float(np.mean(reverse_trial[reference_inliers])))
+                uniqueness_trials.append({
+                    'axis': axis, 'delta': sign * delta,
+                    'fixed_support_mean_m': trial_mean})
+                if trial_mean <= fixed_support_mean + .003:
+                    # The stated registered dock supplies the location prior.
+                    # A bounded translation along a wall is seed uncertainty,
+                    # not proof of a unique millimetre pose. Keep rotational
+                    # ambiguity and candidates outside that prior as failures.
+                    if axis == 2 or not inside_registered_region(registered_pose(trial)):
+                        return reject('dock_match_ambiguous_fixed_support',
+                                      fixed_support_mean_m=fixed_support_mean,
+                                      trial=uniqueness_trials[-1])
+                    ambiguous_translations.append(uniqueness_trials[-1])
+        pose = registered_pose(relative)
+        if not inside_registered_region(pose):
+            return reject('dock_match_outside_registered_region', matched_pose=pose)
+        seed_covariance = dict(INIT_COVARIANCE)
+        if ambiguous_translations:
+            deltas = [(entry['delta'] if entry['axis'] == 0 else 0.,
+                       entry['delta'] if entry['axis'] == 1 else 0.)
+                      for entry in ambiguous_translations]
+            seed_covariance['covariance_x_m2'] += max(
+                (c * dx - s * dy) ** 2 for dx, dy in deltas)
+            seed_covariance['covariance_y_m2'] += max(
+                (s * dx + c * dy) ** 2 for dx, dy in deltas)
+        basis = ('anchored_dock_scan_registered_prior' if ambiguous_translations
+                 else 'anchored_dock_scan')
+        if diagnostics is not None:
+            diagnostics.update(accepted=True, reason=basis,
+                               current_support=int(np.count_nonzero(inliers)),
+                               reference_support=int(np.count_nonzero(reference_inliers)),
+                               supported_sectors=supported_sectors,
+                               fixed_support_mean_m=fixed_support_mean,
+                               uniqueness_trials=uniqueness_trials,
+                               ambiguous_translation_trials=ambiguous_translations,
+                               seed_covariance=seed_covariance)
         return {'pose': pose, 'mean_dist_m': best, 'inlier_5cm': float(inliers.mean()),
                 'score_basis': 'bidirectional_common_dock_support',
                 'reference_inlier_5cm': float(reference_inliers.mean()),
                 'current_inlier_count': int(np.count_nonzero(inliers)),
                 'reference_inlier_count': int(np.count_nonzero(reference_inliers)),
                 'minimum_matched_points': minimum_matched_points,
-                'global_agrees': False, 'basis': 'anchored_dock_scan',
+                'uniqueness_basis': 'fixed_bidirectional_inlier_support',
+                'fixed_support_mean_m': fixed_support_mean,
+                'uniqueness_trials': uniqueness_trials,
+                'ambiguous_translation_trials': ambiguous_translations,
+                'seed_covariance': seed_covariance,
+                'global_agrees': False, 'basis': basis,
                 'reference': reference, 'relative_pose': [float(v) for v in relative],
                 'click': [click['x_m'], click['y_m'], click['yaw_rad']],
                 'click_offset_m': math.dist(pose[:2], (click['x_m'], click['y_m'])),
                 'click_offset_deg': math.degrees(wrap(pose[2] - click['yaw_rad']))}
-    except (OSError, ValueError, KeyError, TypeError, StopIteration):
-        return None
+    except (OSError, ValueError, KeyError, TypeError, StopIteration) as error:
+        return reject('dock_reference_read_or_calculation_error', detail=str(error))
 
 
 # The cycle runs on the Pi; a PC that loses ssh keeps polling this long before it
@@ -985,13 +1052,19 @@ def cmd_init(args):
     log(f'click ({click["x_m"]:.3f}, {click["y_m"]:.3f}, '
         f'{math.degrees(click["yaw_rad"]):.1f} deg), age {age:.0f} s')
     capture_scan(run_dir / 'scan.json')
+    anchor_diagnostic = {}
     refined = refine_at_registered_dock(
-        run_dir / 'scan.json', click, state.get('dock_scan_reference'))
+        run_dir / 'scan.json', click, state.get('dock_scan_reference'),
+        diagnostics=anchor_diagnostic)
+    (run_dir / 'dock_anchor_diagnostic.json').write_text(
+        json.dumps(anchor_diagnostic, indent=1))
     dock_reference_used = refined is not None
     if refined is None:
+        log('dock anchor: ' + anchor_diagnostic.get('reason', 'not_available'))
         refined = refine_pose(run_dir / 'scan.json', click)
     pose = refined['pose']
-    basis = 'anchored dock scan' if dock_reference_used else 'map scan'
+    basis = ('bounded dock-prior scan' if refined.get('ambiguous_translation_trials')
+             else 'anchored dock scan' if dock_reference_used else 'map scan')
     global_result = ('not evaluated for dock scan' if dock_reference_used else
                      'not required for registered dock'
                      if refined.get('global_search_performed') is False else
@@ -1018,7 +1091,7 @@ def cmd_init(args):
         and abs(refined['click_offset_deg']) <= 15.)
     refined['registered_dock_local_match'] = dock_local_match
     refined['min_inlier_used'] = None if dock_reference_used else min_inlier
-    refined['threshold_basis'] = ('anchored_dock_scan' if dock_reference_used else
+    refined['threshold_basis'] = (refined['basis'] if dock_reference_used else
                                   'registered_dock_local_map' if dock_local_match else 'map_scan')
     (run_dir / 'refine.json').write_text(json.dumps(refined, indent=1))
     if not dock_reference_used and (
@@ -1026,12 +1099,15 @@ def cmd_init(args):
             or not (refined['global_agrees'] or args.local_only or dock_local_match)):
         fail('scan does not match the map near the click; check placement or click again')
     initial = {'frame_id': 'map', 'x_m': pose[0], 'y_m': pose[1], 'yaw_rad': pose[2],
-               **INIT_COVARIANCE,
+               **refined.get('seed_covariance', INIT_COVARIANCE),
                'provenance': {'purpose': ('localization_seed_from_anchored_dock_scan'
                                           if dock_reference_used else
                                           'localization_seed_from_scan_match'),
                               'click': refined['click'], 'refine': 'refine.json',
-                              'covariance_basis': 'seed spread (5 cm, 5 deg), not measured'}}
+                              'covariance_basis': (
+                                  'seed spread plus bounded dock translation ambiguity, not measured'
+                                  if refined.get('ambiguous_translation_trials') else
+                                  'seed spread (5 cm, 5 deg), not measured')}}
     (run_dir / 'initial_pose.yaml').write_text(yaml.safe_dump(initial, sort_keys=False))
     sh(f'rsync -a {shlex.quote(str(run_dir))}/ {HOST}:{shlex.quote(str(pi_run_dir))}/')
     log('activating navigation (no motion) with the scan-matched seed')
