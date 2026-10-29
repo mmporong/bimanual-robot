@@ -331,6 +331,7 @@ class TaughtStationReference:
                 self.reference_rgb_rois,
             )
         self.reference_capture = deepcopy(capture)
+        self._contact_tracking_pose = None
         self.goal_left_offset_m = capture_goal_left_offset(capture.get('goal_binding'))
         # A per-run operator correction, bound to this image frame by the caller.
         self.run_left_offset_m = 0.0
@@ -382,7 +383,17 @@ class TaughtStationReference:
                 'current_camera_intrinsics_identity_mismatch', stamp,
                 self.assumptions)
         if self.contact_reference is not None:
-            error, quality = self.contact_reference.observe(current_rgb)
+            previous = self._contact_tracking_pose
+            prediction = None
+            if previous is not None:
+                dx, dy = actual[0] - previous[0], actual[1] - previous[1]
+                cosine, sine = math.cos(previous[2]), math.sin(previous[2])
+                prediction = (cosine * dx + sine * dy,
+                              -sine * dx + cosine * dy,
+                              _wrapped(actual[2] - previous[2]))
+            error, quality = self.contact_reference.observe(
+                current_rgb, prediction_pose=prediction)
+            self._contact_tracking_pose = actual if error.valid else None
         else:
             estimate = self.prepared_reference.observe(current_rgb, current_info)
             quality = {

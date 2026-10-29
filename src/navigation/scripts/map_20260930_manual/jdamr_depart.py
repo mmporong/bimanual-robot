@@ -746,6 +746,36 @@ def cmd_session_stop(_args):
 
 
 # ---------------------------------------------------------------- init
+def capture_motion_failure(odometry):
+    """Reject sustained motion and an unsettled capture end, not isolated spikes."""
+    if not odometry:
+        return 'scan capture returned no odometry'
+    moving_since_s = None
+    previous_stamp_s = None
+    for sample in odometry:
+        stamp_s, linear_mps, angular_radps = (
+            sample['stamp'], sample['v'], sample['w'])
+        if (not all(math.isfinite(value) for value in (
+                stamp_s, linear_mps, angular_radps))
+                or previous_stamp_s is not None and stamp_s < previous_stamp_s):
+            return 'scan capture odometry is invalid or time-regressed'
+        previous_stamp_s = stamp_s
+        moving = abs(linear_mps) > 0.02 or abs(angular_radps) > 0.02
+        if not moving:
+            moving_since_s = None
+            continue
+        if moving_since_s is None:
+            moving_since_s = stamp_s
+        # Match the existing precision stop confirmation interval. A lone EKF
+        # angular-velocity spike must not invalidate otherwise stationary scans.
+        if stamp_s - moving_since_s >= 0.08:
+            return ('robot is moving during capture '
+                    f'(linear={linear_mps:.3f} m/s, angular={angular_radps:.3f} rad/s)')
+    if moving_since_s is not None:
+        return 'scan capture ended before odometry confirmed stop'
+    return None
+
+
 def capture_scan(path):
     script = (TOOLS / 'capture_scan2.py').read_text()
     result = pi(f'{PI_SOURCE}; python3 - 40', stdin=script, timeout=60)
@@ -756,9 +786,9 @@ def capture_scan(path):
     data = json.loads(line[5:])
     if len(data['scans']) < 20:
         fail(f'only {len(data["scans"])} scans captured')
-    moving = max(max(abs(o['v']), abs(o['w'])) for o in data['odom'])
-    if moving > 0.02:
-        fail(f'robot is moving during capture (odom {moving:.3f})')
+    motion_failure = capture_motion_failure(data['odom'])
+    if motion_failure:
+        fail(motion_failure)
     return data
 
 
@@ -823,9 +853,17 @@ def refine_at_registered_dock(scan_path, click, reference):
 
         def score(_points, x_m, y_m, yaw_rad):
             moved = transformed((x_m, y_m, yaw_rad))
-            distances = np.sqrt(np.min(np.sum(
-                (moved[:, None, :] - anchored[None, :, :]) ** 2, axis=2), axis=1))
-            return float(np.mean(np.sort(distances)[:int(.65 * len(distances))])), distances
+            squared = np.sum(
+                (moved[:, None, :] - anchored[None, :, :]) ** 2, axis=2)
+            distances = np.sqrt(np.min(squared, axis=1))
+            reverse_distances = np.sqrt(np.min(squared, axis=0))
+            # Fit the common support required below in both directions. New
+            # chairs/occlusions can change most returns without moving the dock;
+            # scoring 65% of all current returns forced those outliers into the fit.
+            common_mean = max(
+                np.mean(np.sort(distances)[:minimum_matched_points]),
+                np.mean(np.sort(reverse_distances)[:minimum_matched_points]))
+            return float(common_mean), distances
 
         best, relative = scan_match.search(
             score, current, (0., 0., 0.), xy_half=.15, yaw_half=math.radians(10))
@@ -863,6 +901,7 @@ def refine_at_registered_dock(scan_path, click, reference):
                 or abs(wrap(pose[2] - click['yaw_rad'])) > math.radians(15)):
             return None
         return {'pose': pose, 'mean_dist_m': best, 'inlier_5cm': float(inliers.mean()),
+                'score_basis': 'bidirectional_common_dock_support',
                 'reference_inlier_5cm': float(reference_inliers.mean()),
                 'current_inlier_count': int(np.count_nonzero(inliers)),
                 'reference_inlier_count': int(np.count_nonzero(reference_inliers)),

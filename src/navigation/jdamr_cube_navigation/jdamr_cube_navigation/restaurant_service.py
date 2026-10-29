@@ -135,9 +135,11 @@ TRIM_EXTRA_S = 4.0
 # A direct move's stop is sent this much early on top of the deceleration: one
 # 20 Hz smoother cycle plus odometry delay (reviewed 2026-10-06; not measured).
 DIRECT_STOP_LATENCY_S = 0.05
-# After the stop, wait at most this long for odometry to show the base at rest.
+# Normal settle window; precision moves may use the bounded deceleration grace below.
 DIRECT_SETTLE_S = 0.5
 DIRECT_STOP_CONFIRM_S = 0.08
+DIRECT_STOP_CONFIRM_SAMPLES = 2
+DIRECT_STOP_DECEL_GRACE_S = 0.5
 # Direct moves re-check the fail-closed inputs (fresh scan and odom, no latched
 # emergency stop) at this period and stop on the first failure.
 DIRECT_GUARD_PERIOD_S = 0.1
@@ -1240,17 +1242,31 @@ class ServiceRoute(CorridorRoute):
                 spin_node(self, timeout_sec=0.02)
         stopped_s = time.monotonic()
         stationary_since_s = None
+        stationary_samples = 0
         fresh_motion_samples = 0
         last_motion_stamp_s = None
         stopped_confirmed = not confirm_stopped
+        zero_published_s = 0.0
         stop_contract = getattr(self, 'parking_contract', None) or {
             'stopped_linear_mps': 0.01, 'stopped_angular_radps': 0.01}
         stopped_linear_mps = stop_contract['stopped_linear_mps']
         stopped_angular_radps = stop_contract['stopped_angular_radps']
-        while time.monotonic() - stopped_s < DIRECT_SETTLE_S:
+        # The smoother can still be decelerating at the old 0.5 s boundary.
+        # Keep commanding zero during that bounded grace period.  Confirm the
+        # stop from consecutive fresh odometry samples as well as elapsed time;
+        # otherwise a truly stopped base can fail merely because the first
+        # below-threshold sample arrived at the end of the settle window.
+        settle_deadline_s = (stopped_s + DIRECT_SETTLE_S
+                             + (DIRECT_STOP_DECEL_GRACE_S if confirm_stopped else 0.0))
+        while time.monotonic() < settle_deadline_s:
+            now_s = time.monotonic()
+            if now_s - zero_published_s >= 0.05:
+                publisher.publish(Twist())
+                zero_published_s = now_s
             motion = getattr(self, 'latest_motion', None)
-            if (motion is not None and motion[0] > stopped_s
-                    and motion[0] != last_motion_stamp_s):
+            fresh_sample = (motion is not None and motion[0] > stopped_s
+                            and motion[0] != last_motion_stamp_s)
+            if fresh_sample:
                 last_motion_stamp_s = motion[0]
                 fresh_motion_samples += 1
             if (motion is not None and motion[0] > stopped_s
@@ -1261,11 +1277,15 @@ class ServiceRoute(CorridorRoute):
                     break
                 if stationary_since_s is None:
                     stationary_since_s = motion[0]
-                elif motion[0] - stationary_since_s >= DIRECT_STOP_CONFIRM_S:
+                if fresh_sample:
+                    stationary_samples += 1
+                if (stationary_samples >= DIRECT_STOP_CONFIRM_SAMPLES
+                        or motion[0] - stationary_since_s >= DIRECT_STOP_CONFIRM_S):
                     stopped_confirmed = True
                     break
-            elif motion is not None and motion[0] > stopped_s:
+            elif fresh_sample:
                 stationary_since_s = None
+                stationary_samples = 0
             spin_node(self, timeout_sec=0.02)
         if not stopped_confirmed:
             self._last_direct_motion_failure = 'odometry did not confirm stop'
@@ -1276,6 +1296,7 @@ class ServiceRoute(CorridorRoute):
                                        max(0.0, time.monotonic() - motion[0])),
                       last_odom_linear_mps=(None if motion is None else motion[1]),
                       last_odom_angular_radps=(None if motion is None else motion[2]),
+                      consecutive_stopped_odom_samples=stationary_samples,
                       stopped_linear_mps=stopped_linear_mps,
                       stopped_angular_radps=stopped_angular_radps)
             return None
