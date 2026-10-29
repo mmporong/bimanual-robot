@@ -10,6 +10,13 @@ lerobot-rollout을 작업마다 새로 띄우면 라이브러리·모델 로드,
     호출 place (테이블 정렬 완료): 컵배치 정책 -> 작업 끝 감지 -> 끝 자세 -> 대기
     다음 주문이 오면 다시 pour부터. 끝낼 때 shutdown.
 
+이동 자세 (--stow.pose=place_end): 차가 움직이는 동안 팔이 테이블에 걸리지 않게 팔을 접어 든 자세.
+    호출 stow  (출발 전, 바퀴 정지): 양팔(그리퍼 제외)을 이동 자세로 옮긴다.
+    pour 이 작업 끝 감지로 끝나면: 왼팔은 컵을 쥔 상판 적재 자세 그대로 두고 오른팔만 이동 자세로 옮긴다.
+    place 는 끝 자세(place_end)가 곧 이동 자세다.
+    /status 의 arms: stowed(양팔 이동 자세) / carrying_cup(왼팔 컵 유지, 오른팔 이동 자세) / busy / hold(실패·중단으로
+    그 자리 유지, 사람이 확인) / unknown(시작 직후).
+
 팔·카메라 포트는 한 프로그램만 열 수 있어서, 두 정책이 같은 연결을 나눠 쓴다.
 작업별 부가 기능(시작·끝 자세, 붓기 훅, 작업 끝 자동 감지)은 rollout_handoff.py와 같은 코드를 쓴다.
 
@@ -17,9 +24,10 @@ lerobot-rollout을 작업마다 새로 띄우면 라이브러리·모델 로드,
     HTTP   POST http://127.0.0.1:8770/run/pour      작업이 끝날 때까지 기다렸다 결과 JSON을 돌려준다
            POST http://127.0.0.1:8770/run/place     (?wait=0 이면 바로 202를 돌려주고 /status로 확인)
            GET  http://127.0.0.1:8770/status        준비 상태·현재 작업·최근 결과·소요 시간
+           POST http://127.0.0.1:8770/stow          양팔을 이동 자세로(--stow.pose를 준 경우만, 아니면 404)
            POST http://127.0.0.1:8770/stop          진행 중인 작업 중단(팔은 그 자리에서 유지)
            POST http://127.0.0.1:8770/shutdown      팔 연결을 끊고 종료(토크는 연결 설정대로)
-    명령줄 python tools/rollout/rollout_service.py call pour   (status | stop | shutdown 도 같음)
+    명령줄 python tools/rollout/rollout_service.py call pour   (stow | status | stop | shutdown 도 같음)
 
 실행 (평소 lerobot-rollout의 로봇·카메라 인자를 그대로 붙이고, 정책·task·duration만 작업별로 준다):
     python tools/rollout/rollout_service.py \\
@@ -30,6 +38,7 @@ lerobot-rollout을 작업마다 새로 띄우면 라이브러리·모델 로드,
     pour : --pour.start_pose=pour  --pour.end_pose=final      --pour.auto=pour   --pour.duration=100
     place: --place.start_pose=none --place.end_pose=place_end --place.auto=place --place.duration=50
     붓기 훅은 --pour.hook 으로 켠다(--hook.* 값은 rollout_pour_hook.py와 같다).
+    이동 자세: --stow.pose=place_end (기본 none = 이동 자세 기능 끔)
 """
 
 from __future__ import annotations
@@ -84,6 +93,46 @@ def log(msg: str) -> None:
     print(f"[service {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+# ---------------------------------------------------------------- 이동 자세
+def send_arm_joints(robot, action: dict[str, float]) -> None:
+    """키가 있는 팔에만 명령한다. 오른팔만 옮길 때 컵을 쥔 왼팔에는 아무것도 보내지 않기 위해서다."""
+    for side in ("left", "right"):
+        part = {k.removeprefix(f"{side}_"): v for k, v in action.items() if k.startswith(f"{side}_")}
+        if part:
+            getattr(robot.inner, f"{side}_arm").send_action(part)
+
+
+def move_joints(robot, target: dict[str, float], move_s: float, max_speed: float, tol: float,
+                label: str, fps: int = 50) -> tuple[bool, dict]:
+    """target 관절만 부드럽게 옮긴다. 이미 1도 안이면 움직이지 않는다.
+
+    도착 후 tol도 넘게 벗어난 관절이 있으면 더 밀지 않게 현재 위치를 목표로 고정하고 (False, 벗어난 관절)을 돌려준다.
+    """
+    cur = robot.get_observation()
+    start = {k: float(cur[k]) for k in target}
+    biggest = max(abs(target[k] - start[k]) for k in target)
+    if biggest < 1.0:
+        log(f"{label}: 이미 도착(가장 큰 차이 {biggest:.1f}도)")
+        return True, {}
+    dur = max(move_s, biggest / max_speed)
+    log(f"{label}: {dur:.1f}s 동안 이동 (가장 큰 차이 {biggest:.1f}도)")
+    steps = max(int(dur * fps), 1)
+    for i in range(1, steps + 1):
+        t = i / steps
+        t = t * t * (3 - 2 * t)
+        send_arm_joints(robot, {k: start[k] * (1 - t) + target[k] * t for k in target})
+        time.sleep(1 / fps)
+    time.sleep(0.5)
+    now = robot.get_observation()
+    off = {k: round(float(now[k]) - target[k], 1) for k in target if abs(float(now[k]) - target[k]) > tol}
+    if off:
+        send_arm_joints(robot, {k: float(now[k]) for k in target})
+        log(f"{label}: 도달 실패({tol:.0f}도 초과) {off} - 현재 위치에서 정지")
+        return False, off
+    log(f"{label}: 도착")
+    return True, {}
+
+
 # ---------------------------------------------------------------- 인자
 def parse_service_args(argv: list[str]):
     ap = argparse.ArgumentParser(add_help=False)
@@ -108,6 +157,8 @@ def parse_service_args(argv: list[str]):
     ap.add_argument("--end.tol", dest="tol", type=float, default=10.0)
     ap.add_argument("--end.settle_s", dest="settle_s", type=float, default=1.0)
     ap.add_argument("--end.place_tol", dest="place_tol", type=float, default=20.0)
+    ap.add_argument("--stow.pose", dest="stow_pose", default="none",
+                    help="이동 중 유지할 저장 자세(예: place_end). none이면 이동 자세 기능을 끈다")
     ap.add_argument("--idle_check_s", type=float, default=1.0, help="대기 중 팔·카메라 상태를 읽는 간격")
     ns, rest = ap.parse_known_args(argv)
     hook_params, _, rest = parse_hook_args(rest)
@@ -254,9 +305,11 @@ def warm_up(ctx) -> tuple[float, float]:
 
 # ---------------------------------------------------------------- 실행기
 class Service:
-    def __init__(self, ns, hook_params, contexts: dict, settings: dict):
+    def __init__(self, ns, hook_params, contexts: dict, settings: dict, stow_target: dict | None = None):
         self.ns, self.hook_params = ns, hook_params
         self.contexts, self.settings = contexts, settings
+        self.stow_target = stow_target
+        self.arms = "unknown"
         self.jobs: queue.Queue = queue.Queue()
         self.lock = threading.Lock()
         self.state = "loading"
@@ -277,11 +330,14 @@ class Service:
         with self.lock:
             return {"state": self.state, "current": self.current, "timings": self.timings,
                     "last_result": self.results[-1] if self.results else None,
-                    "recent_results": self.results[-10:], "idle_read_failures": self.idle_failures}
+                    "recent_results": self.results[-10:], "idle_read_failures": self.idle_failures,
+                    "stow_pose": self.ns.stow_pose if self.stow_target else None, "arms": self.arms}
 
     def submit(self, task: str) -> tuple[int, dict, dict | None]:
-        if task not in TASKS:
-            return HTTPStatus.NOT_FOUND, {"error": "unknown_task", "tasks": list(TASKS)}, None
+        if task == "stow" and self.stow_target is None:
+            return HTTPStatus.NOT_FOUND, {"error": "stow_not_configured"}, None
+        if task not in (*TASKS, "stow"):
+            return HTTPStatus.NOT_FOUND, {"error": "unknown_task", "tasks": [*TASKS, "stow"]}, None
         with self.lock:
             if self.state != "ready":
                 return HTTPStatus.CONFLICT, {"error": "not_ready", "state": self.state, "current": self.current}, None
@@ -358,6 +414,8 @@ class Service:
         from lerobot.rollout.strategies.base import BaseStrategy
 
         task = job["task"]
+        if task == "stow":
+            return self._run_stow(job)
         s = self.settings[task]
         base_ctx = self.contexts[task]
         event = Event()
@@ -366,6 +424,7 @@ class Service:
         timing: dict = {}
         with self.lock:
             self.current_event, self.stop_requested = event, False
+            self.arms = "busy"
         t0 = job["submitted"]
         log(f"호출 {task} -> 실행")
         result = {"task": task, "ok": False, "reason": "", "started_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -414,6 +473,27 @@ class Service:
             log(f"{task} 결과: {json.dumps(result, ensure_ascii=False)}")
         return result
 
+    def _run_stow(self, job: dict) -> dict:
+        """양팔(그리퍼 제외)을 이동 자세로 옮긴다. 차가 서 있을 때만 부른다(호출하는 쪽 책임)."""
+        robot = next(iter(self.contexts.values())).hardware.robot_wrapper
+        with self.lock:
+            self.arms = "busy"
+        log("호출 stow -> 양팔 이동 자세")
+        result = {"task": "stow", "ok": False, "reason": "", "started_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        try:
+            ok, off = move_joints(robot, self.stow_target, self.ns.start_move_s, self.ns.start_max_speed,
+                                  self.ns.start_tol, f"이동 자세 '{self.ns.stow_pose}'")
+            result["ok"], result["reason"] = ok, "stowed" if ok else "stow_failed"
+            if off:
+                result["off_joints"] = off
+        except Exception as e:  # noqa: BLE001
+            result["reason"] = f"error: {e}"
+        result["stow_s"] = round(time.perf_counter() - job["submitted"], 2)
+        with self.lock:
+            self.arms = "stowed" if result["ok"] else "hold"
+        log(f"stow 결과: {json.dumps(result, ensure_ascii=False)}")
+        return result
+
     def _finish_pose(self, task: str, s: dict, result: dict) -> None:
         hw = self.contexts[task].hardware
         robot = hw.robot_wrapper.inner
@@ -422,17 +502,45 @@ class Service:
         # 중단·실패면 팔을 더 움직이지 않는다. 작업 끝 감지나 최대 시간 도달이면 rollout_handoff.py처럼 끝 자세로 간다.
         reason = result.get("reason", "")
         hold = s["end_pose"] == "final" or reason not in ("auto_done", "duration", "ended")
+        arms = "hold"
         if hold:
             # 그 자리에서 유지하되 그리퍼가 계속 밀지 않게 한다(다음 호출까지 과부하 방지)
             relax_grippers(robot, self.ns.margin, f"{task} 끝")
             log(f"{task} 끝: 마지막 자세 유지")
-            return
-        if s["end_pose"] == "pour_start":
+            if task == "pour" and reason == "auto_done" and self.stow_target is not None:
+                arms = self._stow_right_after_pour(hw, result)
+        elif s["end_pose"] == "pour_start":
             make_pose_mover(POUR_START, self.ns.move_s)(hw)
         elif s["end_pose"] == "initial":
             make_pose_mover(hw.initial_position, self.ns.move_s, "연결 시 자세", self.ns.start_max_speed)(hw)
         else:
             make_pose_mover(s["end_target"], self.ns.move_s, f"저장 자세 '{s['end_pose']}'", self.ns.start_max_speed)(hw)
+            if s["end_pose"] == self.ns.stow_pose and reason == "auto_done":
+                arms = "stowed" if self._at(hw.robot_wrapper, s["end_target"]) else "hold"
+        with self.lock:
+            self.arms = arms
+
+    def _stow_right_after_pour(self, hw, result: dict) -> str:
+        """작업 끝 감지(오른손이 병을 놓고 왼팔이 상판 적재 자세)로 끝난 pour 뒤에 오른팔만 이동 자세로 옮긴다.
+
+        왼팔은 컵을 쥔 채 상판 적재 자세를 유지한다(컵배치 정책의 시작 자세라 바꾸면 안 된다).
+        최대 시간 도달(duration)은 병을 아직 쥐고 있을 수 있어 옮기지 않는다.
+        """
+        right = {k: v for k, v in self.stow_target.items() if k.startswith("right_")}
+        try:
+            ok, off = move_joints(hw.robot_wrapper, right, self.ns.start_move_s, self.ns.start_max_speed,
+                                  self.ns.start_tol, f"오른팔 이동 자세 '{self.ns.stow_pose}'")
+        except Exception as e:  # noqa: BLE001
+            ok, off = False, {"error": str(e)}
+        result["right_stow"] = "ok" if ok else off
+        return "carrying_cup" if ok else "hold"
+
+    def _at(self, robot, target: dict[str, float]) -> bool:
+        try:
+            now = robot.get_observation()
+            return all(abs(float(now[k]) - v) <= self.ns.start_tol for k, v in target.items())
+        except Exception:  # noqa: BLE001
+            return False
 
     def close(self) -> None:
         robot = next(iter(self.contexts.values())).hardware.robot_wrapper.inner
@@ -473,6 +581,12 @@ def handler_factory(service: Service):
                     job["done"].wait()
                     code, body = HTTPStatus.OK, job["result"]
                 self._json(code, body)
+            elif url.path == "/stow":
+                code, body, job = service.submit("stow")
+                if job is not None:
+                    job["done"].wait()
+                    code, body = HTTPStatus.OK, job["result"]
+                self._json(code, body)
             elif url.path == "/stop":
                 self._json(HTTPStatus.OK, service.stop())
             elif url.path == "/shutdown":
@@ -485,14 +599,15 @@ def handler_factory(service: Service):
 
 # ---------------------------------------------------------------- 명령줄 호출
 def client(argv: list[str]) -> None:
-    ap = argparse.ArgumentParser(prog="rollout_service.py call|status|stop|shutdown")
-    ap.add_argument("command", choices=("call", "status", "stop", "shutdown"))
+    ap = argparse.ArgumentParser(prog="rollout_service.py call|stow|status|stop|shutdown")
+    ap.add_argument("command", choices=("call", "stow", "status", "stop", "shutdown"))
     ap.add_argument("task", nargs="?", choices=TASKS)
     ap.add_argument("--url", default=DEFAULT_URL)
     a = ap.parse_args(argv)
     if a.command == "call" and not a.task:
         sys.exit("call 다음에 pour 또는 place 를 준다.")
-    path = {"call": f"/run/{a.task}", "status": "/status", "stop": "/stop", "shutdown": "/shutdown"}[a.command]
+    path = {"call": f"/run/{a.task}", "stow": "/stow", "status": "/status", "stop": "/stop",
+            "shutdown": "/shutdown"}[a.command]
     req = urllib.request.Request(a.url + path, method="GET" if a.command == "status" else "POST", data=None)
     try:
         with urllib.request.urlopen(req, timeout=None) as r:
@@ -504,13 +619,17 @@ def client(argv: list[str]) -> None:
 
 # ---------------------------------------------------------------- 시작
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] in ("call", "status", "stop", "shutdown"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("call", "stow", "status", "stop", "shutdown"):
         client(sys.argv[1:])
         return
     ns, hook_params, rest = parse_service_args(sys.argv[1:])
     t_start = time.perf_counter()
     rest = fill_camera_indices(rest)
     settings = {t: task_settings(ns, t) for t in TASKS}
+    stow_target = None
+    if ns.stow_pose != "none":
+        path, stow_target = load_start_pose(ns.stow_pose, False)
+        log(f"이동 자세 = {path} ({len(stow_target)}관절, 그리퍼 제외)")
 
     if not ns.skip_pre:
         ports = {s: p for s, p in (("left", arg_value(rest, "--robot.left_arm_config.port")),
@@ -536,7 +655,7 @@ def main() -> None:
     t = time.perf_counter()
     contexts = {"pour": build_rollout_context(cfgs["pour"], Event())}
     timings["pour_load_connect_s"] = round(time.perf_counter() - t, 1)
-    service = Service(ns, hook_params, contexts, settings)
+    service = Service(ns, hook_params, contexts, settings, stow_target)
     server = ThreadingHTTPServer((host, int(port)), handler_factory(service))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log(f"호출 주소 http://{host}:{port} (준비 중에는 /run 이 409 not_ready)")

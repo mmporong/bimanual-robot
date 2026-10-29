@@ -193,6 +193,7 @@ function render() {
   const manip = eb.manipulation_service_state ? {
     state: eb.manipulation_service_state, current: eb.manipulation_service_current || eb.running_policy,
     timings: eb.manipulation_service_timings || {}, last_result: eb.manipulation_last_result,
+    arms: eb.arms, drive: eb.drive,
   } : sim ? simManip() : null;
   renderManip(manip, sim && !eb.manipulation_service_state);
 
@@ -212,7 +213,10 @@ function render() {
   $("align-banner").hidden = !waiting;
   if (waiting) {
     const next = waiting.station === "kitchen" ? "pour 정책" : "place 정책";
-    $("align-text").textContent = `ALIGN GATE · ${waiting.station} 정렬 완료 신호 대기 중. 차가 멈추고 정렬됐는지 확인한 뒤 누르면 ${next}을 실행합니다.`;
+    const where = waiting.station === "kitchen" ? "주방(급수대)" : "테이블";
+    const armsOk = eb.drive ? eb.drive.arms_ready : true;
+    const arms = eb.arms ? ` · 팔 ${ARMS_KO[eb.arms] || eb.arms}` : "";
+    $("align-text").textContent = `ALIGN GATE · ${armsOk ? `차를 ${where}로 이동·정렬하세요` : "⚠ 팔이 이동 자세가 아닙니다. 차를 움직이지 마세요"}${arms}. 차가 멈추고 정렬됐는지 확인한 뒤 누르면 ${next}을 실행합니다.`;
     $("align-confirm").textContent = `정렬 완료 → ${next} 실행`;
     $("align-confirm").dataset.station = waiting.station;
   }
@@ -320,6 +324,9 @@ function renderNav(nav, simulated) {
   $("graph-tag").className = `tag ${simulated ? "warn" : "ok"}`;
 }
 
+// rollout_service /status 의 arms 값
+const ARMS_KO = { stowed: "이동 자세", carrying_cup: "컵 유지·오른팔 접힘", busy: "동작 중", hold: "그 자리 유지(확인 필요)", unknown: "미확인" };
+
 function renderManip(m, simulated) {
   const tag = $("manip-tag");
   if (!m) {
@@ -340,6 +347,8 @@ function renderManip(m, simulated) {
   const t = m.timings || {};
   const kv = [
     ["policy", "SmolVLA (chassis 80)"], ["pour ckpt", "016000"], ["place ckpt", "007000"],
+    ["arms", m.arms ? (ARMS_KO[m.arms] || m.arms) : "-"],
+    ["drive next", m.drive ? `${m.drive.next || "-"}${m.drive.arms_ready ? "" : " (팔 대기)"}` : "-"],
     ["ready total", t.ready_total_s != null ? `${t.ready_total_s} s` : "-"],
     ["pour infer", t.pour_infer_s != null ? `${Math.round(t.pour_infer_s * 1000)} ms` : "-"],
     ["place infer", t.place_infer_s != null ? `${Math.round(t.place_infer_s * 1000)} ms` : "-"],
