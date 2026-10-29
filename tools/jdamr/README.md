@@ -172,7 +172,7 @@ Windows 주문 서버(8765)에 상태 조회·정렬 완료 알림을 보낸다.
 
 ```bash
 cd "$HOME/bimanual-robot"
-python3 tools/jdamr/water_service_api.py serve --order-url http://192.168.0.15:8765
+python3 tools/jdamr/water_service_api.py serve --order-url http://192.168.0.175:8765
 ```
 
 출발 요청에서 진행 중인 테이블1 주문이 있으면 그 주문에 연결한다. 없으면 테이블1

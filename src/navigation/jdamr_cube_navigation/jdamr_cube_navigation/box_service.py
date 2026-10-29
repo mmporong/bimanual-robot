@@ -257,6 +257,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.station_reference_result_received_s = None
         self.station_reference_goal = None
         self.station_reference_control_goal = None
+        self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
         self._station_reference_goal_samples = deque(maxlen=5)
         self.station_reference_image_subscription = None
@@ -528,6 +529,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.station_reference_result_received_s = None
         self.station_reference_goal = None
         self.station_reference_control_goal = None
+        self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
         self._station_reference_goal_samples = deque(maxlen=5)
         self.station_reference = reference
@@ -625,10 +627,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         """Hold the reference anchor while steering on recent visual feedback.
 
         Both control and arrival use the same filtered goal in raw odom. The
-        frozen anchor remains diagnostic; it cannot disable later RGB-D input.
+        frozen anchor remains diagnostic until the aligned terminal band.
+        In that band the accepted goal is held while RGB-D remains diagnostic.
         A carried destination is never fresh obstacle or sensor evidence.
         """
         reference = self._fresh_station_reference()
+        terminal_goal = getattr(self, '_station_terminal_goal', None)
+        if terminal_goal is not None:
+            # Keep the accepted terminal destination; fresh images still
+            # report diagnostics, but cannot move it during the last cm.
+            return terminal_goal, reference
         mode = getattr(self, 'station_reference_mode', None)
         frozen = getattr(self, 'station_reference_goal_frozen', False)
         anchor = getattr(self, 'station_reference_goal', None)
@@ -731,6 +739,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return None
         self.station_reference_goal = None
         self.station_reference_control_goal = None
+        self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
         return {
             'basis': 'operator_correction_bound_to_rgbd_reference',
@@ -1903,8 +1912,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if route.get('frame_id') != 'map':
             raise ValueError('observation route must use map')
         self.table_id = table_id
+        self._station_terminal_goal = None
         self.station_reference_goal = None
         self.station_reference_control_goal = None
+        self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
         self._station_face_heading_odom_rad = None
         if reapproach_m is not None:
@@ -2766,8 +2777,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             goal, reference = self._station_goal_reference(freeze=True)
             if goal is not None:
                 return tuple(goal['goal_odom']), reference
-            if getattr(self, 'station_reference_mode', None) == 'rgbd':
-                return None, reference
+            # Before the taught objects become matchable, steer toward the
+            # registered lateral position using this approach's map/odom
+            # anchor. Never silently approach without a lateral destination.
+            # This fallback is not RGB-D arrival evidence.
             taught = self.station_reference_taught_map_pose
             return to_odom(*taught), reference
 
@@ -2995,6 +3008,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 state['basis'] = 'aligned_face_frozen_for_precision_band'
                 if getattr(self, 'station_reference_goal', None) is not None:
                     self.station_reference_goal_frozen = True
+                    if (getattr(self, '_station_terminal_goal', None) is None
+                            and station_observation
+                            and station_observation.get('valid') is True
+                            and goal_odom is not None):
+                        goal, _ = self._station_goal_reference()
+                        if goal is not None:
+                            self._station_terminal_goal = dict(goal, goal_odom=list(goal_odom))
+                            self.emit('table_station_terminal_goal_held',
+                                      goal_odom=list(goal_odom), gap_m=gap,
+                                      lateral_error_m=lateral_error)
             travelled = math.hypot(actual[0] - state['start'][0],
                                    actual[1] - state['start'][1])
             if travelled + max(0.0, remaining) > LIVE_APPROACH_MAX_M:
