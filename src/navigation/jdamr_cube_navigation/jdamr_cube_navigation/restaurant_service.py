@@ -187,6 +187,12 @@ DEFAULT_TRANSIT = 'navfn-rpp'
 PARKED_CONFIRM_MAX_S = 5.0
 PARKED_HOLD_MAX_MOVE_M = 0.02
 PARKED_HOLD_MAX_TURN_RAD = math.radians(2.0)
+# FollowPath TF_ERROR: RPP could not get map->odom at the robot pose stamp within
+# its transform_tolerance. Nav2 Jazzy aborts on it at once (failure_tolerance covers
+# only NoValidControl) and WouldAControllerRecoveryHelp does not retry it, so the
+# transit tree ends (table_01_20261029_191747: map->odom 0.1115 s short).
+NAV2_CONTROLLER_TF_ERROR = 102
+NAV2_TF_ERROR_REASON = 'nav2 transform error'
 
 
 def _ahead(pose, distance_m):
@@ -813,6 +819,10 @@ class ServiceRoute(CorridorRoute):
         if not self.stop_requested and not final and error_code in PATH_BLOCKED_NAV2_CODES:
             self._retry_blocked_reason = f'path blocked: nav2 error {error_code}'
             self._retry_blocked_code = error_code
+        elif not self.stop_requested and error_code == NAV2_CONTROLLER_TF_ERROR:
+            # The existing input-gap path: wait for fresh, stopped inputs, then
+            # resend the current waypoint once; a second 102 still ends the leg.
+            self._retry_guard_reason = f'{NAV2_TF_ERROR_REASON} {error_code}'
 
     def _path_open(self):
         """Plan once from the current pose to the waypoints not yet reached."""
@@ -1214,6 +1224,9 @@ class ServiceRoute(CorridorRoute):
             self.emit('direct_motion_ready', setup_s=setup_s,
                       motion_budget_s=max(0.0, deadline_s - time.monotonic()))
         published_s = guarded_s = 0.0
+        # The velocity smoother ramps to zero after velocity_timeout (0.5 s) without
+        # a command, so a gap that long is a stop no event reports.
+        max_publish_gap_s = 0.0
         try:
             while not done(value) and not self.stop_requested and time.monotonic() < deadline_s:
                 now_s = time.monotonic()
@@ -1224,9 +1237,11 @@ class ServiceRoute(CorridorRoute):
                                or (watch() if watch else None))
                     if failure:
                         self._last_direct_motion_failure = failure
-                        self.emit(event, reason=failure)
+                        self.emit(event, reason=failure, max_publish_gap_s=max_publish_gap_s)
                         break
                 if now_s - published_s >= 0.05:
+                    if published_s:
+                        max_publish_gap_s = max(max_publish_gap_s, now_s - published_s)
                     publisher.publish(command)
                     published_s = time.monotonic()
                 # Drain inputs over this control interval before running the
@@ -1243,7 +1258,8 @@ class ServiceRoute(CorridorRoute):
                 self._last_direct_motion_failure = 'operator_stop'
             elif time.monotonic() >= deadline_s and not done(value):
                 self._last_direct_motion_failure = 'direct_motion_timeout'
-                self.emit(event, reason='direct_motion_timeout')
+                self.emit(event, reason='direct_motion_timeout',
+                          max_publish_gap_s=max_publish_gap_s)
         finally:
             for _repeat in range(5):
                 publisher.publish(Twist())
@@ -1305,7 +1321,8 @@ class ServiceRoute(CorridorRoute):
                       last_odom_linear_mps=(None if motion is None else motion[1]),
                       last_odom_angular_radps=(None if motion is None else motion[2]),
                       stopped_linear_mps=stopped_linear_mps,
-                      stopped_angular_radps=stopped_angular_radps)
+                      stopped_angular_radps=stopped_angular_radps,
+                      max_publish_gap_s=max_publish_gap_s)
             return None
         return measure()
 
@@ -1816,8 +1833,35 @@ class ServiceRoute(CorridorRoute):
     @staticmethod
     def _input_gap_recoverable(reason):
         return (CorridorRoute._input_gap_recoverable(reason)
-                or (isinstance(reason, str) and reason.startswith(
-                    'stationary teaching unavailable: need fresh TF, odometry and localization')))
+                or (isinstance(reason, str) and reason.startswith((
+                    'stationary teaching unavailable: need fresh TF, odometry and localization',
+                    NAV2_TF_ERROR_REASON))))
+
+    def _wait_for_input_recovery(self, reason, timeout_s=8.0):
+        """After a controller TF error, also wait until AMCL publishes map->odom again."""
+        started_s = time.monotonic()
+        if not super()._wait_for_input_recovery(reason, timeout_s):
+            return False
+        tf_buffer = getattr(self, 'parking_tf', None)
+        if (tf_buffer is None or not isinstance(reason, str)
+                or not reason.startswith(NAV2_TF_ERROR_REASON)):
+            return True
+        # AMCL stamps map->odom at its scan time plus transform_tolerance, so a
+        # stamp ahead of the ROS time at this point is a publish newer than the
+        # stall. Resending into the same stall would only repeat the 102.
+        required_stamp_s = self.get_clock().now().nanoseconds * 1e-9
+        while not self.stop_requested and time.monotonic() - started_s < timeout_s:
+            try:
+                stamp = tf_buffer.lookup_transform(
+                    'odom', 'map', rclpy.time.Time()).header.stamp
+                if stamp.sec + stamp.nanosec * 1e-9 >= required_stamp_s:
+                    return True
+            except TransformException:
+                pass
+            spin_node(self, timeout_sec=0.05)
+        if not self.stop_requested:
+            self.emit('nav2_transform_recovery_timeout', reason=reason, timeout_s=timeout_s)
+        return False
 
     def execute(self, *, final_parking=True, alignment=False, staging=False, face=False):
         """Bound transit and parking actions and retain their terminal result."""

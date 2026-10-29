@@ -16,6 +16,7 @@ from jdamr_cube_navigation.box_top_detection import (
     DetectionStability,
 )
 from jdamr_cube_navigation.camera_info_history import CameraInfoHistory, stamp_nanoseconds
+from jdamr_cube_navigation.dedicated_tf import DedicatedTfListener
 from jdamr_cube_navigation.depth_obstacle_core import _depth_view
 from jdamr_cube_navigation.depth_obstacle_filter import camera_intrinsics, transform_matrix
 from jdamr_cube_navigation.observer_camera_mount import load_observer_camera_mount
@@ -41,7 +42,7 @@ from rclpy.qos import (
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
-from tf2_ros import Buffer, TransformException, TransformListener
+from tf2_ros import Buffer, TransformException
 
 
 LATEST_SENSOR_QOS = QoSProfile(
@@ -177,7 +178,10 @@ class DepthBoxParkingNode(Node):
                 'pointcloud request requires a selected region and calibration identity')
         if self._table_components:
             self._table_tf = Buffer()
-            self._table_tf_listener = TransformListener(self._table_tf, self)
+            # The 50 ms stamped lookups in _on_depth sleep-poll; on this node's own
+            # single-threaded spin no /tf callback could run meanwhile.
+            self._table_tf_listener = DedicatedTfListener(
+                self._table_tf, self, 'jdamr_depth_box_parking_tf')
         if self._table_tracking:
             self._table_tracker = TableSurfaceTracker(TrackConfig(
                 required_frames=int(self.get_parameter('stable_frames').value)))
@@ -224,6 +228,14 @@ class DepthBoxParkingNode(Node):
         self.get_logger().info(
             'depth box parking perception started; '
             'velocity output is disabled')
+
+    def destroy_node(self):
+        """Stop the dedicated TF thread before destroying this node."""
+        listener = getattr(self, '_table_tf_listener', None)
+        if listener is not None:
+            self._table_tf_listener = None
+            listener.shutdown()
+        return super().destroy_node()
 
     def _on_parameters(self, parameters) -> SetParametersResult:
         """Apply a bounded depth window or a complete camera/surface update."""

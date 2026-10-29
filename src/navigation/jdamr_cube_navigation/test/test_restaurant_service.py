@@ -2952,8 +2952,13 @@ def test_zero_turn_drive_commands_no_rotation_and_stops_at_the_distance(monkeypa
     travelled = node._drive_zero_turn(0.10)
     assert 0.10 - 1e-9 <= travelled <= 0.12 + 1e-9    # stops on the first odom step past it
     assert all(w == 0.0 for _v, w in published)
-    assert {v for v, _w in published[:-5]} == {restaurant_service.STRAIGHT_ESCAPE_SPEED_MPS}
-    assert published[-5:] == [(0.0, 0.0)] * 5
+    # Motion commands, then only zero commands: the stop burst and the settle
+    # window that keeps commanding zero while the smoother decelerates.
+    first_stop = published.index((0.0, 0.0))
+    assert {v for v, _w in published[:first_stop]} == {
+        restaurant_service.STRAIGHT_ESCAPE_SPEED_MPS}
+    assert published[first_stop:] == [(0.0, 0.0)] * (len(published) - first_stop)
+    assert len(published) - first_stop >= 5
 
 
 @pytest.mark.parametrize('distance_m, expected_speed, approach_time_s', [
@@ -3802,8 +3807,10 @@ def test_in_place_trim_commands_no_translation_and_stops_early_by_the_overshoot(
     early = restaurant_service.TRIM_STOP_RAD
     assert math.radians(2.0) - early <= turned <= math.radians(2.0) - early + 0.003
     assert all(v == 0.0 for v, _w in published)
-    assert {w for _v, w in published[:-5]} == {restaurant_service.TRIM_ANGULAR_RADPS}
-    assert published[-5:] == [(0.0, 0.0)] * 5
+    first_stop = published.index((0.0, 0.0))
+    assert {w for _v, w in published[:first_stop]} == {restaurant_service.TRIM_ANGULAR_RADPS}
+    assert published[first_stop:] == [(0.0, 0.0)] * (len(published) - first_stop)
+    assert len(published) - first_stop >= 5
 
 
 @pytest.mark.parametrize('points, poses, hit', [

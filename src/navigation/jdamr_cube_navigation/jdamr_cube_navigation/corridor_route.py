@@ -14,6 +14,7 @@ import time
 from action_msgs.msg import GoalStatus
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
+from jdamr_cube_navigation.dedicated_tf import DedicatedTfListener
 from jdamr_cube_navigation.mobile_manipulator_protection import (
     evaluate_travel_pose, load_mobile_manipulator_protection,
 )
@@ -83,6 +84,14 @@ ODOM_TRAIL_POINTS = 200
 ODOM_TRAIL_RESET_M = 0.25
 # Measured reverse speed above which the trail unwinds instead of growing.
 ODOM_TRAIL_REVERSE_MPS = 0.01
+# A yaw rate above the stopped limit with no translation is motion once it lasts
+# this long; one gyro sample is not (2026-10-29 dock init: a single 0.021 rad/s
+# sample stopped the capture twice, 3 of 105 stationary samples exceeded 0.02).
+# Translation, non-finite values and nonzero commands still count at once, and
+# so does a rate above this multiple of the stopped limit (bounds what is missed
+# to about 0.2 deg within the confirm window).
+PARKING_TURN_CONFIRM_S = 0.08
+PARKING_TURN_IMMEDIATE_FACTOR = 2.0
 
 
 def _expanded_path(value, parent=None):
@@ -398,8 +407,7 @@ class CorridorRoute(Node):
         self.parking_observation_diagnostics = None
         if parking_contract is not None:
             validate_parking_route(config, parking_contract)
-            self.parking_tf = Buffer()
-            self.parking_tf_listener = TransformListener(self.parking_tf, self)
+            self._start_parking_tf()
             self.create_subscription(
                 Twist, '/cmd_vel', self._parking_command_callback,
                 qos_profile_sensor_data)
@@ -416,7 +424,25 @@ class CorridorRoute(Node):
             self.events_executor = None
             executor.remove_node(self)
             executor.shutdown()
+        self._stop_parking_tf()
         return super().destroy_node()
+
+    def _start_parking_tf(self):
+        """Receive TF on a dedicated node and daemon thread.
+
+        Stamped lookups (depth image, LiDAR scan) failed while /tf sat queued
+        behind a control tick of this route node.
+        """
+        self.parking_tf = Buffer()
+        self.parking_tf_listener = DedicatedTfListener(
+            self.parking_tf, self, 'jdamr_corridor_route_tf')
+
+    def _stop_parking_tf(self):
+        listener = getattr(self, 'parking_tf_listener', None)
+        if listener is None:
+            return
+        self.parking_tf_listener = None
+        listener.shutdown()
 
     def _route_event(self, event, route_index, handle, **fields):
         """Emit one stable JSON line for goal lifecycle correlation."""
@@ -518,10 +544,18 @@ class CorridorRoute(Node):
             linear_mps, angular_radps = self.parking_odom[2:]
             if (not math.isfinite(linear_mps) or
                     not math.isfinite(angular_radps) or
-                    linear_mps > self.parking_contract['stopped_linear_mps'] or
-                    abs(angular_radps) > self.parking_contract[
-                        'stopped_angular_radps']):
+                    linear_mps > self.parking_contract['stopped_linear_mps']):
                 self.parking_motion_revision += 1
+            elif abs(angular_radps) > self.parking_contract['stopped_angular_radps']:
+                turning_since_s = getattr(self, '_parking_turn_since_s', None)
+                if turning_since_s is None:
+                    self._parking_turn_since_s = turning_since_s = self.samples['odom']
+                if (self.samples['odom'] - turning_since_s >= PARKING_TURN_CONFIRM_S
+                        or abs(angular_radps) > PARKING_TURN_IMMEDIATE_FACTOR
+                        * self.parking_contract['stopped_angular_radps']):
+                    self.parking_motion_revision += 1
+            else:
+                self._parking_turn_since_s = None
 
     def _parking_command_callback(self, message):
         self.parking_command = (
@@ -1084,8 +1118,8 @@ class CorridorRoute(Node):
                   'physical_accuracy': 'NOT_MEASURED'}
         while time.monotonic() < deadline_s and not self.stop_requested:
             spin_node(self, timeout_sec=0.05)
-            # The route node also observes scan, TF, battery and AMCL. Drain
-            # their ready callbacks so high-rate TF/odom cannot leave the
+            # The route node also observes scan, battery and AMCL (TF has its own thread). Drain
+            # their ready callbacks so high-rate odometry cannot leave the
             # post-goal witness evaluating old queue entries.
             for _ in range(8):
                 spin_node(self, timeout_sec=0.0)
