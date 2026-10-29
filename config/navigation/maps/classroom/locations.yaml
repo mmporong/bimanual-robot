@@ -65,7 +65,9 @@ tables:
     lateral_precision_status: NOT_VALIDATED
     target_gap_status: NOT_VALIDATED
     source: operator_taught_physical_pose_global_lidar_match_then_current_map_to_base_link_tf
-    lateral_reference: operator_taught_map_pose_without_visual_landmark
+    reference_mode: surface_only
+    lateral_control_enabled: false
+    lateral_reference: disabled_operator_requested_face_alignment_only
     registration_status: CONFIRMED_BY_OPERATOR
     object_reference_role: none_featureless_table
     teaching:

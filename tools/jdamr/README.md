@@ -107,9 +107,11 @@ IMU는 회전 추정을 보완하며, 면을 따라 움직인 실제 좌우 위�
 반복 움직임·사용자 정지·센서 소실을 무시하지 않는다.
 정답 참조에 연결된 재접근 요청은 근접 책상 경계 검출을 기다리지 않고 기존 보호 직선 제어로
 요청한 거리만큼 후진한 뒤 새 깊이 면을 관측한다. 충돌 감시와 입력·명령 timeout은 유지한다.
-목표 연결이 없는 기존 설정의 `rgbd_auxiliary` 모드는 진단용이며, 1번 테이블의
-`map_pose_only`는 영상 기준을 사용하지 않는다. 목표는 차체 앞끝 1 cm와 좌우 ±5 mm이고,
-영상 제어 적용 뒤 실제 반복 정확도는 아직 확인되지 않았다. `NOT_VALIDATED` 상태는 유지한다.
+목표 연결이 없는 기존 설정의 `rgbd_auxiliary` 모드는 진단용이다. 표식 없는 테이블은
+`map_pose_only`에서 등록 좌표로 좌우를 맞추거나, `surface_only`에서 좌우 미세보정 없이
+관측 면의 방향과 앞 간격만 맞춘다. 현재 테이블1은 사용자 요청으로 `surface_only`를
+사용하고 컵·병 참조를 요구하지 않는다. 급수대는 앞끝 1 cm·좌우 ±5 mm 목표를 유지한다.
+최종 내부 추정과 사용자 수용은 외부 실측 정확도와 구분하며 `NOT_VALIDATED`를 유지한다.
 등록된 도크 방향이 `reverse`이면
 고정 도크 앞쪽에서 후진 진입하며, 테이블 주차 목표로 도크 위치를 다시 등록하지 않는다.
 
@@ -143,3 +145,48 @@ odometry로 남은 거리를 계산한다. 이 경우 최종 값은 새 깊이 �
 
 `state.json`, `rviz_initialpose.json`, 실행 로그, bag과 원시 스캔은 저장소 번들에 포함하지
 않는다. 초기화와 배포는 기존 상태 및 목적지 등록부를 자동으로 덮어쓰지 않는다.
+
+## 웹 버튼과 대화 명령의 공통 실행 API
+
+기존 웹의 백엔드 또는 이 PC의 CLI가 `water_service_api.py`를 호출한다. 이 PC가 Pi에는
+기존 SSH 주행 요청을, Windows에는 기존 상주 추론 서비스의 HTTP 요청을 보낸다.
+Windows 추론 명령을 Pi로 중계하지 않는다.
+
+```bash
+cd "$HOME/bimanual-robot"
+# 주행 전용: 도크 → 급수대 → 테이블1 → 도크
+python3 tools/jdamr/water_service_api.py serve --navigation-only
+
+# Windows 서비스와 RGB-D 연결이 준비된 뒤 선택하는 추론 포함 모드
+python3 tools/jdamr/water_service_api.py serve --inference-url http://WINDOWS_IP:8770
+```
+
+추론 포함 모드는 급수대 정밀주차 → Windows `POST /run/pour` → `ok=true` 확인 →
+급수대 이탈·테이블1 주차·도크 복귀 순서다. Windows의 모델·카메라는 출발 전에 준비한다.
+추론 실패·전송 결과 불명·사용자 정지 뒤에는 다음 주행 단계를 자동 시작하지 않는다.
+`--navigation-only`를 명시한 경우에만 Windows 없이 기존 전체 경로를 한 요청으로 실행한다.
+
+서버 기본 주소는 `http://127.0.0.1:8771`이다. 외부 웹 백엔드에서 접근할 때는 해당 PC의
+주소로 접근할 수 있도록 `--host`를 지정한다. API는 Bearer 토큰을 사용하며 기본 토큰
+파일은 `$HOME/.local/state/bimanual-robot/water-service/api-token`이다. 토큰을 저장소나
+브라우저 공개 코드에 넣지 않는다. 웹 백엔드가 이 토큰을 읽어 요청 헤더에 넣는다.
+
+| 요청 | 동작 |
+| --- | --- |
+| `POST /api/mission/start` | JSON `{"request_id":"고유한-요청-ID"}`로 시작 |
+| `GET /api/mission/status` | 모드·현재 단계·실행 결과 조회 |
+| `POST /api/mission/stop` | 진행 중인 단계 중지, 다음 단계 실행 취소 |
+
+같은 `request_id`는 다시 실행하지 않는다. 이 PC의 대화 실행도 같은 API를 사용한다.
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/jdamr/water_service_api.py status
+# 사용자가 출발을 요청한 경우
+python3 tools/jdamr/water_service_api.py start --request-id operator-request-id
+python3 tools/jdamr/water_service_api.py stop
+```
+
+Windows에 카메라 USB를 연결하면 RGB·깊이·CameraInfo를 Pi로 보내는 별도 영상 연결이
+필요하다. 이 API는 영상 송신기를 포함하지 않는다. 현재의 Pi USB 카메라 주행 준비와
+Windows 카메라를 사용하는 추론 포함 준비는 구분한다.

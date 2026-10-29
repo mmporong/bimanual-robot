@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-29 | 공통 실행 API·테이블1 면 주차 설정과 출발 준비
+
+- 사용자 최종 시나리오는 도크 → 급수대 → 테이블1 → 도크다. 테이블1에는 컵·병이 없으며 교시 좌표를 유지하고 `surface_only`로 설정했다. 좌우 미세보정과 RGB-D 표식 참조는 사용하지 않고 깊이 면 정렬·차체 앞끝 1 cm 접근을 수행한다. 급수대는 기존 RGB-D 목표를 유지한다. 현재 지도 자산과 변경 모듈 2개의 Pi SHA 일치를 확인하고 대기 실행기를 재시작했다(PID 134237).
+- 기존 도크 `init`을 완료했다. 등록 기준 스캔 정합 지지율은 0.61이고, AMCL과 스캔 정합의 차이는 약 2 mm·0.6°였다. 기존 도크 좌표는 유지했으며 controller 응답과 활성화를 확인했다. 새 이동 요청은 제출하지 않았다.
+- Pi 정지 입력에서 RGB 640×480·깊이 320×240 수신 시각 차이는 각각 약 44 ms·17 ms였고 라이다 929개 빔과 odom을 수신했다. 배터리는 12.088 V, odom은 -0.000819 m/s·0.001184 rad/s로 기존 정지 범위다. 근거는 PC `$HOME/.local/state/bimanual-robot/table-one-surface-only-20261029/camera_readiness.json`, 배포 근거는 같은 폴더의 `deployment.json`이다. 이번 수정 이후 전체 왕복 실차 확인은 하지 않았다.
+- `tools/jdamr/water_service.py`와 `water_service_api.py`에 기존 웹 백엔드와 이 페인이 공통으로 사용하는 시작·상태·정지 API를 구현했다. 이 PC가 Pi에 기존 SSH 실행을 요청하고 Windows에는 HTTP 추론을 요청한다. 앞 절의 PC 중계 역할 설명은 이 사용자 후속 결정으로 대체한다. 동일 요청 ID 중복 실행을 막고, 추론 포함 모드는 급수대 주차 성공 → Windows `/run/pour`의 `ok=true` → 테이블1·도크 순서로 진행한다. 추론 실패·사용자 정지 뒤 다음 단계를 자동 시작하지 않는다.
+- 현재 PC API는 `--navigation-only`·`127.0.0.1:8771`·`idle`로 실행 중이며, 다음 출발은 기존 `go table_01 --dwell-s 0` 한 요청으로 전체 주행을 수행한다. API 상태 조회와 변경 Python 4파일 문법·diff를 확인했다. 별도 pytest·리뷰·팔 동작·주행은 수행하지 않았다. Windows 서비스 주소·모델·실제 연결은 미확인이고 Windows → Pi RGB·깊이·CameraInfo 전송도 미구현이므로 추론 포함 준비 완료로 보지 않는다. 카메라 USB는 현재 Pi에 연결돼 있다.
+- 다음 출발을 위해 PC `jdamr-water-service-api.service`(PID 3074499), Pi `jdamr-box-executor.service`(PID 134237), `jdamr-box-rgbd.service`(PID 134916), `jdamr-box-observer.service`(PID 134917)를 유지한다. 종료는 PC `systemctl --user stop jdamr-water-service-api.service`, Pi `sudo systemctl stop jdamr-box-executor.service jdamr-box-rgbd.service jdamr-box-observer.service`다. 변경은 목적 브랜치에 로컬 커밋하며 push·main 병합은 하지 않는다.
+
 ## 2026-10-29 | 도크 출발·급수대 주차·후면 복귀 성공과 연속성 수정
 
 - 사용자는 재접근 `water_station_20261029_143236_5bfe51f0`의 우측 약 5 mm 치우침을 눈대중으로 확인하고 사용하기에 충분하다고 판단했다. 당시 내부 좌우 오차는 6.195 mm로 ±5 mm 자동 판정을 벗어났으며, 사용자 수용과 실행기 판정을 각각 보존했다. 목표 참조 재촬영·허용오차 변경은 하지 않았다.

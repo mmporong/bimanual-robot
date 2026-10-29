@@ -499,13 +499,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         taught = tuple(float(value) for value in taught)
         rgbd = profile.get('rgbd_reference')
         mode = profile.get('reference_mode', 'rgbd_auxiliary')
-        if mode not in ('rgbd', 'rgbd_auxiliary', 'map_pose_only'):
+        if mode not in ('rgbd', 'rgbd_auxiliary', 'map_pose_only', 'surface_only'):
             raise ValueError(f'unsupported station reference mode: {mode}')
-        if mode != 'map_pose_only' and not isinstance(rgbd, dict):
+        visual_reference = mode not in ('map_pose_only', 'surface_only')
+        if visual_reference and not isinstance(rgbd, dict):
             raise ValueError(f'RGB-D station reference missing: {table_id}')
-        if mode == 'map_pose_only' and rgbd is not None:
-            raise ValueError('map-only station must not carry an RGB-D reference')
-        reference = TaughtStationReference(rgbd) if mode != 'map_pose_only' else None
+        if not visual_reference and rgbd is not None:
+            raise ValueError('non-visual station must not carry an RGB-D reference')
+        reference = TaughtStationReference(rgbd) if visual_reference else None
         self._station_reference_stop.set()
         self._station_reference_wake.set()
         worker = getattr(self, '_station_reference_thread', None)
@@ -527,7 +528,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.station_reference_profile = profile
         self.station_reference_taught_map_pose = taught
         self.station_reference_table_id = table_id
-        if mode != 'map_pose_only':
+        if visual_reference:
             if self.station_reference_info_subscription is None:
                 self.station_reference_info_subscription = self.create_subscription(
                     CameraInfo, '/camera/color/camera_info',
@@ -546,6 +547,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             'station_reference_configured', table_id=table_id,
             target_role='operator_taught_map_pose_and_heading',
             reference_mode=mode,
+            lateral_control_enabled=self._station_reference_enabled(),
             lateral_tolerance_m=0.005,
             lateral_precision_status=LATERAL_PRECISION_STATUS,
             millimeter_accuracy_validated=False)

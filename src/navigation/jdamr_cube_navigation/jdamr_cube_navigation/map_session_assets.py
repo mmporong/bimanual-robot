@@ -487,8 +487,12 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
                                   loaded['map'], 'RGB-D goal binding')
             profile['reference_mode'] = mode
         else:
+            mode = station.get('reference_mode', 'map_pose_only')
+            if mode not in ('map_pose_only', 'surface_only'):
+                raise ValueError(f'unsupported table reference mode: {mode}')
             profile.update({
-                'reference_mode': 'map_pose_only',
+                'reference_mode': mode,
+                'lateral_control_enabled': mode != 'surface_only',
                 'rgbd_reference': None,
             })
         for key in ('lateral_reference', 'registration_status',
