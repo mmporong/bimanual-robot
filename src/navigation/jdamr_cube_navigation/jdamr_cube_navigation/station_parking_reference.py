@@ -310,13 +310,26 @@ class TaughtStationReference:
         )
         if not self.basis.valid:
             raise ValueError(f'invalid_reference_planar_basis:{self.basis.reason}')
-        self.prepared_reference = PreparedRGBDReference(
-            self.reference_rgb,
-            self.reference_depth,
-            self.reference_rgb_intrinsics,
-            self.reference_depth_intrinsics,
-            self.reference_rgb_rois,
-        )
+        self.observation_method = config.get('observation_method', 'rgbd_pnp')
+        if self.observation_method not in ('rgbd_pnp', 'table_contact_edges'):
+            raise ValueError('unsupported_station_observation_method')
+        self.contact_reference = None
+        self.prepared_reference = None
+        if self.observation_method == 'table_contact_edges':
+            from jdamr_cube_navigation.table_contact_reference import TableContactReference
+            contact_config = capture.get('table_contact_reference')
+            if not isinstance(contact_config, Mapping):
+                raise ValueError('missing_bound_table_contact_reference')
+            self.contact_reference = TableContactReference(
+                self.reference_rgb, self.reference_rgb_intrinsics, self.basis, contact_config)
+        else:
+            self.prepared_reference = PreparedRGBDReference(
+                self.reference_rgb,
+                self.reference_depth,
+                self.reference_rgb_intrinsics,
+                self.reference_depth_intrinsics,
+                self.reference_rgb_rois,
+            )
         self.reference_capture = deepcopy(capture)
         self.goal_left_offset_m = capture_goal_left_offset(capture.get('goal_binding'))
         # A per-run operator correction, bound to this image frame by the caller.
@@ -324,6 +337,7 @@ class TaughtStationReference:
         self.R_base_from_optical = np.asarray(
             self.basis.R_base_from_optical, dtype=np.float64).copy()
         self.assumptions = {
+            'observation_method': self.observation_method,
             'reference_capture_path': str(capture_path),
             'reference_capture_sha256': config['reference_capture_sha256'],
             'reference_rgb_path': str(rgb_path),
@@ -367,22 +381,28 @@ class TaughtStationReference:
             return _invalid_observation(
                 'current_camera_intrinsics_identity_mismatch', stamp,
                 self.assumptions)
-        estimate = self.prepared_reference.observe(current_rgb, current_info)
-        quality = {
-            'match_count': estimate.match_count,
-            'inlier_count': estimate.inlier_count,
-            'reprojection_rmse_px': estimate.reprojection_rmse_px,
-            'roi_inliers': dict(estimate.roi_inliers),
+        if self.contact_reference is not None:
+            error, quality = self.contact_reference.observe(current_rgb)
+        else:
+            estimate = self.prepared_reference.observe(current_rgb, current_info)
+            quality = {
+                'observation_method': 'rgbd_pnp',
+                'match_count': estimate.match_count,
+                'inlier_count': estimate.inlier_count,
+                'reprojection_rmse_px': estimate.reprojection_rmse_px,
+                'roi_inliers': dict(estimate.roi_inliers),
+            }
+            if not estimate.valid:
+                return _invalid_observation(
+                    estimate.reason, stamp, self.assumptions, quality)
+            error = camera_reference_pose_to_planar_base_error(
+                estimate.T_current_from_reference, self.basis)
+        quality.update({
             'tabletop_point_count': self.basis.point_count,
             'tabletop_inlier_count': self.basis.inlier_count,
             'tabletop_inlier_ratio': self.basis.inlier_ratio,
             'tabletop_plane_rms_m': self.basis.plane_rms_m,
-        }
-        if not estimate.valid:
-            return _invalid_observation(
-                estimate.reason, stamp, self.assumptions, quality)
-        error = camera_reference_pose_to_planar_base_error(
-            estimate.T_current_from_reference, self.basis)
+        })
         if not error.valid:
             return _invalid_observation(
                 error.reason, stamp, self.assumptions, quality)
@@ -399,6 +419,7 @@ class TaughtStationReference:
         return {
             'valid': True,
             'reason': 'observed_registered_reference_pose',
+            'observation_method': self.observation_method,
             'goal_odom': goal,
             'observation_odom_pose': list(actual),
             'forward_m': forward_m,
