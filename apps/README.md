@@ -32,7 +32,7 @@ CPU immediate 주문 모드는 하드웨어를 움직이지 않는다. 주문 �
   한 단계 진행·실패 주입 시험 도구가 보인다.
 - 일시정지는 다음 단계를 시작하지 않을 뿐이며, 진행 중인 단계는 끝까지 수행한다. 비상 정지 장치가 아니다.
 - 다른 기기(휴대폰)에서 접속하려면 `--host 0.0.0.0`으로 실행한다. 인증이 없으므로 같은 내부망에서만 쓴다.
-- 실물 팔 연동: `--backend rollout-service`는 조작 단계를 상주형 조작 실행기(`tools/rollout/rollout_service.py`)로 보낸다. 주방·테이블 정렬 단계에서 관제 화면의 [정렬 완료] 버튼(`POST /api/align/confirm`)을 기다린다. 한 번에 켜는 방법은 `tools/rollout/start_scenario.bat`, 상세는 [상주형 조작 실행기 문서](../docs/guides/20261026_상주형_조작실행기_사용법.md) 6절이다.
+- 실물 팔 연동: `--backend rollout-service`는 조작 단계를 상주형 조작 실행기(`tools/rollout/rollout_service.py`)로 보낸다. 주방·테이블 정렬 단계에서 관제 화면의 [정렬 완료] 버튼(`POST /api/align/confirm`)을 기다린다. 한 번에 켜는 방법은 `tools/rollout/start_scenario.bat`, 상세는 [상주형 조작 실행기 문서](../docs/guides/20261026_상주형_조작실행기_사용법.md) 6절이다. 주문이 시작되면 출발 전에 양팔을 이동 자세(`place_end`)로 접고, `/api/state`의 `execution_backend.drive`로 다음 목적지와 출발 가능 여부를 알린다. 시연 절차는 [최종 시연 운영 절차](../docs/guides/20261029_최종시연_운영절차.md)다.
 
 ### Netlify 배포
 
