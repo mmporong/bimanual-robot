@@ -1,0 +1,16 @@
+image: keepout.pgm
+mode: trinary
+resolution: 0.05
+origin:
+- -8.187
+- -4.9639999999999995
+- 0.0
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+generation:
+  scope: unknown-only
+  source_map_yaml_sha256: fe44094511fd906a733a3cb295ba7d0262a15e8571cb210cc7da880b711eb81e
+  source_map_image_sha256: 038b49f8d9287210c218e8880c38d57db256e949fa36506f37365839d9ca7862
+  unknown_source_pixel: 205
+  no_table_keepout_inferred: true

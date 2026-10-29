@@ -79,6 +79,8 @@ setup(
             'jdamr_cube_navigation.depth_box_parking:main',
             'depth_obstacle_filter = '
             'jdamr_cube_navigation.depth_obstacle_filter:main',
+            'pointcloud_replay = '
+            'jdamr_cube_navigation.pointcloud_replay:main',
             'restaurant_service = '
             'jdamr_cube_navigation.restaurant_service:main',
             'service_visualization = '

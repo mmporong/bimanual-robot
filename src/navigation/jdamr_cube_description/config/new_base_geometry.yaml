@@ -54,12 +54,19 @@ laser_translation:
   valid_for: current_g4_mount_from_wheel_axis_ground_projection
   source: user_tape_measurement
 laser_yaw:
-  value: 3.141592653589793
+  value: 3.202979549615386
   unit: rad
-  measured_at: 2026-09-15
-  valid_for: current_g4_mount_orientation_candidate
-  source: user_orientation_estimate
-  status: verify_against_scan_directions
+  derived_at: 2026-10-20
+  valid_for: current_g4_mount_orientation_trial
+  source: jdamr_cube_navigation/test/fixtures/rear_laser_yaw_20261020.json
+  method: pi plus atan2(rear-left minus rear-right gap, frame width) minus stopped scan face yaw
+  external_reference_resolution_m: null
+  right_gap_approximate: true
+  status: provisional_single_pose_same_surface_not_repeatability_validated
+  previous_estimate:
+    value: 3.141592653589793
+    source: user_orientation_estimate
+    status: verify_against_scan_directions
 imu_rotation_rpy:
   value: [3.141592653589793, 0.0, 1.5707963267948966]
   unit: rad

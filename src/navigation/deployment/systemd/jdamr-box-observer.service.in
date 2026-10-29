@@ -9,4 +9,6 @@ CPUWeight=100
 KillSignal=SIGINT
 TimeoutStopSec=10
 Environment=ROS_DOMAIN_ID=12 ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST FASTDDS_BUILTIN_TRANSPORTS=UDPv4 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
-ExecStart=/bin/bash -c "set +u; source /opt/ros/jazzy/setup.bash; source @JDAMR_WS@/install/setup.bash; exec ros2 run jdamr_cube_navigation depth_box_parking --ros-args --params-file @JDAMR_WS@/install/jdamr_cube_navigation/share/jdamr_cube_navigation/config/depth_box_parking.yaml"
+Environment=JDAMR_TABLE_COMPONENTS=false JDAMR_TABLE_TRACKING=false
+EnvironmentFile=-@DEPLOY_DIR@/pointcloud_observer.env
+ExecStart=/bin/bash -c "set +u; source /opt/ros/jazzy/setup.bash; source @JDAMR_WS@/install/setup.bash; exec ros2 run jdamr_cube_navigation depth_box_parking --ros-args --params-file @JDAMR_WS@/install/jdamr_cube_navigation/share/jdamr_cube_navigation/config/depth_box_parking.yaml -p table_components:=${JDAMR_TABLE_COMPONENTS} -p table_tracking:=${JDAMR_TABLE_TRACKING}"

@@ -29,7 +29,10 @@ def observed_at(pose, *, face_map=(-.285, .02), normal_yaw=0.):
     return {'face_midpoint_base_xy_m': midpoint, 'normal_base_xy': normal,
             'normal_yaw_error_rad': angle, 'span_m': .35,
             'observation_roi_clipped': False, 'support_count': 40,
-            'base_pose_odom': pose}
+            'base_pose_odom': pose, 'midpoint_odom': face_map,
+            'normal_odom': (math.cos(normal_yaw), math.sin(normal_yaw)),
+            'gap_m': (x_m - face_map[0]) * math.cos(normal_yaw)
+            + (y_m - face_map[1]) * math.sin(normal_yaw) - .275}
 
 
 def node_with_reference(*, start=(0., 0., 0.), exit_pose=(.7, 0., 0.), normal_yaw=0.):
@@ -51,7 +54,7 @@ def node_with_reference(*, start=(0., 0., 0.), exit_pose=(.7, 0., 0.), normal_ya
     return node
 
 
-def test_stage_retains_outbound_origin_tangent_and_observed_face_normal():
+def test_stage_keeps_origin_axis_and_leaves_room_for_reverse_centering():
     node = node_with_reference(start=(.1, -.08, .2), exit_pose=(.8, -.08, .2),
                                normal_yaw=.1)
     stage = node._rear_reference_stage({'id': 'home_approach', 'x': 9., 'y': 9., 'yaw': 2.})
@@ -59,7 +62,7 @@ def test_stage_retains_outbound_origin_tangent_and_observed_face_normal():
     tangent = -normal[1], normal[0]
     displacement = stage['x'] - .1, stage['y'] + .08
     assert sum(displacement[i] * tangent[i] for i in (0, 1)) == pytest.approx(0.)
-    assert math.hypot(*displacement) == pytest.approx(.7 * math.cos(.1))
+    assert math.hypot(*displacement) == pytest.approx(module.REAR_CENTER_HANDOFF_M)
     assert stage['yaw'] == pytest.approx(.1)
 
 
@@ -125,6 +128,24 @@ def test_clipped_exit_view_preserves_fresh_same_run_dock_observation(monkeypatch
         {'x_m': 0., 'y_m': 0., 'yaw_rad': 0.})
 
 
+@pytest.mark.parametrize('failure', ['missing', 'support'])
+def test_missing_exit_view_keeps_valid_before_exit_midpoint(monkeypatch, failure):
+    node = node_with_reference()
+    del node._rear_dock_reference
+    node.config = {'dock_departure_distance_m': .7}
+    node._dock_departure = {'start': (0., 0., 0.), 'end': (.7, 0., 0.)}
+    before = observed_at((0., 0., 0.))
+    after = RuntimeError('rear face support is below five points')
+    if failure == 'support':
+        after = {**observed_at((.7, 0., 0.)), 'support_count': 5, 'span_m': .09}
+    node._rear_box_observation = Mock(side_effect=[before, after])
+    monkeypatch.setattr(ServiceRoute, '_depart_dock_straight', Mock(return_value=True))
+    assert node._depart_dock_straight(.7)
+    assert node._rear_dock_reference['observation'] is before
+    assert node._rear_dock_reference['observation_phase'] == 'before_straight_departure'
+    assert node.emit.call_args.kwargs['after_exit_failure']
+
+
 def test_small_central_fragment_is_not_taught_as_a_dock_landmark(monkeypatch):
     node = node_with_reference()
     del node._rear_dock_reference
@@ -168,15 +189,16 @@ def test_return_drift_corrects_measured_pose_then_replans_same_stage(monkeypatch
     monkeypatch.setattr(activate_navigation, 'initialize_localization', initialize)
     node._plan_with_input_recovery = Mock(return_value={'ok': True})
     node._reach_staging = Mock(return_value=(.7, 0., 0.))
-    node._center_rear_reference = Mock(return_value=True)
+    node._center_rear_box = Mock(return_value=True)
     assert node._align_rear_reference(stage, {'id': 'home', 'x_m': 0., 'y_m': 0., 'yaw_rad': 0.})
     seed = initialize.call_args.args[1]
     assert tuple(seed[k] for k in ('x_m', 'y_m', 'yaw_rad')) == pytest.approx(physical)
     # The inferred robot pose is not replaced with the registered dock origin.
     assert seed['x_m'] != 0.
     goal = node._plan_with_input_recovery.call_args.args[0]
-    assert (goal['x_m'], goal['y_m'], goal['yaw_rad']) == pytest.approx((.7, 0., 0.))
-    node._center_rear_reference.assert_called_once()
+    assert (goal['x_m'], goal['y_m'], goal['yaw_rad']) == pytest.approx(
+        (stage['x'], stage['y'], stage['yaw']))
+    node._center_rear_box.assert_not_called()
 
 
 def test_other_same_width_face_after_replanning_cannot_start_centering(monkeypatch):
@@ -196,7 +218,7 @@ def test_other_same_width_face_after_replanning_cannot_start_centering(monkeypat
     node._execute_reverse_once.assert_not_called()
 
 
-def test_near_landmark_localizes_and_centers_without_backtracking_to_far_stage(monkeypatch):
+def test_near_landmark_uses_relative_face_without_resetting_amcl_or_backtracking(monkeypatch):
     node = node_with_reference()
     physical = (.4, -.08, math.radians(4.))
     observed = observed_at(physical)
@@ -206,17 +228,17 @@ def test_near_landmark_localizes_and_centers_without_backtracking_to_far_stage(m
     monkeypatch.setattr(activate_navigation, 'initialize_localization', initialize)
     node._plan_with_input_recovery = Mock()
     node._reach_staging = Mock()
-    node._center_rear_reference = Mock(return_value=True)
+    node._center_rear_box = Mock(return_value=True)
     assert node._align_rear_reference(
         node._rear_reference_stage({'id': 'home_approach'}), {'id': 'home'},
         observed=observed, return_to_stage=False)
-    seed = initialize.call_args.args[1]
-    assert tuple(seed[k] for k in ('x_m', 'y_m', 'yaw_rad')) == pytest.approx(physical)
+    initialize.assert_not_called()
+    node.capture_stationary_pose.assert_not_called()
+    assert node.emit.call_args.kwargs['localization_reset_requested'] is False
     node._plan_with_input_recovery.assert_not_called()
     node._reach_staging.assert_not_called()
     node._observe_rear_box.assert_not_called()
-    node._center_rear_reference.assert_called_once_with(
-        observed, pytest.approx(.275), actual_pose_map=physical)
+    node._center_rear_box.assert_not_called()
 
 
 @pytest.mark.parametrize('case', ['operator_stop', 'link_lost', 'sensor_lost'])
@@ -232,43 +254,85 @@ def test_reference_alignment_respects_abort_conditions(monkeypatch, case):
 
 
 @pytest.mark.parametrize('clear', [True, False])
-def test_lateral_drift_uses_one_static_checked_curve_to_twenty_cm_handoff(monkeypatch, clear):
+@pytest.mark.parametrize('has_reference', [True, False])
+def test_lateral_drift_uses_one_static_checked_curve_to_twenty_cm_handoff(
+        monkeypatch, clear, has_reference):
     node = node_with_reference()
+    if not has_reference:
+        del node._rear_dock_reference
     physical = (.7, .08, 0.)
     observation = observed_at(physical)
     node._make_reverse_path = Mock(return_value=SimpleNamespace(poses=[
         SimpleNamespace(pose=SimpleNamespace(
             position=SimpleNamespace(x=x, y=y),
             orientation=SimpleNamespace(z=0., w=1.)))
-        for x, y in (physical[:2], (.19, 0.))]))
+        for x, y in (physical[:2], (.19, .02))]))
     node._footprint_outline = Mock(return_value=[(-.275, -.225), (.065, .225)])
     check = Mock(return_value=clear)
     monkeypatch.setattr(module, 'CachedStaticCorridorValidator', Mock(return_value=check))
-    node._odom_pose = Mock(return_value=(10., 20., math.pi / 2.))
+    node._odom_pose = Mock(return_value=physical)
+    node._frozen_in_odom = Mock(return_value=(None, lambda x, y, yaw: (x, y, yaw)))
     node._odom_path = Mock(return_value='frozen landmark curve')
     node._execute_reverse_once = Mock(return_value=True)
     if not clear:
         with pytest.raises(RuntimeError, match='static corridor blocked'):
-            node._center_rear_reference(observation, .275, actual_pose_map=physical)
+            node._center_rear_box(observation, .275)
         node._execute_reverse_once.assert_not_called()
         return
-    assert node._center_rear_reference(observation, .275, actual_pose_map=physical)
+    assert node._center_rear_box(observation, .275)
     start, target = node._make_reverse_path.call_args.args
     assert start == pytest.approx(physical)
-    assert target == pytest.approx((.19, 0., 0.))
+    assert target == pytest.approx((.19, .02, 0.))
     assert node._make_reverse_path.call_args.kwargs == {'curve': True}
     frozen_points = node._odom_path.call_args.args[0]
-    assert frozen_points[0] == pytest.approx((10., 20., math.pi / 2.))
-    assert frozen_points[-1] == pytest.approx((10.08, 19.49, math.pi / 2.))
+    assert frozen_points[0] == pytest.approx(physical)
+    assert frozen_points[-1] == pytest.approx((.19, .02, 0.))
     node._execute_reverse_once.assert_called_once()
     assert node._execute_reverse_once.call_args.kwargs['final'] is False
+    assert node._execute_reverse_once.call_args.kwargs['goal_checker_id'] == 'dock_position_checker'
+    assert node._execute_reverse_once.call_args.kwargs['position_handoff_m'] == .025
+
+
+@pytest.mark.parametrize('gap_m', [.85, .89, .9, .99, 1.])
+def test_midpoint_centering_curve_fits_current_dock_corridor(gap_m):
+    from pathlib import Path
+    import yaml
+    from jdamr_cube_navigation.reverse_parking import (
+        CachedStaticCorridorValidator, reverse_curve_waypoints)
+    runtime = Path(__file__).resolve().parents[4] / 'config/navigation/jdamr_runtime'
+    package = Path(__file__).resolve().parents[1]
+    registry = yaml.safe_load((runtime / 'service_destinations.yaml').read_text())
+    home = registry['home']
+    normal = math.cos(home['yaw_rad']), math.sin(home['yaw_rad'])
+    tangent = -normal[1], normal[0]
+    # A geometric scenario on the deployed map, not a measured dock return.
+    center = tuple(home[k] - .285*normal[i] for i, k in enumerate(('x_m', 'y_m')))
+    start = (*(center[i] + (.275+gap_m)*normal[i] + .225*tangent[i] for i in (0, 1)),
+             home['yaw_rad'])
+    target = (*(center[i] + .475*normal[i] for i in (0, 1)), home['yaw_rad'])
+    poses = reverse_curve_waypoints(start, target)
+    params = yaml.safe_load((package / 'config/new_base_nav2_params.yaml').read_text())
+    footprint = yaml.safe_load(
+        params['global_costmap']['global_costmap']['ros__parameters']['footprint'])
+    check = CachedStaticCorridorValidator(runtime / 'map.yaml', runtime / 'keepout.yaml', footprint)
+    assert check(poses), check.last_blockage
 
 
 def test_already_centered_return_does_not_add_reverse_or_turn():
     node = node_with_reference()
     node._make_reverse_path = Mock()
-    assert node._center_rear_reference(
-        observed_at((.7, 0., 0.)), .275, actual_pose_map=(.7, 0., 0.))
+    node._odom_pose = Mock(return_value=(.3, 0., 0.))
+    assert node._center_rear_box(observed_at((.3, 0., 0.), face_map=(-.285, 0.)), .275)
+    node._make_reverse_path.assert_not_called()
+
+
+@pytest.mark.parametrize('lateral_m', [-.049, .049])
+def test_center_within_operator_five_cm_tolerance_skips_curve(lateral_m):
+    node = node_with_reference()
+    pose = (.15, lateral_m, 0.)
+    node._odom_pose = Mock(return_value=pose)
+    node._make_reverse_path = Mock(side_effect=AssertionError('unnecessary curve'))
+    assert node._center_rear_box(observed_at(pose, face_map=(-.285, 0.)), .275)
     node._make_reverse_path.assert_not_called()
 
 

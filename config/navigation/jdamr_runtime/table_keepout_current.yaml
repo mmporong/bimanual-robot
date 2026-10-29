@@ -70,15 +70,16 @@ zones:
 - operator_layout: 왼쪽 테이블이 도크 옆까지 이어지며 도크는 후진으로 테이블에 가깝게 붙음
   operator_dock_relation: 차체 전체가 상판 바깥에서 붙음(사용자 확인). 도크 상판 아래 진입으로 해석하지 않음
   id: dock_table
-  enabled: true
+  enabled: false
+  disabled_reason: 사용자 요청으로 도킹 구역의 인위적 킵아웃 전체 제거. 실제 마스크에서 도크 셀 119개를 base mask로 복원
   confidence: operator_gap_and_parallel_alignment
   polygon:
   - &id001
     - -0.75
     - -0.6
-  - - -0.2863905120508253
+  - - -0.40639051205082527
     - -0.6
-  - - -0.4665915467516807
+  - - -0.5865915467516807
     - 0.7362682348479284
   - &id002
     - -0.7
@@ -97,8 +98,8 @@ zones:
     footprint_overlap_area_m2: 0.0568545
     max_rear_overlap_m: 0.136087
     interpretation: 동일 폭 연장 추정과 고정 도크의 실제 배치가 불일치. 테이블 외곽 또는 지도 정합 재확인 필요
-  boundary_basis: 도크 접근 구간은 사용자 지시로 기존 추정 경계를 법선 방향 0.20m 후퇴. 정지 후면 관측과 최신 map/odom의
-    명목 1cm 전체 차체 경로로 검증. 원본 지도 점유와 다른 테이블 영역은 유지
+  boundary_basis: 아래 polygon은 비활성화 전 경계 기록. map -x 방향으로 누적 0.32m 후퇴했던 영역을 이번에 전체 해제. 2026-10-20
+    최신 정지 후면 관측의 조향 preview와 명목 1cm endpoint까지 전체 차체로 검증. 원본 지도 점유와 다른 테이블 영역은 유지
   provenance:
     source_run: $HOME/jdamr_data/map_20260930_manual/aligned/runs/dock_table_fit_20261016_121145
     operator_report:
@@ -138,13 +139,15 @@ zones:
   - - -0.7
     - 0.7
   precision_dock_corridor:
-    retreat_m: 0.2
+    retreat_m: 0.32
     unit: m
     derived_at: '2026-10-20'
     source: operator_requested_dock_priority_and_stopped_rear_approach_replay
-    evidence: test/fixtures/rear_dock_keepout_20261020.json
-    method: 元 boundary normal retreat; 0.15m passes alignment preview, 0.20m also
-      clears the nominal 1cm endpoint with the full footprint on 5cm grid
+    evidence:
+    - test/fixtures/rear_dock_keepout_20261020.json
+    - test/fixtures/rear_dock_keepout_20261020_171136.json
+    method: 최초 0.20m에서 map -x 방향으로 0.12m를 추가 후퇴. 0.11m은 최신
+      preview의 전체 차체가 마스크와 겹치고 0.12m는 명목 1cm endpoint까지 통과하는 5cm 격자의 최소값
     original_map_occupancy_preserved: true
     other_table_zones_unchanged: true
     physical_table_outline_measured: false

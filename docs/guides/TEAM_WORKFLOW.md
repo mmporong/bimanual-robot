@@ -65,6 +65,10 @@ git pull --ff-only origin main
 
 `main`에는 직접 푸시하지 않는다. Issue 하나마다 작업 브랜치 하나를 만든다.
 
+브랜치 이름은 `fix/depth-frame-offset`처럼 변경 목적이 드러나게 쓴다. `next`·`followup`·날짜·일련번호만으로 구분하지 않는다. 같은 목적의 작업은 완료할 때까지 같은 브랜치와 PR에서 이어간다.
+
+PR이 병합되면 원격과 로컬의 작업 브랜치를 삭제한다. 병합 당시 head와 현재 tip을 대조해 후속 미반영 커밋이 없는지 확인하고, 다른 worktree에서 사용하는 브랜치는 보존한다. 병합 없이 닫힌 PR은 완료로 간주하지 않는다. 별도 목적의 다음 작업은 최신 `main`에서 시작하며, 병합한 브랜치를 다시 사용하지 않는다.
+
 ```bash
 git switch main
 git pull --ff-only origin main
@@ -146,7 +150,7 @@ GitHub Projects는 Issue와 Pull Request 상태를 연결하고 Board·Table·Ro
 3. 변경 내용, 검증 결과, 실물 증거 경로를 Pull Request 본문에 적는다.
 4. 공용 인터페이스·실기체 안전·데이터 규격 변경은 필요할 때 팀원 리뷰를 요청한다.
 5. 팀원 승인 여부와 관계없이 대화가 해결되고 로컬 검증이 통과하면 작업자가 `main`에 합칠 수 있다.
-6. 기여자 기록을 보존하려면 기본은 `Rebase and merge`를 사용한다.
+6. 현재 자동 병합은 `Squash and merge`를 사용한다. PR에 포함된 기여자·변경 내용·검증 근거를 보존한다.
 
 `main` 브랜치 보호 권장값:
 
@@ -156,7 +160,7 @@ GitHub Projects는 Issue와 Pull Request 상태를 연결하고 Board·Table·Ro
 - Block force pushes
 - Block branch deletion
 
-설정 위치는 `Settings → Branches → Add branch protection rule`이며 대상 패턴은 `main`이다. 이 저장소에서는 GitHub Actions를 사용하지 않으므로 필수 상태 검사 대신 Pull Request에 로컬 검증 결과를 남긴다.
+설정 위치는 `Settings → Branches → Add branch protection rule`이며 대상 패턴은 `main`이다. 현재 GitHub Actions의 `PR gate / validate`와 로컬 검증 결과를 사용하고, Draft가 아닌 PR은 필수 검사 통과 후 자동 병합한다. 병합 후 원격 브랜치 자동 삭제가 활성화돼 있으며 로컬 브랜치는 별도로 정리한다.
 
 - [Managing protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches)
 - [Managing and standardizing pull requests](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/getting-started/managing-and-standardizing-pull-requests)

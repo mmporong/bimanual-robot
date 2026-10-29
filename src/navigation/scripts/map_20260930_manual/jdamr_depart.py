@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JD-AMR box service departure runbook as one PC-side command (new map, 2026-09-30).
+"""JD-AMR taught-station departure runbook as one PC-side command.
 
 A call runs: dock -> water_station (face approach, escape) -> called table
 (face approach, escape) -> reverse docking. The operator's "출발 table_0N" stands in
@@ -100,9 +100,12 @@ DISPLAY_UNITS = ('jdamr-p2-mapserver', 'jdamr-p2-relay', 'jdamr-p2-markers',
 RECORD_UNIT = 'jdamr-p2-record'
 RECORD_TOPICS = ('/tf', '/tf_static', '/scan', '/plan', '/amcl_pose')
 # Box front-face centres and outward normals (destinations.json, operator RViz clicks).
-DESTINATIONS = json.loads((P2 / 'destinations.json').read_text())['destinations']
+DESTINATIONS = (json.loads((P2 / 'destinations.json').read_text())['destinations']
+                if (P2 / 'destinations.json').exists() else {})
 VIA_ID = 'water_station'
 TABLES = ('table_01', 'table_02')
+ACTIVE_MAP_SESSION = None
+STATION_PROFILES = None
 # Nominal observation and escape distances from destinations.json's face.
 # Table_01 joins its observation point along the aisle instead of returning
 # toward the opposing water table's old box-based pre-point.
@@ -110,6 +113,140 @@ PRE_M, OBSERVE_M, ESCAPE_M = 1.00, 0.58, 0.565
 CAMERA_MOUNT_CONFIG = (
     TOOLS.parents[1] / 'jdamr_cube_navigation/config/camera_mount_current.yaml')
 HOME_EXIT_M = 0.70
+
+
+def configure_map_session(pointer):
+    """Bind the existing executor to one taught map without changing the captures."""
+    from jdamr_cube_navigation.map_session_assets import prepare_map_session
+
+    profile = prepare_map_session(pointer)
+    base = Path(profile['session_directory'])
+    runtime = Path(profile['runtime_directory'])
+    relative = base.relative_to(DATA_ROOT.resolve())
+    pi_base = Path(PI_HOME) / 'jdamr_data' / relative
+    pi_runtime = pi_base / runtime.relative_to(base)
+    paths = {
+        'ACTIVE_MAP_SESSION': profile, 'BASE': base, 'P2': runtime,
+        'MAP_YAML': runtime / 'map.yaml', 'KEEPOUT_YAML': runtime / 'keepout.yaml',
+        'REGISTRY': runtime / 'service_destinations.yaml',
+        'ANNOTATION': runtime / 'annotation.json', 'CLICK': runtime / 'rviz_initialpose.json',
+        'STATE': runtime / 'state.json', 'PI_BASE': pi_base, 'PI_P2': pi_runtime,
+        'PI_REGISTRY': pi_runtime / 'service_destinations.yaml',
+        'DDS_PROFILE': runtime / 'fastdds_udp_loopback.xml',
+        'DESTINATIONS': json.loads((runtime / 'destinations.json').read_text())['destinations'],
+        'TABLES': tuple(profile['station_ids']),
+        'STATION_PROFILES': runtime / 'station_profiles.json',
+        'PI_TOOLS': f'{PI_WS}/src/jdamr_cube_ros/scripts/map_20260930_manual',
+    }
+    globals().update(paths)
+    if prepare_reference_mount():
+        globals().update(CAMERA_MOUNT_CONFIG=runtime / 'camera_mount.yaml',
+                         PI_MOUNT=str(pi_runtime / 'camera_mount.yaml'))
+    # Shared display/transport inputs carry no coordinates from the old map.
+    bundled = TOOLS.parents[3] / 'config/navigation/jdamr_runtime'
+    for name in ('fastdds_udp_loopback.xml', 'restaurant_phase2.rviz'):
+        source = bundled / name
+        if source.exists() and not (runtime / name).exists():
+            (runtime / name).write_bytes(source.read_bytes())
+    annotation = json.loads(ANNOTATION.read_text()) if ANNOTATION.exists() else {}
+    if annotation.get('source_map_sha256') != profile['map_hashes']['runtime']['image_sha256']:
+        ANNOTATION.write_text(json.dumps({
+            'source_map_sha256': profile['map_hashes']['runtime']['image_sha256'],
+            'markers': {},
+        }) + '\n')
+    state = load_state()
+    pointer_doc = json.loads(Path(pointer).expanduser().read_text())
+    reference_path = Path(pointer_doc['dock_scan_reference']).expanduser()
+    reference = json.loads(reference_path.read_text())
+    if reference['map_identity'] != dock_map_identity():
+        raise ValueError('dock scan reference belongs to a different map')
+    if (state.get('map_session_identity') != reference['map_identity']
+            or state.get('dock_scan_reference') != reference):
+        # A taught session's registered capture is the fixed dock anchor.
+        # A later local scan-match must not silently replace that anchor.
+        state['dock_scan_reference'] = reference
+        state['localized'] = False
+        state['map_session_identity'] = reference['map_identity']
+        save_state(state)
+    return profile
+
+
+def select_stop_state(pointer):
+    """Locate cancellation state without validating any perception or map assets."""
+    try:
+        document = json.loads(Path(pointer).expanduser().read_text())
+        base = Path(document['directory']).expanduser().resolve()
+        globals().update(BASE=base, P2=base / 'runtime',
+                         STATE=base / 'runtime/state.json')
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        log(f'cannot locate taught-map state: {error}; stop handler remains available')
+
+
+def prepare_reference_mount():
+    """Derive a candidate tilt from the new reference, retaining nominal translation."""
+    import numpy as np
+    from jdamr_cube_navigation.station_parking_reference import TaughtStationReference
+
+    profiles = json.loads(STATION_PROFILES.read_text())
+    config = profiles['stations'][TABLES[0]].get('rgbd_reference')
+    if config is None:
+        raise ValueError('taught station requires an explicit RGB-D reference configuration')
+    model = TaughtStationReference(config)
+    position = config['camera_position_m']
+    if (len(position) != 3 or not all(
+            isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) for value in position)):
+        raise ValueError('nominal camera position must have three finite metre values')
+    optical_to_unpitched = np.asarray([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
+    rotation = model.R_base_from_optical @ optical_to_unpitched.T
+    roll = math.atan2(rotation[2, 1], rotation[2, 2])
+    pitch = math.atan2(-rotation[2, 0], math.hypot(rotation[0, 0], rotation[1, 0]))
+    yaw = math.atan2(rotation[1, 0], rotation[0, 0])
+    document = {'camera_mount': {
+        'status': 'derived', 'parent_frame': 'base_link', 'child_frame': 'camera_link',
+        'transform': dict(zip(('x_m', 'y_m', 'z_m', 'roll_rad', 'pitch_rad', 'yaw_rad'),
+                              [*map(float, position), roll, pitch, yaw])),
+        'table_observation': {'base_offset_m': 0.5},
+        'table_edge_calibration': {'enabled': False},
+        'provenance': {'source': config['reference_capture_path'],
+                       'basis_source': model.basis.basis_source,
+                       'plane_rms_m': model.basis.plane_rms_m,
+                       'camera_position_source': config.get('camera_position_source'),
+                       'camera_yaw_source': config.get('camera_yaw_source'),
+                       'translation_basis': 'existing_urdf_nominal_mount_geometry',
+                       'orientation_basis': 'reference_tabletop_plane_fit_with_nominal_yaw',
+                       'mount_calibration_complete': False,
+                       'millimeter_accuracy_validated': False},
+    }}
+    (P2 / 'camera_mount.yaml').write_text(yaml.safe_dump(document, sort_keys=False))
+    return True
+
+
+def prepare_reference_camera():
+    """Enable both reference streams on the existing single Astra driver."""
+    if ACTIVE_MAP_SESSION is None:
+        return
+    source = (f'source /opt/ros/jazzy/setup.bash; '
+              f'source {shlex.quote(PI_HOME + "/astra_ws/install/setup.bash")}; '
+              f'exec {shlex.quote(PI_WS + "/install/jdamr_cube_bringup/lib/"
+                                 "jdamr_cube_bringup/jdamr-launch-supervisor")} -- '
+              'ros2 launch astra_camera astra.launch.xml '
+              'enable_color:=true color_width:=640 color_height:=480 color_fps:=30 '
+              'enable_depth:=true enable_ir:=false enable_point_cloud:=false '
+              'enable_colored_point_cloud:=false depth_registration:=true '
+              'color_depth_synchronization:=false tf_publish_rate:=0.0 '
+              'depth_width:=320 depth_height:=240 depth_fps:=30')
+    content = '[Service]\nExecStart=\nExecStart=/bin/bash -c ' + shlex.quote(source) + '\n'
+    target = '/etc/systemd/system/jdamr-box-rgbd.service.d/96-taught-station-reference.conf'
+    result = pi(f'cat {shlex.quote(target)}', check=False)
+    if result.returncode == 0 and result.stdout == content:
+        return
+    active = pi('systemctl is-active jdamr-box-rgbd.service', check=False).stdout.strip()
+    pi(f'sudo -n mkdir -p {shlex.quote(str(Path(target).parent))} && '
+       f'sudo -n tee {shlex.quote(target)} >/dev/null', stdin=content)
+    pi('sudo -n systemctl daemon-reload')
+    if active == 'active':
+        pi('sudo -n systemctl restart jdamr-box-rgbd.service', timeout=90)
 
 
 def along_normal(dest_id, distance_m):
@@ -131,6 +268,20 @@ def table_observation_offset_m():
 
 
 def approach_waypoints(dest_id):
+    if ACTIVE_MAP_SESSION is not None:
+        registry = yaml.safe_load(REGISTRY.read_text())
+        table = next(item for item in registry['tables'] if item['table_id'] == dest_id)
+        pose = table['service_poses'][0]
+        yaw = pose['yaw_rad']
+        offset = pose['approach_offset_m']
+        return [
+            {'id': f'{dest_id}_pre',
+             'x': pose['x_m'] - PRE_M * math.cos(yaw),
+             'y': pose['y_m'] - PRE_M * math.sin(yaw)},
+            {'id': f'{dest_id}_observation',
+             'x': pose['x_m'] - offset * math.cos(yaw),
+             'y': pose['y_m'] - offset * math.sin(yaw), 'yaw': yaw},
+        ]
     pre_x, pre_y, normal = along_normal(dest_id, PRE_M)
     obs_x, obs_y, _ = along_normal(dest_id, table_observation_offset_m())
     facing = math.atan2(-math.sin(normal), -math.cos(normal))
@@ -140,6 +291,28 @@ def approach_waypoints(dest_id):
     return [{'id': f'{dest_id}_pre', 'x': round(pre_x, 3), 'y': round(pre_y, 3)},
             {'id': f'{dest_id}_observation', 'x': round(obs_x, 3), 'y': round(obs_y, 3),
              'yaw': round(facing, 4)}]
+
+
+def station_escape_xy(dest_id):
+    """Expected base position after the face-relative straight escape."""
+    spec = DESTINATIONS[dest_id]
+    normal = math.radians(spec['normal_deg'])
+    return (spec['face_xy'][0] + ESCAPE_M * math.cos(normal),
+            spec['face_xy'][1] + ESCAPE_M * math.sin(normal))
+
+
+def station_region(state, dest_id):
+    """Use a saved region, or the taught-map face when this map introduced the stop."""
+    region = state.get('regions', {}).get(dest_id)
+    if region is not None:
+        return region
+    if ACTIVE_MAP_SESSION is not None and dest_id in DESTINATIONS:
+        return {
+            'xy': list(DESTINATIONS[dest_id]['face_xy']),
+            'radius_m': REGION_RADIUS_M,
+            'basis': 'taught-map destination face',
+        }
+    fail(f'{dest_id} region is missing')
 
 
 REGION_RADIUS_M = 0.40
@@ -265,6 +438,48 @@ def write_routes(home):
     hx, hy, hyaw = home
     exit_wp = {'id': 'home_exit', 'x': round(hx + HOME_EXIT_M * math.cos(hyaw), 3),
                'y': round(hy + HOME_EXIT_M * math.sin(hyaw), 3)}
+    if ACTIVE_MAP_SESSION is not None:
+        for dest_id in TABLES:
+            is_via = dest_id == VIA_ID
+            if is_via:
+                start = (hx, hy)
+                waypoints = [exit_wp, *approach_waypoints(dest_id)]
+                start_basis = 'registered dock pose'
+            else:
+                start = station_escape_xy(VIA_ID)
+                waypoints = approach_waypoints(dest_id)
+                start_basis = f'{VIA_ID} face-relative escape pose'
+            route = {
+                'schema_version': 1, 'frame_id': 'map',
+                'map_yaml': str(MAP_YAML), 'keepout_mask_yaml': str(KEEPOUT_YAML),
+                'expected_mask_sha256': sha256(keepout_image),
+                'start_pose': {'x': round(start[0], 3), 'y': round(start[1], 3)},
+                'max_route_start_distance_m': 0.3,
+                'waypoints': waypoints,
+                'purpose': 'taught station observation; final parking follows in the same run',
+                'target_basis': 'operator taught pose; no old-map destinations',
+                'start_basis': start_basis,
+                'station_profiles': str(STATION_PROFILES),
+            }
+            if is_via:
+                if ACTIVE_MAP_SESSION.get('dock_departure_mode', 'straight') == 'straight':
+                    route['dock_departure_distance_m'] = HOME_EXIT_M
+                direct_route = route
+            else:
+                direct_route = {
+                    **route,
+                    'start_pose': {'x': round(hx, 3), 'y': round(hy, 3)},
+                    'waypoints': [exit_wp, *waypoints],
+                    'start_basis': 'registered dock pose; water stop omitted',
+                }
+                if ACTIVE_MAP_SESSION.get('dock_departure_mode', 'straight') == 'straight':
+                    direct_route['dock_departure_distance_m'] = HOME_EXIT_M
+            (P2 / f'{dest_id}_route.yaml').write_text(
+                yaml.safe_dump(route, sort_keys=False, allow_unicode=True))
+            (P2 / f'{dest_id}_direct_route.yaml').write_text(
+                yaml.safe_dump(direct_route, sort_keys=False, allow_unicode=True))
+        log(f'taught-map routes written: {", ".join(TABLES)}; reverse home retained')
+        return
     escape = along_normal(VIA_ID, ESCAPE_M)
     plans = {VIA_ID: ((hx, hy), [exit_wp, *approach_waypoints(VIA_ID)],
                       'registry home taught at the operator placement (start = dock)')}
@@ -311,7 +526,26 @@ def cmd_sync(_args):
         remote = pi(f'sha256sum {shlex.quote(str(PI_P2 / name))}').stdout.split()[0]
         if local != remote:
             fail(f'{name} differs after sync')
-    log('Phase 2 assets synced to the Pi (hashes match)')
+    if ACTIVE_MAP_SESSION is not None:
+        profiles = json.loads(STATION_PROFILES.read_text())
+        reference_paths = set()
+        for station_id, station in profiles['stations'].items():
+            config = station.get('rgbd_reference')
+            if config is None:
+                continue
+            if not isinstance(config, dict):
+                fail(f'{station_id} rgbd_reference must be a mapping or null')
+            for key in ('reference_capture_path', 'reference_rgb_path', 'reference_depth_path'):
+                if config.get(key):
+                    reference_paths.add(Path(config[key]))
+        for source in sorted(reference_paths):
+            remote = Path(PI_HOME) / 'jdamr_data' / source.relative_to(DATA_ROOT)
+            pi(f'mkdir -p {shlex.quote(str(remote.parent))}')
+            sh(f'rsync -a --protect-args {shlex.quote(str(source))} '
+               f'{HOST}:{shlex.quote(str(remote))}')
+            if pi(f'sha256sum {shlex.quote(str(remote))}').stdout.split()[0] != sha256(source):
+                fail(f'{source.name} reference differs after sync')
+    log('map assets and taught references synced to the Pi (hashes match)')
 
 
 def pull_registry():
@@ -343,7 +577,9 @@ def cmd_display_start(args):
             f'--host {shlex.quote(HOST)} --workspace {shlex.quote(PI_WS)}'),
         'jdamr-p2-markers': (
             f'{PC_SOURCE}; exec ros2 run jdamr_cube_navigation service_visualization '
-            f'--registry {REGISTRY} --annotation {ANNOTATION} --selected table_01'),
+            f'--registry {REGISTRY} --annotation {ANNOTATION} --selected {TABLES[0]}'
+            + (f' --station-directory {shlex.quote(str(BASE))}'
+               if ACTIVE_MAP_SESSION is not None else '')),
         'jdamr-p2-rviz': f'{PC_SOURCE}; exec rviz2 -d {P2}/restaurant_phase2.rviz',
         'jdamr-p2-click': f'{PC_SOURCE}; exec python3 {TOOLS}/initialpose_capture.py {CLICK}',
     }
@@ -452,6 +688,7 @@ def start_sensor_services():
 
 def cmd_session_start(_args):
     refuse_during_cycle('session-start')
+    prepare_reference_camera()
     start_sensor_services()
     script = SESSION_SCRIPT.format(source=PI_SOURCE, session=PI_SESSION, registry=PI_REGISTRY,
                                    discovery=SESSION_DISCOVERY,
@@ -715,9 +952,10 @@ def cmd_init(args):
         refined = refine_pose(run_dir / 'scan.json', click)
     pose = refined['pose']
     basis = 'anchored dock scan' if dock_reference_used else 'map scan'
+    global_result = 'not evaluated for dock scan' if dock_reference_used else refined['global_agrees']
     log(f'{basis} match ({pose[0]:.3f}, {pose[1]:.3f}, {math.degrees(pose[2]):.1f} deg) '
         f'inlier {refined["inlier_5cm"]:.2f}, click offset {refined["click_offset_m"]:.2f} m / '
-        f'{refined["click_offset_deg"]:.1f} deg, global agrees {refined["global_agrees"]}')
+        f'{refined["click_offset_deg"]:.1f} deg, global agrees {global_result}')
     # --local-only: the operator stated the placement (e.g. pulled straight back and
     # turned to face a box); nearby boxes can outrank it globally. AMCL agreement stays.
     min_inlier = 0.35 if args.local_only else MATCH_MIN_INLIER
@@ -760,7 +998,7 @@ def cmd_init(args):
         f'{dxy:.3f} m, {math.degrees(dyaw):.1f} deg')
     if dxy > AMCL_AGREE_XY_M or abs(dyaw) > AMCL_AGREE_YAW_RAD:
         fail('AMCL disagrees with the scan match after activation; do not depart')
-    if not args.keep_home:
+    if not args.keep_home and ACTIVE_MAP_SESSION is None:
         pi(f'{PI_SOURCE}; cd {PI_WS}; python3 -m jdamr_cube_navigation.restaurant_service '
            f'teach-home --registry {PI_REGISTRY} --log {pi_run_dir}/teach_home.jsonl '
            '--pose-id home_dock --approach-offset-m 0.7 --parking-direction reverse --replace',
@@ -803,7 +1041,8 @@ def cmd_init(args):
                   'regions': regions, 'init_time': time.time(), 'localized': True,
                   'init_local_only': bool(args.local_only),
                   'init_pose_source': refined['threshold_basis']})
-    if click['source'] == 'registered_dock' and not dock_reference_used:
+    if (click['source'] == 'registered_dock' and not dock_reference_used
+            and ACTIVE_MAP_SESSION is None):
         state['dock_scan_reference'] = {
             'scan_path': str(run_dir / 'scan.json'), 'pose_map': list(pose),
             'home_pose': [home['x_m'], home['y_m'], home['yaw_rad']],
@@ -827,12 +1066,48 @@ def map_wait_failed(events):
             and str(events[0].get('reason', '')).startswith(MAP_WAIT_FAILURE))
 
 
-def show_event(event, *, notify=True):
+def controller_wait_failed(events):
+    """Recover only an unavailable controller proven to fail before any route goal."""
+    allowed = {'observation_route_selected', 'failed', 'operator_call',
+               'box_camera', 'executor_failed'}
+    failures = [event for event in events if event.get('event') == 'failed']
+    if len(failures) != 1 or failures[0].get('phase') != 'preflight':
+        return False
+    reason = str(failures[0].get('reason', ''))
+    if not reason.startswith((
+            'controller_server parameter service unavailable',
+            'controller_server parameter read timed out:')):
+        return False
+    completion = [event for event in events if event.get('event') == 'executor_failed']
+    if len(completion) != 1 or completion[0].get('code') != 1 or \
+            completion[0].get('reason') != 'executor_exit_nonzero':
+        return False
+    return all(event.get('event') in allowed and not (
+        event.get('event') == 'box_camera' and not (
+            event.get('action') == 'stop' and event.get('ok') is True))
+        for event in events)
+
+
+def recover_controller_before_departure(started):
+    """Refresh a hung Nav2 session once while the original dock departure is unmoved."""
+    stop_requested_since(started)
+    refuse_during_cycle('controller connection recovery before motion')
+    cmd_session_stop(None)
+    stop_requested_since(started)
+    cmd_session_start(None)
+    stop_requested_since(started)
+    cmd_init(SimpleNamespace(keep_home=True, local_only=False, min_inlier=None,
+                             seed_from_state=False, click=False))
+    stop_requested_since(started)
+
+
+def show_event(event):
+    # Historical runs may still contain removed notification events.
+    if event.get('event') == 'operator_call':
+        return
     keep = {k: event[k] for k in ('event', 'level', 'category', 'phase', 'reason', 'waypoint_id',
                                   'terminal_status_code', 'nav2_error_code') if k in event}
     log('  ' + json.dumps(keep, ensure_ascii=False))
-    if notify and event.get('event') == 'operator_call':
-        alert_operator(event)
 
 
 def execution_failure_cause(events):
@@ -849,42 +1124,15 @@ def execution_failure_cause(events):
     return None
 
 
-def alert_operator(event):
-    """Bell, desktop notification and an optional extra channel for an operator_call.
-
-    JDAMR_OPERATOR_NOTIFY_CMD, when set, is run with the message as its last argument
-    (for example a Telegram helper). Nothing is sent outside the PC without it.
-    """
-    text = f'{event.get("level")} {event.get("category")}: {event.get("reason")}'
-    if load_state().get('operator_alerts', True) is False:
-        # Test runs: the operator is not called (2026-10-02 "호출알림 보내지말라니까");
-        # `alerts on` restores it for demonstrations.
-        log(f'operator call (alerts off, not sent): {text}')
-        return
-    log(f'OPERATOR CALL {text}')
-    print('\a', end='', flush=True)
-    title = shlex.quote('JD-AMR 운영자 호출')
-    commands = [f'notify-send -u critical {title} {shlex.quote(text)}']
-    extra = os.environ.get('JDAMR_OPERATOR_NOTIFY_CMD')
-    if extra:
-        commands.append(f'{extra} {shlex.quote("JD-AMR 운영자 호출: " + text)}')
-    for command in commands:
-        try:   # an alert channel never stops the follow-up of the run
-            sh(command, timeout=15, check=False)
-        except subprocess.TimeoutExpired:
-            log(f'alert channel timed out: {command.split()[0]}')
-
-
 def run_cycle(args, state, table_id):
     """Start one box_service run on the Pi and follow its log until the unit ends."""
     requested_s = getattr(args, '_request_started_monotonic_s', time.monotonic())
-    region = state['regions'][table_id]
+    region = station_region(state, table_id)
     surface_mode = getattr(args, 'surface_mode', 'table_edge')
     rear_box_only = getattr(args, 'rear_box_only', False)
-    include_via = not rear_box_only and not args.dock_only and not args.skip_via
-    via = state['regions'].get(VIA_ID)
-    if include_via and via is None:
-        fail(f'{VIA_ID} region is required by the selected via mode')
+    include_via = (not rear_box_only and not args.dock_only and not args.skip_via
+                   and table_id != VIA_ID)
+    via = station_region(state, VIA_ID) if include_via else None
     if args.region:
         region = {'xy': args.region[:2], 'radius_m': args.region[2],
                   'basis': f'operator-confirmed {surface_mode}'}
@@ -927,6 +1175,10 @@ def run_cycle(args, state, table_id):
                    + (' --home-only ' if args.dock_only else '')
                    + (' --graceful-final ' if args.graceful_final else '')
                    + (' --rpp-transit ' if getattr(args, 'rpp_transit', False) else '')
+                   + (' --pointcloud-perception '
+                      if getattr(args, 'pointcloud_perception', False) else '')
+                   + (f' --station-profiles {shlex.quote(str(pi_path(STATION_PROFILES)))} '
+                      if STATION_PROFILES is not None else '')
                    + (f' --transit {args.transit} ' if getattr(args, 'transit', None) else '')
                    + (f' --final-gap-m {args.final_gap_m} '
                       if getattr(args, 'final_gap_m', None) is not None else '')
@@ -1005,24 +1257,15 @@ def run_cycle(args, state, table_id):
                 log(f'monitor start failed ({error}); the run continues without it')
         stops = ('rear box only' if rear_box_only else 'dock only' if args.dock_only else
                  f'{VIA_ID} -> {table_id}' if include_via else f'{table_id}')
-        alerts = 'on' if load_state().get('operator_alerts', True) is not False else 'off'
         submission_label = 'SUBMISSION_UNCONFIRMED' if submission_uncertain else 'SUBMITTED'
         log(f'{submission_label} {stops} -> dock: unit {unit}, log {run_dir}/cycle_events.jsonl, '
-            f'request_submit_s={time.monotonic() - requested_s:.3f}, '
-            f'operator alerts {alerts}')
+            f'request_submit_s={time.monotonic() - requested_s:.3f}')
         seen, bag_checked, departed_s, lost_since = 0, False, time.monotonic(), None
         first_event_reported = False
-        deferred_calls = []
 
         def report_new(events):
-            for index in range(seen, len(events)):
-                event = events[index]
-                defer = (getattr(args, '_map_retry_allowed', False)
-                         and event.get('event') == 'operator_call'
-                         and map_wait_failed(events[:index + 1]))
-                show_event(event, notify=not defer)
-                if defer:
-                    deferred_calls.append(event)
+            for event in events[seen:]:
+                show_event(event)
 
         while True:
             # The recorder needs ~13 s to subscribe on a loaded Pi (2026-10-01).
@@ -1059,9 +1302,6 @@ def run_cycle(args, state, table_id):
                 if completion_error is not None:
                     final.append(completion_error)
                     show_event(completion_error)
-                if not map_wait_failed(final):
-                    for event in deferred_calls:
-                        alert_operator(event)
                 if record_diagnostics:
                     stop_monitors(monitors)
                     finish_onboard_bag(bag_unit, run_dir)
@@ -1227,6 +1467,17 @@ def go_one(args, table_id):
         if map_wait_failed(events):
             fail('map still unavailable after one executor restart; no further departure '
                  'or full recovery was started; current localization is preserved')
+    fresh_departure = not any(getattr(args, flag, False) for flag in (
+        'resume_at_observation', 'resume_at_final_approach', 'resume_parked_log',
+        'dock_only', 'rear_box_only', 'route', 'region', 'skip_via'))
+    if (fresh_departure and state.get('init_pose_source') == 'anchored_dock_scan'
+            and state.get('init_local_only') is not True
+            and controller_wait_failed(events)):
+        log('controller unavailable before motion; restoring only Nav2/executor '
+            'and the registered dock localization once')
+        recover_controller_before_departure(started)
+        refuse_during_cycle('the restored departure')
+        events = run_cycle(args, load_state(), table_id)
     names = [e.get('event') for e in events]
     executor_failure = next((e for e in events if e.get('event') == 'executor_failed'), None)
     if executor_failure is not None:
@@ -1346,9 +1597,20 @@ def cmd_recover(args):
 
 
 def cmd_stop(_args):
-    state = load_state()
+    signal = f'sudo -n systemctl kill --signal=SIGINT {EXECUTOR_UNIT}'
+    try:
+        first_signal = pi(signal, timeout=SSH_READ_TIMEOUT_S, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        first_signal = None
+    try:
+        state = load_state()
+    except (OSError, ValueError, TypeError):
+        state = {}
     state['stop_unix'] = time.time()
-    save_state(state)
+    try:
+        save_state(state)
+    except (OSError, ValueError, TypeError) as error:
+        log(f'stop state could not be saved: {error}')
     # The robot first: closing the bag (reindex up to 120 s) or the monitors on a
     # slow Pi must not hold back the stop (review 2026-10-06).
     unit = state.get('last_unit')
@@ -1356,7 +1618,6 @@ def cmd_stop(_args):
         prefix = f'{EXECUTOR_SPOOL}/{unit.split(":", 1)[1]}'
         cancel = (f'set -e; touch {prefix}.cancelled; '
                   f'rm -f -- {prefix}.part {prefix}.request')
-        signal = f'sudo -n systemctl kill --signal=SIGINT {EXECUTOR_UNIT}'
         # Signal existing motion first; cancel pending/late publication under the
         # claim lock, then signal again to cover a concurrent request claim.
         try:
@@ -1371,6 +1632,10 @@ def cmd_stop(_args):
     elif unit:
         pi(f'sudo -n systemctl stop {unit}', check=False)
         log(f'{unit}: ' + pi(f'systemctl is-active {unit}', check=False).stdout.strip())
+    else:
+        if first_signal is None or first_signal.returncode != 0:
+            fail('resident executor stop reply unavailable; cancellation unconfirmed')
+        log(f'stop sent to {EXECUTOR_UNIT}; no recorded request was available')
     if state.get('onboard_bag_unit'):
         # go closes and copies it; this covers a go that is no longer running.
         finish_onboard_bag(state['onboard_bag_unit'], Path(state['onboard_bag_run']))
@@ -1414,14 +1679,6 @@ def cmd_estop_reset(_args):
          + (out.strip().splitlines() or ['no answer'])[-1]) + f'; state: {estop_state()}')
 
 
-def cmd_alerts(args):
-    """Switch the operator-call alerts (bell, desktop, extra channel) on or off."""
-    state = load_state()
-    state['operator_alerts'] = args.mode == 'on'
-    save_state(state)
-    log(f'operator alerts: {args.mode}')
-
-
 def cmd_status(_args):
     state = load_state()
     log('session: ' + pi('systemctl is-active jdamr-restaurant-navigation.service',
@@ -1436,17 +1693,30 @@ def cmd_status(_args):
     log(f'emergency stop: {estop_state()}')
     log('state: ' + json.dumps({k: state[k] for k in ('pose', 'home', 'last_run', 'bag')
                                 if k in state}))
-    log('operator alerts: ' + ('on' if state.get('operator_alerts', True) is not False
-                               else 'off'))
 
 
 def main():
+    context = argparse.ArgumentParser(add_help=False)
+    context.add_argument('--map-session', type=Path,
+                         default=os.environ.get('JDAMR_MAP_SESSION'))
+    context.add_argument('--legacy-map', action='store_true',
+                         help='Explicit archival access to the previous map; never selected by default')
+    selected, remaining = context.parse_known_args()
+    if (selected.map_session is not None and not selected.legacy_map
+            and not any(arg in ('--help', '-h') for arg in sys.argv[1:])):
+        if remaining and remaining[0] in (
+                'stop', 'estop', 'session-stop', 'display-stop', 'status'):
+            select_stop_state(selected.map_session)
+        else:
+            configure_map_session(selected.map_session)
     parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+                                     formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     parents=[context])
     sub = parser.add_subparsers(dest='command', required=True)
     for name in ('sync', 'display-stop', 'session-start', 'session-stop',
                  'stop', 'status', 'record-start', 'record-stop', 'estop', 'estop-reset'):
         sub.add_parser(name)
+    sub.add_parser('prepare', help='write and sync taught-map assets; no motion')
     display = sub.add_parser('display-start')
     display.add_argument('--record-diagnostics', action='store_true',
                          help='also start the optional PC bag recorder')
@@ -1485,6 +1755,8 @@ def main():
                     help='Graceful box approach and dock leg instead of RPP (default)')
     go.add_argument('--zero-turn-final', action='store_true',
                     help='final box approach: trim the residual in place, then zero-turn straight')
+    go.add_argument('--pointcloud-perception', action='store_true',
+                    help='use the optional depth pointcloud observer and selected table region')
     go.add_argument('--rpp-transit', action='store_true',
                     help='RPP on NavFn paths for the transit and staging legs (the default)')
     go.add_argument('--transit', choices=('lattice-mppi', 'navfn-mppi', 'navfn-rpp'),
@@ -1503,8 +1775,6 @@ def main():
     go.add_argument('--resume-parked-log',
                     help='cycle_events.jsonl of a run that stopped at the first box: hold, escape, continue')
     sub.add_parser('health')
-    alerts = sub.add_parser('alerts', help='operator-call alerts on (demos) or off (tests)')
-    alerts.add_argument('mode', choices=('on', 'off'))
     recover = sub.add_parser('recover')
     recover.add_argument('--seed', nargs=3, type=float, metavar=('X', 'Y', 'YAW_DEG'),
                          help='placement when the robot is not at the last init pose')
@@ -1514,15 +1784,26 @@ def main():
     routes.add_argument('--start', nargs=3, type=float, required=True,
                         metavar=('X', 'Y', 'YAW_RAD'))
     args = parser.parse_args()
+    if args.command == 'go' and args.pointcloud_perception and (
+            args.surface_mode != 'table_edge' or args.dock_only or args.rear_box_only):
+        parser.error('--pointcloud-perception requires a table_edge approach task')
     handlers = {'sync': cmd_sync, 'display-start': cmd_display_start,
                 'display-stop': cmd_display_stop, 'session-start': cmd_session_start,
                 'session-stop': cmd_session_stop, 'init': cmd_init, 'go': cmd_go,
                 'stop': cmd_stop, 'status': cmd_status, 'health': cmd_health,
-                'estop': cmd_estop, 'estop-reset': cmd_estop_reset, 'alerts': cmd_alerts,
+                'estop': cmd_estop, 'estop-reset': cmd_estop_reset,
                 'recover': cmd_recover,
                 'record-start': lambda _a: record_start(),
                 'record-stop': lambda _a: record_stop(),
                 'routes': lambda a: write_routes(a.start)}
+    def prepare(args):
+        if ACTIVE_MAP_SESSION is None:
+            parser.error('prepare requires --map-session')
+        home = yaml.safe_load(REGISTRY.read_text())['home']
+        write_routes([home[key] for key in ('x_m', 'y_m', 'yaw_rad')])
+        cmd_sync(args)
+        log('taught map prepared; session-start and init are no-motion setup')
+    handlers['prepare'] = prepare
     handlers[args.command](args)
 
 

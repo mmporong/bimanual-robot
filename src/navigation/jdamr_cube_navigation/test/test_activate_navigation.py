@@ -19,6 +19,7 @@ def prepared_node():
     node.create_client.return_value = client
     node._wait.return_value = SimpleNamespace(success=True)
     node.wait_until_ready.return_value = True
+    node._parking_parameters_ready.return_value = True
     node.capture_stationary_pose.return_value = ((1., 2., 0.), {'confirmed': True})
     node._guard_failure.return_value = None
     return node, client
@@ -408,6 +409,7 @@ def test_unconfirmed_localization_never_requests_startup(monkeypatch, failure):
         node.verify_live_maps.side_effect = RuntimeError('map mismatch')
     elif failure == 'sensors':
         node.wait_until_ready.return_value = False
+        node.readiness_failure_reason.return_value = 'scan missing'
     elif failure == 'stationary':
         node.capture_stationary_pose.side_effect = RuntimeError('no current TF')
     else:
@@ -415,6 +417,23 @@ def test_unconfirmed_localization_never_requests_startup(monkeypatch, failure):
     with pytest.raises(RuntimeError):
         module.activate_prepared(node)
     client.call_async.assert_not_called()
+
+
+@pytest.mark.parametrize('reason', [
+    'battery low: voltage=10.192V limit=10.500V',
+    'battery departure reserve: voltage=10.600V limit=10.800V',
+    'scan missing', 'operator stop',
+])
+def test_activation_preserves_readiness_cause_without_startup(monkeypatch, reason):
+    monkeypatch.setattr(module, 'require_active', Mock())
+    node, client = prepared_node()
+    node.wait_until_ready.return_value = False
+    node.readiness_failure_reason.return_value = reason
+    with pytest.raises(RuntimeError, match=reason):
+        module.activate_prepared(node)
+    client.call_async.assert_not_called()
+    node.create_client.assert_not_called()
+    node.capture_stationary_pose.assert_not_called()
 
 
 @pytest.mark.parametrize('success', [False, True])
@@ -652,3 +671,17 @@ def test_navigation_active_reads_every_server_state(monkeypatch, active):
     monkeypatch.setattr(module, 'require_active', check)
     assert REAL_NAVIGATION_ACTIVE(SimpleNamespace()) is active
     assert check.call_args.args[1] == module.NAVIGATION_NODES
+
+
+@pytest.mark.parametrize('already_active', [True, False])
+def test_preparation_requires_live_controller_response(monkeypatch, already_active):
+    monkeypatch.setattr(module, 'require_active', Mock())
+    monkeypatch.setattr(module, 'navigation_active', lambda _node: already_active)
+    node, client = prepared_node()
+    node._parking_parameters_ready.return_value = False
+    node.last_parking_parameters_failure = 'controller_server parameter service unavailable'
+    with pytest.raises(RuntimeError, match=node.last_parking_parameters_failure):
+        module.activate_prepared(node)
+    assert not any(call.args[0] == 'navigation_activated_without_motion'
+                   for call in node.emit.call_args_list)
+    node._parking_parameters_ready.assert_called_once()

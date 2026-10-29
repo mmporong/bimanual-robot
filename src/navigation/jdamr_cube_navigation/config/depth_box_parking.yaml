@@ -7,10 +7,8 @@ jdamr_depth_box_parking:
     plane_distance_m: 0.025
     minimum_normal_y: 0.65
     minimum_front_normal_z: 0.90
-    # 계산 근거와 설치 가정: camera_mount_current.yaml
-    camera_height_m: 1.26
-    camera_roll_rad: -0.01946375975958315
-    camera_pitch_rad: 0.639563761794311
+    # 시작 높이·각도는 이 파일에서 읽는다. 빈 문자열이면 개별 파라미터를 사용한다.
+    camera_mount_file: camera_mount_current.yaml
     maximum_top_y_m: 0.05
     # table_01's box shows a 0.16 m face (5-95 % extent, 2026-10-01 15:50); at 0.18
     # every frame was dropped. The LiDAR witness still has to support the face.

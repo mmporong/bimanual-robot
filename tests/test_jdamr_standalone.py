@@ -7,6 +7,7 @@ import importlib.util
 import json
 import math
 import os
+import shlex
 import shutil
 import socket
 from pathlib import Path
@@ -139,9 +140,22 @@ class StandaloneRuntimeTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout)
             self.assertIn("go", result.stdout)
             aligned = Path(temporary) / "map_20260930_manual/aligned"
-            self.assertTrue((aligned / "map.yaml").is_file())
+            self.assertFalse(aligned.exists())
             self.assertFalse((aligned / "state.json").exists())
             self.assertFalse((aligned / "rviz_initialpose.json").exists())
+
+    def test_legacy_help_can_prepare_archived_static_assets_without_runtime_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env = {**os.environ, "JDAMR_DATA_ROOT": temporary}
+            result = subprocess.run(
+                [str(TOOLS / "jdamr_depart.py"), "--legacy-map", "--help"],
+                cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            aligned = Path(temporary) / "map_20260930_manual/aligned"
+            self.assertTrue((aligned / "map.yaml").is_file())
+            self.assertFalse((aligned / "state.json").exists())
 
     def test_bootstrap_preserves_changed_registry_and_refresh_backs_it_up(self):
         common = load("jdamr_common_test", TOOLS / "_common.py")
@@ -246,6 +260,37 @@ class StandaloneRuntimeTest(unittest.TestCase):
         self.assertTrue(all(len(command[7:]) == 1 for command in commands if command[0] == "ssh"))
         with self.assertRaises(ValueError):
             runtime.deploy_commands(args, stamp="stamp;touch")
+
+    def test_rsync_inserted_login_user_is_accepted_by_openssh(self):
+        with mock.patch.object(os.sys, 'path', [str(TOOLS), *os.sys.path]):
+            runtime = load('jdamr_runtime_rsync_transport', TOOLS / 'runtime.py')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, report, wrapper = root / 'input', root / 'report.json', root / 'ssh-probe'
+            source.write_text('no remote writes\n')
+            wrapper.write_text(
+                f'#!{os.sys.executable}\n'
+                'import json,subprocess,sys\nfrom pathlib import Path\n'
+                "r=subprocess.run(['ssh','-G','-F','/dev/null',*sys.argv[1:]], "
+                'capture_output=True,text=True)\n'
+                f'Path({str(report)!r}).write_text(json.dumps({{"code":r.returncode, '
+                '"values":[s for s in r.stdout.splitlines() '
+                'if s.startswith(("hostname ","user "))]}))\n'
+                'sys.exit(99)\n')
+            wrapper.chmod(0o755)
+            command = runtime.rsync_argv(str(source), 'robot@127.0.0.1',
+                                         '/unused-pointcloud-test', '--dry-run')
+            transport_index = command.index('-e') + 1
+            transport = shlex.split(command[transport_index])
+            transport[0] = str(wrapper)
+            command[transport_index] = shlex.join(transport)
+            # Real rsync constructs the SSH argv. OpenSSH -G parses it without
+            # connecting; the wrapper deliberately stops before data transfer.
+            subprocess.run(command, capture_output=True, text=True, timeout=10)
+            parsed = json.loads(report.read_text())
+            self.assertEqual(parsed['code'], 0)
+            self.assertIn('user robot', parsed['values'])
+            self.assertIn('hostname 127.0.0.1', parsed['values'])
 
     def _promotion_layout(self, root: Path):
         stage = root / "stage"

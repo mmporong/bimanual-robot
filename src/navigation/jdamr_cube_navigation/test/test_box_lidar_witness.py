@@ -82,7 +82,7 @@ def witness(ranges, depth_target=None, robot=None, geometry=None):
 
 def test_aligned_face_at_predock_distance_has_bounded_witness():
     assert GEOMETRY['laser_translation']['value'][0] == -0.01
-    assert GEOMETRY['laser_yaw']['value'] == math.pi
+    assert GEOMETRY['laser_yaw']['previous_estimate']['value'] == math.pi
     robot = {'x_m': 0.0, 'y_m': 0.0, 'yaw_rad': 0.0}
     ranges = scan_for_face((0.5, 0.0), (-1.0, 0.0), robot)
     result = witness(ranges, robot=robot)
