@@ -42,6 +42,7 @@ REAR_CENTER_TOLERANCE_M = 0.05
 REAR_COARSE_SEGMENT_M = 0.5
 REAR_REOBSERVE_SEGMENT_M = 0.2
 REAR_FACE_REOBSERVE_GAP_M = 0.2
+REAR_FINAL_TRIM_MAX_M = 0.01
 # Observation only: the swept footprint and gap calculation retain the chassis width.
 REAR_FACE_OBSERVATION_HALF_WIDTH_M = 1.2
 REAR_FACE_OBSERVATION_WIDTHS_M = (0.6, 0.9, REAR_FACE_OBSERVATION_HALF_WIDTH_M)
@@ -1003,6 +1004,30 @@ class RearBoxParkingMixin:
             return confirmed, gap, far_gap, error
 
         confirmed, gap, far_gap, error = confirmation(final)
+        # The feedback drive can stop a few millimetres early while braking.
+        # Finish that residual inside this request instead of requiring a new
+        # coarse approach.  Keep this to one reverse-only trim; a larger miss
+        # or a face-angle miss still returns through the existing failure path.
+        center_gap = gap + half_width * abs(math.sin(error))
+        trim_m = (center_gap - target_gap) / math.cos(error)
+        trim_allowed = (
+            not confirmed
+            and gap > target_gap + 0.003
+            and 0.0 < trim_m <= REAR_FINAL_TRIM_MAX_M
+            and far_gap - gap <= 0.006
+        )
+        if trim_allowed:
+            self.emit('rear_box_final_trim_started', requested_distance_m=trim_m,
+                      nearest_gap_m=gap, farthest_gap_m=far_gap,
+                      angle_rad=error)
+            if approach(final):
+                final = self._observe_rear_box_recovering(
+                    geometry, extent, half_width, command_watch)
+                _same_target(initial, final)
+                confirmed, gap, far_gap, error = confirmation(final)
+                self.emit('rear_box_final_trim_finished', confirmed=confirmed,
+                          nearest_gap_m=gap, farthest_gap_m=far_gap,
+                          angle_rad=error)
         self.confirmation = {
             'confirmed': confirmed,
             'reason': ('confirmed' if confirmed

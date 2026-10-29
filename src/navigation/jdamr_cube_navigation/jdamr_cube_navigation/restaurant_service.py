@@ -1243,6 +1243,10 @@ class ServiceRoute(CorridorRoute):
         fresh_motion_samples = 0
         last_motion_stamp_s = None
         stopped_confirmed = not confirm_stopped
+        stop_contract = getattr(self, 'parking_contract', None) or {
+            'stopped_linear_mps': 0.01, 'stopped_angular_radps': 0.01}
+        stopped_linear_mps = stop_contract['stopped_linear_mps']
+        stopped_angular_radps = stop_contract['stopped_angular_radps']
         while time.monotonic() - stopped_s < DIRECT_SETTLE_S:
             motion = getattr(self, 'latest_motion', None)
             if (motion is not None and motion[0] > stopped_s
@@ -1250,7 +1254,8 @@ class ServiceRoute(CorridorRoute):
                 last_motion_stamp_s = motion[0]
                 fresh_motion_samples += 1
             if (motion is not None and motion[0] > stopped_s
-                    and abs(motion[1]) < 0.01 and abs(motion[2]) < 0.01):
+                    and abs(motion[1]) <= stopped_linear_mps
+                    and abs(motion[2]) <= stopped_angular_radps):
                 if not confirm_stopped:
                     stopped_confirmed = True
                     break
@@ -1270,7 +1275,9 @@ class ServiceRoute(CorridorRoute):
                       last_odom_age_s=(None if motion is None else
                                        max(0.0, time.monotonic() - motion[0])),
                       last_odom_linear_mps=(None if motion is None else motion[1]),
-                      last_odom_angular_radps=(None if motion is None else motion[2]))
+                      last_odom_angular_radps=(None if motion is None else motion[2]),
+                      stopped_linear_mps=stopped_linear_mps,
+                      stopped_angular_radps=stopped_angular_radps)
             return None
         return measure()
 

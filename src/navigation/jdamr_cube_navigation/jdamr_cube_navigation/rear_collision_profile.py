@@ -306,9 +306,23 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
             remembered_points = state['filtered_memory']
         points = [*live_points, *remembered_points]
         poses = _prediction_poses(linear_mps, angular_radps, horizon_s)
+        witness = {}
         if path_sweep_hit(
-                points, state['outline'], poses, push_tolerance_m=0.0):
+                points, state['outline'], poses, push_tolerance_m=0.0, witness=witness):
+            if not state['collision_active']:
+                live_hit = witness['point_index'] < len(live_points)
+                source = 'live_scan' if live_hit else 'remembered_blind_point'
+                node.emit(
+                    'rear_collision_witness', source=source,
+                    point_base_xy_m=witness['point_base_xy_m'], scan_stamp_s=stamp_s,
+                    live_point_count=len(live_points),
+                    remembered_point_count=len(remembered_points),
+                    target_face_filter_active=target is not None,
+                    requested_linear_mps=requested[0],
+                    requested_angular_radps=requested[1])
+            state['collision_active'] = True
             return state.get('collision_reason', 'rear docking swept footprint occupied')
+        state['collision_active'] = False
     except (AttributeError, TypeError, ValueError, OverflowError):
         return f'{collision_context} scan geometry invalid'
     return None
@@ -338,6 +352,7 @@ def _motion_collision_watch(node, snapshot, *, rotation=False):
         'scan_key': (id(scan), _stamp_s(scan)),
         'target': None,
         'filtered_memory': (), 'filtered_memory_key': None,
+        'collision_active': False,
     }
     if rotation:
         state.update(scan_context='rotation', collision_context='rotation collision',

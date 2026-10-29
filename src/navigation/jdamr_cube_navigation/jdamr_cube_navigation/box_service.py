@@ -2817,6 +2817,25 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 raise RuntimeError('table approach depth stale or future-dated')
             if observation.get('reason') in OBSERVER_LATENCY_REASONS:
                 raise RuntimeError('table approach observer latency')
+            previous_face_stamp = state['stamp']
+            if (state['input_stamp'] is not None and stamp > state['input_stamp']
+                    and isinstance(previous_face_stamp, (float, int))
+                    and 0.0 <= now_s - previous_face_stamp <= 0.5
+                    and observation.get('detected') is True
+                    and observation.get('surface_kind') == 'table_edge'
+                    and observation.get('frame_id') == 'camera_color_optical_frame'
+                    and observation.get('control_ready') is False
+                    and not self.parking_tf.can_transform(
+                        'odom', self.parking_contract['robot_base_frame'],
+                        rclpy.time.Time(seconds=stamp))):
+                # A newer image can arrive before its odom TF callback. Keep the
+                # previously accepted, still-fresh plane in odom for this tick;
+                # do not consume the new image or renew the old plane's timestamp.
+                self.emit('table_approach_stamped_tf_deferred',
+                          observation_stamp_s=stamp,
+                          retained_observation_stamp_s=previous_face_stamp,
+                          retained_observation_age_s=now_s - previous_face_stamp)
+                stamp = state['input_stamp']
             if stamp != state['input_stamp']:
                 if state['input_stamp'] is not None and stamp < state['input_stamp']:
                     raise RuntimeError('table approach depth clock regressed')

@@ -198,7 +198,7 @@ def _edge_distance(x_m, y_m, outline):
 
 
 def path_sweep_hit(points, outline, poses, step_m=0.01, step_rad=math.radians(1.0),
-                   push_tolerance_m=0.005):
+                   push_tolerance_m=0.005, witness=None):
     """
     Whether moving along poses would bring the outline over a point, or push into one.
 
@@ -220,7 +220,7 @@ def path_sweep_hit(points, outline, poses, step_m=0.01, step_rad=math.radians(1.
                           start[1] + (end[1] - start[1]) * fraction,
                           start[2] + turn * fraction))
     reach_m = max(math.hypot(x_m, y_m) for x_m, y_m in outline)
-    for x_m, y_m in points:
+    for point_index, (x_m, y_m) in enumerate(points):
         touching = _point_in_polygon(x_m, y_m, outline)
         allowed_m = _edge_distance(x_m, y_m, outline) + push_tolerance_m if touching else None
         for x, y, yaw in dense[1:]:
@@ -232,6 +232,8 @@ def path_sweep_hit(points, outline, poses, step_m=0.01, step_rad=math.radians(1.
             if not _point_in_polygon(*local, outline):
                 continue
             if allowed_m is None or _edge_distance(*local, outline) > allowed_m:
+                if witness is not None:
+                    witness.update(point_index=point_index, point_base_xy_m=(x_m, y_m))
                 return True
     return False
 
