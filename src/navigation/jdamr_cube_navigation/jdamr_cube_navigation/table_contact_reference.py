@@ -42,6 +42,8 @@ class TableContactReference:
     """Metric contact-gradient templates for an unchanged camera and table height."""
 
     def __init__(self, reference_rgb, rgb_info, basis, config):
+        # Share the Pi with depth perception, TF and the control callbacks.
+        cv2.setNumThreads(1)
         self.basis = basis
         self.intrinsics = CameraIntrinsics.from_value(rgb_info)
         self.shape = reference_rgb.shape
@@ -62,7 +64,11 @@ class TableContactReference:
             config['candidate_spacing_m'], 'candidate_spacing', positive=True)
         self.tracking_radius_m = _number(
             config['tracking_radius_m'], 'tracking_radius', positive=True)
+        self.tracking_rotation_radius_deg = _number(
+            config.get('tracking_rotation_radius_deg', 90.),
+            'tracking_rotation_radius', positive=True)
         self._last_centers_px = None
+        self._last_yaw_rad = None
         self.candidate_count = config['candidate_count']
         if (isinstance(self.candidate_count, bool) or not isinstance(self.candidate_count, int)
                 or not 1 <= self.candidate_count <= 16):
@@ -138,7 +144,8 @@ class TableContactReference:
                 coverage = cv2.matchTemplate(
                     self.valid_raster[sy:ey, sx:ex], support, cv2.TM_CCORR) / max(
                         float(support.sum()), 1.)
-                rotations.append((rotated, support, template_energy, coverage >= .98))
+                rotations.append((rotated, support, template_energy, coverage >= .98,
+                                  angle_deg))
             self.templates[name] = {
                 'bounds_px': bounds, 'side_px': side_px,
                 'reference_xy_m': self._base_xy(x_px + side_px / 2, y_px + side_px / 2),
@@ -172,6 +179,13 @@ class TableContactReference:
         return np.stack((cv2.Sobel(planar, cv2.CV_32F, 1, 0, ksize=3),
                          cv2.Sobel(planar, cv2.CV_32F, 0, 1, ksize=3)), axis=-1)
 
+    def tracking_checkpoint(self):
+        return (None if self._last_centers_px is None else dict(self._last_centers_px),
+                self._last_yaw_rad)
+
+    def restore_tracking(self, checkpoint):
+        self._last_centers_px, self._last_yaw_rad = checkpoint
+
     def observe(self, image):
         started_s = time.perf_counter()
         quality = {'observation_method': 'table_contact_edges', 'contact_matches': {},
@@ -204,7 +218,14 @@ class TableContactReference:
             search = gradients[sy:ey, sx:ex]
             search_energy = gradient_energy[sy:ey, sx:ex]
             aggregate = None
-            for patch, support, template_energy, covered in template['rotations']:
+            rotations = template['rotations']
+            if self._last_centers_px is not None and self._last_yaw_rad is not None:
+                angle_deg = min(
+                    rotations, key=lambda r: abs(r[4] - math.degrees(self._last_yaw_rad)))[4]
+                nearby = [r for r in rotations if abs(r[4] - angle_deg)
+                          <= self.tracking_rotation_radius_deg]
+                rotations = nearby or [min(rotations, key=lambda r: abs(r[4] - angle_deg))]
+            for patch, support, template_energy, covered, _angle_deg in rotations:
                 covered = covered[sy - original_sy:ey - original_sy - side_px + 1,
                                   sx - original_sx:ex - original_sx - side_px + 1]
                 numerator = cv2.matchTemplate(search, patch, cv2.TM_CCORR)
@@ -267,6 +288,7 @@ class TableContactReference:
             name: ((self.left_max_m - point[1]) / self.resolution_m,
                    (self.forward_max_m - point[0]) / self.resolution_m)
             for name, point in zip(self.templates, current)}
+        self._last_yaw_rad = yaw_rad
         quality['processing_s'] = time.perf_counter() - started_s
         return PlanarBaseErrorEstimate(
             True, 'observed_table_contact_edges', forward_m=float(translation_m[0]),

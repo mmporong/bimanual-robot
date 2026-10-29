@@ -384,8 +384,12 @@ def mark_localized(value):
 
 
 def session_active():
-    return pi('systemctl is-active jdamr-restaurant-navigation.service',
-              timeout=SSH_READ_TIMEOUT_S, check=False).stdout.strip() == 'active'
+    for _attempt in range(2):
+        result = pi('systemctl is-active jdamr-restaurant-navigation.service',
+                    timeout=SSH_READ_TIMEOUT_S, check=False)
+        if result.returncode != 255:
+            return result.returncode == 0
+    return False
 
 
 def refuse_during_cycle(action):
@@ -698,8 +702,12 @@ def cmd_session_start(_args):
 
 
 def executor_active():
-    return pi(f'systemctl is-active {EXECUTOR_UNIT}',
-              timeout=SSH_READ_TIMEOUT_S, check=False).stdout.strip() == 'active'
+    for _attempt in range(2):
+        result = pi(f'systemctl is-active {EXECUTOR_UNIT}',
+                    timeout=SSH_READ_TIMEOUT_S, check=False)
+        if result.returncode != 255:
+            return result.returncode == 0
+    return False
 
 
 def start_executor():
@@ -710,7 +718,8 @@ def start_executor():
                f'--serve {EXECUTOR_SPOOL}')
     pi(f'mkdir -p {EXECUTOR_SPOOL} && sudo -n systemd-run --unit={EXECUTOR_UNIT} --collect '
        f'--property=User={PI_USER} --property=KillSignal=SIGTERM --property=TimeoutStopSec=30 '
-       f'--setenv=HOME={PI_HOME} --working-directory={PI_WS} /bin/bash -c {shlex.quote(command)}',
+       f'--setenv=HOME={PI_HOME} --setenv=OPENBLAS_NUM_THREADS=1 --setenv=OMP_NUM_THREADS=1 '
+       f'--working-directory={PI_WS} /bin/bash -c {shlex.quote(command)}',
        check=False)
     active = executor_active()
     log(f'{EXECUTOR_UNIT}: ' + ('active' if active else 'not active'))

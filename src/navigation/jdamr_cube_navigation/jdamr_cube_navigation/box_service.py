@@ -54,7 +54,7 @@ import rclpy
 from rclpy.duration import Duration
 from rclpy.parameter import Parameter, parameter_value_to_python
 from rclpy.parameter_client import AsyncParameterClient
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import CameraInfo, Image
 from tf2_ros import TransformException
@@ -147,6 +147,8 @@ STOP_DWELL_S = 0.0
 SURFACE_MODES = ('front', 'table_edge')
 STATION_REFERENCE_MAX_AGE_S = 0.5
 STATION_REFERENCE_MIN_PERIOD_S = 0.2
+STATION_REFERENCE_QOS = QoSProfile(
+    depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 def front_lead_m(front_extent_m, half_width_m, heading_error_rad):
@@ -347,6 +349,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 continue
             started_s = time.monotonic()
             image, info, stamp_s = pending
+            contact_reference = None
+            tracking_checkpoint = None
             try:
                 stamp = rclpy.time.Time(seconds=stamp_s)
                 base = self.parking_contract['robot_base_frame']
@@ -360,16 +364,22 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     STATION_REFERENCE_MAX_AGE_S - age_s))
                 odom_transform = self.parking_tf.lookup_transform(
                     'odom', base, stamp, timeout=wait).transform
-                map_from_odom = self.parking_tf.lookup_transform(
-                    'map', 'odom', stamp, timeout=wait).transform
                 odom_pose = (
                     odom_transform.translation.x,
                     odom_transform.translation.y,
                     self._yaw(odom_transform.rotation),
                 )
+                contact_reference = self.station_reference.contact_reference
+                if contact_reference is not None:
+                    tracking_checkpoint = contact_reference.tracking_checkpoint()
                 result = self.station_reference.observe(
                     image, info, odom_pose, stamp_s)
                 if result.get('valid') is True:
+                    # The correction is measured in odom at image time. Map is
+                    # its current presentation frame, not a second image-time
+                    # dependency that may hold up fresh lateral feedback.
+                    map_from_odom = self.parking_tf.lookup_transform(
+                        'map', 'odom', rclpy.time.Time()).transform
                     goal = result['goal_odom']
                     turn = self._yaw(map_from_odom.rotation)
                     cosine, sine = math.cos(turn), math.sin(turn)
@@ -379,6 +389,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         map_from_odom.translation.y + sine * goal[0] + cosine * goal[1],
                         math.atan2(math.sin(goal[2] + turn), math.cos(goal[2] + turn)),
                     ]
+                    result['goal_map_transform_time'] = 'latest_at_completion'
             except Exception as error:
                 result = {
                     'valid': False,
@@ -386,6 +397,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     'detail': str(error),
                     'stamp_s': stamp_s,
                 }
+            result['runtime_processing_s'] = time.monotonic() - started_s
+            result['image_age_at_completion_s'] = (
+                self.get_clock().now().nanoseconds * 1e-9 - stamp_s)
             with self._station_reference_lock:
                 reference = self.station_reference
                 if (result.get('valid') is True
@@ -393,16 +407,48 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         != reference.goal_left_offset_m + reference.run_left_offset_m):
                     # Computed before this run's correction was bound; drop it.
                     continue
+                samples = getattr(self, '_station_reference_goal_samples', None)
+                if (result.get('valid') is True and contact_reference is not None
+                        and samples is not None and len(samples) >= 3):
+                    goals = [sample['goal_odom'] for sample in samples]
+                    baseline = np.median(np.asarray(goals)[:, :2], axis=0)
+                    heading = goals[-1][2]
+                    candidate = result['goal_odom']
+                    lateral_jump = ((candidate[0] - baseline[0]) * -math.sin(heading)
+                                    + (candidate[1] - baseline[1]) * math.cos(heading))
+                    yaw_jump = math.atan2(math.sin(candidate[2] - heading),
+                                          math.cos(candidate[2] - heading))
+                    lateral_limit = 4. * self.station_reference_profile['lateral_tolerance_m']
+                    yaw_limit = self.parking_contract['yaw_tolerance_rad']
+                    result['quality'].update(
+                        static_goal_lateral_jump_m=lateral_jump,
+                        static_goal_yaw_jump_rad=yaw_jump)
+                    if abs(lateral_jump) > lateral_limit or abs(yaw_jump) > yaw_limit:
+                        # The taught cup/bottle pair is static in this run.
+                        # An isolated wrong pair must not steer the base or
+                        # move the next frame's tracking window.
+                        contact_reference.restore_tracking(tracking_checkpoint)
+                        result = dict(result, valid=False,
+                                      reason='station_reference_inconsistent_static_goal')
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
                 if result.get('valid') is True:
                     # Collect during transit/observation, not just when the
                     # moving controller first asks for a destination.
-                    samples = getattr(self, '_station_reference_goal_samples', None)
                     if samples is None:
                         samples = self._station_reference_goal_samples = deque(maxlen=5)
                     if not samples or stamp_s > samples[-1]['stamp_s']:
                         samples.append(dict(result))
+            status = (result.get('reason') if result.get('valid') is not True else
+                      'fresh' if result['image_age_at_completion_s'] <= STATION_REFERENCE_MAX_AGE_S
+                      else 'processing_exceeded_image_age')
+            if status != getattr(self, '_station_reference_reported_status', None):
+                self._station_reference_reported_status = status
+                self.emit('station_reference_input_status', status=status,
+                          processing_s=result['runtime_processing_s'],
+                          image_age_s=result['image_age_at_completion_s'],
+                          quality=result.get('quality', {}),
+                          detail=result.get('detail'))
             remaining_s = STATION_REFERENCE_MIN_PERIOD_S - (
                 time.monotonic() - started_s)
             if remaining_s > 0.0:
@@ -485,11 +531,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if self.station_reference_info_subscription is None:
                 self.station_reference_info_subscription = self.create_subscription(
                     CameraInfo, '/camera/color/camera_info',
-                    self._station_info_callback, qos_profile_sensor_data)
+                    self._station_info_callback, STATION_REFERENCE_QOS)
             if self.station_reference_image_subscription is None:
                 self.station_reference_image_subscription = self.create_subscription(
                     Image, '/camera/color/image_raw',
-                    self._station_image_callback, qos_profile_sensor_data)
+                    self._station_image_callback, STATION_REFERENCE_QOS)
             self._station_reference_stop.clear()
             self._station_reference_wake.clear()
             self._station_reference_thread = threading.Thread(
@@ -2559,8 +2605,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         mount, region, radius = self._table_observation_context
         try:
             target.update(self.observe_target(
-                mount, front_extent_m, self._final_gap_m(), region, radius,
-                reuse_configuration=True))
+                mount, front_extent_m, self._final_gap_m(), region, radius))
         except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
             self._fail_final('table_clearance_reobserve_failed', detail=str(error))
             return False, None
@@ -2583,7 +2628,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         check = CachedStaticCorridorValidator(map_yaml, keepout_yaml, footprint)
 
         def validate(actual, face, normal, command_heading_rad, span_m=None, *,
-                     lateral_goal_odom=None):
+                     lateral_goal_odom=None, support_endpoints=None):
             try:
                 preview = face_approach_waypoints(
                     actual, face, normal, front_extent_m, self.box_front_half_width_m,
@@ -2610,29 +2655,26 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             mapped = [to_map_pose(pose) for pose in preview]
             kwargs = {}
             if span_m is not None:
-                center = to_map_pose((*face, 0.))
-                tip = to_map_pose((face[0] + normal[0], face[1] + normal[1], 0.))
-                heading = math.atan2(-normal[1], -normal[0])
-                residual = math.atan2(math.sin(heading - actual[2]),
-                                      math.cos(heading - actual[2]))
-                corner_span = 2 * self.box_front_half_width_m * abs(math.sin(residual))
-                gap = (sum((actual[i] - face[i]) * normal[i] for i in (0, 1))
-                       - front_lead_m(front_extent_m, self.box_front_half_width_m, residual))
-                lateral_ready = lateral_goal_odom is None or abs(sum(
-                    (lateral_goal_odom[i] - actual[i]) * (-math.sin(heading), math.cos(heading))[i]
-                    for i in (0, 1))) <= self.station_reference_profile['lateral_tolerance_m']
+                surface_center = face
+                half_span = span_m / 2.
+                if support_endpoints is not None:
+                    tangent = (-normal[1], normal[0])
+                    offsets = [sum((point[i] - face[i]) * tangent[i] for i in (0, 1))
+                               for point in support_endpoints]
+                    midpoint = (min(offsets) + max(offsets)) / 2.
+                    surface_center = tuple(face[i] + midpoint * tangent[i] for i in (0, 1))
+                    half_span = (max(offsets) - min(offsets)) / 2.
+                center = to_map_pose((*surface_center, 0.))
+                tip = to_map_pose((surface_center[0] + normal[0],
+                                   surface_center[1] + normal[1], 0.))
                 kwargs['target_surface'] = {
                     'point_xy_m': center[:2],
                     'normal_xy': (tip[0] - center[0], tip[1] - center[1]),
-                    'half_span_m': span_m / 2.,
-                    # Match the near-face contract already used by _table_fine_approach.
-                    # Only the target's raster fringe is resolved by its measured plane.
-                    'allow_precision_unknown': (
-                        0. < gap <= FINAL_PLAN_GAP_M
-                        and corner_span <= 2 * TABLE_FINE_GAP_TOLERANCE_M
-                        and abs(residual) <= min(
-                            self.parking_contract['yaw_tolerance_rad'], FINAL_HEADING_TRIM_RAD)
-                        and lateral_ready)}
+                    'half_span_m': half_span,
+                    # The exact swept footprint must stay outside this measured
+                    # plane and within its observed span. Only its target raster
+                    # fringe can override unknown; occupied cells stay blocked.
+                    'allow_precision_unknown': True}
             if not check(mapped, **kwargs):
                 self.emit('table_approach_static_blocked',
                           blockage=check.last_blockage, reference_frame='map',
@@ -2658,6 +2700,19 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         normal = target['outward_normal_map_xy']
         frozen_face = to_odom(*face, 0.0)[:2]
         tip = to_odom(face[0] + normal[0], face[1] + normal[1], 0.0)
+        def surface_support(face, normal, width, shift=0., previous=None):
+            if width is None:
+                return previous
+            tangent = (-normal[1], normal[0])
+            center = tuple(face[i] - shift * tangent[i] for i in (0, 1))
+            points = [tuple(center[i] + sign * width / 2. * tangent[i] for i in (0, 1))
+                      for sign in (-1., 1.)]
+            points.extend(previous or ())
+            offsets = [sum((point[i] - face[i]) * tangent[i] for i in (0, 1))
+                       for point in points]
+            return tuple(tuple(face[i] + offset * tangent[i] for i in (0, 1))
+                         for offset in (min(offsets), max(offsets)))
+
         if (getattr(self, 'station_reference_mode', None) in ('map_pose_only', 'rgbd_auxiliary')
                 and not (getattr(self, 'station_reference_goal_frozen', False)
                          and getattr(self, 'station_reference_goal', None) is not None)):
@@ -2689,6 +2744,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                  'validated_input': None, 'validated_pose': None,
                  'validated_heading': None, 'validated_goal': None,
                  'control_goal': None,
+                 'surface_support': surface_support(
+                     frozen_face, (tip[0] - frozen_face[0], tip[1] - frozen_face[1]),
+                     target.get('observed_face_span_m'), target.get('lateral_shift_m', 0.)),
                  'span_m': target.get('observed_face_span_m')}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
@@ -2721,6 +2779,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     or math.dist(actual[:2], state['validated_pose'][:2]) >= 0.025
                     or heading_change >= FINAL_TRIM_TOLERANCE_RAD):
                 validate(actual, state['face'], state['normal'], filtered_heading, state['span_m'],
+                         support_endpoints=state['surface_support'],
                          **({'lateral_goal_odom': goal} if goal is not None else {}))
                 state.update(validated_input=state['input_stamp'], validated_pose=actual,
                              validated_heading=filtered_heading, validated_goal=goal)
@@ -2810,20 +2869,27 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         raise RuntimeError('moving table face outside selected region')
                     if sum(normal[i] * state['normal'][i] for i in (0, 1)) <= 0.0:
                         raise RuntimeError('moving table normal reversed')
+                    angle_change = abs(math.atan2(
+                        state['normal'][0] * normal[1] - state['normal'][1] * normal[0],
+                        sum(normal[i] * state['normal'][i] for i in (0, 1))))
+                    # Compare at the robot, independent of the odom origin.
+                    distance_change = abs(sum(
+                        (actual[i] - face[i]) * normal[i]
+                        - (actual[i] - state['face'][i]) * state['normal'][i]
+                        for i in (0, 1)))
+                    same_surface = (angle_change <= MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD
+                                    and distance_change <= MAX_CANDIDATE_PLANE_DISTANCE_M)
                     if observation.get('stable') is False:
-                        angle_change = abs(math.atan2(
-                            state['normal'][0] * normal[1] - state['normal'][1] * normal[0],
-                            sum(normal[i] * state['normal'][i] for i in (0, 1))))
-                        # Compare at the robot, so shifting the odom origin
-                        # cannot turn normal fit noise into a distance jump.
-                        distance_change = abs(sum(
-                            (actual[i] - face[i]) * normal[i]
-                            - (actual[i] - state['face'][i]) * state['normal'][i]
-                            for i in (0, 1)))
-                        if (angle_change > MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD
-                                or distance_change > MAX_CANDIDATE_PLANE_DISTANCE_M):
+                        if not same_surface:
                             raise RuntimeError('moving table candidate changed surface')
+                    # Preserve the edge already seen in odom when close-up FOV
+                    # clips it. A lateral goal never moves these observed ends.
+                    support = surface_support(
+                        face, normal, observation.get('width_m'),
+                        measured.get('lateral_shift_m', 0.),
+                        state['surface_support'] if same_surface else None)
                     state.update(face=face, normal=normal, stamp=stamp,
+                                 surface_support=support,
                                  span_m=observation.get('width_m'),
                                  last_valid_s=time.monotonic(), occluded_frames=0,
                                  occlusion_latched=False,
@@ -2832,6 +2898,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                                         'moving_candidate_at_stamped_odom'))
                     self.emit('table_approach_face_updated', observation_stamp_s=stamp,
                               reference_frame='odom', face_center_xy_m=list(face),
+                              visible_span_m=state['span_m'],
+                              observed_support_endpoints_odom=support,
                               outward_normal_xy=list(normal))
                 elif observation.get('reason') == 'no_table_edge_candidate':
                     state['occluded_frames'] += 1
