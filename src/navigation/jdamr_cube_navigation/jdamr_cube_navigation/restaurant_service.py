@@ -1674,6 +1674,12 @@ class ServiceRoute(CorridorRoute):
             if not rear_recovery:
                 deadline_s += time.monotonic() - paused_s
             timing['checked_s'] = None
+        # Recovery can discover a different terminal failure without entering
+        # _direct_motion again. Propagate that cause instead of the old pause.
+        if not self.stop_requested:
+            failure = state['tf_failure'] or state['target_failure']
+            if failure:
+                self._last_direct_motion_failure = failure
         if precision:
             self.emit('precision_straight_finished',
                       requested_distance_m=distance_m,
