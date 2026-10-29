@@ -24,6 +24,35 @@ REGISTERED_LATERAL_TOLERANCE_M = 0.005
 LATERAL_PRECISION_STATUS = 'NOT_VALIDATED'
 DEFAULT_MINIMUM_LOOKAHEAD_M = 0.10
 SHA256_PATTERN = re.compile(r'[0-9a-f]{64}')
+CAPTURE_EQUALS_GOAL = 'operator_confirmed_registered_station_goal'
+# The robot was photographed where the operator measured it, not on the goal.
+CAPTURE_OFFSET_FROM_GOAL = 'operator_measured_offset_from_capture'
+MAXIMUM_GOAL_LEFT_OFFSET_M = 0.05
+
+
+def capture_goal_left_offset(binding):
+    """Return the measured lateral goal offset in the capture's base frame."""
+    if not isinstance(binding, Mapping):
+        raise ValueError('reference_goal_binding_missing')
+    kind = binding.get('kind')
+    if kind == CAPTURE_EQUALS_GOAL:
+        if binding.get('robot_pose_equals_goal') is not True:
+            raise ValueError('reference_goal_binding_pose_mismatch')
+        return 0.0
+    if kind != CAPTURE_OFFSET_FROM_GOAL or binding.get('robot_pose_equals_goal') is not False:
+        raise ValueError('unsupported_reference_goal_binding')
+    offset = binding.get('goal_offset_in_capture_base_m')
+    if not isinstance(offset, Mapping) or set(offset) != {'forward_m', 'left_m'}:
+        raise ValueError('reference_goal_offset_must_be_forward_left')
+    # Depth owns the front gap; the image binding may move the goal sideways only.
+    if _finite(offset['forward_m'], 'reference_goal_forward_offset') != 0.0:
+        raise ValueError('reference_goal_offset_must_be_lateral_only')
+    left = _finite(offset['left_m'], 'reference_goal_left_offset')
+    if abs(left) > MAXIMUM_GOAL_LEFT_OFFSET_M:
+        raise ValueError('reference_goal_left_offset_out_of_bounds')
+    if not isinstance(binding.get('operator_measurement'), Mapping):
+        raise ValueError('reference_goal_offset_requires_operator_measurement')
+    return left
 
 
 def _finite(value, label):
@@ -289,6 +318,9 @@ class TaughtStationReference:
             self.reference_rgb_rois,
         )
         self.reference_capture = deepcopy(capture)
+        self.goal_left_offset_m = capture_goal_left_offset(capture.get('goal_binding'))
+        # A per-run operator correction, bound to this image frame by the caller.
+        self.run_left_offset_m = 0.0
         self.R_base_from_optical = np.asarray(
             self.basis.R_base_from_optical, dtype=np.float64).copy()
         self.assumptions = {
@@ -307,6 +339,7 @@ class TaughtStationReference:
             'reference_depth_stamp_s': depth_stamp,
             'reference_rgb_depth_delta_s': recorded_delta,
             'reference_goal_binding': deepcopy(capture.get('goal_binding')),
+            'goal_left_offset_from_capture_m': self.goal_left_offset_m,
             'mount_calibration_complete': self.basis.mount_calibration_complete,
             'millimeter_accuracy_validated': False,
             'registered_lateral_tolerance_m': REGISTERED_LATERAL_TOLERANCE_M,
@@ -314,9 +347,16 @@ class TaughtStationReference:
             'stale_age_checked_by_runtime_node': True,
         }
 
+    def set_run_left_offset(self, offset_m):
+        """Shift this run's goal sideways in the capture frame, never the capture."""
+        offset = _finite(offset_m, 'run_left_offset')
+        if abs(offset) > MAXIMUM_GOAL_LEFT_OFFSET_M:
+            raise ValueError('run_left_offset_out_of_bounds')
+        self.run_left_offset_m = offset
+
     def observe(self, current_rgb, current_info, odom_pose_at_image_stamp,
                 stamp_s):
-        """Return the recorded reference pose composed into the odom frame."""
+        """Return the bound goal (capture pose plus lateral offset) in odom."""
         try:
             stamp = _finite(stamp_s, 'stamp_s')
             actual = _pose(odom_pose_at_image_stamp, 'odom_pose')
@@ -346,10 +386,14 @@ class TaughtStationReference:
         if not error.valid:
             return _invalid_observation(
                 error.reason, stamp, self.assumptions, quality)
+        # The offset is along the capture base's left axis, seen from current base.
+        offset = self.goal_left_offset_m + self.run_left_offset_m
+        forward_m = error.forward_m - math.sin(error.yaw_rad) * offset
+        left_m = error.left_m + math.cos(error.yaw_rad) * offset
         cosine, sine = math.cos(actual[2]), math.sin(actual[2])
         goal = [
-            actual[0] + cosine * error.forward_m - sine * error.left_m,
-            actual[1] + sine * error.forward_m + cosine * error.left_m,
+            actual[0] + cosine * forward_m - sine * left_m,
+            actual[1] + sine * forward_m + cosine * left_m,
             _wrapped(actual[2] + error.yaw_rad),
         ]
         return {
@@ -357,9 +401,12 @@ class TaughtStationReference:
             'reason': 'observed_registered_reference_pose',
             'goal_odom': goal,
             'observation_odom_pose': list(actual),
-            'forward_m': error.forward_m,
-            'left_m': error.left_m,
+            'forward_m': forward_m,
+            'left_m': left_m,
             'yaw_rad': error.yaw_rad,
+            'capture_forward_m': error.forward_m,
+            'capture_left_m': error.left_m,
+            'goal_left_offset_m': offset,
             'stamp_s': stamp,
             'quality': quality,
             'assumptions': deepcopy(self.assumptions),

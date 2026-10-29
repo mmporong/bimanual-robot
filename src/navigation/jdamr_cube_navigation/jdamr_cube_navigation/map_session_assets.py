@@ -471,10 +471,15 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
                 capture = _mapping(
                     _path(station['reference_capture'], station_path.parent),
                     'station RGB-D capture')
+                # Imported here so map-only sessions do not load OpenCV.
+                from jdamr_cube_navigation.station_parking_reference import (
+                    capture_goal_left_offset)
                 binding = capture.get('goal_binding', {})
-                if (binding.get('kind') != 'operator_confirmed_registered_station_goal'
-                        or binding.get('station_id') != station_id
-                        or binding.get('robot_pose_equals_goal') is not True
+                try:
+                    capture_goal_left_offset(binding)
+                except ValueError as error:
+                    raise ValueError(f'RGB-D capture goal binding invalid: {error}') from error
+                if (binding.get('station_id') != station_id
                         or binding.get('registered_goal_map_pose') != list(
                             _finite_pose(station, station_id))):
                     raise ValueError('RGB-D capture must represent the registered station goal')

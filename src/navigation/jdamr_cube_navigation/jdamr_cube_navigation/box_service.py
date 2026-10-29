@@ -37,6 +37,8 @@ from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
 from jdamr_cube_navigation.station_parking_reference import (
     anchor_face_to_taught_lateral,
+    CAPTURE_EQUALS_GOAL,
+    CAPTURE_OFFSET_FROM_GOAL,
     filter_station_goal_observations,
     LATERAL_PRECISION_STATUS,
     TaughtStationReference,
@@ -385,6 +387,12 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     'stamp_s': stamp_s,
                 }
             with self._station_reference_lock:
+                reference = self.station_reference
+                if (result.get('valid') is True
+                        and result.get('goal_left_offset_m')
+                        != reference.goal_left_offset_m + reference.run_left_offset_m):
+                    # Computed before this run's correction was bound; drop it.
+                    continue
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
                 if result.get('valid') is True:
@@ -626,6 +634,59 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                           'reference_capture_sha256'))
         return goal, reference
 
+    def _bind_station_correction_to_rgbd(self, correction_m, sample_count=5,
+                                         timeout_s=3.0):
+        """Express an operator's lateral correction in the image reference frame.
+
+        The base is still parked where the operator measured it. The median of
+        fresh stationary observations is the bound goal's left offset from the
+        base; shifting the goal by ``correction_m - median`` puts it
+        ``correction_m`` left of the base, and later live images keep steering
+        to that place instead of a fixed raw-odom point.
+        """
+        reference = getattr(self, 'station_reference', None)
+        if reference is None:
+            return None
+        deadline_s = time.monotonic() + timeout_s
+        lefts, observation = {}, None
+        while (not self.stop_requested and time.monotonic() < deadline_s
+               and len(lefts) < sample_count):
+            observation = self._fresh_station_reference()
+            if observation and observation.get('valid') is True:
+                lefts[observation['stamp_s']] = observation['left_m']
+            time.sleep(0.05)
+        if len(lefts) < 3:
+            self.emit('station_correction_rgbd_binding_unavailable',
+                      reason='fewer_than_three_stationary_rgbd_observations',
+                      sample_count=len(lefts),
+                      last_reason=(observation.get('reason') if observation else None))
+            return None
+        median_m = float(np.median(list(lefts.values())))
+        run_offset_m = reference.run_left_offset_m + correction_m - median_m
+        try:
+            with self._station_reference_lock:
+                reference.set_run_left_offset(run_offset_m)
+                # Results with the previous offset must not reach the filter.
+                self.station_reference_result = None
+                self.station_reference_result_received_s = None
+                self._station_reference_goal_samples = deque(maxlen=5)
+        except ValueError as error:
+            self.emit('station_correction_rgbd_binding_unavailable', reason=str(error),
+                      sample_count=len(lefts), stationary_left_median_m=median_m)
+            return None
+        self.station_reference_goal = None
+        self.station_reference_control_goal = None
+        self.station_reference_goal_frozen = False
+        return {
+            'basis': 'operator_correction_bound_to_rgbd_reference',
+            'operator_left_correction_m': correction_m,
+            'stationary_sample_count': len(lefts),
+            'stationary_left_median_m': median_m,
+            'stationary_left_spread_m': max(lefts.values()) - min(lefts.values()),
+            'capture_goal_left_offset_m': reference.goal_left_offset_m,
+            'run_left_offset_m': run_offset_m,
+        }
+
     def _station_anchor_target(self, target, *, reference_frame='map'):
         """Keep the measured normal/gap and select only the taught tangent."""
         if not self._station_reference_enabled():
@@ -707,6 +768,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 rgbd_reference_reason=(reference.get('reason') if reference else
                                        'station_reference_not_observed'),
                 rgbd_observation_stamp_s=(reference.get('stamp_s') if reference else None),
+                rgbd_goal_left_offset_m=(self.station_reference.goal_left_offset_m
+                                         + self.station_reference.run_left_offset_m),
                 reference_capture_path=self.station_reference.assumptions.get(
                     'reference_capture_path'),
                 reference_capture_sha256=self.station_reference.assumptions.get(
@@ -1849,22 +1912,29 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.emit('failed', phase='box_camera_ready')
             return False
         search_budget = BoxSearchBudget(target_directed=surface_mode == 'table_edge')
-        if (reapproach_m is not None and reapproach_from_log is None
-                and not station_left_correction_m
+        if (reapproach_m is not None
+                and (reapproach_from_log is None or station_left_correction_m)
                 and getattr(self, 'station_reference_mode', None) == 'rgbd'):
             binding = self.station_reference.assumptions.get('reference_goal_binding') or {}
+            # A measured correction follows the image frame, not raw odom: the
+            # fixed odom goal kept every 10 mm correction (2026-10-29 B-D)
+            # inside wheel/IMU drift. Without fresh images the old path remains.
+            bound_correction = (self._bind_station_correction_to_rgbd(
+                station_left_correction_m) if station_left_correction_m else None)
             goal, observation = self._station_goal_reference()
-            if (binding.get('kind') == 'operator_confirmed_registered_station_goal'
-                    and binding.get('robot_pose_equals_goal') is True):
+            if (binding.get('kind') in (CAPTURE_EQUALS_GOAL, CAPTURE_OFFSET_FROM_GOAL)
+                    and (not station_left_correction_m or bound_correction is not None)):
                 # The requested retreat uses the existing guarded straight
                 # controller. Neither the parked edge nor the first visual
                 # match is needed for an explicitly requested retreat. Fresh
                 # depth and visual feedback are acquired after moving away.
                 self.emit('station_reapproach_started', retreat_m=reapproach_m,
-                          station_left_correction_m=0.0,
+                          station_left_correction_m=station_left_correction_m,
                           lateral_goal_reference=goal,
+                          rgbd_bound_correction=bound_correction,
                           registered_station_unchanged=True,
-                          retreat_basis='observed_operator_bound_rgbd_goal',
+                          retreat_basis=(bound_correction['basis'] if bound_correction
+                                         else 'observed_operator_bound_rgbd_goal'),
                           rgbd_reference_valid=bool(observation and observation.get('valid')),
                           rgbd_reference_reason=(observation.get('reason')
                                                  if observation else 'not_observed_yet'),
