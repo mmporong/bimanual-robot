@@ -6,6 +6,15 @@
 
 ## 2026-10-29 | GR00T 로딩 크래시 수정·SmolVLA 20·40 로컬 준비·로봇 노트북 이전 준비
 
+- **주행–조작 연동 구현 명세 작성**: [문서](docs/guides/20261029_주행_조작_연동_구현명세.md)
+  - PR #86 주행 코드를 읽기 전용으로 조사했다. 두 정차가 모두 `box_service._wait_optional_box_dwell`을 지나고, 외부 해제 수단은 없다(정지·비상정지만 있음). PC → Pi 제어는 ssh와 spool 파일뿐이다.
+  - 제안한 구조:
+    - Pi: `--hold-until-release`. `<spool>/<run>.release.<station>` 파일을 기다리고, 상한 시간이 지나면 실패한 채 그 자리에서 정지한다.
+    - PC: `jdamr_depart.py release`
+    - 브리지: 주행 PC에서 주문 서버 `/api/state`·`/api/align/confirm`를 쓴다.
+  - 팔 실측: SmolVLA 80 물따르기 66~71 s, 컵배치 31~34 s(단건, 평가 기록 시트)
+- **보안**: PR #86 `config/navigation/maps/classroom/README.md`에 Pi 비밀번호가 평문으로 있다(공개 저장소). 비밀번호 교체·삭제 후 머지가 필요하다.
+
 - **최종 시연 준비**: 웹 주문 → 출발 전 팔 접기 → 주방 정렬 후 물따르기 → 테이블 정렬 후 컵배치 → 도크.
   - 조작 쪽은 상주형 실행기(SmolVLA 80 두 정책 미리 로드·예열)와 주문 서버 `--backend rollout-service`로 이미 연결돼 있었다.
   - 설정을 사용자 단건 명령(`max_relative_target=15`, 끝 자세 허용치 기본 10°)에 맞췄다. 기존 bat은 20과 `--end.tol=15`였다.
