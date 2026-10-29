@@ -391,7 +391,30 @@ def install_groot_bf16() -> None:
         print(f"[groot] bf16으로 불러옴 (GPU {torch.cuda.memory_allocated() / 1e9:.2f}GB)")
         return policy
 
+    def load_streamed(cls, model, model_file, map_location, strict):
+        # 원래는 fp32 모델(12.6GB)과 가중치 전체(11.7GB)를 한꺼번에 올려 커밋 메모리 부족(os error 1455)으로 죽었다.
+        # 모델을 먼저 bf16으로 줄이고 가중치를 한 텐서씩 복사해 순간 메모리를 모델 크기 수준으로 낮춘다.
+        from safetensors import safe_open
+        from lerobot.policies.utils import log_model_loading_keys
+
+        model.to(torch.bfloat16)
+        state = model.state_dict()
+        missing, unexpected = set(state), []
+        with torch.no_grad(), safe_open(model_file, framework="pt", device="cpu") as f:
+            for key in f.keys():
+                if key in state:
+                    state[key].copy_(f.get_tensor(key))
+                    missing.discard(key)
+                else:
+                    unexpected.append(key)
+        # embed_tokens처럼 lm_head와 같은 텐서를 공유하는 키는 파일에 한 번만 있어도 채워진다
+        loaded = {state[k].data_ptr() for k in state if k not in missing}
+        missing = {k for k in missing if state[k].data_ptr() not in loaded}
+        log_model_loading_keys(sorted(missing), unexpected)
+        return model
+
     GrootPolicy.from_pretrained = classmethod(from_pretrained)
+    GrootPolicy._load_as_safetensor = classmethod(load_streamed)
 
 
 def arg_value(args: list[str], key: str) -> str | None:

@@ -1,0 +1,2 @@
+# 패치 파일은 원본 코드의 공백을 그대로 담으므로 git diff --check에서 제외한다
+*.patch -whitespace
