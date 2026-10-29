@@ -292,15 +292,24 @@ def test_task_calibration_rejects_malformed_input(calibration, message):
 
 
 def test_current_mount_disables_superseded_astra_s_task_calibration():
-    """A replaced camera must not inherit the previous sensor's task correction."""
+    """A replaced camera must not inherit the previous sensor's task correction.
+
+    The 2026-10-27 correction was derived again for the current Astra mount
+    (operator gap report plus a matching stationary depth observation).
+    """
     mounted = yaml.safe_load((Path(__file__).resolve().parents[1]
                               / 'config/camera_mount_current.yaml').read_text())
     calibration = mounted['camera_mount']['table_edge_calibration']
     superseded = mounted['camera_mount']['provenance']['superseded_astra_s_profile']
-    assert calibration['enabled'] is False
-    assert calibration['status'] == 'invalidated_by_camera_replacement'
     assert superseded['valid'] is False
+    assert calibration['enabled'] is True
+    assert calibration['status'] == 'derived'
+    assert calibration['provenance']['valid_for'] == (
+        'current_Astra_mount_water_station_front_edge')
+    assert calibration['reference_transform'] == mounted['camera_mount']['transform']
+    assert calibration['provenance']['millimeter_accuracy_validated'] is False
 
+    # The enabled current-mount correction is applied (the superseded one was not).
     without_calibration = deepcopy(mounted)
     without_calibration['camera_mount'].pop('table_edge_calibration')
-    assert target(mounted=mounted) == target(mounted=without_calibration)
+    assert target(mounted=mounted) != target(mounted=without_calibration)

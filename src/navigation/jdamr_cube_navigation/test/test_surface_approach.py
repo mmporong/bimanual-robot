@@ -4,7 +4,7 @@ import math
 
 from jdamr_cube_navigation.reverse_parking import static_corridor_clear
 from jdamr_cube_navigation.surface_approach import (
-    FACE_ALIGNMENT_ENTRY_MARGIN_M, FACE_ALIGNMENT_GAP_M,
+    FACE_ALIGNMENT_ENTRY_MARGIN_M,
     face_approach_command, face_approach_waypoints, filtered_face_heading,
     lateral_face_approach_command,
 )
@@ -224,7 +224,9 @@ def _actual_lateral_rollout(start_y, start_yaw):
         face_error = -yaw
         center_gap = face_x - x - .065 * math.cos(face_error)
         gap = center_gap - .225 * abs(math.sin(face_error))
-        if gap <= FACE_ALIGNMENT_GAP_M + FACE_ALIGNMENT_ENTRY_MARGIN_M:
+        # Lateral tracking runs to the target-gap precision band (b4e5cdd),
+        # not the older 5 cm face-alignment band.
+        if gap <= .01 + FACE_ALIGNMENT_ENTRY_MARGIN_M:
             return poses, stopped_before_band
         remaining = (center_gap - .01) / math.cos(face_error)
         linear, angular = lateral_face_approach_command(

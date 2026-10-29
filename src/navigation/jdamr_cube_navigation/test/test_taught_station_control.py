@@ -60,9 +60,14 @@ def _node():
     return node
 
 
+def _rgbd_model(**kwargs):
+    # Status and worker arithmetic need the bound capture and run offsets.
+    return Mock(goal_left_offset_m=0., run_left_offset_m=0., **kwargs)
+
+
 def test_live_feedback_corrects_the_first_anchor_and_arrival_uses_the_same_goal():
     node = _node()
-    node.station_reference = Mock()
+    node.station_reference = _rgbd_model()
     node.station_reference_mode = 'rgbd'
     reference = {'valid': True, 'stamp_s': 10., 'goal_odom': [.4, 0., 0.]}
     node._fresh_station_reference = Mock(return_value=reference)
@@ -105,7 +110,7 @@ def test_first_control_call_uses_observations_already_processed_in_background():
 
 def test_lost_video_keeps_steering_goal_but_cannot_confirm_precision():
     node = _node()
-    node.station_reference = Mock()
+    node.station_reference = _rgbd_model()
     node.station_reference_mode = 'rgbd'
     node._fresh_station_reference = Mock(return_value={
         'valid': True, 'stamp_s': 10., 'goal_odom': [.4, .02, 0.]})
@@ -311,20 +316,22 @@ def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction(mo
     # A fresh Jazzy process need not expose duration on the rclpy package.
     monkeypatch.delattr(box_service.rclpy, 'duration', raising=False)
     node = _node()
-    model = Mock(return_value=None)
+    model = _rgbd_model(contact_reference=None)
     model.observe.return_value = {
         'valid': True, 'reason': 'observed_registered_reference_pose',
-        'goal_odom': [1., .25, .2], 'stamp_s': 10.,
+        'goal_odom': [1., .25, .2], 'stamp_s': 10., 'goal_left_offset_m': 0.,
     }
     node.station_reference = model
     node.parking_tf = Mock()
 
-    def lookup(target, source, stamp, *, timeout):
-        assert stamp.nanoseconds == int(10e9)
-        assert 0 < timeout.nanoseconds <= int(.2e9)
+    def lookup(target, source, stamp, **kwargs):
         if (target, source) == ('odom', 'base_link'):
+            assert stamp.nanoseconds == int(10e9)
+            assert 0 < kwargs['timeout'].nanoseconds <= int(.2e9)
             return SimpleNamespace(transform=_pose(.8, .1, .05))
         assert (target, source) == ('map', 'odom')
+        # Map only presents the image-time odom goal: latest TF, no wait.
+        assert stamp.nanoseconds == 0 and 'timeout' not in kwargs
         return SimpleNamespace(transform=_pose(2., 3., math.pi / 2))
 
     node.parking_tf.lookup_transform.side_effect = lookup
@@ -432,8 +439,11 @@ def test_fresh_rgbd_goal_replaces_only_taught_tangent():
     node = _node()
     node.station_reference = Mock()
     node.station_reference_taught_map_pose = (1.2, -.4, .1)
+    node.station_reference_mode = 'rgbd'
+    # Control filters fresh results by stamp in odom and carries their map goal.
     node._fresh_station_reference = Mock(return_value={
         'valid': True, 'reason': 'observed_registered_reference_pose',
+        'stamp_s': 10., 'goal_odom': [.1, .08, .02],
         'goal_map': [1.1, .08, .02],
     })
     target = {
@@ -469,6 +479,12 @@ def test_invalid_or_stale_reference_never_claims_lateral_precision():
         'lateral_goal_valid': False,
         'lateral_goal_basis': None,
         'lateral_goal_observation_stamp_s': None,
+        'lateral_goal_frozen': False,
+        'lateral_goal_odom': None,
+        'lateral_actual_odom': None,
+        'lateral_anchor_odom': None,
+        'rgbd_observed_lateral_error_m': None,
+        'rgbd_goal_lateral_difference_m': None,
     }
 
 
@@ -484,7 +500,10 @@ def test_rejected_rgb_frame_retains_accepted_odom_goal_only_for_steering():
     first, current = node._station_goal_reference()
     carried, current = node._station_goal_reference()
 
-    assert first == carried == accepted
+    # The steering goal is the filtered accepted frame plus its filter metadata.
+    assert first == carried
+    assert {key: first[key] for key in accepted} == accepted
+    assert first['goal_filter_sample_count'] == 1
     assert current == rejected
     status = node._station_lateral_status()
     assert status['lateral_goal_valid'] is True
