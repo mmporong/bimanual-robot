@@ -215,3 +215,10 @@ python3 tools/jdamr/water_service_api.py stop
 Windows에 카메라 USB를 연결하면 RGB·깊이·CameraInfo를 Pi로 보내는 별도 영상 연결이
 필요하다. 이 API는 영상 송신기를 포함하지 않는다. 현재의 Pi USB 카메라 주행 준비와
 Windows 카메라를 사용하는 추론 포함 준비는 구분한다.
+
+### Windows 공유 Astra 입력
+
+현재 주행의 센서 입력 기본값은 `JDAMR_CAMERA_TRANSPORT=windows_tcp`다.
+`session-start`에서 TCP 수신기와 면 관측기를 준비하고, 태스크 사이에도 유지해 카메라 재기동·시계 동기화 대기를 반복하지 않는다.
+Windows 송신기·필드·지연 기록과 종료 명령은 [ASTRA_TCP.md](ASTRA_TCP.md)에 있다.
+USB 복원 시에는 TCP 수신기를 먼저 중지하고 `JDAMR_CAMERA_TRANSPORT=usb`를 명시한다.

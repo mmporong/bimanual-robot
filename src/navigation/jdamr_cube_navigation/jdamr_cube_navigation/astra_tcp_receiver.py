@@ -354,6 +354,8 @@ def main():
     parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', type=int, default=5600)
     parser.add_argument('--peer', default='192.168.0.175')
+    parser.add_argument('--publish-optical-tf', action='store_true',
+                        help='publish existing calibrated lens-origin optical convention')
     parser.add_argument('--clock-hold-s', type=float, default=120.0)
     parser.add_argument('--clock-max-rtt-ms', type=float, default=100.0)
     args = parser.parse_args()
@@ -363,6 +365,22 @@ def main():
         parser.error('clock hold must be 1..120s and maximum RTT must be 0..200ms')
     rclpy.init()
     node = Node('astra_tcp_receiver')
+    if args.publish_optical_tf:
+        from geometry_msgs.msg import TransformStamped
+        from tf2_ros import StaticTransformBroadcaster
+        # camera_mount_current.yaml defines camera_link at the lens origin.
+        # This is the same (z, -x, -y) basis used by table_edge_target; the
+        # existing robot description continues to own base_link -> camera_link.
+        optical_tf = TransformStamped()
+        optical_tf.header.stamp = node.get_clock().now().to_msg()
+        optical_tf.header.frame_id = 'camera_link'
+        optical_tf.child_frame_id = FRAME
+        optical_tf.transform.rotation.x = -0.5
+        optical_tf.transform.rotation.y = 0.5
+        optical_tf.transform.rotation.z = -0.5
+        optical_tf.transform.rotation.w = 0.5
+        optical_broadcaster = StaticTransformBroadcaster(node)
+        optical_broadcaster.sendTransform(optical_tf)
     qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
                      durability=DurabilityPolicy.VOLATILE)
     pubs = [(node.create_publisher(CameraInfo, f'/camera/{kind}/camera_info', qos),

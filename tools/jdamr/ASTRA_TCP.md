@@ -36,7 +36,11 @@ systemctl --user stop jdamr-astra-tcp.service
 journalctl --user -u jdamr-astra-tcp.service -n 30
 ```
 
-기존 USB Astra 발행기와 동시에 사용하지 않는다. 이번 배포는 독립 센서 수신 서비스이며 기존 실행기의 카메라 자동 기동 서비스를 교체하지 않았다. 주행 연결 전에는 카메라 기동 경로 전환, 기존 광학 TF 유지, Windows의 registration/CameraInfo/미러·크롭 일치, 실제 영상 지연을 확인해야 한다. 320×240 및 5fps 이상 입력 지원과 1cm 주차 달성은 별개다.
+현재 주행 helper의 기본은 JDAMR_CAMERA_TRANSPORT=windows_tcp다. session-start 준비에서 TCP 수신기와 관측기를 한 번 켜고, 실행 요청에 --camera-always-on을 전달해 급수대·테이블·도크 사이에 다시 켜거나 끄지 않는다. 기존 USB Astra 서비스는 함께 실행하지 않는다. USB 구성을 복원할 때는 TCP 수신기를 먼저 중지하고 JDAMR_CAMERA_TRANSPORT=usb를 명시한다.
+
+서비스는 --publish-optical-tf를 사용해 camera_link → camera_color_optical_frame을 발행한다. 기존 camera_mount_current.yaml의 렌즈 원점 동일 관례와 table_edge_target.py의 (z,-x,-y) 투영을 TF에 연결한다. base_link → camera_link는 기존 로봇 모델이 계속 소유한다. 이 연결은 새로운 실측·공장 외부 보정값으로 주장하지 않는다. USB 드라이버와 TF를 중복 발행하지 않는다.
+
+JPEG 실제 입력에서 약 10.0fps·1.40MB/s, RGB 촬영→수신 중앙값 46~47ms(95백분위 60~73ms), 깊이 79~82ms(95백분위 99~108ms), RGB·깊이 촬영 차이 중앙값 33~34ms를 확인했다. 마지막 30초 수신·유효 처리 FPS가 같았으며 ROS 발행 전 만료 건수는 0이었다. PING/PONG 최소 RTT는 3.5~4.8ms다. 지연은 시계 보정 기반 추정값이며 조작 추론 중 성능은 아직 미확인이다. 도크 정지 영상에서 관측기가 실제 깊이를 처리하는 것까지 확인했으며, 급수대·테이블의 정밀주차 성공은 별도 실차 확인 대상이다.
 
 ## Pi 비교 자료
 

@@ -83,6 +83,10 @@ ROS_ENV = ('export ROS_DOMAIN_ID=12 ROS_LOCALHOST_ONLY=0 '
 # keep the project-standard LOCALHOST transport and test per-process Nav2 nodes.
 PI_SOURCE = f'set +u; source /opt/ros/jazzy/setup.bash; source {PI_WS}/install/setup.bash; {ROS_ENV}'
 SESSION_DISCOVERY = 'LOCALHOST'
+# The shared Astra is owned by Windows in the current serving scenario.
+CAMERA_TRANSPORT = os.environ.get('JDAMR_CAMERA_TRANSPORT', 'windows_tcp')
+if CAMERA_TRANSPORT not in ('windows_tcp', 'usb'):
+    raise ValueError('JDAMR_CAMERA_TRANSPORT must be windows_tcp or usb')
 # 9/29's last session ran without composition (plan v4.1 E4); a composed container
 # deadlocked when a participant joined (three reproductions on 2026-09-30).
 SESSION_COMPOSITION = 'false'
@@ -193,7 +197,17 @@ def prepare_reference_mount():
 
 
 def prepare_reference_camera():
-    """Enable both reference streams on the existing single Astra driver."""
+    """Prepare the selected sensor source without restarting it between tasks."""
+    if CAMERA_TRANSPORT == 'windows_tcp':
+        # The user unit owns the sole receiver. The USB unit must stay inactive.
+        active = pi('systemctl is-active jdamr-box-rgbd.service', check=False).stdout.strip()
+        if active == 'active':
+            pi('sudo -n systemctl stop jdamr-box-rgbd.service')
+        pi('export XDG_RUNTIME_DIR=/run/user/$(id -u); '
+           'systemctl --user start jdamr-astra-tcp.service && '
+           'sudo -n systemctl start jdamr-box-observer.service')
+        log('camera: continuous Windows AST1 receiver and observer; no USB launch')
+        return
     if ACTIVE_MAP_SESSION is None:
         return
     source = (f'source /opt/ros/jazzy/setup.bash; '
@@ -1300,6 +1314,7 @@ def run_cycle(args, state, table_id):
                    + ('--rear-box-only ' if rear_box_only else
                       '--search ' if getattr(args, 'park_only', False) else
                       f'--search --return-home --return-timeout-s {RETURN_TIMEOUT_S} ')
+                   + ('--camera-always-on ' if CAMERA_TRANSPORT == 'windows_tcp' else '')
                    + f'--operator-heartbeat {heartbeat} '
                    f'--surface-mode {surface_mode} '
                    + (' --home-only ' if args.dock_only else '')
