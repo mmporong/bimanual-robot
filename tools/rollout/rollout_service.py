@@ -624,6 +624,10 @@ def main() -> None:
         return
     ns, hook_params, rest = parse_service_args(sys.argv[1:])
     t_start = time.perf_counter()
+    # lerobot(pyarrow)을 카메라 번호 찾기(Windows COM)보다 먼저 불러온다.
+    # 순서가 반대면 pyarrow.dataset import에서 access violation으로 꺼진다(2026-10-29 실차 연결 때 재현).
+    import lerobot.motors  # noqa: F401
+    import lerobot.rollout  # noqa: F401
     rest = fill_camera_indices(rest)
     settings = {t: task_settings(ns, t) for t in TASKS}
     stow_target = None

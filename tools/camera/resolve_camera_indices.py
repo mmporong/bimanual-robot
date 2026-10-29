@@ -27,8 +27,10 @@ from pygrabber.dshow_ids import DeviceCategories
 # 화면에 순정 SO-101 집게가 보이는 것으로 왼쪽임을 확인했다. v2 데이터는 이전 카메라로 녹화됨.
 # 2026-10-24: 차체 결합 후 오른쪽 손목캠이 다른 USB 포트로 옮겨져 30e3ab42 -> b7049f8.
 # 캡처에 오른손이 잡은 병이 보이는 것으로 오른쪽임을 확인했다.
+# 2026-10-29: 실차 연결 때 오른쪽 손목캠 포트가 다시 바뀌어 b7049f8 -> 1b3f2dc8.
+# 왼쪽(Innomaker)과 다른 집게가 화면에 보이는 손목캠임을 캡처로 확인했다.
 LEFT_DEVPATH_HINT = "2bd3af6b"
-RIGHT_DEVPATH_HINT = "b7049f8"
+RIGHT_DEVPATH_HINT = "1b3f2dc8"
 DEPTH_NAME = "OBS Virtual Camera"
 
 

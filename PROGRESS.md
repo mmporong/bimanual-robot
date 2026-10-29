@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-10-29 (저녁) | 실차 연결 첫 시험·실행기 기동 크래시 수정·Astra 깊이 Pi 송신
+
+- **조작 실행기 기동 크래시 수정** (`tools/rollout/rollout_service.py`)
+  - 증상: `start_scenario.bat`의 `manip-service` 창이 바로 닫혔다. 로그상 `pyarrow.dataset` import에서 `access violation`(종료 코드 139), 3회 재현.
+  - 원인 범위: 카메라 번호 찾기(`resolve_camera_indices`, Windows COM) → 설정 파싱 → lerobot import 순서에서만 터졌다. lerobot을 먼저 import하면 2/2 정상.
+  - 조치: `fill_camera_indices` 전에 `lerobot.motors`·`lerobot.rollout`을 import한다. 이후 실차로 준비 완료까지 3회 정상.
+- **오른쪽 손목캠 USB 경로 갱신**: `b7049f8` → `1b3f2dc8`(포트 변경). 두 손목캠 캡처로 집게 모양을 대조해 확인했다.
+- **팔 연결 일시 오류 1회**: 오른팔 4번(wrist_flex) `Torque_Enable` 응답 패킷 깨짐. 읽기 진단 3회 모두 12개 모터 정상이었고 재기동으로 통과했다. 반복되면 케이블·전원 점검.
+- **실차 첫 시험(차 정지, 병·컵 없이 허공)**: 웹 주문 → 양팔 접기(10.9 s) → 물따르기 시작 자세(6.4 s) → 물따르기 60.3 s `auto_done` → 오른팔 접기 → 컵배치 50 s 시간 초과.
+  - 허공 시험이라 정책 판정·소요 시간은 의미가 없다. 실물 시간은 주행 통합 때 다시 잰다.
+  - `Record loop is running slower (~1 Hz)` 경고는 50스텝마다 청크를 다시 계산하는 한 루프에서만 나온다(그 사이는 30 Hz).
+- **배터리 성능**: 노트북은 차에 실려 충전기를 못 꽂는다. ASUS Silent 모드에서 추론 1회 0.99 s, Performance로 바꾸자 0.52~0.59 s(이전 기록 0.39~0.41 s). 준비 완료 157 s → 100 s.
+- **Wi-Fi**: 주행 PC·Pi가 `aicampus_286`이다. 노트북이 `robot`으로 자동 재연결돼 서로 닿지 않던 것을 `robot` 자동 연결을 끄고 고정했다. 노트북 IP `192.168.0.175`, 주문 QR도 새 IP로 다시 만들었다.
+- **Astra RGB·정렬 깊이 → Pi 송신(AST1)** (`tools/camera/astra_pi_sender.py`, 브리지 `--send-pi`)
+  - Astra는 Windows 노트북에 있고, Pi 정밀주차는 RGB·깊이·CameraInfo가 필요하다. 브리지가 장치를 계속 쥐고 IL 가상 카메라와 Pi 송신을 함께 한다.
+  - 깊이: OpenNI2 depth→color registration, 320×240 1 mm(Pi 드라이버 설정과 같음). 640×480으로 열었을 때는 3~6분마다 센서가 멈췄다.
+  - 보정값: `tools/camera/astra_camera_params.py`로 장치 공장값을 읽어 `config/camera/astra_params.json`에 저장했다. 컬러 K가 Pi 교시 저장값과 소수점까지 같았다(fx=fy=516.824, cx=324.241, cy=252.942). D는 Pi 드라이버와 같게 0으로 보내고 장치 왜곡값은 `factory_D`로 따로 싣는다.
+  - Windows 기본 미러링이 켜져 있어 송신 전에 RGB·깊이 좌우를 되돌린다. 교시 RGB와 화각·크롭이 같은 것을 캡처로 대조했다.
+  - RGB JPEG q95 + 깊이 PNG16, 10 fps, 약 1.35 MB/s. PNG RGB는 5 fps에 그쳤다. PING/PONG 시계 동기화는 프레임 사이에만 보낸다. 로컬 가짜 수신기로 무손실·PONG 순서를 확인했다.
+- 남은 일: 병·컵을 둔 실물 시험(Performance 모드에서 성공률·추론 중 송신 fps), 주행 통합 3회, Pi 쪽 수신 fps·시각 차이·정밀주차 확인.
+
+---
+
 ## 2026-10-29 | GR00T 로딩 크래시 수정·SmolVLA 20·40 로컬 준비·로봇 노트북 이전 준비
 
 - **주행–조작 연동 구현 명세 작성**: [문서](docs/guides/20261029_주행_조작_연동_구현명세.md)
