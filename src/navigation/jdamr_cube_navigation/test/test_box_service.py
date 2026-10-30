@@ -4194,3 +4194,47 @@ def test_rgbd_station_before_its_first_match_targets_the_registered_pose_in_map_
     pending = node._station_anchor_target(target, reference_frame='odom')
     assert pending['y_m'] == .2
     assert pending['lateral_goal_pending'] is True
+
+
+def test_tape_frozen_approach_keeps_endpoint_when_new_image_moves_it():
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_goal_frozen = True
+    anchor = {'valid': True, 'goal_odom': [1., .02, 0.], 'stamp_s': 1.}
+    node.station_reference_goal = anchor
+    newer = {'valid': True, 'goal_odom': [1., -.02, 0.], 'stamp_s': 2.}
+    node._fresh_station_reference = Mock(return_value=newer)
+    goal, reference = node._station_goal_reference(freeze=True)
+    assert goal is anchor
+    assert reference is newer
+    assert goal['goal_filter_sample_count'] == 2
+    node._station_goal_reference(freeze=True)
+    assert goal['goal_filter_sample_count'] == 2
+    node._fresh_station_reference.return_value = dict(newer, stamp_s=3.)
+    goal, _ = node._station_goal_reference(freeze=True)
+    assert goal['goal_filter_sample_count'] == 3
+    node._fresh_station_reference.return_value = dict(newer, stamp_s=4.)
+    goal, _ = node._station_goal_reference(freeze=True)
+    assert goal['goal_filter_sample_count'] == 3
+    assert goal['goal_odom'] == [1., .02, 0.]
+    assert getattr(node, '_station_terminal_goal', None) is None
+
+
+def test_tape_retreat_clears_old_endpoint_and_samples():
+    from collections import deque
+    from threading import Lock
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_goal = {'goal_odom': [1., .02, 0.]}
+    node.station_reference_control_goal = dict(node.station_reference_goal)
+    node.station_reference_goal_frozen = True
+    node._station_reference_lock = Lock()
+    node._station_reference_goal_samples = deque([dict(node.station_reference_goal)])
+    node._table_observation_context = ({'camera_mount': {}}, (1., 0.), .6)
+    node._leave_parked_pose = Mock(return_value=True)
+    assert node._leave_for_table_reobservation()
+    assert node.station_reference_goal is None
+    assert node.station_reference_control_goal is None
+    assert not node.station_reference_goal_frozen
+    assert not node._station_reference_goal_samples

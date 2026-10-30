@@ -227,3 +227,76 @@ Windows 카메라를 사용하는 추론 포함 준비는 구분한다.
 `session-start`에서 TCP 수신기와 면 관측기를 준비하고, 태스크 사이에도 유지해 카메라 재기동·시계 동기화 대기를 반복하지 않는다.
 Windows 송신기·필드·지연 기록과 종료 명령은 [ASTRA_TCP.md](ASTRA_TCP.md)에 있다.
 USB 복원 시에는 TCP 수신기를 먼저 중지하고 `JDAMR_CAMERA_TRANSPORT=usb`를 명시한다.
+
+## 팀원 실행 절차
+
+현재 기체와 같은 카메라 장착·테이프·지도·교시 자산을 사용하는 절차다. Git pull만으로
+지도와 교시 RGB-D가 생기지는 않는다. 새 PC는 ROS 2 Jazzy와 아래 자산을 먼저 준비한다.
+
+### 지도와 정렬 설정
+
+- 선택 포인터: `$HOME/jdamr_data/maps/current_manual_mapping.json`
+- 현재 자산 폴더: `$HOME/jdamr_data/maps/20261026_manual_160135/`
+- 선택 지도: `map_table01_observed.yaml`과 해당 이미지. 도크: `home_dock_table01_observed.yaml`,
+  `dock_scan_reference_table01_observed.json`, `dock_scan.json`.
+- 급수대 원본: `water_station.yaml`, 테이블 원본: `table_01.yaml`.
+  `stations/`의 참조 JSON·RGB·depth·보정 자료도 함께 필요하다.
+- 기존 PC 또는 Pi에서 이 자산 폴더와 선택 포인터를 인계한다. 다른 홈 경로라면 포인터와
+  등록 파일의 참조 경로도 새 자산 위치에 맞춰야 한다. 로그·이전 AMCL 상태를 현재 위치로 사용하지 않는다.
+- 급수대 책상 앞 옆면에 두 검은 띠를 중앙에서 좌우5cm, 폭1.8cm로 붙인다.
+  팔을 접었을 때 접근 구간에서 두 띠의 위끝이 보여야 한다. 카메라 장착과 기준 컵·병 위치는 유지한다.
+- 설정 예제는 [config/water_station_tape.json](config/water_station_tape.json).
+  현재 `water_station.yaml`의 `rgbd_reference`에 같은 두 키가 설정돼 있다.
+  기존 참조 경로·해시·상판 보정은 보존하고 예제만으로 참조 전체를 교체하지 않는다.
+  `prepare`가 원본 설정을 runtime/station_profiles.json과 Pi로 동기화한다.
+- 목표 앞 간격1cm, 테이프 좌우 허용5mm는 제어 목표이며 실측 보증치가 아니다.
+  테이블1은 `surface_only`로 면 정렬만 사용한다.
+
+### 서비스 준비 후 출발
+
+1. Windows OMEN에서 팔 전원·USB·손목캠·Astra를 연결하고 현재 COM 번호를 확인한다.
+   모델은 저장소와 별도로 설치한다. 저장소 루트에서 `tools\rollout\start_scenario.bat`을
+   일반 창으로 실행하고 ready를 기다린다. 오래된 AMRArmService 예약 작업과 중복 실행하지 않는다.
+   Astra 송신은 별도 프로세스이며 이 bat만으로 켜지지 않는다. [ASTRA_TCP.md](ASTRA_TCP.md)를 따른다.
+2. Windows 주문 서버는 `http://192.168.0.157:8765`, Pi 수신은 `192.168.0.159:5600`이다.
+   IP가 바뀌면 주문 URL과 수신기 peer를 함께 변경한다. 같은 내부망에서 연결한다.
+3. 주행 PC에서 아래 준비 명령을 실행한다. 현재 도크에 로봇을 놓고 앞은 통로를 보게 한다.
+   충전선을 분리한 뒤 출발한다. init은 기존 도크를 재등록하지 않는다.
+
+```bash
+cd "$HOME/bimanual-robot"
+git pull --ff-only origin main
+python3 tools/jdamr/jdamr_depart.py prepare
+python3 tools/jdamr/jdamr_depart.py session-start
+python3 tools/jdamr/jdamr_depart.py init
+python3 tools/jdamr/water_service_api.py serve --order-url http://192.168.0.157:8765
+```
+
+이미 미션 서버가 켜져 있으면 serve를 중복 실행하지 않는다. 서버는 시연 동안 유지한다.
+다른 터미널에서 전체 시나리오를 시작한다(이 명령은 팔 접기와 실물 주행을 시작한다).
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/jdamr/water_service_api.py start --request-id "serving-$(date +%Y%m%d-%H%M%S)"
+python3 tools/jdamr/water_service_api.py status
+```
+
+중단이 필요할 때만 별도로 실행한다. 다음 구간을 시작하지 않으며 자동 복귀하지 않는다.
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/jdamr/water_service_api.py stop
+```
+
+순서는 도크 → 급수대 테이프·면 주차 → 물따르기 → 테이블1 면 주차 → 컵배치 → 후진 도킹이다.
+기존 웹 주문이 있으면 start가 그 주문에 연결하고, 없으면 새 주문을 생성한다.
+정렬 완료는 미션 실행기가 보내므로 관제에서 같은 단계 버튼을 중복 누르지 않는다.
+수동 조종 화면은 `http://192.168.0.159:8080/`이며 자동주행과 동시에 조작하지 않는다.
+
+### 전원 종료 후 재개 주의점
+
+마지막 주문261030002는 급수대 주차 후 pour 실행 중 Windows가 꺼졌다. 로컬 미션은
+stopped이며 Windows 취소 요청은 전달되지 않았다. 재부팅 뒤 `/control`에서 그 주문의
+상태를 확인하고 미완료 주문을 취소한 다음 새 회차를 시작한다. 물따르기 완료를 추정해
+테이블로 보내거나 align/confirm을 재전송하지 않는다. 기존 모델 로딩은 출발 전에 마친다.
+전원 꺼짐 이전 주행·추론 진행은 사용자 확인이며, 이번 회차 전체 완료를 뜻하지 않는다.

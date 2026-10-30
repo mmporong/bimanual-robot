@@ -7,12 +7,28 @@ import numpy as np
 
 from .box_top_detection import (
     _fit_plane,
-    _plane_from_sample,
     BoxTopConfig,
     BoxTopDetection,
     CameraIntrinsics,
     depth_points,
 )
+
+
+def _plane_from_triplet(sample: np.ndarray):
+    """Fit a plane from three points without the generic ``np.cross`` path."""
+    first, second, third = sample
+    first_edge = second - first
+    second_edge = third - first
+    normal = np.array([
+        first_edge[1] * second_edge[2] - first_edge[2] * second_edge[1],
+        first_edge[2] * second_edge[0] - first_edge[0] * second_edge[2],
+        first_edge[0] * second_edge[1] - first_edge[1] * second_edge[0],
+    ])
+    norm = math.sqrt(float(normal @ normal))
+    if norm < 1e-9:
+        return None
+    normal /= norm
+    return normal, -float(normal @ first)
 
 
 @dataclass(frozen=True)
@@ -117,7 +133,7 @@ def _strongest_table_plane(
     for _ in range(config.ransac_iterations):
         sample = search_points[
             random.choice(len(search_points), size=3, replace=False)]
-        plane = _plane_from_sample(sample)
+        plane = _plane_from_triplet(sample)
         if plane is None:
             continue
         normal, offset = plane
@@ -193,13 +209,27 @@ def _visible_front_edge(
     plane_indices = np.flatnonzero(plane_mask)
     plane_columns = columns[plane_mask].astype(np.int64)
     plane_rows = rows[plane_mask].astype(np.int64)
-    for column in np.unique(plane_columns):
-        in_column = np.flatnonzero(plane_columns == column)
-        ordered = in_column[np.argsort(plane_rows[in_column])]
-        breaks = np.flatnonzero(np.diff(plane_rows[ordered]) > 2 * config.pixel_step) + 1
+    if len(plane_indices) == 0:
+        return None
+    # Group once by column instead of scanning every plane point for every
+    # column.  ``order`` retains each point's local index into ``plane_indices``.
+    order = np.lexsort((plane_rows, plane_columns))
+    ordered_columns = plane_columns[order]
+    column_breaks = np.flatnonzero(np.diff(ordered_columns)) + 1
+    for ordered in np.split(order, column_breaks):
+        column = plane_columns[ordered[0]]
+        breaks = np.flatnonzero(
+            np.diff(plane_rows[ordered]) > 2 * config.pixel_step) + 1
         # A background wall can cross the top plane in a separate thin band.
         # Follow the dominant connected top surface rather than that lower band.
-        top_run = max(np.split(ordered, breaks), key=len)
+        if len(breaks):
+            boundaries = np.empty(len(breaks) + 2, dtype=np.int64)
+            boundaries[0], boundaries[-1] = 0, len(ordered)
+            boundaries[1:-1] = breaks
+            run_index = int(np.argmax(np.diff(boundaries)))
+            top_run = ordered[boundaries[run_index]:boundaries[run_index + 1]]
+        else:
+            top_run = ordered
         if len(top_run) < 4:
             continue
         local_index = int(top_run[-1])

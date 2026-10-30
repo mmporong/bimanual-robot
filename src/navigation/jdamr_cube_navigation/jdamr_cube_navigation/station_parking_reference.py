@@ -311,11 +311,15 @@ class TaughtStationReference:
         if not self.basis.valid:
             raise ValueError(f'invalid_reference_planar_basis:{self.basis.reason}')
         self.observation_method = config.get('observation_method', 'rgbd_pnp')
-        if self.observation_method not in ('rgbd_pnp', 'table_contact_edges'):
+        if self.observation_method not in ('rgbd_pnp', 'table_contact_edges', 'table_front_tape'):
             raise ValueError('unsupported_station_observation_method')
         self.contact_reference = None
         self.prepared_reference = None
-        if self.observation_method == 'table_contact_edges':
+        if self.observation_method == 'table_front_tape':
+            from jdamr_cube_navigation.table_tape_reference import TableTapeReference
+            self.contact_reference = TableTapeReference(
+                self.reference_rgb_intrinsics, self.basis, config['table_front_tape'])
+        elif self.observation_method == 'table_contact_edges':
             from jdamr_cube_navigation.table_contact_reference import TableContactReference
             contact_config = capture.get('table_contact_reference')
             if not isinstance(contact_config, Mapping):
@@ -332,6 +336,10 @@ class TaughtStationReference:
             )
         self.reference_capture = deepcopy(capture)
         self.goal_left_offset_m = capture_goal_left_offset(capture.get('goal_binding'))
+        if self.observation_method == 'table_front_tape':
+            # The user placed the strips symmetrically around the desired centre.
+            # A historical cup/bottle capture offset does not move this new target.
+            self.goal_left_offset_m = 0.0
         # A per-run operator correction, bound to this image frame by the caller.
         self.run_left_offset_m = 0.0
         self.R_base_from_optical = np.asarray(
