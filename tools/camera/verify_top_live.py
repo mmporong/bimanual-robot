@@ -8,7 +8,7 @@ Astra 브리지가 freeze되면 연속 읽기에서만 얼어붙은 게 드러�
 겸사겸사 index 0~5를 스캔해서 각 인덱스가 라이브인지/어떤 화면인지도 보여준다
 (USB 재연결 후 인덱스가 바뀌었을 수 있으므로).
 
-사용법: python verify_top_live.py
+사용법: python tools/camera/verify_top_live.py   (저장소 루트에서)
 로봇/모터는 건드리지 않는다(카메라 읽기 전용).
 """
 import time

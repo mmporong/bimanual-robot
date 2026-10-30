@@ -1,3 +1,8 @@
 # 패치 파일은 원본 코드의 공백·줄바꿈(LF)을 그대로 담는다. CRLF로 바뀌면 git apply가 실패하고,
 # 줄 끝 공백 때문에 git diff --check가 오류를 내므로 텍스트 변환과 공백 검사에서 모두 뺀다.
 *.patch -text -whitespace
+
+# Windows 배치 파일은 core.autocrlf와 상관없이 CRLF로 받는다. LF만 있으면 cmd가 줄을 잘못 읽어
+# set 값이 비고 주석 조각이 명령으로 실행된다(2026-10-30 autocrlf=false 클론의 start_scenario.bat).
+*.bat text eol=crlf
+*.cmd text eol=crlf

@@ -63,6 +63,54 @@
 - 원거리·근거리 저장영상에서 각 두 띠 검출, 도크 바닥 영상에서는 무검출. 변경 모듈 문법·diff 확인 완료. 남은 문제는 거리별 목표 일관성과 Pi 처리 지연이다. 기존 별도 depth 최적화3파일은 이번 커밋에서 제외한다.
 - 양팔 배터리 교체 후 COM3 11.2~11.4V, COM4 11.0~11.1V·12개 모터 읽기 정상. Windows 실행기20072와 Astra 송신21972 유지(모델 준비 유지·Pi 영상 공급 목적). 실행기 종료는 로컬8770 `/shutdown`, 카메라는 `Stop-Process -Id 21972`. 시나리오 주문261030001은 ALIGN_KITCHEN 대기이며 자동 물따르기는 시작되지 않았다.
 
+## 2026-10-30 | 최상위 IL 스크립트를 tools 하위로 정리
+
+- #82에서 기존 노트북 작업 폴더의 스크립트 21개가 저장소 최상위에 그대로 들어와 있었다. `tools/README.md` 규칙(도구는 하위 폴더, 저장소 루트에서 실행)에 맞춰 옮겼다. 다른 코드·문서·테스트·CI에서 참조하는 곳은 없었다.
+  - `tools/servo/`: `diag_motor_read_noise.py`, `diag_servo_execution.py`
+  - `tools/rollout/`: `goto_cup_place_start.py`, `goto_water_pour_gravel_start.py`, `instrumented_rollout.py`, `run_rollout_test.py/.bat/.ps1`, `run_rollout_cup_place_test.py/.bat`, `setup_check.py`(`tools/` 바로 아래에서 이동)
+  - `tools/recording/`: `run_record_pour_handoff.py/.bat`, `run_record_cup_place_handoff.py/.bat`, `run_record_cup_place_test.bat`, `run_teleop_test.py/.bat`
+  - `tools/camera/`: `verify_top_live.py`
+- 삭제 2개: 최상위 `goto_train_start.py`는 문서가 가리키는 `tools/rollout/goto_train_start.py`(같은 ep32 목표)의 예전 작업본이고, `read_joint_state.bat`은 기존 노트북 Claude 임시 폴더의 스크립트를 불러 다른 곳에서 동작하지 않았다(관절 판독은 `tools/servo/servo_read.py`·`export_current_joint_state.py`).
+- 경로 수정: `run_*.py` 5개의 카메라 도구 경로를 `Path(__file__).resolve().parents[1] / "camera"`로, `setup_check.py`의 저장소 루트를 `parents[2]`로, 각 파일 설명의 사용법 경로를 새 위치로 바꿨다. 보정·모델 경로는 원래 절대 경로라 그대로다.
+- 검증: `compileall`(data·design·src·tools·tests·simulation·apps) 통과, Markdown 링크 245개 파일 이상 없음, `git diff --check` 통과, 옮긴 `run_*.py`가 `tools/camera/launch_with_resolved_cameras.py`를 찾고 `setup_check.py`가 저장소 루트를 맞게 계산함을 확인했다. 로봇을 움직이는 스크립트는 실행하지 않았다.
+
+---
+
+## 2026-10-30 | 새 노트북(OMEN) 인계 준비·하드웨어 점검·실행기 준비 확인
+
+`docs/guides/20261030_새노트북_작업인계.md` 2절을 진행했다. 노트북은 OMEN 16(i7-13700HX, RTX 4060 Laptop 8GB, RAM 32GB), 사용자 이름 `user`다(`C:\Users\USER\...` 하드코딩이 그대로 맞는다).
+
+- 2-1: 저장소를 `core.autocrlf=false`로 `Desktop\프로젝트\최종프로젝트\bimanual-robot-git`에 새로 받았다. 환경 가이드 0~7절은 2026-10-29에 끝냈다(lerobot 패치·`so101_env`는 `so101_env_requirements.txt` 버전, SmolVLA 80 두 개·토크나이저 수정). 패치·패키지 목록은 그 뒤 바뀌지 않았다.
+  - 7절(로봇 없이): 추론 0.38~0.44초, 불러오기 30~33초, GPU 1.28GB(AC 전원).
+  - OMEN 성능 모드는 **재부팅해야 적용**된다. 재부팅 전에는 추론 2.1초·불러오기 150초였다.
+- 2-2: Astra SDK·드라이버 4.3.0.22를 기존 노트북에서 복사·설치했다. `astra_sdk.py`가 `Downloads` 아래 SDK를 찾는다. OBS 설치.
+- 2-4: Wi-Fi `aicampus_286_6G`(6 GHz) 1순위, `robot` 수동 연결. **새 노트북 IP `192.168.0.157`**(기존 `.175`, DHCP 임대 2시간, MAC `44-38-E8-AB-22-6E`). Pi `192.168.0.159:5600` TCP 연결 OK.
+  - 공유기(`192.168.0.1`) 관리 권한이 없어 고정 할당은 못 한다. `.157`로 진행하고 바뀌면 대응하기로 했다(Windows 수동 고정 IP는 충돌 위험이라 쓰지 않음). 매 회차 전 `ipconfig` 확인 → 바뀌면 QR 재생성, 주행 PC `--order-url`·Pi `--peer` 변경 공지.
+  - Pi `astra_tcp_receiver`는 `--peer`와 다른 송신 IP의 접속을 끊는다(PR #86, 기본값·서비스 `.175`). 주행 담당에게 `--peer 192.168.0.157`, `--order-url http://192.168.0.157:8765` 변경과 PR #86 `.175` 4곳 수정을 요청한다.
+- 2-5: 절전·최대 절전·화면 꺼짐·덮개 닫기 동작·USB 선택적 절전을 AC/DC 모두 끔. Windows 전원 모드 최고 성능(AC·DC, 설정 화면에서 바꿈, 재부팅 불필요), OMEN 성능 모드.
+  - 배터리(충전기 분리, 100%)에서 7절 5회: 물따르기 0.45~0.48초, 컵배치 0.52~0.57초(첫 회 1.48초), 불러오기 34~36초. 충전 중(0.38~0.44초)보다 약 20~30% 느리고 기존 ASUS Performance(0.5~0.6초)와 비슷하다.
+  - 방화벽 `order-server 8765` 인바운드 허용 규칙 추가(사용자가 관리자 PowerShell에서 실행).
+- 2-6: `Desktop\table1_qr.png`(`http://192.168.0.157:8765/order?table=1`) 생성, 디코딩 확인.
+- 하드웨어 없는 테스트: `test_rollout_service_stow`·`test_rollout_service_backend`·`test_service_mission_control` 36개 통과.
+- 하드웨어 연결 후(16시~): `#86`(39b44e8)까지 pull했다(PROGRESS 충돌은 양쪽 기록 보존). 주행 쪽 `--peer`·`--order-url`은 주행 세션이 이미 `.157`로 바꿨다.
+  - 팔 USB는 CH343 `COM3`·`COM4`다. 배터리 맞바꾸기에서 COM3가 실제 왼팔임을 확인해 `start_scenario.bat`을 `LEFT_PORT=COM3`, `RIGHT_PORT=COM4`로 바꿨다(장치 관리자 번호는 그대로).
+  - 오른쪽 손목캠 경로가 `1b3f2dc8` → `2353db1a`(USB 2.0 PC Cam)로 바뀌었다. 캡처에 오른손 집게가 보여 힌트를 바꿨고 왼쪽 `2bd3af6b`(순정 집게)는 그대로다. `resolve_camera_indices.py` → `left=1 right=2 depth=4`.
+  - 오른팔(COM4)이 6/6 무응답이었다(1M/500k/115200bps × ID 1~20 ping 전부). 배터리를 맞바꾸자 무응답이 배터리를 따라가 원래 오른팔 배터리 방전으로 판정했다(보드·케이블·모터 정상). 15:56 물따르기 중 `There is no status packet!`도 같은 원인으로 본다. 충전 대기.
+  - 예약 작업 `AMRArmService`·`AMRAstraCamera`·`AMROrderServer`가 옛 클론 `C:\Users\user\bimanual-robot`과 `%TEMP%\amr_launch_omen.py`로 등록돼 있었다(14:47, 트리거 없음). 같은 시각 주행 PC `192.168.0.217`의 SSH 접속이 이어져 주행 쪽이 만든 것으로 보인다(미확정). 14:53 주문으로 물따르기가 실제 실행됐다. 중지·사용 안 함은 자동 권한 검사에서 거부돼 사용자 실행 대기, 삭제는 사용자 확인 후.
+  - `tools/setup_check.py`(기존 노트북 세션 작성): 첫 판은 정상 31·실패 3(COM15/16, 오른쪽 힌트)·주의 1(pull 전)이었고, 방화벽 조회 시간 초과를 OK로 표시했다. 수정본(`--left/--right`, 방화벽 조회 실패=WARN, 전원 모드 오버레이)은 `--left COM3 --right COM4`로 **실패 0·주의 0·정상 35**.
+- 16:52 통합 추론(주행 PC 주문·align/confirm, 예약 작업 실행기): 물따르기가 움직였다 멈췄다 하다 `ok=false, reason=duration`(101 s). 추론이 제어 루프 안(`SyncInferenceEngine` inline)에서 2.94 s 걸려 제어 주기가 최저 0.3 Hz로 떨어졌다. 왼쪽 손목캠도 28 s·22 s 멈춘 화면으로 돌았다.
+  - 같은 시점·같은 배터리(13%, 충전기 없음)에서 일반 창으로 추론만 재면 0.47~0.56 s였다. 예약 작업(우선순위 7, 창 없는 `pythonw`)과 배터리 전력 제한을 원인으로 봤다.
+  - 모델은 SmolVLA 80이 맞다. 016000·007000 `model.safetensors` SHA256이 HF `jun-seo/water_pour_chassis_smolvla_80_16000S`·`jun-seo/cup_place_chassis_smolvla_80_7000S`와 같다.
+- 17:45~18:07 정리와 실행기 준비 확인:
+  - 팀원 임무가 없음(IDLE·도크)을 확인하고 예약 작업 실행기를 `/shutdown`으로 끈 뒤, 사용자가 관리자 PowerShell로 남은 브리지·주문 서버를 끄고 세 작업을 사용 안 함으로 바꿨다(삭제는 안 함).
+  - `cv2`가 5.0.0이었다(`opencv-python` 5.0과 `-headless` 4.13이 같은 `cv2` 폴더를 덮어씀, 기존 노트북 4.13.0). `pip install --force-reinstall --no-deps opencv-python-headless==4.13.0.92`로 4.13.0에 맞췄다.
+  - 팔 전압: 왼팔 9.2~9.3 V(교체 권장 경계), 오른팔 11.1~11.2 V.
+  - 이 클론(`autocrlf=false`)의 `start_scenario.bat`이 LF라 cmd가 줄을 잘못 읽었다. `set` 값이 비어 `start "manip-service" "" tools\rollout\rollout_service.py …`가 나가 실행기 창이 바로 닫혔다(echo 시험에서 LF는 깨지고 CRLF는 정상). `.gitattributes`에 `*.bat text eol=crlf`를 더했다.
+  - 같은 인자로 실행기를 직접 띄우니(충전 중, 보통 우선순위) **준비 100.7 s, `pour_infer_s` 0.51 s, `place_infer_s` 0.51 s**, 카메라 읽기 실패·제어 주기 경고 0건이었다(16:44 예약 작업은 372 s·2.94 s·3.38 s).
+  - 확인용 사본 `jangjunseo05/test`에 코드와 환경 스냅샷을 올려 기존 노트북 세션이 검토했다(코드·패치·패키지·모델·손목캠 좌우 일치, cv2 차이만 발견).
+- 남은 일: 왼팔 충전 배터리 교체 → bat CRLF 재체크아웃 후 `start_scenario.bat` 창 실행 확인 → 실물 회차(사용자 확인 후). 예약 작업 삭제와 `AMR-SSH-In`(22번, 모든 원격 주소) 범위 축소는 팀원과 협의.
+
+---
 
 ## 2026-10-30 | 급수대 재주차·물따르기 실패와 실행기 운영 변경
 
