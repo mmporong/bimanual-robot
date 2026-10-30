@@ -828,6 +828,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             'map_pose_only', 'rgbd_auxiliary')
         auxiliary = getattr(self, 'station_reference_mode', None) == 'rgbd_auxiliary'
         valid_reference = bool(reference and reference.get('valid') is True)
+        tape_terminal = (
+            getattr(getattr(self, 'station_reference', None), 'observation_method', None)
+            == 'table_front_tape'
+            and getattr(self, '_station_terminal_goal', None) is not None
+            and goal_reference is not None)
+        if tape_terminal:
+            # The aligned terminal band already accepted a visual goal in odom.
+            # Tape leaves the downward camera's view near contact; keep that goal,
+            # while final depth, odom and collision checks still govern the move.
+            valid_reference = True
         if auxiliary:
             valid_reference = bool(goal_reference is not None
                                    and self._navigation_ready(require_fresh_amcl=False))
@@ -882,6 +892,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             status['lateral_reference_reason'] = 'operator_measured_relative_lateral_correction'
         if reference and reference.get('detail'):
             status['lateral_reference_detail'] = reference['detail']
+        if tape_terminal:
+            status['lateral_reference_reason'] = 'accepted_tape_terminal_goal_in_odom'
+            status['lateral_goal_basis'] = 'accepted_tape_terminal_goal_in_odom'
         if goal_reference is None or not status['lateral_reference_valid']:
             return status
         try:
@@ -2088,6 +2101,17 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 # A repeat keeps the preceding fixed goal, rather than teaching
                 # the most recent stopping error as a new destination.
                 previous_goal = target.get('reapproach_goal_reference')
+                if (getattr(getattr(self, 'station_reference', None),
+                            'observation_method', None) == 'table_front_tape'):
+                    live_goal, live_reference = self._station_goal_reference()
+                    deadline = min(time.monotonic() + 3., self.run_deadline_s)
+                    while (not self.stop_requested and time.monotonic() < deadline
+                           and not (live_reference and live_reference.get('valid') is True
+                                    and live_goal)):
+                        spin_node(self, timeout_sec=.05)
+                        live_goal, live_reference = self._station_goal_reference()
+                    if live_reference and live_reference.get('valid') is True and live_goal:
+                        previous_goal = dict(live_goal)
                 if previous_goal is None:
                     raise RuntimeError('fixed station goal missing from reapproach log')
                 self.station_reference_goal = dict(previous_goal)
