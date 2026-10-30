@@ -2,8 +2,8 @@
 
 docs/guides/20261030_새노트북_작업인계.md 2절을 마친 뒤 so101_env 파이썬으로 실행하고, 출력 전체를 공유한다.
 
-    & $PY tools\\setup_check.py              # 저장소 루트에서
-    & $PY tools\\setup_check.py --pi 192.168.0.159:5600 --left COM3 --right COM4
+    & $PY tools\\rollout\\setup_check.py              # 저장소 루트에서
+    & $PY tools\\rollout\\setup_check.py --pi 192.168.0.159:5600 --left COM3 --right COM4
 
 팔 포트를 열어 보므로 조작 실행기(start_scenario.bat)는 꺼 둔 상태에서 실행한다.
 """
@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 RESULTS: list[tuple[str, str, str]] = []  # (상태, 항목, 내용)
 
 

@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "tools" / "camera"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "camera"))
 from launch_with_resolved_cameras import run_lerobot
 
 EXE = r"C:\Users\USER\miniconda3\envs\so101_env\Scripts\lerobot-rollout.exe"
