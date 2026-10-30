@@ -67,8 +67,13 @@ class TableContactReference:
         self.tracking_rotation_radius_deg = _number(
             config.get('tracking_rotation_radius_deg', 90.),
             'tracking_rotation_radius', positive=True)
+        self._candidate_spacing_px = math.ceil(
+            self.candidate_spacing_m / self.resolution_m)
+        self._tracking_radius_px = math.ceil(
+            self.tracking_radius_m / self.resolution_m)
         self._last_centers_px = None
         self._last_yaw_rad = None
+        self._reacquisition_pending = False
         self.candidate_count = config['candidate_count']
         if (isinstance(self.candidate_count, bool) or not isinstance(self.candidate_count, int)
                 or not 1 <= self.candidate_count <= 16):
@@ -149,11 +154,20 @@ class TableContactReference:
             self.templates[name] = {
                 'bounds_px': bounds, 'side_px': side_px,
                 'reference_xy_m': self._base_xy(x_px + side_px / 2, y_px + side_px / 2),
-                'rotations': rotations}
+                'rotations': rotations,
+                'tracking_rotations': {
+                    angle: tuple(
+                        rotation for rotation in rotations
+                        if abs(rotation[4] - angle) <= self.tracking_rotation_radius_deg)
+                    for angle in angles_deg}}
         names = tuple(self.templates)
+        self._reference_xy_m = np.asarray(
+            [self.templates[name]['reference_xy_m'] for name in names])
         self.reference_vector_m = (self.templates[names[1]]['reference_xy_m']
                                    - self.templates[names[0]]['reference_xy_m'])
         self.reference_baseline_m = float(np.linalg.norm(self.reference_vector_m))
+        self._reference_heading_rad = math.atan2(
+            self.reference_vector_m[1], self.reference_vector_m[0])
         if self.reference_baseline_m <= 2 * self.maximum_baseline_error_m:
             raise ValueError('contact_reference_baseline_too_short')
 
@@ -181,23 +195,24 @@ class TableContactReference:
 
     def tracking_checkpoint(self):
         return (None if self._last_centers_px is None else dict(self._last_centers_px),
-                self._last_yaw_rad)
+                self._last_yaw_rad, self._reacquisition_pending)
 
     def restore_tracking(self, checkpoint):
-        self._last_centers_px, self._last_yaw_rad = checkpoint
+        (self._last_centers_px, self._last_yaw_rad,
+         self._reacquisition_pending) = checkpoint
 
     def observe(self, image):
         started_s = time.perf_counter()
         quality = {'observation_method': 'table_contact_edges', 'contact_matches': {},
-                   'contact_tracking': self._last_centers_px is not None}
+                   'contact_tracking': self._last_centers_px is not None,
+                   'contact_reacquisition': self._reacquisition_pending}
 
         def invalid(reason):
             if self._last_centers_px is not None:
                 self._last_centers_px = None
-                estimate, retry_quality = self.observe(image)
-                retry_quality['contact_reacquisition'] = True
-                retry_quality['processing_s'] = time.perf_counter() - started_s
-                return estimate, retry_quality
+                self._last_yaw_rad = None
+                self._reacquisition_pending = True
+                quality['contact_reacquisition_pending'] = True
             quality['processing_s'] = time.perf_counter() - started_s
             return PlanarBaseErrorEstimate(False, reason), quality
 
@@ -210,7 +225,7 @@ class TableContactReference:
             original_sx, original_sy = sx, sy
             if self._last_centers_px is not None:
                 center_x, center_y = self._last_centers_px[name]
-                radius_px = math.ceil(self.tracking_radius_m / self.resolution_m)
+                radius_px = self._tracking_radius_px
                 sx = max(sx, math.floor(center_x - side_px / 2) - radius_px)
                 sy = max(sy, math.floor(center_y - side_px / 2) - radius_px)
                 ex = min(ex, math.ceil(center_x + side_px / 2) + radius_px)
@@ -222,9 +237,8 @@ class TableContactReference:
             if self._last_centers_px is not None and self._last_yaw_rad is not None:
                 angle_deg = min(
                     rotations, key=lambda r: abs(r[4] - math.degrees(self._last_yaw_rad)))[4]
-                nearby = [r for r in rotations if abs(r[4] - angle_deg)
-                          <= self.tracking_rotation_radius_deg]
-                rotations = nearby or [min(rotations, key=lambda r: abs(r[4] - angle_deg))]
+                rotations = (template['tracking_rotations'][angle_deg]
+                             or (min(rotations, key=lambda r: abs(r[4] - angle_deg)),))
             for patch, support, template_energy, covered, _angle_deg in rotations:
                 covered = covered[sy - original_sy:ey - original_sy - side_px + 1,
                                   sx - original_sx:ex - original_sx - side_px + 1]
@@ -238,7 +252,7 @@ class TableContactReference:
                 aggregate = scores if aggregate is None else np.maximum(aggregate, scores)
             remaining = aggregate.copy()
             peaks = []
-            radius_px = math.ceil(self.candidate_spacing_m / self.resolution_m)
+            radius_px = self._candidate_spacing_px
             for _ in range(self.candidate_count):
                 _minimum, score, _minimum_at, (px, py) = cv2.minMaxLoc(remaining)
                 if score < self.minimum_score:
@@ -254,20 +268,31 @@ class TableContactReference:
                 return invalid('table_contact_match_unavailable')
             candidates.append(peaks)
         best_pair = None
+        rigid_pair_found = False
         for first in candidates[0]:
             for second in candidates[1]:
-                distance_m = float(np.linalg.norm(second[1] - first[1]))
+                vector_m = second[1] - first[1]
+                distance_m = float(np.linalg.norm(vector_m))
                 if abs(distance_m - self.reference_baseline_m) > self.maximum_baseline_error_m:
                     continue
+                rigid_pair_found = True
+                yaw_rad = math.atan2(vector_m[1], vector_m[0]) - self._reference_heading_rad
+                yaw_rad = math.atan2(math.sin(yaw_rad), math.cos(yaw_rad))
+                if abs(yaw_rad) > self.maximum_yaw_rad:
+                    continue
                 score = (first[0] + second[0]) / 2.
-                if best_pair is None or score > best_pair[0]:
-                    best_pair = score, first, second
+                selection = min(first[0], second[0]), score
+                if best_pair is None or selection > best_pair[0]:
+                    best_pair = selection, score, first, second
         if best_pair is None:
-            return invalid('table_contact_pair_not_rigid')
-        quality['contact_pair_score'] = best_pair[0]
+            return invalid('table_contact_heading_out_of_range' if rigid_pair_found
+                           else 'table_contact_pair_not_rigid')
+        quality['contact_pair_score'] = best_pair[1]
+        quality['contact_pair_min_score'] = best_pair[0][0]
+        quality['contact_pair_selection'] = 'maximum_minimum_score_then_mean'
         current = []
         for (name, match), (score, point_m) in zip(
-                quality['contact_matches'].items(), best_pair[1:]):
+                quality['contact_matches'].items(), best_pair[2:]):
             match.update(score=score, base_xy_m=point_m.tolist())
             current.append(point_m)
         vector_m = current[1] - current[0]
@@ -275,20 +300,20 @@ class TableContactReference:
         quality['contact_baseline_error_m'] = baseline_error_m
         if abs(baseline_error_m) > self.maximum_baseline_error_m:
             return invalid('table_contact_pair_not_rigid')
-        yaw_rad = math.atan2(vector_m[1], vector_m[0]) - math.atan2(
-            self.reference_vector_m[1], self.reference_vector_m[0])
+        yaw_rad = math.atan2(vector_m[1], vector_m[0]) - self._reference_heading_rad
         yaw_rad = math.atan2(math.sin(yaw_rad), math.cos(yaw_rad))
         if abs(yaw_rad) > self.maximum_yaw_rad:
             return invalid('table_contact_heading_out_of_range')
         cosine, sine = math.cos(yaw_rad), math.sin(yaw_rad)
         rotation = np.array(((cosine, -sine), (sine, cosine)))
-        reference = [t['reference_xy_m'] for t in self.templates.values()]
-        translation_m = np.mean([p - rotation @ r for p, r in zip(current, reference)], axis=0)
+        translation_m = np.mean(
+            np.asarray(current) - self._reference_xy_m @ rotation.T, axis=0)
         self._last_centers_px = {
             name: ((self.left_max_m - point[1]) / self.resolution_m,
                    (self.forward_max_m - point[0]) / self.resolution_m)
             for name, point in zip(self.templates, current)}
         self._last_yaw_rad = yaw_rad
+        self._reacquisition_pending = False
         quality['processing_s'] = time.perf_counter() - started_s
         return PlanarBaseErrorEstimate(
             True, 'observed_table_contact_edges', forward_m=float(translation_m[0]),

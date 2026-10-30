@@ -424,6 +424,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         and result.get('goal_left_offset_m')
                         != reference.goal_left_offset_m + reference.run_left_offset_m):
                     # Computed before this run's correction was bound; drop it.
+                    if contact_reference is not None:
+                        contact_reference.restore_tracking(tracking_checkpoint)
                     continue
                 samples = getattr(self, '_station_reference_goal_samples', None)
                 if (result.get('valid') is True and contact_reference is not None

@@ -479,6 +479,23 @@ def test_failed_init_leaves_go_refused(env, monkeypatch):
     assert d.load_state()['localized'] is False
 
 
+@pytest.mark.parametrize('source', ['anchored_dock_scan', 'registered_dock_local_map'])
+def test_registered_dock_init_refuses_previous_state_seed_without_revoking_localization(
+        env, monkeypatch, source):
+    state = d.load_state()
+    state['init_pose_source'] = source
+    d.save_state(state)
+    pi = Pi()
+    monkeypatch.setattr(d, 'pi', pi)
+
+    with pytest.raises(SystemExit):
+        d.cmd_init(SimpleNamespace(seed_from_state=True, local_only=False, keep_home=True,
+                                   min_inlier=None))
+
+    assert d.load_state()['localized'] is True
+    assert pi.calls == []
+
+
 @pytest.mark.parametrize('stdout,expected', [
     ("PROBE health ok {'map': 1} 1.2 s\n", 'ok'),
     ("PROBE health MISSING {'map': 0} 30.0 s\n", 'missing'),
@@ -1724,6 +1741,7 @@ def test_dock_reference_still_requires_activation_and_amcl_agreement(
 
 
 CONTROLLER_FAIL = [
+    {'event': 'station_reference_configured', 'table_id': 'water_station'},
     {'event': 'observation_route_selected'},
     {'event': 'failed', 'phase': 'preflight',
      'reason': 'controller_server parameter service unavailable'},

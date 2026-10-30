@@ -1029,6 +1029,12 @@ def cmd_init(args):
                                      and MATCH_OVERRIDE_FLOOR <= override <= 1.0):
         fail(f'--min-inlier must be between {MATCH_OVERRIDE_FLOOR} and 1.0, got {override}')
     state = load_state()
+    if (args.seed_from_state and args.keep_home
+            and state.get('init_pose_source') in (
+                'anchored_dock_scan', 'registered_dock_local_map')):
+        fail('the previous init already used the registered dock reference; omit '
+             '--seed-from-state to keep that reference, or save a fresh RViz click and use '
+             '--click --keep-home if the robot is now elsewhere')
     # Until this init completes, go must not depart on an earlier localization.
     state['localized'] = False
     save_state(state)
@@ -1211,7 +1217,8 @@ def map_wait_failed(events):
 
 def controller_wait_failed(events):
     """Recover only an unavailable controller proven to fail before any route goal."""
-    allowed = {'observation_route_selected', 'failed', 'operator_call',
+    allowed = {'station_reference_configured', 'observation_route_selected',
+               'failed', 'operator_call',
                'box_camera', 'executor_failed'}
     failures = [event for event in events if event.get('event') == 'failed']
     if len(failures) != 1 or failures[0].get('phase') != 'preflight':
