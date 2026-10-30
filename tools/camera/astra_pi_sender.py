@@ -27,6 +27,12 @@ import numpy as np
 
 MAGIC = b"AST1"
 FRAME_ID = "camera_color_optical_frame"
+# 이보다 긴 공백은 즉시 시각과 함께 로그에 남긴다(10 fps 기준 3프레임). 추론 중 송신 공백 기록용
+GAP_LOG_S = 0.3
+
+
+def now_text() -> str:
+    return time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
 
 
 class DeviceClock:
@@ -69,12 +75,22 @@ class PiSender:
         self.slot = None  # (rgb_bgr, rgb_stamp_ns, depth_mm, depth_stamp_ns)
         self.pongs: list[int] = []
         self.seq = 0
-        self.stats = {"sent": 0, "dropped": 0, "bytes": 0, "connected": False}
+        self.stats = {"sent": 0, "dropped": 0, "bytes": 0, "connected": False,
+                      "max_send_gap_s": 0.0, "max_offer_gap_s": 0.0}
+        self._last_sent = None  # 마지막 프레임 송신 완료 시각(monotonic)
+        self._last_offer = None  # 브리지가 마지막으로 프레임을 넘긴 시각(monotonic)
         self.stop = threading.Event()
         threading.Thread(target=self._run, daemon=True, name="ast1-send").start()
 
     # 브리지 쪽에서 부른다(빠르게 돌아와야 한다)
     def offer(self, rgb_bgr: np.ndarray, rgb_stamp_ns: int, depth_mm: np.ndarray, depth_stamp_ns: int) -> None:
+        now = time.monotonic()
+        if self._last_offer is not None:
+            gap = now - self._last_offer
+            self.stats["max_offer_gap_s"] = max(self.stats["max_offer_gap_s"], gap)
+            if gap > GAP_LOG_S:
+                print(f"[ast1 {now_text()}] 카메라 쪽 공백 {gap:.2f}s (브리지가 프레임을 못 넘김)")
+        self._last_offer = now
         with self.cv:
             if self.slot is not None:
                 self.stats["dropped"] += 1
@@ -146,23 +162,31 @@ class PiSender:
                 sock.sendall(msg)
                 self.stats["sent"] += 1
                 self.stats["bytes"] += len(msg)
+                now = time.monotonic()
+                if self._last_sent is not None:
+                    gap = now - self._last_sent
+                    self.stats["max_send_gap_s"] = max(self.stats["max_send_gap_s"], gap)
+                    if gap > GAP_LOG_S:
+                        print(f"[ast1 {now_text()}] 송신 공백 {gap:.2f}s (seq {self.seq})")
+                self._last_sent = now
 
     def _run(self) -> None:
         while not self.stop.is_set():
             try:
                 sock = socket.create_connection(self.addr, timeout=3.0)
             except OSError as exc:
-                print(f"[ast1] {self.addr[0]}:{self.addr[1]} 접속 실패({exc}) - 1초 뒤 재시도")
+                print(f"[ast1 {now_text()}] {self.addr[0]}:{self.addr[1]} 접속 실패({exc}) - 1초 뒤 재시도")
                 time.sleep(1.0)
                 continue
             sock.settimeout(None)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.stats["connected"] = True
-            print(f"[ast1] Pi {self.addr[0]}:{self.addr[1]} 연결됨")
+            self._last_sent = None
+            print(f"[ast1 {now_text()}] Pi {self.addr[0]}:{self.addr[1]} 연결됨")
             try:
                 self._session(sock)
             except OSError as exc:
-                print(f"[ast1] 연결 끊김({exc}) - 1초 뒤 재접속")
+                print(f"[ast1 {now_text()}] 연결 끊김({exc}) - 1초 뒤 재접속")
             finally:
                 self.stats["connected"] = False
                 try:

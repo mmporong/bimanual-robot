@@ -42,11 +42,10 @@ import numpy as np
 import pyvirtualcam
 from primesense import openni2
 
-# Astra SDK가 압축 해제된 bin 폴더 — 환경이 바뀌면 이 경로만 고치면 된다.
-SDK_BIN = (
-    r"C:\Users\USER\Downloads\AstraSDK-v2.1.3-94bca0f52e-20210608T034051Z-vs2015-win64"
-    r"\AstraSDK-v2.1.3-94bca0f52e-20210608T034051Z-vs2015-win64\bin"
-)
+from astra_sdk import find_sdk_bin
+
+# Astra SDK가 압축 해제된 bin 폴더. 환경 변수 ASTRA_SDK_BIN 또는 흔한 위치에서 찾는다(astra_sdk.py).
+SDK_BIN = find_sdk_bin()
 
 FPS = 30
 # --exposure/--gain 으로 지정하면 자동 수렴값 대신 이 값으로 고정한다(재연결 때도 동일 적용).
@@ -159,7 +158,8 @@ def main() -> None:
     args = ap.parse_args()
     MANUAL["exposure"], MANUAL["gain"] = args.exposure, args.gain
     if not Path(SDK_BIN).is_dir():
-        sys.exit(f"SDK bin 폴더를 찾을 수 없습니다: {SDK_BIN}")
+        sys.exit(f"SDK bin 폴더를 찾을 수 없습니다: {SDK_BIN}\n"
+                 "환경 변수 ASTRA_SDK_BIN에 astra.dll이 있는 bin 폴더를 지정하세요(tools/camera/astra_sdk.py).")
 
     sender = None
     if args.send_pi:
@@ -253,8 +253,10 @@ def main() -> None:
                 if time.monotonic() - last_report > 10.0:
                     last_report = time.monotonic()
                     s = sender.stats
-                    print(f"[ast1] 연결={s['connected']} 보냄={s['sent']} 버림={s['dropped']} "
-                          f"{s['bytes'] / 1e6:.1f} MB")
+                    print(f"[ast1 {time.strftime('%H:%M:%S')}] 연결={s['connected']} 보냄={s['sent']} "
+                          f"버림={s['dropped']} {s['bytes'] / 1e6:.1f} MB "
+                          f"최대공백 송신={s['max_send_gap_s']:.2f}s 카메라={s['max_offer_gap_s']:.2f}s")
+                    s["max_send_gap_s"] = s["max_offer_gap_s"] = 0.0
         except KeyboardInterrupt:
             pass
         finally:
