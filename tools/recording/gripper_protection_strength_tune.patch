@@ -1,0 +1,26 @@
+diff --git a/src/lerobot/robots/so_follower/so_follower.py b/src/lerobot/robots/so_follower/so_follower.py
+index 85dc43dc..24a1dedc 100644
+--- a/src/lerobot/robots/so_follower/so_follower.py
++++ b/src/lerobot/robots/so_follower/so_follower.py
+@@ -165,10 +165,17 @@ class SOFollower(Robot):
+                 self.bus.write("I_Coefficient", motor, self.config.position_i_coefficient)
+                 self.bus.write("D_Coefficient", motor, self.config.position_d_coefficient)
+ 
+-                if motor == "gripper":
+-                    self.bus.write("Max_Torque_Limit", motor, 500)  # 50% of max torque to avoid burnout
+-                    self.bus.write("Protection_Current", motor, 250)  # 50% of max current to avoid burnout
+-                    self.bus.write("Overload_Torque", motor, 25)  # 25% torque when overloaded
++                if motor == "gripper" and self.config.gripper_protection:
++                    # (bimanual-robot local patch, 2026-10-21: 자갈 든 컵을 상판으로 옮기다
++                    # 그립이 풀려 놓치는 문제. 기존 50%/50%/과부하25%는 무거운 컵 유지에
++                    # 부족해, 운반 중 과부하로 판단되면 토크가 25%로 떨어지며 미끄러졌다.
++                    # 보호는 유지하되 그립 힘을 올렸다. 완전히 끄지 않았으므로 번아웃 보호는
++                    # 남아 있다. 그래도 미끄러지면 값을 더 올리고, 그리퍼 서보가 뜨겁거나
++                    # 스톨음이 나면 낮춰라. 전류(Protection_Current)가 발열을 가장 직접
++                    # 좌우하므로 토크보다 보수적으로 둔다.)
++                    self.bus.write("Max_Torque_Limit", motor, 700)  # 70% (was 500/50%)
++                    self.bus.write("Protection_Current", motor, 300)  # 60% (was 250/50%) - 발열 때문에 보수적
++                    self.bus.write("Overload_Torque", motor, 50)  # 과부하 시 50% 유지 (was 25%) - 미끄러짐 핵심
+ 
+     def setup_motors(self) -> None:
+         for motor in reversed(self.bus.motors):

@@ -2,7 +2,10 @@ import cv2
 import os
 import time
 
-OUT_DIR = os.path.join(os.getcwd(), "output")
+OUT_DIR = os.environ.get(
+    "CAPTURE_OUT_DIR",
+    os.path.join(os.getcwd(), "camera_index"),
+)
 os.makedirs(OUT_DIR, exist_ok=True)
 
 found = []
@@ -18,8 +21,11 @@ for idx in range(6):
     ok, frame = cap.read()
     if ok and frame is not None:
         path = os.path.join(OUT_DIR, f"index{idx}.jpg")
-        cv2.imwrite(path, frame)
-        found.append((idx, path))
+        ok_enc, buf = cv2.imencode(".jpg", frame)
+        if ok_enc:
+            with open(path, "wb") as f:
+                f.write(buf.tobytes())
+            found.append((idx, path))
     cap.release()
 
 print("RESULT_START")

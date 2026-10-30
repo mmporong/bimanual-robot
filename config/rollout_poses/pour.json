@@ -1,0 +1,17 @@
+{
+  "saved_at": "2026-10-26T08:11:08",
+  "pose": {
+    "left_shoulder_pan.pos": 0.0,
+    "left_shoulder_lift.pos": 0.04,
+    "left_elbow_flex.pos": 95.08,
+    "left_wrist_flex.pos": -53.63,
+    "left_wrist_roll.pos": -92.62,
+    "left_gripper.pos": 0.43,
+    "right_shoulder_pan.pos": -3.34,
+    "right_shoulder_lift.pos": -0.04,
+    "right_elbow_flex.pos": 95.65,
+    "right_wrist_flex.pos": -81.14,
+    "right_wrist_roll.pos": 1.45,
+    "right_gripper.pos": 0.79
+  }
+}

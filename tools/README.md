@@ -9,6 +9,7 @@
 | [servo](servo/README.md) | 서보 버스·판독·보정·복귀 |
 | camera/ | 카메라 연결 진단·Astra RGB 중계 |
 | recording/, rollout/ | LeRobot 수집·정책 실행 호환 패치 |
+| eval/ | 실물 롤아웃 평가 기록 시트·집계(표·그래프) |
 | data/ | 메타데이터·실패 레코드 검증·failure bank |
 | design/ | 설계 산출물 생성 |
 | ci/ | Markdown 링크·README 요약·PR 정책 |

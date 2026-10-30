@@ -1,0 +1,37 @@
+{
+  "source": "config/navigation/maps/classroom (origin/main e9c44d6): map.yaml + map_table01_observed.pgm + locations.yaml",
+  "frame_id": "map",
+  "robot_base_frame": "base_link",
+  "resolution_m": 0.05,
+  "origin": {
+    "x_m": -8.187,
+    "y_m": -4.964,
+    "yaw_deg": 0.0
+  },
+  "width": 186,
+  "height": 254,
+  "stations": [
+    {
+      "id": "dock",
+      "label": "충전소",
+      "x_m": -2.780726,
+      "y_m": 0.567876,
+      "yaw_rad": -0.01697
+    },
+    {
+      "id": "kitchen",
+      "label": "급수대(주방)",
+      "x_m": 0.024608,
+      "y_m": -0.076957,
+      "yaw_rad": -0.025997
+    },
+    {
+      "id": "table_1",
+      "label": "1번 테이블",
+      "x_m": -0.73491,
+      "y_m": -1.606882,
+      "yaw_rad": -0.03841
+    }
+  ],
+  "note": "table_2~4 는 실제 지도에 아직 등록되지 않았다(주행 쪽 미교시)."
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -11,10 +12,12 @@ import os
 from pathlib import Path
 import re
 import threading
+import time
+from collections import deque
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from src.mission.service_execution_backend import CommandBackend, ImmediateBackend, Ros2ManipulationBackend, Ros2PlannedArtifactBackend, Ros2PlannedRoundtripBackend, Ros2PlannedSessionBackend
+from src.mission.service_execution_backend import CommandBackend, ImmediateBackend, Ros2ManipulationBackend, Ros2PlannedArtifactBackend, Ros2PlannedRoundtripBackend, Ros2PlannedSessionBackend, RolloutServiceBackend
 from src.mission.service_mission_control import DryRunRuntime, MissionController
 from src.mission.service_order_store import ServiceOrderStore
 
@@ -22,7 +25,102 @@ from src.mission.service_order_store import ServiceOrderStore
 ROOT = Path(__file__).resolve().parents[2]
 INDEX = Path(__file__).resolve().parents[2] / 'apps/service_order/static/index.html'
 DASHBOARD_JS = INDEX.with_name("dashboard.js")
+ORDER_PAGE = INDEX.with_name("order.html")
+ORDER_JS = INDEX.with_name("order.js")
+CONTROL_PAGE = INDEX.with_name("control.html")
+CONTROL_JS = INDEX.with_name("control.js")
+API_JS = INDEX.with_name("api.js")
+CONFIG_JS = INDEX.with_name("config.js")
+STATIC_FILES = {
+    "/": (INDEX, "text/html"),
+    "/index.html": (INDEX, "text/html"),
+    "/dashboard.js": (DASHBOARD_JS, "text/javascript"),
+    "/order": (ORDER_PAGE, "text/html"),
+    "/order.js": (ORDER_JS, "text/javascript"),
+    "/control": (CONTROL_PAGE, "text/html"),
+    "/control.js": (CONTROL_JS, "text/javascript"),
+    "/api.js": (API_JS, "text/javascript"),
+    "/config.js": (CONFIG_JS, "text/javascript"),
+}
 ORDER_PATH = re.compile(r"^/api/orders/([A-Za-z0-9._:-]{1,64})/cancel$")
+TICKET_PATH = re.compile(r"^/api/tickets/([A-Za-z0-9._:-]{1,64})/served$")
+# 메뉴 사진(static/menu/*.jpg), 관제 지도(static/map/*.png|json), 손님 화면 글꼴(static/fonts/*.woff)
+ASSET_PATH = re.compile(r"^/(menu|map|fonts)/([a-z0-9_]{1,40})\.(jpg|png|json|woff)$")
+ASSET_TYPES = {"jpg": "image/jpeg", "png": "image/png", "json": "application/json; charset=utf-8", "woff": "font/woff"}
+CLIENT_REF_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+ORDER_NO_DIGITS = 3  # 주문 번호 = YYMMDD + 일련번호 3자리 (예: 261027001)
+
+
+def _trim(value, depth: int = 0):
+    """Keep the dashboard snapshot small for the browser: drop long arrays (scan ranges, path points)."""
+    if isinstance(value, dict):
+        return {k: _trim(v, depth + 1) for k, v in value.items() if depth < 4}
+    if isinstance(value, list):
+        return value if len(value) <= 60 else {"count": len(value)}
+    return value
+
+
+class RobotPoseFeed:
+    """Polls the Pi navigation dashboard (ammr_dashboard /api/state) for the live map pose and ROS status.
+
+    Besides the pose it keeps a trimmed copy of the dashboard snapshot (topic freshness, ROS graph,
+    battery, odometry, Nav2 goal) for the developer console on /control.
+
+    The dashboard listens on the Pi loopback only, so reach it through an SSH tunnel:
+    `ssh -N -L 8090:127.0.0.1:8090 lim@<pi>` (or pass --robot-ssh to let this server open it).
+    """
+
+    def __init__(self, url: str, interval_s: float = 1.0, ssh_target: str | None = None) -> None:
+        self.url = url
+        self.interval_s = interval_s
+        self.ssh_target = ssh_target
+        self.pose: dict = {"live": False, "error": "not polled yet"}
+        self.nav: dict = {"connected": False, "error": "not polled yet", "url": url}
+        self._stop = threading.Event()
+        self._tunnel = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        if self.ssh_target:
+            import subprocess
+
+            port = urlparse(self.url).port or 8090
+            self._tunnel = subprocess.Popen(
+                ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=8",
+                 "-L", f"{port}:127.0.0.1:8090", self.ssh_target],
+                stdin=subprocess.DEVNULL,
+            )
+        self._thread.start()
+
+    def _run(self) -> None:
+        import time
+        import urllib.request
+
+        while not self._stop.is_set():
+            try:
+                started = time.perf_counter()
+                with urllib.request.urlopen(self.url, timeout=2.0) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                self.nav = {"connected": True, "error": None, "url": self.url, "received_at": time.time(),
+                            "latency_ms": round((time.perf_counter() - started) * 1000, 1), "snapshot": _trim(data)}
+                loc = (data.get("navigation") or {}).get("localization") or {}
+                if not all(isinstance(loc.get(k), (int, float)) for k in ("x_m", "y_m", "yaw_deg")):
+                    raise ValueError("dashboard has no map pose yet")
+                self.pose = {
+                    "live": bool(loc.get("live", True)), "x_m": loc["x_m"], "y_m": loc["y_m"], "yaw_deg": loc["yaw_deg"],
+                    "frame_id": loc.get("frame_id", "map"), "age_s": loc.get("age_s"), "received_at": time.time(),
+                }
+            except Exception as exc:  # noqa: BLE001 - 위치는 보조 정보다. 실패해도 주문 처리는 계속한다.
+                if not isinstance(exc, ValueError) or "map pose" not in str(exc):
+                    self.nav = {"connected": False, "error": str(exc)[:160], "url": self.url,
+                                "last_snapshot_at": self.nav.get("received_at") or self.nav.get("last_snapshot_at")}
+                self.pose = {"live": False, "error": str(exc)[:160], "last": self.pose if self.pose.get("x_m") is not None else self.pose.get("last")}
+            self._stop.wait(self.interval_s)
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._tunnel is not None:
+            self._tunnel.terminate()
 
 
 class BackendBusyError(RuntimeError):
@@ -68,7 +166,75 @@ class ServiceApplication:
         self.backend = selected_backend
         self.execution_lock = threading.Lock()
         self.last_backend_result: dict | None = None
+        self.auto_paused = False
+        # 주문표: 주문 번호별 메뉴 줄(로봇 음료 + 직원이 가져다주는 음식). 로봇 미션은 음료만 맡는다.
+        self.tickets: dict[str, dict] = self._load_tickets()
+        self.pose_feed: RobotPoseFeed | None = None
+        self.started_at = datetime.now().astimezone()
+        # 개발자 콘솔용 최근 실행 명령(단계별 backend 호출, 결과, 걸린 시간)
+        self.recent_commands: deque[dict] = deque(maxlen=40)
         self._persist()
+
+    def _load_tickets(self) -> dict[str, dict]:
+        path = self.state_dir / "tickets.json" if self.state_dir is not None else None
+        if path is None or not path.exists():
+            return {}
+        try:
+            return {ticket["order_id"]: ticket for ticket in json.loads(path.read_text(encoding="utf-8"))}
+        except (ValueError, KeyError, TypeError):
+            return {}
+
+    def _persist_tickets(self) -> None:
+        if self.state_dir is None:
+            return
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        temporary = self.state_dir / "tickets.json.tmp"
+        temporary.write_text(json.dumps(list(self.tickets.values()), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(self.state_dir / "tickets.json")
+
+    def _next_order_no(self) -> str:
+        """Next YYMMDDNNN for today.
+
+        Orders from before the 9-digit format (WEB-..., STAFF-...) are shown on /control with the lowest
+        free numbers of their day (control.js `buildDisplayNumbers`), so a new number also skips those slots.
+        """
+        prefix = datetime.now().strftime("%y%m%d")
+        used: set[int] = set()
+        legacy = 0
+        records = [*((o.order_id, o.created_at) for o in self.controller.orders.values()),
+                   *((t["order_id"], t.get("created_at")) for t in self.tickets.values())]
+        for order_id, created_at in dict(records).items():
+            if re.fullmatch(r"\d{9}", order_id):
+                if order_id.startswith(prefix):
+                    used.add(int(order_id[6:]))
+            elif created_at and datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone().strftime("%y%m%d") == prefix:
+                legacy += 1
+        slot = 0
+        while legacy:
+            slot += 1
+            if slot not in used:
+                legacy -= 1
+        return f"{prefix}{max([slot, *used]) + 1:0{ORDER_NO_DIGITS}d}"
+
+    @staticmethod
+    def _validate_items(raw: Any) -> list[dict]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list) or len(raw) > 20:
+            raise ValueError("items must be a list of at most 20 menu lines")
+        items = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError("each item must be an object")
+            name, qty, price = item.get("name"), item.get("qty", 1), item.get("price", 0)
+            if not isinstance(name, str) or not 0 < len(name) <= 40:
+                raise ValueError("item name must be 1-40 characters")
+            if isinstance(qty, bool) or not isinstance(qty, int) or not 1 <= qty <= 20:
+                raise ValueError("item qty must be an integer from 1 to 20")
+            if isinstance(price, bool) or not isinstance(price, int) or not 0 <= price <= 1_000_000:
+                raise ValueError("item price must be an integer from 0 to 1000000")
+            items.append({"name": name, "qty": qty, "price": price, "robot": bool(item.get("robot", False))})
+        return items
 
     def _persist(self, command: dict | None = None) -> None:
         if self.state_dir is None:
@@ -105,7 +271,25 @@ class ServiceApplication:
             snapshot["execution_backend"] = self.backend.info()
             snapshot['simulator_accessed'] = snapshot['execution_backend'].get('simulator_accessed', False)
             snapshot["last_backend_result"] = self.last_backend_result
+            snapshot["auto_paused"] = self.auto_paused
+            snapshot["tickets"] = list(self.tickets.values())
+            snapshot["robot_pose"] = self.pose_feed.pose if self.pose_feed is not None else None
+            snapshot["robot_nav"] = self.pose_feed.nav if self.pose_feed is not None else None
+            snapshot["recent_commands"] = list(self.recent_commands)
+            snapshot["server"] = {
+                "started_at": self.started_at.isoformat(timespec="seconds"),
+                "uptime_s": round((datetime.now().astimezone() - self.started_at).total_seconds(), 1),
+                "pid": os.getpid(),
+                "auto_paused": self.auto_paused,
+                "busy": self.execution_lock.locked(),
+            }
             return snapshot
+
+    def set_auto_paused(self, paused: bool) -> dict:
+        """Pause or resume automatic phase execution; a running backend command still finishes."""
+        with self.lock:
+            self.auto_paused = paused
+            return {"auto_paused": self.auto_paused}
 
     def _stats(self, snapshot: dict) -> dict:
         if self.store is not None:
@@ -133,13 +317,83 @@ class ServiceApplication:
             return self.store.order_history(limit) if kind == "orders" else self.store.event_history(limit)
 
     def submit(self, payload: dict) -> tuple[dict, bool]:
+        """Accept an order. Without order_id the server assigns the next YYMMDDNNN number.
+
+        `drink` (optional) goes to the robot mission; `items` (optional) are the menu lines for the
+        ticket, food included, which staff serve.  `client_ref` makes a resend idempotent.
+        """
         with self.lock:
-            validate_order = getattr(self.backend, "validate_order", None)
-            if validate_order is not None:
-                validate_order(payload, existing_order_ids=set(self.controller.orders))
-            order, created = self.controller.submit(payload)
+            if not isinstance(payload, dict):
+                raise ValueError("order payload must be an object")
+            client_ref = payload.get("client_ref")
+            if client_ref is not None and (not isinstance(client_ref, str) or not CLIENT_REF_PATTERN.fullmatch(client_ref)):
+                raise ValueError("client_ref must be 1-64 safe identifier characters")
+            if client_ref is not None:
+                for ticket in self.tickets.values():
+                    if ticket.get("client_ref") == client_ref:
+                        order = self.controller.orders.get(ticket["order_id"])
+                        return {"order": order.__dict__ if order else None, "ticket": ticket,
+                                "state": self.controller.snapshot()}, False
+            items = self._validate_items(payload.get("items"))
+            drink = payload.get("drink")
+            if drink is None and not items:
+                raise ValueError("an order needs a drink or menu items")
+            if payload.get("table_id") not in self.controller.table_ids:
+                raise ValueError("unknown table_id")
+            mission_payload = {k: v for k, v in payload.items() if k not in {"items", "client_ref"}}
+            if "order_id" not in mission_payload:
+                mission_payload["order_id"] = self._next_order_no()
+            order, created = None, True
+            if drink is not None:
+                validate_order = getattr(self.backend, "validate_order", None)
+                if validate_order is not None:
+                    validate_order(mission_payload, existing_order_ids=set(self.controller.orders))
+                order, created = self.controller.submit(mission_payload)
+            elif mission_payload["order_id"] in self.tickets:
+                return {"order": None, "ticket": self.tickets[mission_payload["order_id"]],
+                        "state": self.controller.snapshot()}, False
+            ticket = self.tickets.get(mission_payload["order_id"])
+            if created and (items or client_ref or drink is None):
+                staff_items = [item for item in items if not item["robot"]]
+                ticket = {
+                    "order_id": mission_payload["order_id"],
+                    "table_id": mission_payload["table_id"],
+                    "drink": drink,
+                    "items": items,
+                    "total": sum(item["qty"] * item["price"] for item in items),
+                    "staff_state": "PREPARING" if staff_items else None,
+                    "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "served_at": None,
+                    "client_ref": client_ref,
+                }
+                self.tickets[ticket["order_id"]] = ticket
+                self._persist_tickets()
             self._persist()
-            return {"order": order.__dict__, "state": self.controller.snapshot()}, created
+            return {"order": order.__dict__ if order else None, "ticket": ticket,
+                    "state": self.controller.snapshot()}, created
+
+    def _record_command(self, command: dict, elapsed_s: float) -> None:
+        result = command.get("backend_result") or {}
+        self.recent_commands.append({
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "phase": command.get("phase"), "kind": command.get("kind"), "name": command.get("name"),
+            "order_id": command.get("order_id"), "success": result.get("success"),
+            "failure_code": result.get("failure_code") or None, "adapter": result.get("adapter") or result.get("mode"),
+            "duration_s": round(elapsed_s, 3), "superseded": command.get("superseded", False),
+        })
+
+    def mark_served(self, order_id: str) -> dict:
+        """Staff brought the food lines of a ticket to the table."""
+        with self.lock:
+            ticket = self.tickets.get(order_id)
+            if ticket is None:
+                raise KeyError(order_id)
+            if ticket["staff_state"] is None:
+                raise ValueError("this order has no staff-served items")
+            ticket["staff_state"] = "SERVED"
+            ticket["served_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+            self._persist_tickets()
+            return {"ticket": ticket}
 
     def cancel(self, order_id: str) -> dict:
         with self.lock:
@@ -175,6 +429,7 @@ class ServiceApplication:
                     "adapter": "manual_api_step",
                 }
                 self.last_backend_result = stored_command["backend_result"]
+                self._record_command(stored_command, 0.0)
                 self._persist(stored_command)
                 return {"executed_command": command, "state": self.controller.snapshot()}
         finally:
@@ -204,11 +459,13 @@ class ServiceApplication:
                     command = {**command, "phase": phase_before}
                 self.runtime.commands.append(command)
 
+            started = time.perf_counter()
             result = self.backend.execute(
                 command,
                 mission_id=mission_id,
                 phase_attempt=phase_attempt,
             )
+            elapsed_s = time.perf_counter() - started
 
             with self.lock:
                 superseded = (
@@ -226,6 +483,7 @@ class ServiceApplication:
                 stored_command["backend_result"] = result.to_dict()
                 stored_command["superseded"] = superseded
                 self.last_backend_result = result.to_dict()
+                self._record_command(stored_command, elapsed_s)
                 self._persist(stored_command)
                 return {
                     "executed_command": command,
@@ -237,14 +495,30 @@ class ServiceApplication:
             self.execution_lock.release()
 
     def close(self) -> None:
+        if self.pose_feed is not None:
+            self.pose_feed.close()
         self.backend.close()
         if self.store is not None:
             self.store.close()
 
 
-def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
+def handler_factory(app: ServiceApplication, cors_origin: str | None = None) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "HoldTheFlowOrderServer/1.0"
+
+        def end_headers(self) -> None:
+            # 다른 주소(예: Netlify)에 올린 화면이 이 서버 API를 부를 때만 허용한다.
+            if cors_origin:
+                self.send_header("Access-Control-Allow-Origin", cors_origin)
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Vary", "Origin")
+            super().end_headers()
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            self.send_response(HTTPStatus.NO_CONTENT if cors_origin else HTTPStatus.METHOD_NOT_ALLOWED)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def log_message(self, fmt: str, *args: Any) -> None:
             if urlparse(self.path).path == "/api/state":
@@ -299,21 +573,23 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
                 kind = "orders" if path == "/api/orders/history" else "events"
                 self._json(HTTPStatus.OK, {kind: app.history(kind, limit)})
                 return
-            if path in {"/", "/index.html"}:
-                body = INDEX.read_bytes()
+            if path in STATIC_FILES:
+                file_path, content_type = STATIC_FILES[path]
+                body = file_path.read_bytes()
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Type", f"{content_type}; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if path == "/dashboard.js":
-                body = DASHBOARD_JS.read_bytes()
+            asset = ASSET_PATH.fullmatch(path)
+            if asset and (INDEX.parent / asset.group(1) / f"{asset.group(2)}.{asset.group(3)}").is_file():
+                body = (INDEX.parent / asset.group(1) / f"{asset.group(2)}.{asset.group(3)}").read_bytes()
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/javascript; charset=utf-8")
+                self.send_header("Content-Type", ASSET_TYPES[asset.group(3)])
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
+                self.send_header("Cache-Control", "max-age=3600")
                 self.end_headers()
                 self.wfile.write(body)
                 return
@@ -340,9 +616,31 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
                         raise ValueError("failure must be a nonempty string")
                     self._json(HTTPStatus.OK, app.step(success=success, failure=failure))
                     return
+                if path == "/api/align/confirm":
+                    confirm = getattr(app.backend, "confirm_alignment", None)
+                    if confirm is None:
+                        self._json(HTTPStatus.CONFLICT, {"error": "backend_has_no_alignment_gate"})
+                        return
+                    length = int(self.headers.get("Content-Length") or 0)
+                    station = self._read_json().get("station") if length else None
+                    if station is not None and not isinstance(station, str):
+                        raise ValueError("station must be a string")
+                    result = confirm(station)
+                    self._json(HTTPStatus.OK if result.get("confirmed") else HTTPStatus.CONFLICT, result)
+                    return
+                if path == "/api/control":
+                    paused = self._read_json().get("paused")
+                    if not isinstance(paused, bool):
+                        raise ValueError("paused must be boolean")
+                    self._json(HTTPStatus.OK, app.set_auto_paused(paused))
+                    return
                 match = ORDER_PATH.fullmatch(path)
                 if match:
                     self._json(HTTPStatus.OK, app.cancel(match.group(1)))
+                    return
+                match = TICKET_PATH.fullmatch(path)
+                if match:
+                    self._json(HTTPStatus.OK, app.mark_served(match.group(1)))
                     return
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             except KeyError as exc:
@@ -358,6 +656,8 @@ def handler_factory(app: ServiceApplication) -> type[BaseHTTPRequestHandler]:
 def auto_step(app: ServiceApplication, interval_s: float, stop: threading.Event) -> None:
     while not stop.wait(interval_s):
         state = app.state()
+        if state["auto_paused"]:
+            continue
         if state["phase"] not in {"IDLE_AT_DOCK", "TERMINAL_HOLD"} or state["queue"] or state["active_order_id"]:
             try:
                 app.execute_next()
@@ -380,11 +680,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "ros2-planned-artifact",
             "ros2-planned-session",
             "ros2-planned-roundtrip",
+            "rollout-service",
         ),
         default="immediate",
-        help="manipulation backend; ROS modes are simulation-only and never access hardware",
+        help="manipulation backend; ROS modes are simulation-only, rollout-service moves the real arms",
     )
     parser.add_argument("--manipulation-timeout-s", type=float, default=30.0)
+    parser.add_argument("--manip-url", default="http://127.0.0.1:8770",
+                        help="rollout-service backend: address of tools/rollout/rollout_service.py")
+    parser.add_argument("--no-align-confirm", action="store_true",
+                        help="rollout-service backend: do not wait for the alignment-done signal before arm work")
+    parser.add_argument("--accept-duration", action="store_true",
+                        help="rollout-service backend: count a policy that hit its max duration as success")
+    parser.add_argument(
+        "--cors-origin",
+        help="allow this origin (e.g. https://<site>.netlify.app) to call the API from a separately hosted page",
+    )
+    parser.add_argument(
+        "--robot-pose-url",
+        help="live map pose source for /control: the Pi navigation dashboard state, e.g. http://127.0.0.1:8090/api/state",
+    )
+    parser.add_argument(
+        "--robot-ssh",
+        help="open an SSH tunnel to this Pi (e.g. lim@192.168.0.159) for --robot-pose-url; needs key login",
+    )
     parser.add_argument(
         "--executor-socket",
         type=Path,
@@ -415,6 +734,14 @@ def main(argv: list[str] | None = None) -> int:
             executor_socket=args.executor_socket,
             timeout_sec=args.manipulation_timeout_s,
         )
+    elif args.backend == "rollout-service":
+        backend = RolloutServiceBackend(
+            url=args.manip_url,
+            require_alignment=not args.no_align_confirm,
+            accept_duration=args.accept_duration,
+        )
+        status = backend.service_status(max_age_s=0)
+        print(f"manipulation service {args.manip_url}: {status.get('state')}", flush=True)
     else:
         backend = ImmediateBackend()
     app = ServiceApplication(
@@ -425,12 +752,21 @@ def main(argv: list[str] | None = None) -> int:
         args.state_dir,
         backend,
     )
-    server = ThreadingHTTPServer((args.host, args.port), handler_factory(app))
+    if args.robot_pose_url:
+        app.pose_feed = RobotPoseFeed(args.robot_pose_url, ssh_target=args.robot_ssh)
+        app.pose_feed.start()
+        print(f"robot pose: {args.robot_pose_url}" + (f" via ssh {args.robot_ssh}" if args.robot_ssh else ""), flush=True)
+    server = ThreadingHTTPServer((args.host, args.port), handler_factory(app, args.cors_origin))
     stop = threading.Event()
     worker = threading.Thread(target=auto_step, args=(app, args.auto_step_s, stop), daemon=True)
     worker.start()
     print(f"service order dashboard: http://{args.host}:{server.server_port}", flush=True)
-    print(f"mode: {backend.mode} (hardware disabled; simulator access depends on backend)", flush=True)
+    print(f"guest order page: http://{args.host}:{server.server_port}/order?table=1", flush=True)
+    print(f"control page: http://{args.host}:{server.server_port}/control", flush=True)
+    if backend.info().get("hardware_accessed"):
+        print(f"mode: {backend.mode} (REAL ARMS: manipulation phases call the rollout service)", flush=True)
+    else:
+        print(f"mode: {backend.mode} (hardware disabled; simulator access depends on backend)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

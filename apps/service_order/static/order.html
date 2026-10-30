@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#ffffff">
+  <title>MS 레스토랑</title>
+  <style>
+    /* 캐주얼 레스토랑 톤: 제목·메뉴 이름은 배민 주아체(Jua), 본문은 고운돋움(Gowun Dodum). 둘 다 SIL OFL.
+       이 페이지에 쓰는 글자만 남긴 부분 글꼴(static/fonts, tools: subset_fonts.py)이다. 없는 글자는 아래 시스템 글꼴로 나온다. */
+    @font-face { font-family: "Jua"; src: url("/fonts/jua.woff") format("woff"); font-display: swap; }
+    @font-face { font-family: "Gowun Dodum"; src: url("/fonts/gowun_dodum.woff") format("woff"); font-display: swap; }
+    :root {
+      --bg: #ffffff; --bg-2: #f4f9fd; --card: #ffffff; --card-2: #e8f4fc; --line: #dbe7f1;
+      --ink: #1f3553; --muted: #5a6b80; --faint: #9aa9ba;
+      --accent: #1677c8; --accent-ink: #ffffff; --accent-soft: rgba(22,119,200,.10);
+      --ok: #2b8a5a; --danger: #d63c3c;
+      --radius: 18px;
+      --display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+      font-family: "Gowun Dodum", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; color: var(--ink); font-size: 16px; line-height: 1.5;
+      background: var(--bg); -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+    button:focus-visible { outline: 3px solid rgba(22,119,200,.45); outline-offset: 2px; }
+    svg { display: block; }
+    [hidden] { display: none !important; }
+
+    /* ---------- 상단 ---------- */
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 18px clamp(16px, 3vw, 32px); border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); flex: none; }
+    .brand-name { margin: 0; font-family: var(--display); font-size: 24px; letter-spacing: .02em; white-space: nowrap; }
+    .brand-sub { margin: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .table-pill { flex: none; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 700; font-size: 14px; }
+    .table-pill:empty { display: none; }
+    .demo-note { margin: 0; padding: 8px clamp(16px, 3vw, 32px); background: #e8f4fc; color: #155a94; font-size: 13px; }
+
+    /* ---------- 메뉴 (세로로 이어지는 카테고리 + 따라오는 탭) ---------- */
+    .shop { flex: 1; display: grid; grid-template-columns: 1fr; align-items: start; }
+    .menu { padding: 0 clamp(16px, 3vw, 32px) 150px; min-width: 0; }
+    .tabs { position: sticky; top: 0; z-index: 4; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+      margin: 0 calc(-1 * clamp(16px, 3vw, 32px)); padding: 14px clamp(16px, 3vw, 32px); background: rgba(255,255,255,.96);
+      border-bottom: 1px solid var(--line); backdrop-filter: blur(6px); }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab { flex: none; padding: 10px 18px; border-radius: 999px; background: var(--card); color: var(--muted); font-weight: 600; border: 1px solid var(--line); }
+    .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    .tab .dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--ok); vertical-align: middle; }
+    .tab[aria-selected="true"] .dot { background: var(--accent-ink); }
+    .sec { padding-top: 22px; scroll-margin-top: 70px; }
+    .sec + .sec { margin-top: 18px; border-top: 1px dashed var(--line); }
+    .section-title { margin: 0 0 4px; font-family: var(--display); font-size: 27px; font-weight: 400; }
+    .section-sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+    .items { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .item { position: relative; display: flex; flex-direction: column; text-align: left; padding: 10px; min-width: 0;
+      background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); transition: border-color .15s, box-shadow .15s; }
+    .item:hover { border-color: #b9d6ee; box-shadow: 0 6px 18px rgba(31,53,83,.06); }
+    .photo { aspect-ratio: 4 / 3; margin-bottom: 10px; border-radius: 12px; overflow: hidden; background: var(--card-2); }
+    .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .item .name { padding: 0 4px; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+    .item .desc { padding: 0 4px; margin-top: 2px; color: var(--muted); font-size: 13px; min-height: 2.6em; }
+    .item .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding: 0 4px 2px; }
+    .item .price { font-weight: 700; color: var(--accent); }
+    .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .badge.robot { background: rgba(43,138,90,.10); color: var(--ok); }
+    .badge.staff { background: #eef2f7; color: var(--muted); }
+    .item[aria-pressed="true"] { border-color: var(--accent); background: linear-gradient(180deg, rgba(22,119,200,.06), var(--card) 60%); }
+    .item .count { position: absolute; top: 16px; right: 16px; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 999px;
+      display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 800; font-size: 14px; box-shadow: 0 2px 8px rgba(31,53,83,.25); }
+    .item .count:empty { display: none; }
+
+    /* ---------- 주문 패널 ---------- */
+    .cart { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+      background: rgba(255,255,255,.97); border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(31,53,83,.06); }
+    .cart-title, .cart-lines { display: none; }
+    .cart-tables { margin-bottom: 12px; }
+    .cart-tables h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+    .table-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .table-btn { padding: 10px 0; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-weight: 700; }
+    .table-btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+    .cart-row { display: flex; align-items: center; gap: 12px; }
+    .cart-sel { flex: 1; min-width: 0; }
+    .cart-sel .what { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cart-sel .hint { color: var(--muted); font-size: 13px; }
+    .lines { list-style: none; margin: 0; padding: 0; }
+    .line { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .line .ln { font-weight: 700; min-width: 0; }
+    .line .ln small { display: block; color: var(--muted); font-weight: 500; font-size: 12px; }
+    .line .lp { font-weight: 700; text-align: right; }
+    .qty { display: inline-flex; align-items: center; gap: 6px; }
+    .qty button { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); font-weight: 800; color: var(--accent); }
+    .qty span { min-width: 18px; text-align: center; font-weight: 700; }
+    .primary { padding: 16px 22px; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 17px; font-weight: 800; white-space: nowrap; }
+    .primary:disabled { background: #e3ebf3; color: #9aa9ba; cursor: not-allowed; }
+    .ghost { padding: 14px 18px; border-radius: 14px; border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
+    .error { margin: 8px 0 0; color: var(--danger); font-size: 14px; }
+    .error:empty { display: none; }
+
+    /* Netlify 무료 배포는 오른쪽 아래에 "Powered by Netlify" 배지(약 184x48)를 덮어씌운다. 데모에서는 주문 버튼을 그 위로 올린다. */
+    body.demo .cart { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
+    @media (min-width: 900px) {
+      .shop { grid-template-columns: minmax(0, 1fr) 360px; }
+      .items { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+      .menu { padding-bottom: 60px; }
+      .cart { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+        padding: 24px; border-top: 0; border-left: 1px solid var(--line); background: var(--bg-2); box-shadow: none; }
+      .cart-title { display: block; margin: 0 0 18px; font-family: var(--display); font-size: 24px; font-weight: 400; }
+      .cart-lines { display: block; flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 12px; }
+      .cart-lines:empty::before { content: "담은 메뉴가 없어요"; color: var(--faint); font-size: 14px; }
+      .cart-row { flex-direction: column; align-items: stretch; }
+      .cart-sel { padding: 14px 16px; border-radius: 14px; background: var(--card); border: 1px dashed var(--line); }
+      .cart-sel .what { font-size: 18px; white-space: normal; }
+      .primary { width: 100%; padding: 18px; font-size: 19px; }
+      body.demo .cart { padding-bottom: 72px; }
+    }
+
+    /* ---------- 확인 창 ---------- */
+    .modal { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; background: rgba(31,53,83,.45); }
+    .sheet { width: min(440px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; padding: 24px 22px 20px; border-radius: 22px;
+      background: var(--bg); border: 1px solid var(--line); box-shadow: 0 20px 50px rgba(31,53,83,.18); }
+    .sheet h2 { margin: 0; font-size: 22px; text-align: center; }
+    .sheet > p { margin: 6px 0 14px; color: var(--muted); text-align: center; }
+    .sheet .total { display: flex; justify-content: space-between; margin: 12px 0 18px; font-size: 18px; font-weight: 800; }
+    .sheet .row { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
+
+    /* ---------- 진행 화면 ---------- */
+    .track { width: min(760px, 100%); margin: 0 auto; padding: 28px 16px 48px; text-align: center; }
+    .ticket { display: inline-flex; flex-direction: column; align-items: center; padding: 14px 28px; margin-bottom: 26px;
+      border: 1px dashed var(--accent); border-radius: 16px; background: var(--bg-2); }
+    .ticket .label { color: var(--muted); font-size: 13px; }
+    .ticket .no { font-size: 36px; font-weight: 800; line-height: 1.15; letter-spacing: .08em; font-variant-numeric: tabular-nums; color: var(--accent); }
+    .ticket .what { margin-top: 2px; font-weight: 600; }
+    .hero { width: 120px; height: 120px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; background: var(--card-2); border: 1px solid var(--line); }
+    .hero svg { width: 72px; height: 72px; }
+    .hero.live { animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(22,119,200,.30); } 50% { box-shadow: 0 0 0 16px rgba(22,119,200,0); } }
+    .status-title { margin: 0; font-size: clamp(24px, 5vw, 32px); font-weight: 800; letter-spacing: -.02em; }
+    .status-sub { margin: 6px 0 0; color: var(--muted); min-height: 1.5em; }
+    .card.ok .status-title { color: var(--ok); }
+    .card.fail .status-title { color: var(--danger); }
+    ol.steps { list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin: 30px 0 0; padding: 0; counter-reset: s; }
+    .steps li { position: relative; padding-top: 44px; color: var(--faint); font-size: 13px; font-weight: 600; }
+    .steps li::before { counter-increment: s; content: counter(s); position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--card); border: 2px solid var(--line); z-index: 1; }
+    .steps li:not(:first-child)::after { content: ""; position: absolute; top: 16px; right: 50%; width: 100%; height: 2px; background: var(--line); }
+    .steps li.done { color: var(--ink); }
+    .steps li.done::before { content: "✓"; background: var(--ok); border-color: var(--ok); color: #ffffff; }
+    .steps li.done::after, .steps li.now::after { background: var(--ok); }
+    .steps li.now { color: var(--accent); }
+    .steps li.now::before { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 5px var(--accent-soft); }
+    .receipt { width: min(420px, 100%); margin: 28px auto 0; padding: 14px 18px; text-align: left; border: 1px solid var(--line); border-radius: 16px; background: var(--bg-2); }
+    .receipt h3 { margin: 0 0 4px; font-size: 14px; color: var(--muted); }
+    .receipt .total { display: flex; justify-content: space-between; padding-top: 10px; font-weight: 800; }
+    .staff-note { margin: 10px 0 0; font-size: 14px; color: var(--muted); }
+    .staff-note.served { color: var(--ok); font-weight: 700; }
+    .actions { display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%); margin: 26px auto 0; }
+    .offline { margin: 14px 0 0; color: var(--danger); font-size: 14px; }
+    @media (max-width: 420px) { .steps li { font-size: 11px; } .ticket .no { font-size: 30px; } .items { gap: 10px; } .item .name { font-size: 15px; } }
+    /* 제목 글꼴(주아체는 한 굵기뿐이라 가짜 굵게를 막는다). 위 규칙보다 뒤에 둔다. */
+    .tab, .item .name, .primary, .status-title, .ticket .no, .sheet h2, .table-pill, .table-btn
+      { font-family: var(--display); font-weight: 400; }
+    /* 가격은 주아체의 쉼표가 마침표처럼 보여서(24,000 -> 24.000) 숫자가 또렷한 시스템 글꼴로 쓴다. */
+    .item .price, .line .lp, .sheet .total, .receipt .total
+      { font-family: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; font-weight: 800; }
+  </style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v8a2 2 0 0 0 2 2v8M5 3v5M9 3v5"/><path d="M17 21V3c-2 1.5-3 4-3 7v3h3"/></svg>
+    </div>
+    <div style="min-width:0">
+      <p class="brand-name">MS RESTAURANT</p>
+      <p class="brand-sub">서빙 로봇이 음료를 따라 테이블까지 가져다드립니다</p>
+    </div>
+  </div>
+  <span class="table-pill" id="table-label"></span>
+</header>
+<p class="demo-note" id="demo-note" hidden>체험용 데모 화면입니다. 실제 로봇과 연결되어 있지 않습니다.</p>
+
+<div id="order-view" class="shop">
+  <main class="menu">
+    <nav class="tabs" id="tabs" role="tablist" aria-label="메뉴 분류"></nav>
+    <div id="sections"></div>
+  </main>
+
+  <aside class="cart" aria-label="주문 내역">
+    <h2 class="cart-title">주문 내역</h2>
+    <section class="cart-tables" id="table-section">
+      <h3>테이블을 선택해 주세요</h3>
+      <div class="table-grid" id="tables"></div>
+    </section>
+    <ul class="lines cart-lines" id="cart-lines"></ul>
+    <div class="cart-row">
+      <div class="cart-sel">
+        <div class="what" id="cart-what">메뉴를 골라 주세요</div>
+        <div class="hint" id="cart-hint">로봇은 한 번에 음료 한 잔을 서빙해요</div>
+      </div>
+      <button type="button" class="primary" id="submit" disabled>주문하기</button>
+    </div>
+    <p class="error" id="order-error" role="alert"></p>
+  </aside>
+</div>
+
+<div class="modal" id="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div class="sheet">
+    <h2 id="confirm-title">주문을 확인해 주세요</h2>
+    <p id="confirm-sub"></p>
+    <ul class="lines" id="confirm-lines"></ul>
+    <div class="total"><span>합계</span><span id="confirm-total"></span></div>
+    <div class="row">
+      <button type="button" class="ghost" id="confirm-cancel">돌아가기</button>
+      <button type="button" class="primary" id="confirm-ok">주문 확정</button>
+    </div>
+  </div>
+</div>
+
+<div id="track-view" class="track" hidden>
+  <div class="ticket">
+    <span class="label">주문 번호</span>
+    <span class="no" id="track-no"></span>
+    <span class="what" id="track-drink"></span>
+  </div>
+  <div class="card" id="status-card" aria-live="polite">
+    <div class="hero" id="hero"></div>
+    <p class="status-title" id="status-title"></p>
+    <p class="status-sub" id="status-sub"></p>
+    <ol class="steps" id="steps"></ol>
+  </div>
+  <div class="receipt" id="receipt" hidden>
+    <h3>주문 내역</h3>
+    <ul class="lines" id="track-lines"></ul>
+    <div class="total"><span>합계</span><span id="track-total"></span></div>
+    <p class="staff-note" id="staff-note" hidden></p>
+  </div>
+  <div class="actions">
+    <button type="button" class="ghost" id="cancel" hidden>주문 취소</button>
+    <button type="button" class="primary" id="again" hidden>새로 주문하기</button>
+  </div>
+  <p class="offline" id="offline" hidden>서버와 연결이 끊겼어요. 다시 연결하는 중…</p>
+</div>
+<!-- 진행 그림. order.js 가 복제해 쓴다(innerHTML 미사용). 메뉴 사진은 /menu/<이름>.jpg (AI 생성). -->
+<template id="art-receipt"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8h28v48l-5-3-5 3-4-3-4 3-5-3-5 3z" stroke="#1677c8" stroke-width="2.5"/><path d="M25 20h14M25 28h14M25 36h8" stroke="#1677c8" stroke-width="2.5"/></svg></template>
+<template id="art-robot"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="14" y="20" width="36" height="26" rx="6" stroke="#1677c8" stroke-width="2.5"/><circle cx="25" cy="33" r="3.5" fill="#1677c8"/><circle cx="39" cy="33" r="3.5" fill="#1677c8"/><path d="M32 20v-8M28 10h8M14 33H8M56 33h-6" stroke="#1677c8" stroke-width="2.5"/><circle cx="22" cy="52" r="4" stroke="#1677c8" stroke-width="2.5"/><circle cx="42" cy="52" r="4" stroke="#1677c8" stroke-width="2.5"/></svg></template>
+<template id="art-pour"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 18l14-8 8 8-14 8z" stroke="#1677c8" stroke-width="2.5"/><path d="M28 22c2 6 4 10 4 14" stroke="#3a8fd6" stroke-width="2.5"/><path d="M22 36h22l-3 20a3 3 0 0 1-3 2.5H28a3 3 0 0 1-3-2.5z" stroke="#1677c8" stroke-width="2.5"/><path d="M24 44h18l-1.6 11H25.6z" fill="#7cc4ef" fill-opacity=".6"/></svg></template>
+<template id="art-done"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="32" r="22" stroke="#2b8a5a" stroke-width="3"/><path d="M21 33l7 7 15-16" stroke="#2b8a5a" stroke-width="3.5"/></svg></template>
+<template id="art-fail"><svg viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="32" r="22" stroke="#d63c3c" stroke-width="3"/><path d="M32 20v15M32 43v1" stroke="#d63c3c" stroke-width="3.5"/></svg></template>
+<script src="/config.js"></script>
+<script src="/api.js"></script>
+<script src="/order.js"></script>
+</body>
+</html>

@@ -15,7 +15,7 @@ import pytest
 from src.mission.service_mission_control import MissionController
 import src.mission.service_execution_backend as service_execution_backend
 from src.mission.service_execution_backend import BackendResult, ImmediateBackend, Ros2ManipulationBackend, Ros2PlannedRoundtripBackend, Ros2PlannedSessionBackend
-from apps.service_order.service_order_server import BackendBusyError, DASHBOARD_JS, INDEX, ServiceApplication, auto_step, default_state_dir, handler_factory
+from apps.service_order.service_order_server import API_JS, BackendBusyError, CONTROL_JS, CONTROL_PAGE, DASHBOARD_JS, INDEX, ORDER_JS, ORDER_PAGE, ServiceApplication, auto_step, default_state_dir, handler_factory
 from src.mission.service_order_store import ServiceOrderStore
 
 
@@ -152,6 +152,190 @@ def test_static_dashboard_has_no_external_runtime_dependencies():
     assert "fetch(\"http" not in javascript and "request(\"http" not in javascript
     assert "request(\"/api/orders\"" in javascript
     assert ".innerHTML" not in javascript
+
+
+def test_guest_and_control_pages_are_served(server):
+    _, base, _ = server
+    pages = {
+        "/order": "MS RESTAURANT",
+        "/order.js": "STEP_BY_PHASE",
+        "/control": "로봇 운영 콘솔",
+        "/control.js": "SERVICE_PHASES",
+        "/api.js": "orderApi",
+        "/config.js": "ORDER_API_BASE",
+    }
+    for path, marker in pages.items():
+        with urlopen(base + path, timeout=3) as response:
+            assert marker in response.read().decode()
+
+
+def test_guest_and_control_pages_have_no_external_runtime_dependencies():
+    for page, script in ((ORDER_PAGE, ORDER_JS), (CONTROL_PAGE, CONTROL_JS), (CONTROL_PAGE, API_JS)):
+        html = Path(page).read_text(encoding="utf-8")
+        javascript = Path(script).read_text(encoding="utf-8")
+        assert "https://" not in html and "http://" not in html
+        assert "fetch(\"http" not in javascript
+        assert ".innerHTML" not in javascript
+
+
+def test_server_assigns_daily_order_numbers_and_keeps_food_tickets(server):
+    app, base, state_dir = server
+    _, first = post_json(base + "/api/orders", {"client_ref": "web-a", "table_id": "table_1", "drink": "COLA",
+                                                "items": [{"name": "콜라", "qty": 1, "price": 3000, "robot": True},
+                                                          {"name": "감자튀김", "qty": 2, "price": 5000}]})
+    number = first["ticket"]["order_id"]
+    assert len(number) == 9 and number.isdigit() and number.endswith("001")
+    assert first["order"]["order_id"] == number and first["order"]["drink"] == "COLA"
+    assert first["ticket"]["total"] == 13000 and first["ticket"]["staff_state"] == "PREPARING"
+
+    status, again = post_json(base + "/api/orders", {"client_ref": "web-a", "table_id": "table_1", "drink": "COLA"})
+    assert status == 200 and again["ticket"]["order_id"] == number
+
+    _, food_only = post_json(base + "/api/orders", {"table_id": "table_2", "items": [{"name": "스테이크", "qty": 1, "price": 24000}]})
+    second = food_only["ticket"]["order_id"]
+    assert second == number[:6] + "002" and food_only["order"] is None
+    assert second not in app.state()["queue"]
+
+    _, served = post_json(base + f"/api/tickets/{second}/served", {})
+    assert served["ticket"]["staff_state"] == "SERVED"
+    tickets = json.loads((state_dir / "tickets.json").read_text(encoding="utf-8"))
+    assert {t["order_id"] for t in tickets} == {number, second}
+
+    with pytest.raises(HTTPError) as error:
+        post_json(base + "/api/orders", {"table_id": "table_1"})
+    assert error.value.code == 400
+
+
+def test_new_order_numbers_skip_slots_shown_for_legacy_orders(server):
+    app, base, _ = server
+    # 9자리 형식 전의 주문 1건은 관제 화면에서 오늘 001로 보인다. 새 주문은 002부터.
+    post_json(base + "/api/orders", {"order_id": "WEB-20261027-090000-ab12", "table_id": "table_1", "drink": "COLD_WATER"})
+    _, created = post_json(base + "/api/orders", {"table_id": "table_2", "drink": "HOT_WATER"})
+    assert created["order"]["order_id"].endswith("002")
+
+
+def test_backend_commands_are_logged_for_the_console(tmp_path):
+    app = ServiceApplication(MissionController(), tmp_path / "state")
+    try:
+        app.submit({"table_id": "table_1", "drink": "COLD_WATER"})
+        app.execute_next()
+        log = app.state()["recent_commands"]
+        assert log[-1]["phase"] == "NAVIGATE_KITCHEN" and log[-1]["success"] is True
+        assert log[-1]["duration_s"] >= 0 and app.state()["server"]["pid"] > 0
+    finally:
+        app.close()
+
+
+def test_menu_photos_and_map_assets_are_served(server):
+    _, base, _ = server
+    with urlopen(base + "/map/classroom.json", timeout=3) as response:
+        meta = json.loads(response.read())
+    assert meta["resolution_m"] == 0.05 and {s["id"] for s in meta["stations"]} >= {"dock", "kitchen", "table_1"}
+    with urlopen(base + "/map/classroom.png", timeout=3) as response:
+        assert response.headers["Content-Type"] == "image/png"
+    with urlopen(base + "/fonts/jua.woff", timeout=3) as response:
+        assert response.headers["Content-Type"] == "font/woff"
+    with pytest.raises(HTTPError) as error:
+        urlopen(base + "/map/..%2Fsecret.json", timeout=3)
+    assert error.value.code == 404
+
+
+def test_robot_pose_feed_reads_navigation_dashboard(tmp_path):
+    from http.server import BaseHTTPRequestHandler
+    import time
+    from apps.service_order.service_order_server import RobotPoseFeed
+
+    class Dashboard(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({"navigation": {"localization": {
+                "x_m": 0.02, "y_m": -0.08, "yaw_deg": -1.5, "frame_id": "map", "live": True, "age_s": 0.3}}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    dashboard = ThreadingHTTPServer(("127.0.0.1", 0), Dashboard)
+    threading.Thread(target=dashboard.serve_forever, daemon=True).start()
+    app = ServiceApplication(MissionController(), tmp_path / "state")
+    app.pose_feed = RobotPoseFeed(f"http://127.0.0.1:{dashboard.server_port}/api/state", interval_s=0.1)
+    app.pose_feed.start()
+    try:
+        deadline = time.time() + 3
+        while time.time() < deadline and not app.state()["robot_pose"].get("live"):
+            time.sleep(0.05)
+        pose = app.state()["robot_pose"]
+        assert pose["live"] and pose["x_m"] == 0.02 and pose["yaw_deg"] == -1.5
+        nav = app.state()["robot_nav"]
+        assert nav["connected"] and nav["snapshot"]["navigation"]["localization"]["x_m"] == 0.02
+        dashboard.shutdown()
+        dashboard.server_close()
+        deadline = time.time() + 5
+        while time.time() < deadline and app.state()["robot_pose"].get("live"):
+            time.sleep(0.05)
+        lost = app.state()["robot_pose"]
+        assert not lost["live"] and lost["last"]["x_m"] == 0.02
+    finally:
+        app.close()
+
+
+def test_cors_headers_only_when_origin_configured(tmp_path):
+    app = ServiceApplication(MissionController(), tmp_path / "state")
+    servers = {}
+    for name, origin in (("closed", None), ("open", "https://example.netlify.app")):
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(app, origin))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        servers[name] = httpd
+    try:
+        base = f"http://127.0.0.1:{servers['open'].server_port}"
+        with urlopen(base + "/api/health", timeout=3) as response:
+            assert response.headers["Access-Control-Allow-Origin"] == "https://example.netlify.app"
+        with urlopen(Request(base + "/api/orders", method="OPTIONS"), timeout=3) as response:
+            assert response.status == 204
+        closed = f"http://127.0.0.1:{servers['closed'].server_port}"
+        with urlopen(closed + "/api/health", timeout=3) as response:
+            assert response.headers["Access-Control-Allow-Origin"] is None
+        with pytest.raises(HTTPError) as error:
+            urlopen(Request(closed + "/api/orders", method="OPTIONS"), timeout=3)
+        assert error.value.code == 405
+    finally:
+        for httpd in servers.values():
+            httpd.shutdown()
+            httpd.server_close()
+        app.close()
+
+
+def test_netlify_bundle_contains_pages_and_demo_config(tmp_path):
+    from apps.service_order.build_netlify import build
+
+    build(tmp_path / "site", "demo")
+    names = {path.name for path in (tmp_path / "site").iterdir()}
+    assert {"order.html", "order.js", "control.html", "control.js", "api.js", "config.js", "_redirects"} <= names
+    assert '"demo"' in (tmp_path / "site/config.js").read_text(encoding="utf-8")
+
+
+def test_control_pause_stops_auto_step_until_resumed(server):
+    app, base, _ = server
+    post_json(base + "/api/orders", {"order_id": "PAUSE-1", "table_id": "table_1", "drink": "COLD_WATER"})
+    status, body = post_json(base + "/api/control", {"paused": True})
+    assert status == 200 and body == {"auto_paused": True}
+    stop = threading.Event()
+    worker = threading.Thread(target=auto_step, args=(app, 0.01, stop), daemon=True)
+    worker.start()
+    stop.wait(0.2)
+    assert app.state()["phase"] == "NAVIGATE_KITCHEN"
+    post_json(base + "/api/control", {"paused": False})
+    stop.wait(0.3)
+    stop.set()
+    worker.join(timeout=3)
+    assert app.state()["auto_paused"] is False
+    assert app.state()["phase"] != "NAVIGATE_KITCHEN"
+    with pytest.raises(HTTPError) as error:
+        post_json(base + "/api/control", {"paused": "yes"})
+    assert error.value.code == 400
 
 
 def test_restart_restores_active_mission_and_history(tmp_path):
