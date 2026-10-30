@@ -59,7 +59,11 @@ class TableTapeReference:
         contours = list(contours) + list(cv2.findContours(
             full_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0])
         for contour in contours:
-            _, y, _, _ = cv2.boundingRect(contour)
+            _, y, component_width, _ = cv2.boundingRect(contour)
+            # The upper edge cannot be wider than its bounding box. Reject
+            # tiny components before allocating arrays for every image speck.
+            if component_width < 4 or y < 3 or y + 2 >= gray.shape[0]:
+                continue
             upper = contour[:, 0, :]
             upper = upper[upper[:, 1] <= y + 1]
             x = int(upper[:, 0].min())

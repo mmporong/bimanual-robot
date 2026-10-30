@@ -655,6 +655,19 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if (frozen and anchor and anchor.get('reason')
                 == 'operator_measured_relative_lateral_correction'):
             return anchor, reference
+        tape = (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape')
+        if tape and frozen and anchor:
+            # Count distinct valid observations without moving the accepted
+            # endpoint. Early terminal hold must not be stuck at one sample.
+            if reference and reference.get('valid') is True:
+                stamps = set(anchor.get('tape_confirmation_stamps', [anchor['stamp_s']]))
+                stamps.add(reference['stamp_s'])
+                anchor['tape_confirmation_stamps'] = sorted(stamps)[-3:]
+                anchor['goal_filter_sample_count'] = max(
+                    min(3, anchor.get('goal_filter_sample_count', 1)),
+                    len(anchor['tape_confirmation_stamps']))
+            return anchor, reference
         if mode == 'rgbd_auxiliary':
             # The taught destination is primary. A rejected visual pose is
             # diagnostic evidence, not permission to move the goal or go home.
@@ -700,7 +713,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and not getattr(self, 'station_reference_goal_frozen', False)):
             self.station_reference_goal_frozen = True
             self.emit('table_station_goal_frozen', reference_frame='odom',
-                      reason='rgbd_anchor_held_live_feedback_continues',
+                      reason=('tape_approach_goal_held' if tape
+                              else 'rgbd_anchor_held_live_feedback_continues'),
                       goal_odom=list(anchor['goal_odom']),
                       observation_stamp_s=goal.get('stamp_s'),
                       reference_capture_path=self.station_reference.assumptions.get(
@@ -2885,10 +2899,18 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         # Operator corrections and logged fixed goals keep their own reason.
         self._station_terminal_goal = None
         anchor = getattr(self, 'station_reference_goal', None)
-        if (isinstance(anchor, dict) and anchor.get('reason')
-                == 'registered_map_pose_frozen_with_table_face'):
+        tape = (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape')
+        if (tape or (isinstance(anchor, dict) and anchor.get('reason')
+                     == 'registered_map_pose_frozen_with_table_face')):
             self.station_reference_goal = None
             self.station_reference_goal_frozen = False
+            if tape:
+                self.station_reference_control_goal = None
+                with self._station_reference_lock:
+                    samples = getattr(self, '_station_reference_goal_samples', None)
+                    if samples is not None:
+                        samples.clear()
         mount, _region, _radius = self._table_observation_context
         profile = mount.get('camera_mount', {}).get('table_observation', {})
         clearance_m = profile.get('base_offset_m')
@@ -3307,6 +3329,21 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                             self.emit('table_station_terminal_goal_held',
                                       goal_odom=list(goal_odom), gap_m=gap,
                                       lateral_error_m=lateral_error)
+            if (getattr(getattr(self, 'station_reference', None), 'observation_method', None)
+                    == 'table_front_tape'
+                    and getattr(self, '_station_terminal_goal', None) is None
+                    and .15 <= gap <= .35
+                    and abs(residual) <= self.parking_contract['yaw_tolerance_rad']
+                    and lateral_ready and goal_odom is not None
+                    and station_observation and station_observation.get('valid') is True):
+                goal, _ = self._station_goal_reference()
+                if goal is not None and goal.get('goal_filter_sample_count', 0) >= 3:
+                    self._station_terminal_goal = dict(goal, goal_odom=list(goal_odom))
+                    self.station_reference_goal_frozen = True
+                    self.emit('table_station_terminal_goal_held',
+                              reason='tape_aligned_before_close_approach',
+                              goal_odom=list(goal_odom), gap_m=gap,
+                              lateral_error_m=lateral_error)
             travelled = math.hypot(actual[0] - state['start'][0],
                                    actual[1] - state['start'][1])
             if travelled + max(0.0, remaining) > LIVE_APPROACH_MAX_M:

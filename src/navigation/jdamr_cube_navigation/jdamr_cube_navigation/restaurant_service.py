@@ -1561,6 +1561,16 @@ class ServiceRoute(CorridorRoute):
                                    if state['lateral_tracking'] else {}))
                         command.linear.x = direction * linear
                         command.angular.z = angular
+                        if (getattr(getattr(self, 'station_reference', None),
+                                    'observation_method', None) == 'table_front_tape'):
+                            # User-requested slow tape alignment, then a slower
+                            # final approach to the already accepted odom goal.
+                            cap = (.025 if getattr(self, '_station_terminal_goal', None)
+                                   is not None else .04)
+                            if abs(command.linear.x) > cap:
+                                ratio = cap / abs(command.linear.x)
+                                command.linear.x *= ratio
+                                command.angular.z *= ratio
                         if (state['lateral_error_m'] is None and state['allow_near_alignment']
                                 and state['remaining_m'] <= FACE_ALIGNMENT_GAP_M - .01):
                             if state['alignment_in_progress']:
