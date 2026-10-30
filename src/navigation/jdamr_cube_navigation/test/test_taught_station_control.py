@@ -364,6 +364,33 @@ def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction(mo
         (1.75, 4., math.pi / 2 + .2))
 
 
+def test_expired_match_never_seeds_control_but_can_seed_fresh_image_search():
+    node = _node()
+    contact = Mock()
+    checkpoint = ({'cup': (12., 13.)}, .1)
+    contact.tracking_checkpoint.return_value = checkpoint
+    model = _rgbd_model(contact_reference=contact)
+    node.station_reference = model
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(transform=_pose())
+
+    def observe(*args):
+        node.get_clock.return_value = _clock(11.)
+        return {'valid': True, 'goal_odom': [1., .25, .2],
+                'stamp_s': 10., 'goal_left_offset_m': 0.}
+
+    model.observe.side_effect = observe
+    node._station_reference_pending = (None, None, 10.)
+    # End after this iteration, without timing-dependent sleeps.
+    node.emit.side_effect = lambda *args, **kwargs: node._station_reference_stop.set()
+    node._station_reference_wake.set()
+    node._station_reference_loop()
+
+    assert node.station_reference_result['reason'] == 'processing_exceeded_image_age'
+    contact.restore_tracking.assert_not_called()
+    assert not getattr(node, '_station_reference_goal_samples', None)
+
+
 def test_worker_preserves_tf_failure_detail_for_final_diagnostics():
     node = _node()
     node.station_reference = Mock()
