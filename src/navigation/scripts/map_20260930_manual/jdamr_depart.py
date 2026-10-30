@@ -1575,11 +1575,11 @@ def cmd_go(args):
     reapproach_m = getattr(args, 'reapproach_m', None)
     correction_m = getattr(args, 'station_left_correction_m', 0.0)
     if reapproach_m is not None:
-        if not (math.isfinite(reapproach_m) and 0.2 <= reapproach_m <= 0.3
+        if not (math.isfinite(reapproach_m) and 0.2 <= reapproach_m <= 0.45
                 and len(tables) == 1 and args.park_only and surface_mode == 'table_edge'
                 and not (args.dock_only or args.rear_box_only or with_via
                          or args.resume_parked_log or tables[0] != VIA_ID and not args.skip_via)):
-            fail('--reapproach-m requires one --park-only table_edge station, 0.2–0.3 m')
+            fail('--reapproach-m requires one --park-only table_edge station, 0.2–0.45 m')
     if (not math.isfinite(correction_m) or abs(correction_m) > 0.05
             or correction_m and reapproach_m is None):
         fail('--station-left-correction-m requires --reapproach-m and at most 0.05 m')

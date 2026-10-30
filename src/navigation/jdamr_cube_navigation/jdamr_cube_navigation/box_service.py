@@ -4015,11 +4015,11 @@ def parse_args(argv=None):
                      or args.rear_box_only or args.resume_parked_from_log)):
         parser.error('--station-capture-retreat-m requires one executed step of at most 0.05 m')
     if args.reapproach_m is not None and not (
-            math.isfinite(args.reapproach_m) and 0.2 <= args.reapproach_m <= 0.3
+            math.isfinite(args.reapproach_m) and 0.2 <= args.reapproach_m <= 0.45
             and args.execute and args.surface_mode == 'table_edge'
             and not (args.return_home or args.via_id or args.home_only
                      or args.rear_box_only or args.resume_parked_from_log)):
-        parser.error('--reapproach-m requires a standalone executed table_edge task, 0.2–0.3 m')
+        parser.error('--reapproach-m requires a standalone executed table_edge task, 0.2–0.45 m')
     if (not math.isfinite(args.station_left_correction_m)
             or abs(args.station_left_correction_m) > 0.05
             or (args.station_left_correction_m and args.reapproach_m is None)):
