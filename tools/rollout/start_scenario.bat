@@ -14,8 +14,8 @@ REM Edit the paths/ports below for this laptop.
 set PY=C:\Users\USER\miniconda3\envs\so101_env\python.exe
 set POUR=C:\Users\USER\lerobot-training\outputs\water_pour_chassis_smolvla_80\checkpoints\016000\pretrained_model
 set PLACE=C:\Users\USER\lerobot-training\outputs\cup_place_chassis_smolvla_80\checkpoints\007000\pretrained_model
-set LEFT_PORT=COM15
-set RIGHT_PORT=COM16
+set LEFT_PORT=COM3
+set RIGHT_PORT=COM4
 
 cd /d "%~dp0..\.."
 
