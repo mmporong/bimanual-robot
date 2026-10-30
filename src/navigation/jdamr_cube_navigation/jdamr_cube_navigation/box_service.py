@@ -3756,15 +3756,16 @@ def parse_args(argv=None):
     if any(value is not None for value in via):
         if any(value is None for value in via):
             parser.error('--via-id, --via-route and --via-region-xy go together')
-        if not args.return_home:
-            parser.error('a via stop requires --return-home')
+        if not args.return_home and args.resume_parked_from_log is None:
+            parser.error('a via stop requires --return-home or --resume-parked-from-log')
         if (not all(math.isfinite(v) for v in args.via_region_xy)
                 or not math.isfinite(args.via_region_radius_m)
                 or not 0.0 < args.via_region_radius_m <= 0.6):
             parser.error('via region must be finite and radius in (0, 0.6] m')
     if args.resume_parked_from_log is not None:
-        if not (args.execute and args.return_home):
-            parser.error('--resume-parked-from-log requires --execute and --return-home')
+        if not args.execute or (not args.return_home and args.via_id is None):
+            parser.error('--resume-parked-from-log requires --execute and '
+                         'either --return-home or a via station')
         if args.resume_at_observation:
             parser.error('--resume-parked-from-log cannot be combined with '
                          '--resume-at-observation')
