@@ -28,6 +28,19 @@ Windows OpenNI2 브리지가 USB를 유지하고 Pi `192.168.0.159:5600`에 접�
 
 영상·보정값 QoS는 best effort / volatile / keep last 1. 같은 센서의 Image와 CameraInfo는 같은 촬영 시각을 사용한다. 발행할 영상이 없으면 과거 프레임을 재발행하지 않는다.
 
+수신 본문은 크기를 확인한 뒤 버퍼를 한 번 할당하고 `recv_into`로 채운다. 부분 수신마다
+새 bytes 조각을 만들고 버퍼를 늘리던 작업을 줄이는 변경이며 AST1 형식·부분 수신 복구·
+읽기 제한시간은 유지한다. 프레임 전송 중간을 버리거나 헤더만 남기지 않는다. 이 변경의
+실차 FPS·지연 개선량은 아직 측정하지 않았다.
+
+카메라는 이미 OpenNI2 SDK를 사용한다. SDK의 프레임 대기/읽기와 TCP 전송은 다른 단계이며,
+SDK 교체만으로 Wi-Fi 지연이 해결된다고 보지 않는다. 기존 수신 상태의 촬영→송신,
+촬영→수신, decode_ms, PONG RTT를 구분해 본다. 촬영→송신에는 압축·SDK 이후 대기가 함께
+포함되므로 그 수치만으로 USB·SDK 병목을 확정하지 않는다.
+
+관련 원문: [Orbbec OpenNI 프레임 읽기 API](https://github.com/orbbec/OpenNI_SDK/blob/main/Doc/English/0400_API.md),
+[Python socket.recv_into](https://docs.python.org/3/library/socket.html#socket.socket.recv_into).
+
 ## 운영
 
 Pi user systemd unit: `jdamr-astra-tcp.service`. 설치 원본은 tools/jdamr/systemd/jdamr-astra-tcp.service. Windows 송신기 연결을 기다리기 위해 유지하며 자동 부팅 enable은 하지 않는다.

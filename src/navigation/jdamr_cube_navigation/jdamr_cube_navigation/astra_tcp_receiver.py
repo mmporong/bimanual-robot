@@ -23,19 +23,21 @@ MAX_AGE_NS = 500_000_000
 
 
 def exact(connection, size):
-    chunks = bytearray()
+    buffer = bytearray(size)
+    view = memoryview(buffer)
+    received = 0
     deadline = time.monotonic() + 3.0
-    while len(chunks) < size:
+    while received < size:
         if time.monotonic() >= deadline:
             raise TimeoutError('incomplete AST1 record')
         try:
-            block = connection.recv(min(size - len(chunks), 65536))
+            count = connection.recv_into(view[received:received + 65536])
         except socket.timeout:
             continue
-        if not block:
+        if not count:
             raise EOFError('sender disconnected')
-        chunks.extend(block)
-    return bytes(chunks)
+        received += count
+    return bytes(buffer)
 
 
 def integer(value, minimum, maximum):

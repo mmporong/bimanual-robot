@@ -470,19 +470,32 @@ class WaterServiceController:
 
     def _wait_drive(self, destination: str) -> None:
         deadline = time.monotonic() + self.inference_timeout_s
+        last_error = None
         while time.monotonic() < deadline:
             self._check_stopped()
-            state = self._http_json("GET", "/api/state", timeout_s=3.0)
+            try:
+                state = self._http_json(
+                    "GET", "/api/state",
+                    timeout_s=min(3.0, max(0.001, deadline - time.monotonic())))
+            except RuntimeError as error:
+                # No drive helper runs in this stage. Keep the same order while
+                # waiting for communication to recover; never replay a POST.
+                last_error = str(error)
+                self._stop_event.wait(0.25)
+                continue
+            self._check_stopped()
             if self._drive_ready(state, destination):
                 return
-            self._stop_event.wait(1.0)
-        raise RuntimeError(f"order server did not release drive to {destination}")
+            last_error = None
+            self._stop_event.wait(0.25)
+        self._check_stopped()
+        detail = f"; last read error: {last_error}" if last_error else ""
+        raise RuntimeError(f"order server did not release drive to {destination}{detail}")
 
     def _confirm_alignment(self, station: str) -> None:
         # Validate the same order immediately before authorizing arm motion.
-        state = self._http_json("GET", "/api/state", timeout_s=3.0)
-        if not self._drive_ready(state, station):
-            raise RuntimeError(f"order changed before alignment confirmation at {station}")
+        # The base is parked: a transient read may recover in this same stage.
+        self._wait_drive(station)
         with self._inference_gate:
             self._check_stopped()
             result = self._http_json("POST", "/api/align/confirm", timeout_s=5.0,

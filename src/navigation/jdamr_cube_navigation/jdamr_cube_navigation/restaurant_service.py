@@ -2284,10 +2284,18 @@ class ServiceRoute(CorridorRoute):
         """Capture fresh TF while odometry and consecutive poses remain still."""
         contract = ({**self.parking_contract, 'hold_s': DIRECT_STOP_CONFIRM_S}
                     if intermediate else self.parking_contract)
-        gate = ParkingHold(contract)
-        target = None
-        last_stamp = None
         revision = self.parking_motion_revision
+        window = getattr(self, '_stationary_capture_window', None)
+        self._stationary_capture_window = None
+        if (window is not None and window['contract'] == contract
+                and window['revision'] == revision):
+            # Continue the same measured hold, rather than adding another hold
+            # after an observation. ParkingHold still rejects gaps and motion;
+            # the last stamp forces a new odometry sample before returning.
+            gate, target, last_stamp = (
+                window['gate'], window['target'], window['last_stamp'])
+        else:
+            gate, target, last_stamp = ParkingHold(contract), None, None
         deadline_s = time.monotonic() + timeout_s
         last_guard_failure = None
         refresh_attempted = False
@@ -2334,6 +2342,10 @@ class ServiceRoute(CorridorRoute):
                 if result['reason'] in ('position_out_of_tolerance', 'yaw_out_of_tolerance'):
                     target = None
                 if result['confirmed']:
+                    self._stationary_capture_window = {
+                        'contract': dict(contract), 'revision': revision,
+                        'gate': gate, 'target': target, 'last_stamp': last_stamp,
+                    }
                     return actual, {
                         **result, 'source_ages_s': ages_s,
                         'amcl_xy_covariance_m2': list(self.amcl_covariance),

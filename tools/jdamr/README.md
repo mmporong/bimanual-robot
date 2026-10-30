@@ -182,6 +182,11 @@ python3 tools/jdamr/water_service_api.py serve --order-url http://192.168.0.157:
 컵배치 완료 대기 → 도크 복귀다. 정차는 시간 만료로 풀지 않고 기존 `--park-only`와
 `--resume-parked-log`로 구간을 연결한다. 테이블1은 표식 없이 면 정렬을 사용한다.
 
+정지한 지점에서 다음 단계 허용이나 팔 실행 직전 상태를 읽을 때 일시적인 조회 실패는
+같은 주문·단계에서 재조회한다. 준비 상태 확인 주기는 0.25초이며 기존 단계 제한시간은
+유지한다. 실패·취소된 주문을 재시작하거나 정렬 완료 POST를 자동 재전송하지 않는다.
+주행 중의 통신·팔 상태 감시와 이 정지 상태 재조회는 별개다.
+
 `GET /api/state`의 동일 주문과 `execution_backend.drive.next`, `arms_ready=true`,
 `running_policy=null`, 팔 자세를 확인한다. 주행 중에도 이 조건을 감시한다.
 급수대·테이블 출발은 `waiting_alignment`의 주문·지점이 맞아야 하고, 도크 복귀는

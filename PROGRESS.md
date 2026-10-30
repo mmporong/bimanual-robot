@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-30 | 중복 정지 확인·정지 구간 서버 재조회·AST1 수신 버퍼 개선
+
+- 사용자 요청은 시연의 중복 대기와 불필요한 중단을 줄이는 것이다. 사람이 다치지 않는다는 주장은 실측 근거가 없으므로 실제 충돌 정지·통신 두절 시 구동 정지·팔 준비 상태·과부하 보호를 제거하지 않았다. 팔 실행기 내부의 안전 설정과 Windows 코드는 변경하지 않았다.
+- `capture_stationary_pose`는 같은 계약·이동 revision에서 이미 측정한 정지 hold를 이어 쓴다. 매번 새로운 odom 표본과 TF·속도·명령·나이를 확인하고, 입력 공백·이동·계약 변경은 기존 hold를 다시 시작한다. 면 관측 직후 같은 정지 확인을 처음부터 중복 수행하던 경로를 줄이며 최초 1초 hold와 센서 신선도는 유지한다.
+- `water_service.py`는 정지 상태의 다음 목적지 대기와 정렬 완료 알림 직전 GET 조회 실패를 기존 단계 제한시간 안에서 재조회한다. 준비 확인 간격은 1초에서 0.25초다. 실패/취소 주문은 계속 거절하고 align/confirm POST는 한 번만 보낸다. 주행 중 HTTP 실패에 대한 정지 조건을 제거하거나 과거 arms_ready를 재사용하지 않았다. 큰 후진 재접근 제어 자체는 이번 변경 대상이 아니다.
+- 카메라 포화 조언은 가능한 가설이다. 기존 방식은 이미 OpenNI2 SDK·JPEG RGB/PNG16 깊이·최신 프레임 한 칸·TCP_NODELAY를 사용하므로 SDK 교체로 전송 지연이 해결된다고 단정하지 않는다. 수신 `exact`는 미리 할당한 버퍼와 `recv_into`로 부분 수신 때의 임시 bytes 조각·버퍼 확장을 줄였다. AST1 형식·시각 변환·500ms 신선도·읽기 제한시간은 유지한다. 실제 FPS/지연 개선 수치는 아직 없다. 공식 근거와 구간별 관측 한계는 tools/jdamr/ASTRA_TCP.md에 남겼다.
+- 새 상태 조회 복구·POST 중복 방지·정지 hold 재사용/무효화·분할 수신/EOF/제한시간 관련 25건과 문법·diff를 확인했다. Pi 두 모듈 소스 SHA256 일치 후 실행기·수신기를 재시작했고 주행 PC API도 재시작했다. 기존 실패 상태는 이력으로 보존한다. 배포 전 파일은 Pi `$HOME/jdamr_deploy/backups/continuous-handoff-20261030_125440/`에 있다.
+- Pi executor/observer/receiver와 PC API는 다음 장치 연결용으로 유지한다. pending/running 이동 요청은 없고 물리 이동·주문 등록·팔 실행 알림은 보내지 않았다. 로컬 브랜치 커밋만 수행하며 push·main 병합은 보류한다. 종료는 Pi `sudo systemctl stop jdamr-box-executor.service jdamr-box-observer.service`와 `systemctl --user stop jdamr-astra-tcp.service`, PC `systemctl --user stop jdamr-water-service-api.service`다.
+
 ## 2026-10-30 | OMEN 16 주소로 주행 연동 전환
 
 - 차량 노트북 교체 공지에 따라 주문 서버 주소와 Astra 허용 송신 IP를 `192.168.0.157`로 변경했다. Pi `.159`, 주행 PC `.217`, 포트 8765/5600과 기존 API·시나리오는 유지한다. 노트북은 DHCP이므로 주소 변경 시 실제 주행 API의 `--order-url`과 Pi 수신 서비스의 `--peer`를 함께 바꾼다. 허용 IP 검사는 유지한다.

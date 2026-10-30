@@ -4345,8 +4345,9 @@ def test_rear_input_gap_keeps_same_motion_and_respects_task_deadline(
 
 
 @pytest.mark.parametrize('intermediate', [True, False])
+@pytest.mark.parametrize('next_capture', ['continuous', 'motion', 'gap', 'contract'])
 def test_intermediate_stationary_capture_uses_short_hold_without_relaxing_inputs(
-        monkeypatch, intermediate):
+        monkeypatch, intermediate, next_capture):
     node = route()
     clock = [10.0]
     node._guard_failure = lambda *_a, **_k: None
@@ -4373,6 +4374,24 @@ def test_intermediate_stationary_capture_uses_short_hold_without_relaxing_inputs
     assert 0.08 <= clock[0]-10.0 < (.3 if intermediate else 1.3)
     if not intermediate:
         assert clock[0]-10.0 >= node.parking_contract['hold_s']
+    if next_capture == 'motion':
+        node.parking_motion_revision += 1
+    elif next_capture == 'gap':
+        clock[0] += max(node.parking_contract['sample_max_age_s'],
+                        node.parking_contract['observation_timeout_s']) + .1
+    elif next_capture == 'contract':
+        node.parking_contract = {**node.parking_contract,
+                                 'xy_tolerance_m': node.parking_contract['xy_tolerance_m'] / 2}
+    started_s = clock[0]
+    _, evidence = node.capture_stationary_pose(intermediate=intermediate)
+    assert evidence['confirmed']
+    elapsed_s = clock[0] - started_s
+    if next_capture == 'continuous':
+        assert 0.0 < elapsed_s < .1  # A fresh sample, without another full hold.
+    else:
+        required_s = (restaurant_service.DIRECT_STOP_CONFIRM_S if intermediate
+                      else node.parking_contract['hold_s'])
+        assert elapsed_s >= required_s
 
 
 @pytest.mark.parametrize('failure', [None, RuntimeError('controller_server parameter read timed out')])
