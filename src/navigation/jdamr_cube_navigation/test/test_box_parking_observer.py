@@ -32,7 +32,28 @@ def test_depth_inputs_keep_only_latest_best_effort_sample():
     source = Path(__file__).resolve().parents[1].joinpath(
         'jdamr_cube_navigation', 'depth_box_parking.py').read_text()
     assert source.count('self._on_camera_info, LATEST_SENSOR_QOS') == 1
-    assert source.count('self._on_depth, LATEST_SENSOR_QOS') == 1
+    assert source.count(
+        'self._on_depth_with_watchdog_activity, LATEST_SENSOR_QOS') == 1
+
+
+def test_long_depth_callback_does_not_trigger_silent_subscription_recovery(
+        monkeypatch):
+    """Detector runtime is reader activity, without changing image freshness."""
+    node = object.__new__(DepthBoxParkingNode)
+    node._depth_subscription = SimpleNamespace(get_publisher_count=lambda: 1)
+    node._max_image_age_s = .5
+    node._last_depth_callback_s = 10.
+    node.destroy_subscription = lambda subscription: pytest.fail(
+        'active callback must not recreate subscriptions')
+    node._on_depth = lambda message: node._recover_silent_depth_subscriptions()
+    monkeypatch.setattr(
+        'jdamr_cube_navigation.depth_box_parking.time.monotonic',
+        lambda: 20.1)
+
+    node._on_depth_with_watchdog_activity(SimpleNamespace())
+
+    assert node._last_depth_callback_s == 20.1
+    assert node._depth_callback_active is False
 
 
 def test_silent_matched_depth_subscription_is_recreated(monkeypatch):
@@ -372,7 +393,37 @@ def test_age_includes_detection_processing_time(monkeypatch):
     assert document['input_age_s'] == pytest.approx(.1)
     assert document['age_s'] == pytest.approx(.7)
     assert document['processing_duration_s'] >= 0.
+    assert document['processing_duration_s'] == pytest.approx(
+        document['input_decode_duration_s']
+        + document['calculation_duration_s']
+        + document['postprocess_duration_s'])
+    assert document['previous_status_serialization_duration_s'] is None
+    assert document['previous_status_publish_duration_s'] is None
     assert document['control_ready'] is False
+
+
+def test_publish_reports_previous_output_cost_without_hiding_current_phases(monkeypatch):
+    node = object.__new__(DepthBoxParkingNode)
+    node._last_status_serialization_duration_s = .004
+    node._last_status_publish_duration_s = .006
+    messages = []
+    node._status = SimpleNamespace(publish=messages.append)
+    ticks = iter((4., 5., 5.1, 5.2, 5.3))
+    monkeypatch.setattr(
+        'jdamr_cube_navigation.depth_box_parking.time.monotonic',
+        lambda: next(ticks))
+
+    node._publish({'detected': False}, timing_markers=(1., 2., 3.))
+
+    document = json.loads(messages[0].data)
+    assert document['input_decode_duration_s'] == 1.
+    assert document['calculation_duration_s'] == 1.
+    assert document['postprocess_duration_s'] == 1.
+    assert document['processing_duration_s'] == 3.
+    assert document['previous_status_serialization_duration_s'] == .004
+    assert document['previous_status_publish_duration_s'] == .006
+    assert node._last_status_serialization_duration_s == pytest.approx(.1)
+    assert node._last_status_publish_duration_s == pytest.approx(.1)
 
 
 def test_front_observation_publishes_optical_vertical_position(monkeypatch):

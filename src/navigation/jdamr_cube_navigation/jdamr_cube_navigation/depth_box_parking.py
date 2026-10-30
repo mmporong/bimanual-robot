@@ -235,13 +235,24 @@ class DepthBoxParkingNode(Node):
             self._on_camera_info, LATEST_SENSOR_QOS)
         self._depth_subscription = self.create_subscription(
             Image, '/camera/depth/image_raw',
-            self._on_depth, LATEST_SENSOR_QOS)
+            self._on_depth_with_watchdog_activity, LATEST_SENSOR_QOS)
+
+    def _on_depth_with_watchdog_activity(self, message: Image) -> None:
+        """Keep a long-running callback from looking like a silent DDS reader."""
+        self._depth_callback_active = True
+        try:
+            self._on_depth(message)
+        finally:
+            self._last_depth_callback_s = time.monotonic()
+            self._depth_callback_active = False
 
     def _recover_silent_depth_subscriptions(self) -> None:
         """Rematch a stalled local DDS reader while a depth writer is present."""
         depth_subscription = getattr(self, '_depth_subscription', None)
         if (depth_subscription is None
                 or depth_subscription.get_publisher_count() == 0):
+            return
+        if getattr(self, '_depth_callback_active', False):
             return
         now_s = time.monotonic()
         if now_s - self._last_depth_callback_s <= 4.0 * self._max_image_age_s:
@@ -386,16 +397,38 @@ class DepthBoxParkingNode(Node):
         except ValueError as error:
             self._reject(str(error))
 
-    def _publish(self, document: dict) -> None:
+    def _publish(self, document: dict, *, timing_markers=None) -> None:
+        """Publish status and retain output costs for the following sample."""
+        if timing_markers is not None:
+            callback_started_s, calculation_started_s, calculation_finished_s = timing_markers
+            publish_boundary_s = time.monotonic()
+            document = {
+                **document,
+                'input_decode_duration_s': calculation_started_s - callback_started_s,
+                'calculation_duration_s': calculation_finished_s - calculation_started_s,
+                'postprocess_duration_s': publish_boundary_s - calculation_finished_s,
+                'processing_duration_s': publish_boundary_s - callback_started_s,
+                'previous_status_serialization_duration_s': getattr(
+                    self, '_last_status_serialization_duration_s', None),
+                'previous_status_publish_duration_s': getattr(
+                    self, '_last_status_publish_duration_s', None),
+            }
         document = {**document, 'control_ready': False}
         message = String()
+        serialization_started_s = time.monotonic()
         message.data = json.dumps(
             document, ensure_ascii=False, separators=(',', ':'))
+        self._last_status_serialization_duration_s = (
+            time.monotonic() - serialization_started_s)
+        publish_started_s = time.monotonic()
         try:
             self._status.publish(message)
         except RCLError:
             if rclpy.ok():
                 raise
+        finally:
+            self._last_status_publish_duration_s = (
+                time.monotonic() - publish_started_s)
 
     def _reject(self, reason: str, **details) -> None:
         """Clear consecutive stability after any unusable observation."""
@@ -511,12 +544,14 @@ class DepthBoxParkingNode(Node):
                     or (previous_geometry is not None and geometry != previous_geometry)):
                 self._reset_measurements()
             self._camera_geometry = geometry
+            calculation_started_s = time.monotonic()
             if self._surface_mode == 'table_edge':
                 detection, table_fields, table_stable = self._table_observation(
                     depth_mm, intrinsics, stamp_s, message.header.frame_id)
             else:
                 detector = detect_box_front if self._surface_mode == 'front' else detect_box_top
                 detection = detector(depth_mm, intrinsics, self._config)
+            calculation_finished_s = time.monotonic()
         except (AttributeError, ValueError, TypeError,
                 OverflowError, IndexError) as error:
             self._reject(str(error) or type(error).__name__)
@@ -532,7 +567,6 @@ class DepthBoxParkingNode(Node):
         info_stamp_s = stamp_nanoseconds(info.header.stamp) * 1e-9
         timing = {
             'input_age_s': input_age_s,
-            'processing_duration_s': time.monotonic() - now_s,
             'camera_info_stamp_s': info_stamp_s,
             'camera_info_age_s': stamp_s - info_stamp_s if info_stamp_s else None,
             'camera_info_mode': 'stamped' if info_stamp_s else 'static',
@@ -556,7 +590,8 @@ class DepthBoxParkingNode(Node):
                     'reason', 'no_table_edge_candidate' if self._surface_mode == 'table_edge'
                     else 'no_box_surface_candidate'),
                 'control_ready': False,
-            })
+            }, timing_markers=(
+                now_s, calculation_started_s, calculation_finished_s))
             return
         edge_fields = {}
         if detection.surface_kind == 'table_edge':
@@ -600,7 +635,8 @@ class DepthBoxParkingNode(Node):
             'reason': 'stable_detection' if stable else 'collecting_stability',
             'control_ready': False,
             'control_blocker': 'camera_extrinsic_and_physical_validation',
-        })
+        }, timing_markers=(
+            now_s, calculation_started_s, calculation_finished_s))
 
 
 def main(args=None):
