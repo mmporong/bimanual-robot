@@ -11,7 +11,7 @@
 - action(정책 명령)이 제자리에서 진동하면 정책이 떨리는 출력을 내는 것
 - action은 부드러운데 팔만 떨면 실행 문제(이미 정상 확인됨)
 
-사용법: python instrumented_rollout.py
+사용법: python tools/rollout/instrumented_rollout.py   (저장소 루트에서)
 Ctrl+C로 중단 가능. 끝나면 로그가 scratchpad에 저장된다.
 """
 import sys

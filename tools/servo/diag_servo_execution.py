@@ -12,7 +12,7 @@
 안전장치: 진폭 8도로 작게, 속도 느리게. max_relative_target=20으로 급동작 차단.
 Ctrl+C로 즉시 중단 가능(중단 시 토크 끔).
 
-사용법: python diag_servo_execution.py
+사용법: python tools/servo/diag_servo_execution.py   (저장소 루트에서)
 """
 import math
 import time

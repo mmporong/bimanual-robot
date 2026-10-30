@@ -8,7 +8,7 @@
 특정 모터(특히 왼팔 id=4 wrist_flex, id=5 wrist_roll)만 std가 유독 크면,
 그 모터의 전기 연결/통신이 불안정하다는 강한 증거다 — 떨림의 유력 원인.
 
-사용법: python diag_motor_read_noise.py
+사용법: python tools/servo/diag_motor_read_noise.py   (저장소 루트에서)
 끝나면 토크를 끄고 종료한다.
 """
 import time

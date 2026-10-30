@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-10-30 | 최상위 IL 스크립트를 tools 하위로 정리
+
+- #82에서 기존 노트북 작업 폴더의 스크립트 21개가 저장소 최상위에 그대로 들어와 있었다. `tools/README.md` 규칙(도구는 하위 폴더, 저장소 루트에서 실행)에 맞춰 옮겼다. 다른 코드·문서·테스트·CI에서 참조하는 곳은 없었다.
+  - `tools/servo/`: `diag_motor_read_noise.py`, `diag_servo_execution.py`
+  - `tools/rollout/`: `goto_cup_place_start.py`, `goto_water_pour_gravel_start.py`, `instrumented_rollout.py`, `run_rollout_test.py/.bat/.ps1`, `run_rollout_cup_place_test.py/.bat`, `setup_check.py`(`tools/` 바로 아래에서 이동)
+  - `tools/recording/`: `run_record_pour_handoff.py/.bat`, `run_record_cup_place_handoff.py/.bat`, `run_record_cup_place_test.bat`, `run_teleop_test.py/.bat`
+  - `tools/camera/`: `verify_top_live.py`
+- 삭제 2개: 최상위 `goto_train_start.py`는 문서가 가리키는 `tools/rollout/goto_train_start.py`(같은 ep32 목표)의 예전 작업본이고, `read_joint_state.bat`은 기존 노트북 Claude 임시 폴더의 스크립트를 불러 다른 곳에서 동작하지 않았다(관절 판독은 `tools/servo/servo_read.py`·`export_current_joint_state.py`).
+- 경로 수정: `run_*.py` 5개의 카메라 도구 경로를 `Path(__file__).resolve().parents[1] / "camera"`로, `setup_check.py`의 저장소 루트를 `parents[2]`로, 각 파일 설명의 사용법 경로를 새 위치로 바꿨다. 보정·모델 경로는 원래 절대 경로라 그대로다.
+- 검증: `compileall`(data·design·src·tools·tests·simulation·apps) 통과, Markdown 링크 245개 파일 이상 없음, `git diff --check` 통과, 옮긴 `run_*.py`가 `tools/camera/launch_with_resolved_cameras.py`를 찾고 `setup_check.py`가 저장소 루트를 맞게 계산함을 확인했다. 로봇을 움직이는 스크립트는 실행하지 않았다.
+
+---
+
 ## 2026-10-30 | 새 노트북(OMEN) 인계 준비·하드웨어 점검·실행기 준비 확인
 
 `docs/guides/20261030_새노트북_작업인계.md` 2절을 진행했다. 노트북은 OMEN 16(i7-13700HX, RTX 4060 Laptop 8GB, RAM 32GB), 사용자 이름 `user`다(`C:\Users\USER\...` 하드코딩이 그대로 맞는다).
