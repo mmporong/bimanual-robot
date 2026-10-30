@@ -211,7 +211,7 @@ class StandaloneRuntimeTest(unittest.TestCase):
         args = type("Args", (), {
             "host": "robot@test", "pi_home": "/srv/robot",
             "pi_ws": "/srv/ws", "replace_assets": False, "all": False,
-            "promote": True,
+            "promote": True, "legacy_map": True,
         })()
         rendered = "\n".join(runtime.shell_join(c) for c in runtime.deploy_commands(args))
         self.assertIn(str(ROOT / "src/navigation") + "/", rendered)
@@ -263,7 +263,7 @@ class StandaloneRuntimeTest(unittest.TestCase):
         args = type("Args", (), {
             "host": "robot@pi.local", "pi_home": "/srv/robot home",
             "pi_ws": "/srv/robot workspace", "replace_assets": False,
-            "all": False, "promote": True,
+            "all": False, "promote": True, "legacy_map": True,
         })()
         commands = runtime.deploy_commands(args, stamp="stamp")
         rendered = "\n".join(runtime.shell_join(command) for command in commands)
