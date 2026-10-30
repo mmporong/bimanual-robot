@@ -1,0 +1,16 @@
+{
+  "observation_method": "table_front_tape",
+  "table_front_tape": {
+    "goal_front_from_base_m": 0.075,
+    "maximum_yaw_rad": 0.5,
+    "provenance": {
+      "front_extent_source": "new_base_geometry.yaml front_to_wheel_axis.value=0.065 plus target_front_gap_m=0.01",
+      "projection": "upper strip ends at tabletop edge; reference tabletop plane retained; no inferred mounting change",
+      "source": "user 2026-10-30: two strips at centre +/-5 cm, width 1.8 cm on table front face"
+    },
+    "spacing_m": 0.1,
+    "spacing_tolerance_m": 0.025,
+    "width_m": 0.018,
+    "width_tolerance_m": 0.008
+  }
+}
