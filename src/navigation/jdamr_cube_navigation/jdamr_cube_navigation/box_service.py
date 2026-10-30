@@ -2137,6 +2137,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         planned = self.plan_pose(
                             target, single=True,
                             end_tolerance_m=MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'])
+                    elif surface_mode == 'table_edge' and self._final_gap_m() <= 0.01:
+                        # The local face controller validates its actual swept
+                        # footprint and live inputs. A Nav2 endpoint is not the
+                        # path executed for this centimetre-scale approach.
+                        planned = {'ok': True, 'controller': 'continuous_table_approach'}
+                        self.emit('table_final_control_selected',
+                                  controller='continuous_table_approach',
+                                  corridor_validation='local_swept_footprint')
                     else:
                         planned = self.plan_pose(
                             target, single=True, end_tolerance_m=FINAL_PLAN_END_TOLERANCE_M)
@@ -2581,38 +2589,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return self._zero_turn_final_approach(target, front_extent_m)
         return self._parking_final_approach(target, front_extent_m)
 
-    def _acquire_table_lateral_goal(self, target):
-        """Hold a measured lateral destination before the final approach."""
-        if (getattr(self, 'station_reference_mode', None) == 'rgbd'
-                and getattr(self, '_station_terminal_goal', None) is None):
-            # Acquire the taught tangent before closing the gap. A map-only
-            # fallback must not turn into a different visual goal near contact.
-            deadline = min(self.run_deadline_s, time.monotonic() + 3.0)
-            self.emit('table_lateral_goal_acquiring', before_final_approach=True)
-            while not self.stop_requested and time.monotonic() < deadline:
-                goal, reference = self._station_goal_reference()
-                if (goal is not None and reference and reference.get('valid') is True
-                        and goal.get('goal_filter_sample_count', 0) >= 3):
-                    self._station_terminal_goal = dict(
-                        goal, goal_odom=list(goal['goal_odom']))
-                    self.station_reference_goal_frozen = True
-                    target.update(self._station_anchor_target(target))
-                    self.emit('table_lateral_goal_acquired',
-                              goal_odom=list(goal['goal_odom']),
-                              sample_count=goal['goal_filter_sample_count'],
-                              before_final_approach=True)
-                    break
-                spin_node(self, timeout_sec=0.05)
-            else:
-                self._fail_final('station_lateral_goal_unavailable_before_approach')
-                return False
-        return True
-
     def _table_fine_approach(self, target, front_extent_m):
         """Align to the observed normal while closing the gap in one move."""
         self._continuous_table_stop = None
-        if not self._acquire_table_lateral_goal(target):
-            return False, None
         observed = target.get('observation_robot_pose_map')
         if observed is not None:
             lateral_status = self._station_lateral_status()
@@ -2659,8 +2638,6 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 mount, front_extent_m, self._final_gap_m(), region, radius))
         except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
             self._fail_final('table_clearance_reobserve_failed', detail=str(error))
-            return False, None
-        if not self._acquire_table_lateral_goal(target):
             return False, None
         return self._zero_turn_final_approach(
             target, front_extent_m, allow_trim=False, continuous_table=True)
@@ -3246,6 +3223,38 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         elif (getattr(self, 'surface_mode', 'front') == 'table_edge'
               and self._final_gap_m() <= 0.01):
             self._continuous_table_stop = None
+            # The already-aligned short leg uses the same local corridor check
+            # as continuous steering, including the frozen odom/map transform.
+            origin = to_odom(0., 0., 0.) if not allow_trim else (0., 0., 0.)
+            cosine, sine = math.cos(origin[2]), math.sin(origin[2])
+
+            def to_map_pose(pose):
+                dx, dy = pose[0] - origin[0], pose[1] - origin[1]
+                return (cosine * dx + sine * dy, -sine * dx + cosine * dy,
+                        math.atan2(math.sin(pose[2] - origin[2]),
+                                   math.cos(pose[2] - origin[2])))
+
+            steps = max(1, int(math.ceil(travel_m / 0.01)))
+            swept = [to_map_pose((
+                actual[0] + travel_m * k / steps * math.cos(actual[2]),
+                actual[1] + travel_m * k / steps * math.sin(actual[2]), actual[2]))
+                for k in range(steps + 1)]
+            check = CachedStaticCorridorValidator(
+                Path(self.registry['map']['yaml_path']),
+                Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
+            kwargs = {}
+            span = target.get('observed_face_span_m')
+            if span is not None:
+                center = to_map_pose((*face, 0.))
+                tip = to_map_pose((face[0] + outward[0], face[1] + outward[1], 0.))
+                kwargs['target_surface'] = {
+                    'point_xy_m': center[:2],
+                    'normal_xy': (tip[0] - center[0], tip[1] - center[1]),
+                    'half_span_m': span / 2., 'allow_precision_unknown': True}
+            if not check(swept, **kwargs):
+                self._fail_final('table_precision_corridor_blocked',
+                                 blockage=check.last_blockage)
+                return False, to_odom
             travelled_m = self._drive_zero_turn(travel_m, precision=True, hold_heading=True)
         else:
             travelled_m = self._drive_zero_turn(travel_m)
