@@ -2,7 +2,7 @@
   "captured_from": "/home/lim/jdamr_data/map_20260930_manual/tools",
   "captured_on": "2026-10-15",
   "departure_helper_original_sha256": "1bbc313d756d4d07532064bacb3464b57174497b01d29db02329c8d570e0bd7f",
-  "departure_helper_change_scope": "환경변수로 host, local data root, PC workspace, Pi home/workspace/user를 재지정하는 경로 설정만 변경",
+  "departure_helper_change_scope": "환경별 경로 설정, 현행 지도·등록 도크·면 주차, 상주 실행기 및 Windows AST1 입력·미션 재개를 저장소에서 관리한다. 최초 이식 해시는 보존한다",
   "copied_dependencies": {
     "capture_scan2.py": "2a555850ee02098d3ee232114611fc7819de95d2ed1fea4052a8a9cab837efcd",
     "dock_survey.py": "d4ad53c64814e722a2aec864069b5b359ecc81e89c1ef6bef1f217d3c7a94160",
@@ -11,5 +11,12 @@
     "pose_scan_probe.py": "afea43eaa8c77e0f5d4a484cb1346f6fb4a7146ed6bedc8f64419a80e957a930",
     "scan_match.py": "8526d7bde710a3d173ab1e35baf34395ebdb6e4e64287a37d4c7dae5be2d2043"
   },
-  "camera_mount_current_sha256": "2047a34e883955985a734cf7655137e33edc0c8b23c4b9468a1aeec58c1559c5"
+  "camera_mount_current_sha256": "2047a34e883955985a734cf7655137e33edc0c8b23c4b9468a1aeec58c1559c5",
+  "derived_dependencies": {
+    "scan_match.py": {
+      "source_sha256": "8526d7bde710a3d173ab1e35baf34395ebdb6e4e64287a37d4c7dae5be2d2043",
+      "sha256": "df249f73dd65b61a34e43c99afc82a16ebef98659b075129a0edc03182cfc6f5",
+      "change_scope": "등록 도크의 공통 스캔 지지점과 위치 모호성 진단을 현행 초기화에 연결"
+    }
+  }
 }

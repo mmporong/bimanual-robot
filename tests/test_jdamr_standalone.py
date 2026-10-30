@@ -83,11 +83,20 @@ class StandaloneRuntimeTest(unittest.TestCase):
                 self.assertEqual(generated['waypoints'][0]['id'], 'home_exit')
                 self.assertEqual(generated['dock_departure_distance_m'], helper.HOME_EXIT_M)
                 bundled = yaml.safe_load((assets / name).read_text())
-                self.assertEqual(generated['waypoints'], bundled['waypoints'])
+                # The observation endpoint follows the current camera mount;
+                # the archival bundle preserves its older endpoint.
+                dest = 'water_station' if name.startswith('water_station') else name.split('_direct')[0]
+                x, y, normal = helper.along_normal(dest, observation_offset_m)
+                endpoint = generated['waypoints'][-1]
+                self.assertEqual((endpoint['x'], endpoint['y']), (round(x, 3), round(y, 3)))
+                self.assertEqual(generated['waypoints'][:-1], bundled['waypoints'][:-1])
                 self.assertEqual(generated['expected_mask_sha256'], bundled['expected_mask_sha256'])
             table2 = yaml.safe_load((aligned / 'table_02_route.yaml').read_text())
-            self.assertEqual(table2['waypoints'], yaml.safe_load(
-                (assets / 'table_02_route.yaml').read_text())['waypoints'])
+            bundled2 = yaml.safe_load((assets / 'table_02_route.yaml').read_text())
+            self.assertEqual(table2['waypoints'][:-1], bundled2['waypoints'][:-1])
+            x, y, _ = helper.along_normal('table_02', observation_offset_m)
+            self.assertEqual((table2['waypoints'][-1]['x'], table2['waypoints'][-1]['y']),
+                             (round(x, 3), round(y, 3)))
 
     def test_existing_owned_user_bus_fills_missing_terminal_environment(self):
         common = load('jdamr_bus_common', TOOLS / '_common.py')
@@ -127,7 +136,11 @@ class StandaloneRuntimeTest(unittest.TestCase):
             actual = hashlib.sha256(
                 (ROOT / "src/navigation/scripts/map_20260930_manual" / name).read_bytes()
             ).hexdigest()
-            self.assertEqual(actual, expected, name)
+            derived = provenance.get("derived_dependencies", {}).get(name)
+            if derived is not None:
+                self.assertEqual(derived["source_sha256"], expected, name)
+                self.assertTrue(derived["change_scope"], name)
+            self.assertEqual(actual, derived["sha256"] if derived else expected, name)
 
     def test_help_works_with_empty_data_root_and_creates_no_mutable_state(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -168,14 +181,14 @@ class StandaloneRuntimeTest(unittest.TestCase):
             (source / "service_destinations.yaml").write_text("bundled\n")
             (runtime / "service_destinations.yaml").write_text("operator\n")
             with mock.patch.object(common, "ASSET_SOURCE", source), mock.patch.object(
-                common, "RUNTIME_ASSETS", runtime
+                common, "LEGACY_RUNTIME_ASSETS", runtime
             ), mock.patch.object(common, "RUNTIME_ROOT", root / "runtime"):
-                report = common.bootstrap_assets()
+                report = common.bootstrap_assets(legacy=True)
                 self.assertEqual(report["preserved"], ["service_destinations.yaml"])
                 self.assertEqual(
                     (runtime / "service_destinations.yaml").read_text(), "operator\n"
                 )
-                report = common.bootstrap_assets(refresh=True, now="stamp")
+                report = common.bootstrap_assets(refresh=True, now="stamp", legacy=True)
                 self.assertEqual(
                     (root / "runtime/asset_backups/stamp/service_destinations.yaml").read_text(),
                     "operator\n",

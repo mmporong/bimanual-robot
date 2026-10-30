@@ -37,6 +37,18 @@ TABLE_EDGE_ALIGNMENT_FIXTURE = (
 
 
 @pytest.fixture
+def clear_precision_corridor(monkeypatch):
+    """Isolate trim geometry; corridor acceptance/rejection has separate cases."""
+    monkeypatch.setattr(box_service, 'CachedStaticCorridorValidator',
+                        Mock(return_value=Mock(return_value=True)))
+    def configure(node):
+        node.registry = {'map': {'yaml_path': 'map'}, 'keepout': {'yaml_path': 'mask'}}
+        node._footprint_outline = Mock(return_value=[
+            (-.28, -.275), (.07, -.275), (.07, .275), (-.28, .275)])
+    return configure
+
+
+@pytest.fixture
 def mission(monkeypatch):
     """Provide synthetic action peers and a map-bound observation route."""
     route = {'frame_id': 'map', 'map_yaml': 'map', 'keepout_mask_yaml': 'mask',
@@ -385,7 +397,8 @@ def test_one_centimetre_table_uses_frozen_face_when_fresh_depth_is_occluded(miss
     }
 
 
-def test_occluded_five_millimetre_correction_reuses_original_odom_face(mission):
+def test_occluded_five_millimetre_correction_reuses_original_odom_face(mission, clear_precision_corridor):
+    clear_precision_corridor(mission)
     mission.surface_mode = 'table_edge'
     mission.final_gap_override_m = 0.01
     mission.parking_contract = {'yaw_tolerance_rad': math.radians(3.0)}
@@ -2969,8 +2982,9 @@ def test_one_centimetre_table_correction_has_a_bounded_iteration_count(mission):
     assert mission.emit.call_args.kwargs['reason'] == 'final_gap_correction_limit'
 
 
-def test_fine_trim_corrects_small_overshoot_without_restarting_the_visit():
+def test_fine_trim_corrects_small_overshoot_without_restarting_the_visit(clear_precision_corridor):
     node = object.__new__(BoxServiceRoute)
+    clear_precision_corridor(node)
     node.surface_mode = 'table_edge'
     node.final_gap_override_m = 0.01
     node.parking_contract = {'yaw_tolerance_rad': math.radians(3.0)}
@@ -3007,8 +3021,9 @@ def test_one_centimetre_table_correction_requires_current_operator_link(mission)
 
 
 @pytest.mark.parametrize('remaining_deg, reached_expected', [(0.5, True), (1.1, False)])
-def test_fine_trim_residual_is_judged_by_final_heading_contract(remaining_deg, reached_expected):
+def test_fine_trim_residual_is_judged_by_final_heading_contract(remaining_deg, reached_expected, clear_precision_corridor):
     node = object.__new__(BoxServiceRoute)
+    clear_precision_corridor(node)
     node.surface_mode = 'table_edge'
     node.final_gap_override_m = 0.01
     node.parking_contract = {'yaw_tolerance_rad': math.radians(3.0)}
@@ -3182,8 +3197,9 @@ def test_fine_table_starts_with_heading_error_without_a_stationary_trim():
     node._rotate_in_place.assert_not_called()
 
 
-def test_final_table_leg_freezes_face_before_computing_distance():
+def test_final_table_leg_freezes_face_before_computing_distance(clear_precision_corridor):
     node = object.__new__(BoxServiceRoute)
+    clear_precision_corridor(node)
     node.surface_mode = 'table_edge'
     node.final_gap_override_m = 0.01
     node.parking_contract = {'yaw_tolerance_rad': math.radians(3.0)}
@@ -3255,8 +3271,9 @@ def test_occluded_table_escape_keeps_frozen_odom_face_after_amcl_shift():
 
 
 
-def test_zero_turn_remeasures_face_after_rotation_before_computing_final_distance():
+def test_zero_turn_remeasures_face_after_rotation_before_computing_final_distance(clear_precision_corridor):
     node = object.__new__(BoxServiceRoute)
+    clear_precision_corridor(node)
     node.stop_requested = False
     node._operator_link_ready = Mock(return_value=True)
     node._navigation_ready = Mock(return_value=True)
@@ -3287,8 +3304,9 @@ def test_zero_turn_remeasures_face_after_rotation_before_computing_final_distanc
 
 @pytest.mark.parametrize('direction', [-1.0, 1.0])
 @pytest.mark.parametrize('continuous', [False, True])
-def test_trim_crossing_reobserves_before_any_counter_rotation(direction, continuous):
+def test_trim_crossing_reobserves_before_any_counter_rotation(direction, continuous, clear_precision_corridor):
     node = object.__new__(BoxServiceRoute)
+    clear_precision_corridor(node)
     node.stop_requested = False
     node._operator_link_ready = Mock(return_value=True)
     node._navigation_ready = Mock(return_value=True)
@@ -3626,7 +3644,7 @@ def test_near_fine_table_reuses_face_and_skips_separate_alignment_goal(mission):
         candidate_trial=True, resume_at_observation=True)
 
     mission.execute.assert_not_called()
-    mission.plan_pose.assert_called_once()
+    mission.plan_pose.assert_not_called()
     mission._straight_final_approach.assert_called_once()
     assert [call.args[2] for call in mission.observe_target.call_args_list] == [0.45, 0.01]
     assert any(call.args == ('table_alignment_transit_skipped',)

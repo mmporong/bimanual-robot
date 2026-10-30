@@ -2137,4 +2137,3 @@ sudo systemctl stop jdamr-box-observer jdamr-box-rgbd jdamr-ammr-dashboard
   이어가기, 20 cm 어긋난 도착에서 face-alignment 재배치 후 테이블1 좌우 결과(정렬 허용 5 cm + AMCL), 회전 공간 후진이
   충돌 감시와 겹치지 않는지, 1 cm 미세 보정의 전후 교대 소멸. 후면 대기 65 s와 이동 중 RGB 작업자 부하는
   `20261029_DRIVE_TIMING_REVIEW.md` 4절의 측정 후 결정 항목이다.
-
