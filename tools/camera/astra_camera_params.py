@@ -15,8 +15,10 @@ import sys
 import time
 from pathlib import Path
 
-SDK_BIN = (r"C:\Users\USER\Downloads\AstraSDK-v2.1.3-94bca0f52e-20210608T034051Z-vs2015-win64"
-           r"\AstraSDK-v2.1.3-94bca0f52e-20210608T034051Z-vs2015-win64\bin")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from astra_sdk import find_sdk_bin  # noqa: E402
+
+SDK_BIN = find_sdk_bin()
 os.add_dll_directory(SDK_BIN)
 os.chdir(SDK_BIN)
 astra = C.CDLL(os.path.join(SDK_BIN, "astra.dll"))

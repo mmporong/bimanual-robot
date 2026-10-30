@@ -102,13 +102,31 @@ def send_arm_joints(robot, action: dict[str, float]) -> None:
             getattr(robot.inner, f"{side}_arm").send_action(part)
 
 
+def read_joints(robot) -> dict[str, float]:
+    """관절 위치만 모터 버스에서 읽는다(카메라는 읽지 않는다).
+
+    팔 접기·자세 확인은 관절만 있으면 된다. get_observation()은 카메라까지 읽어서, 손목캠 USB가 빠지면
+    접기가 실패하고 arms_ready=false로 주행이 막혔다(2026-10-30 통합 시험). 정책 추론은 그대로 카메라를 쓴다.
+    """
+    joints: dict[str, float] = {}
+    for side in ("left", "right"):
+        arm = getattr(robot.inner, f"{side}_arm", None)
+        bus = getattr(arm, "bus", None)
+        if bus is None:  # 버스가 없는 대체 객체(테스트용 가짜 팔 등)는 관측에서 관절만 고른다
+            return {k: float(v) for k, v in robot.get_observation().items() if k.endswith(".pos")}
+        retries = getattr(getattr(arm, "config", None), "num_read_retries", 3)
+        for motor, value in bus.sync_read("Present_Position", num_retry=retries).items():
+            joints[f"{side}_{motor}.pos"] = float(value)
+    return joints
+
+
 def move_joints(robot, target: dict[str, float], move_s: float, max_speed: float, tol: float,
                 label: str, fps: int = 50) -> tuple[bool, dict]:
     """target 관절만 부드럽게 옮긴다. 이미 1도 안이면 움직이지 않는다.
 
     도착 후 tol도 넘게 벗어난 관절이 있으면 더 밀지 않게 현재 위치를 목표로 고정하고 (False, 벗어난 관절)을 돌려준다.
     """
-    cur = robot.get_observation()
+    cur = read_joints(robot)
     start = {k: float(cur[k]) for k in target}
     biggest = max(abs(target[k] - start[k]) for k in target)
     if biggest < 1.0:
@@ -123,7 +141,7 @@ def move_joints(robot, target: dict[str, float], move_s: float, max_speed: float
         send_arm_joints(robot, {k: start[k] * (1 - t) + target[k] * t for k in target})
         time.sleep(1 / fps)
     time.sleep(0.5)
-    now = robot.get_observation()
+    now = read_joints(robot)
     off = {k: round(float(now[k]) - target[k], 1) for k in target if abs(float(now[k]) - target[k]) > tol}
     if off:
         send_arm_joints(robot, {k: float(now[k]) for k in target})
@@ -137,6 +155,8 @@ def move_joints(robot, target: dict[str, float], move_s: float, max_speed: float
 def parse_service_args(argv: list[str]):
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--listen", default="127.0.0.1:8770")
+    ap.add_argument("--no_camera_fallback", action="store_true",
+                    help="카메라 끊김 보호(camera_fallback.py)를 끈다. 끄면 프레임이 0.5초 넘게 끊길 때 관측 읽기가 실패한다")
     for t in TASKS:
         d = DEFAULTS[t]
         ap.add_argument(f"--{t}.policy", dest=f"{t}_policy", required=True)
@@ -334,10 +354,10 @@ class Service:
                     "stow_pose": self.ns.stow_pose if self.stow_target else None, "arms": self.arms}
 
     def submit(self, task: str) -> tuple[int, dict, dict | None]:
-        if task == "stow" and self.stow_target is None:
+        if task in ("stow", "stow_right") and self.stow_target is None:
             return HTTPStatus.NOT_FOUND, {"error": "stow_not_configured"}, None
-        if task not in (*TASKS, "stow"):
-            return HTTPStatus.NOT_FOUND, {"error": "unknown_task", "tasks": [*TASKS, "stow"]}, None
+        if task not in (*TASKS, "stow", "stow_right"):
+            return HTTPStatus.NOT_FOUND, {"error": "unknown_task", "tasks": [*TASKS, "stow", "stow_right"]}, None
         with self.lock:
             if self.state != "ready":
                 return HTTPStatus.CONFLICT, {"error": "not_ready", "state": self.state, "current": self.current}, None
@@ -416,6 +436,8 @@ class Service:
         task = job["task"]
         if task == "stow":
             return self._run_stow(job)
+        if task == "stow_right":
+            return self._run_stow_right(job)
         s = self.settings[task]
         base_ctx = self.contexts[task]
         event = Event()
@@ -494,10 +516,32 @@ class Service:
         log(f"stow 결과: {json.dumps(result, ensure_ascii=False)}")
         return result
 
+    def _run_stow_right(self, job: dict) -> dict:
+        """복구용: pour 직후 자동 오른팔 접기가 실패했을 때(예: 손목캠 끊김) 오른팔만 다시 접는다.
+
+        왼팔(컵을 쥔 상판 적재 자세)은 움직이지 않는다. 성공하면 arms=carrying_cup이 되어 테이블 출발이 풀린다.
+        사람이 병을 놓은 것을 확인하고 차가 서 있을 때만 부른다(호출하는 쪽 책임).
+        """
+        hw = self.contexts["pour"].hardware
+        with self.lock:
+            self.arms = "busy"
+        log("호출 stow_right -> 오른팔만 이동 자세(복구)")
+        result = {"task": "stow_right", "ok": False, "started_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        arms = self._stow_right_after_pour(hw, result)
+        result["ok"] = arms == "carrying_cup"
+        result["stow_s"] = round(time.perf_counter() - job["submitted"], 2)
+        with self.lock:
+            self.arms = arms
+        log(f"stow_right 결과: {json.dumps(result, ensure_ascii=False)}")
+        return result
+
     def _finish_pose(self, task: str, s: dict, result: dict) -> None:
         hw = self.contexts[task].hardware
         robot = hw.robot_wrapper.inner
         if not robot.is_connected:
+            # 연결이 끊겨 끝 자세를 못 만들어도 "busy"로 남기지 않는다(관제·주행 쪽이 자세를 모른다는 뜻으로 hold)
+            with self.lock:
+                self.arms = "hold"
             return
         # 중단·실패면 팔을 더 움직이지 않는다. 작업 끝 감지나 최대 시간 도달이면 rollout_handoff.py처럼 끝 자세로 간다.
         reason = result.get("reason", "")
@@ -537,7 +581,7 @@ class Service:
 
     def _at(self, robot, target: dict[str, float]) -> bool:
         try:
-            now = robot.get_observation()
+            now = read_joints(robot)
             return all(abs(float(now[k]) - v) <= self.ns.start_tol for k, v in target.items())
         except Exception:  # noqa: BLE001
             return False
@@ -581,8 +625,8 @@ def handler_factory(service: Service):
                     job["done"].wait()
                     code, body = HTTPStatus.OK, job["result"]
                 self._json(code, body)
-            elif url.path == "/stow":
-                code, body, job = service.submit("stow")
+            elif url.path in ("/stow", "/stow_right"):
+                code, body, job = service.submit(url.path.strip("/"))
                 if job is not None:
                     job["done"].wait()
                     code, body = HTTPStatus.OK, job["result"]
@@ -599,14 +643,14 @@ def handler_factory(service: Service):
 
 # ---------------------------------------------------------------- 명령줄 호출
 def client(argv: list[str]) -> None:
-    ap = argparse.ArgumentParser(prog="rollout_service.py call|stow|status|stop|shutdown")
-    ap.add_argument("command", choices=("call", "stow", "status", "stop", "shutdown"))
+    ap = argparse.ArgumentParser(prog="rollout_service.py call|stow|stow_right|status|stop|shutdown")
+    ap.add_argument("command", choices=("call", "stow", "stow_right", "status", "stop", "shutdown"))
     ap.add_argument("task", nargs="?", choices=TASKS)
     ap.add_argument("--url", default=DEFAULT_URL)
     a = ap.parse_args(argv)
     if a.command == "call" and not a.task:
         sys.exit("call 다음에 pour 또는 place 를 준다.")
-    path = {"call": f"/run/{a.task}", "stow": "/stow", "status": "/status", "stop": "/stop",
+    path = {"call": f"/run/{a.task}", "stow": "/stow", "stow_right": "/stow_right", "status": "/status", "stop": "/stop",
             "shutdown": "/shutdown"}[a.command]
     req = urllib.request.Request(a.url + path, method="GET" if a.command == "status" else "POST", data=None)
     try:
@@ -619,7 +663,7 @@ def client(argv: list[str]) -> None:
 
 # ---------------------------------------------------------------- 시작
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] in ("call", "stow", "status", "stop", "shutdown"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("call", "stow", "stow_right", "status", "stop", "shutdown"):
         client(sys.argv[1:])
         return
     ns, hook_params, rest = parse_service_args(sys.argv[1:])
@@ -629,6 +673,14 @@ def main() -> None:
     import lerobot.motors  # noqa: F401
     import lerobot.rollout  # noqa: F401
     rest = fill_camera_indices(rest)
+    if not ns.no_camera_fallback:
+        import camera_fallback
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "camera"))
+        from resolve_camera_indices import resolve
+
+        camera_fallback.install({index: role for role, index in resolve().items()})
+        log("카메라 끊김 보호 켬: 끊기면 마지막 프레임으로 계속하고 뒤에서 다시 연결")
     settings = {t: task_settings(ns, t) for t in TASKS}
     stow_target = None
     if ns.stow_pose != "none":
