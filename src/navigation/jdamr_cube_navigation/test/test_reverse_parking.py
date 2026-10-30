@@ -353,6 +353,39 @@ def test_static_corridor_does_not_expand_into_neighboring_cells(tmp_path):
          (-0.02, 0.02)])
 
 
+def test_static_corridor_preserves_step_recess_until_motion_sweeps_it(tmp_path):
+    """A blocked cell between wheel steps is free only while the body stays clear."""
+    width = height = 60
+    source_pixels = [254] * (width * height)
+    source_pixels[(height - 1 - 25) * width + 31] = 0
+    source = _write_grid(
+        tmp_path, 'map', source_pixels, width=width, height=height,
+        resolution=.02)
+    keepout = _write_grid(
+        tmp_path, 'keepout', [254] * (width * height), width=width,
+        height=height, resolution=.02)
+    footprint = [
+        (-.20, -.20), (.20, -.20), (.20, -.10), (.05, -.10),
+        (.05, .10), (.20, .10), (.20, .20), (-.20, .20),
+        (-.20, .10), (-.05, .10), (-.05, -.10), (-.20, -.10),
+    ]
+
+    assert static_corridor_clear(source, keepout, [(.50, .50, 0.)], footprint)
+    assert not static_corridor_clear(
+        source, keepout, [(.50, .50, 0.), (.58, .50, 0.)], footprint)
+
+
+def test_static_corridor_rejects_self_intersecting_footprint(tmp_path):
+    free = [254] * (9 * 7)
+    source = _write_grid(tmp_path, 'map', free, width=9, height=7)
+    keepout = _write_grid(tmp_path, 'keepout', free, width=9, height=7)
+
+    with pytest.raises(ValueError, match='simple polygon'):
+        static_corridor_clear(
+            source, keepout, [(.45, .35, 0.)],
+            [(-.05, -.05), (.05, .05), (-.05, .05), (.05, -.05)])
+
+
 def test_static_corridor_rejects_map_boundary_and_grid_mismatch(tmp_path):
     """Fail closed outside either grid and reject differing geometry."""
     free = [254] * (9 * 7)

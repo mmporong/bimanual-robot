@@ -35,6 +35,45 @@ def test_depth_inputs_keep_only_latest_best_effort_sample():
     assert source.count('self._on_depth, LATEST_SENSOR_QOS') == 1
 
 
+def test_silent_matched_depth_subscription_is_recreated(monkeypatch):
+    """A matched writer with no callbacks rematches without widening freshness."""
+    node = object.__new__(DepthBoxParkingNode)
+    old_info = SimpleNamespace(name='old_info')
+    old_depth = SimpleNamespace(get_publisher_count=lambda: 1, name='old_depth')
+    node._camera_info_subscription = old_info
+    node._depth_subscription = old_depth
+    node._max_image_age_s = .5
+    node._last_depth_callback_s = 10.
+    node._camera_info_history = SimpleNamespace(name='old_history')
+    node._camera_geometry = SimpleNamespace(name='old_geometry')
+    destroyed, created, rejected = [], [], []
+    node.destroy_subscription = destroyed.append
+    node._create_depth_subscriptions = lambda: created.append(True)
+    node._reject = rejected.append
+    monkeypatch.setattr(
+        'jdamr_cube_navigation.depth_box_parking.time.monotonic', lambda: 12.1)
+
+    node._recover_silent_depth_subscriptions()
+
+    assert destroyed == [old_info, old_depth]
+    assert created == [True]
+    assert rejected == ['depth_subscription_recreated_after_silence']
+    assert node._camera_geometry is None
+    assert node._last_depth_callback_s == 12.1
+
+
+def test_silent_depth_subscription_waits_without_a_matched_writer(monkeypatch):
+    node = object.__new__(DepthBoxParkingNode)
+    node._depth_subscription = SimpleNamespace(get_publisher_count=lambda: 0)
+    node._max_image_age_s = .5
+    node._last_depth_callback_s = 10.
+    node.destroy_subscription = lambda subscription: pytest.fail('unexpected recovery')
+    monkeypatch.setattr(
+        'jdamr_cube_navigation.depth_box_parking.time.monotonic', lambda: 20.)
+
+    node._recover_silent_depth_subscriptions()
+
+
 def _messages(depth, *, stamp_s=10.0, step=None, bigendian=False):
     depth = np.asarray(depth)
     height, width = depth.shape

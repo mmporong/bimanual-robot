@@ -390,11 +390,10 @@ class RearBoxParkingMixin:
                            'yaw': target[2]}]
         self.emit('rear_dock_centering_started', target_odom=list(target_odom),
                   lateral_error_m=lateral, target_gap_m=REAR_FACE_REOBSERVE_GAP_M)
-        # Leave room between the odom endpoint handoff and the lateral-error
-        # acceptance band. Keep the position-only checker to avoid final-yaw trim.
+        # Complete both position and heading before the live face trim.
+        # A position-only handoff can leave the curve's final turn unfinished.
         completed = self._execute_reverse_once(
-            frozen, goal_checker_id='dock_position_checker', final=False,
-            position_handoff_m=REAR_CENTER_TOLERANCE_M / 2.,
+            frozen, goal_checker_id='entry_heading_checker', final=False,
             motion='rear_dock_centering')
         self._rear_center_moved = bool(completed)
         return completed

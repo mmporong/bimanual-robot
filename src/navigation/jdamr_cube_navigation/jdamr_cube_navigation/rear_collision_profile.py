@@ -319,7 +319,14 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
                     remembered_point_count=len(remembered_points),
                     target_face_filter_active=target is not None,
                     requested_linear_mps=requested[0],
-                    requested_angular_radps=requested[1])
+                    requested_angular_radps=requested[1],
+                    inside_initial_outline=witness.get('inside_initial_outline'),
+                    collision_pose_base_xyyaw=witness.get('collision_pose_base_xyyaw'),
+                    initial_boundary_distance_m=witness.get('initial_boundary_distance_m'),
+                    footprint_base_xy_m=state['outline'],
+                    prediction_horizon_s=horizon_s,
+                    effective_linear_mps=linear_mps,
+                    effective_angular_radps=angular_radps)
             state['collision_active'] = True
             return state.get('collision_reason', 'rear docking swept footprint occupied')
         state['collision_active'] = False

@@ -1539,15 +1539,21 @@ def test_reverse_path_static_failure_never_calls_live_validator(monkeypatch):
     node = route()
     node.registry.update(map={'yaml_path': '/tmp/map.yaml'},
                          keepout={'yaml_path': '/tmp/mask.yaml'})
-    node._reverse_footprint = lambda: [(-.3, -.3), (.1, -.3), (.1, .3), (-.3, .3)]
+    outline = [(-.3, -.2), (-.1, -.2), (-.1, -.3), (.1, -.3),
+               (.1, .3), (-.1, .3), (-.1, .2), (-.3, .2)]
+    node._footprint_outline = Mock(return_value=outline)
+    node._reverse_footprint = Mock(side_effect=AssertionError('bounding rectangle used'))
     node.validate_reverse_path = Mock()
     path = RosPath()
     pose = PoseStamped()
     pose.pose.orientation.w = 1.0
     path.poses = [pose]
+    static_check = Mock(return_value=False)
     monkeypatch.setattr('jdamr_cube_navigation.restaurant_service.static_corridor_clear',
-                        lambda *args: False)
+                        static_check)
     assert not node._reverse_path_valid(path)
+    assert static_check.call_args.args[-1] == outline
+    node._reverse_footprint.assert_not_called()
     node.validate_reverse_path.call_async.assert_not_called()
 
 

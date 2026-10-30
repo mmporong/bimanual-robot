@@ -233,7 +233,10 @@ def path_sweep_hit(points, outline, poses, step_m=0.01, step_rad=math.radians(1.
                 continue
             if allowed_m is None or _edge_distance(*local, outline) > allowed_m:
                 if witness is not None:
-                    witness.update(point_index=point_index, point_base_xy_m=(x_m, y_m))
+                    witness.update(point_index=point_index, point_base_xy_m=(x_m, y_m),
+                                   inside_initial_outline=touching,
+                                   collision_pose_base_xyyaw=(x, y, yaw),
+                                   initial_boundary_distance_m=_edge_distance(x_m, y_m, outline))
                 return True
     return False
 
@@ -488,6 +491,99 @@ def _convex_hull(
     if len(hull) < 3:
         raise ValueError('footprint must enclose an area')
     return hull
+
+
+def _convex_footprint_pieces(
+        points: Sequence[Sequence[float]],
+) -> list[list[tuple[float, float]]]:
+    """Validate an ordered simple footprint and split concavities into ears."""
+    polygon = [(float(point[0]), float(point[1])) for point in points]
+    if len(polygon) > 1 and polygon[0] == polygon[-1]:
+        polygon.pop()
+    if len(polygon) < 3 or len(set(polygon)) != len(polygon):
+        raise ValueError('footprint must be a simple polygon')
+
+    def cross(first, second, third):
+        return ((second[0] - first[0]) * (third[1] - first[1])
+                - (second[1] - first[1]) * (third[0] - first[0]))
+
+    def on_segment(first, second, point):
+        return (abs(cross(first, second, point)) <= 1e-12
+                and min(first[0], second[0]) - 1e-12 <= point[0]
+                <= max(first[0], second[0]) + 1e-12
+                and min(first[1], second[1]) - 1e-12 <= point[1]
+                <= max(first[1], second[1]) + 1e-12)
+
+    def intersects(a, b, c, d):
+        turns = (cross(a, b, c), cross(a, b, d),
+                 cross(c, d, a), cross(c, d, b))
+        if ((turns[0] > 1e-12 and turns[1] < -1e-12
+             or turns[0] < -1e-12 and turns[1] > 1e-12)
+                and (turns[2] > 1e-12 and turns[3] < -1e-12
+                     or turns[2] < -1e-12 and turns[3] > 1e-12)):
+            return True
+        return any((abs(turns[index]) <= 1e-12
+                    and on_segment(*pair)) for index, pair in enumerate((
+                        (a, b, c), (a, b, d), (c, d, a), (c, d, b))))
+
+    edge_count = len(polygon)
+    for first in range(edge_count):
+        for second in range(first + 1, edge_count):
+            if (second == (first + 1) % edge_count
+                    or first == (second + 1) % edge_count):
+                continue
+            if intersects(
+                    polygon[first], polygon[(first + 1) % edge_count],
+                    polygon[second], polygon[(second + 1) % edge_count]):
+                raise ValueError('footprint must be a simple polygon')
+
+    changed = True
+    while changed and len(polygon) >= 3:
+        changed = False
+        for index in range(len(polygon)):
+            if abs(cross(polygon[index - 1], polygon[index],
+                         polygon[(index + 1) % len(polygon)])) <= 1e-12:
+                polygon.pop(index)
+                changed = True
+                break
+    if len(polygon) < 3:
+        raise ValueError('footprint must enclose an area')
+    area = sum(
+        first[0] * second[1] - second[0] * first[1]
+        for first, second in zip(polygon, polygon[1:] + polygon[:1])) / 2.0
+    if abs(area) <= 1e-12:
+        raise ValueError('footprint must enclose an area')
+    if area < 0.0:
+        polygon.reverse()
+    if all(cross(polygon[index - 1], polygon[index],
+                 polygon[(index + 1) % len(polygon)]) > 1e-12
+           for index in range(len(polygon))):
+        return [polygon]
+
+    def inside_triangle(point, triangle):
+        return all(cross(triangle[index], triangle[(index + 1) % 3], point) >= -1e-12
+                   for index in range(3))
+
+    remaining = list(polygon)
+    pieces = []
+    while len(remaining) > 3:
+        for index in range(len(remaining)):
+            previous = (index - 1) % len(remaining)
+            following = (index + 1) % len(remaining)
+            triangle = [remaining[previous], remaining[index], remaining[following]]
+            if cross(*triangle) <= 1e-12:
+                continue
+            if any(inside_triangle(point, triangle)
+                   for candidate, point in enumerate(remaining)
+                   if candidate not in (previous, index, following)):
+                continue
+            pieces.append(triangle)
+            remaining.pop(index)
+            break
+        else:
+            raise ValueError('footprint cannot be decomposed safely')
+    pieces.append(remaining)
+    return pieces
 
 
 def _circumscribed_support_polygon(
@@ -944,12 +1040,13 @@ def static_corridor_clear(
             _finite_number(point[0], 'footprint'),
             _finite_number(point[1], 'footprint')))
 
-    footprint_points = _convex_hull(footprint_points)
+    footprint_pieces = _convex_footprint_pieces(footprint_points)
     footprint_radius = max(
         math.hypot(x_value, y_value)
         for x_value, y_value in footprint_points)
-    world_footprints = [
-        _world_footprint(pose, footprint_points) for pose in checked_poses]
+    world_footprints = [[
+        _world_footprint(pose, piece) for piece in footprint_pieces]
+        for pose in checked_poses]
     ignored_keepout_cells = set()
     if allow_rear_keepout_escape:
         start = checked_poses[0]
@@ -965,7 +1062,9 @@ def static_corridor_clear(
             previous_forward = forward
         while True:
             blockage = _corridor_blockage(
-                source, keepout, [(world_footprints[0], 0.0)], ignored_keepout_cells)
+                source, keepout,
+                [(polygon, 0.0) for polygon in world_footprints[0]],
+                ignored_keepout_cells)
             if blockage is None:
                 break
             if (blockage.get('grid') != 'keepout' or keepout['negate'] != 0
@@ -975,16 +1074,19 @@ def static_corridor_clear(
             corners = ((left, bottom), (right, bottom), (right, top), (left, top))
             if (max((x - start[0]) * cosine + (y - start[1]) * sine
                     for x, y in corners) >= 0.0
-                    or _polygon_intersects_cell(
-                        world_footprints[-1], 0.0, left, bottom, resolution)):
+                    or any(_polygon_intersects_cell(
+                        polygon, 0.0, left, bottom, resolution)
+                        for polygon in world_footprints[-1])):
                 return False
             ignored_keepout_cells.add((blockage['column'], blockage['map_row']))
-    pieces = [(polygon, 0.0) for polygon in world_footprints]
+    pieces = [(polygon, 0.0) for footprints in world_footprints
+              for polygon in footprints]
     for index, (current, following) in enumerate(zip(
             checked_poses, checked_poses[1:])):
         yaw_change = abs(_shortest_angle(following[2] - current[2]))
         sagitta = footprint_radius * (1.0 - math.cos(yaw_change / 2.0))
-        swept_hull = _convex_hull(
-            world_footprints[index] + world_footprints[index + 1])
-        pieces.append((swept_hull, sagitta))
+        for current_piece, following_piece in zip(
+                world_footprints[index], world_footprints[index + 1]):
+            swept_hull = _convex_hull(current_piece + following_piece)
+            pieces.append((swept_hull, sagitta))
     return _corridor_blockage(source, keepout, pieces, ignored_keepout_cells) is None

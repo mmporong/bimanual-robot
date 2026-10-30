@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-30 | 주차 입력 복구·후면 방향 정렬·차체 외곽 수정 배포
+
+- 급수대·테이블1·도크 주차는 사용자 수용 성공으로 보존한다. 최종 도크 내부 추정은 양끝 약12.9/13.3mm, 자동 confirmed=false이며 외부 1cm 실측 성공으로 바꾸지 않는다. 컵배치는 Windows 팔 연결 오류로 실패했다. 상세 실행 ID와 근거는 [주차 복구 기록](src/navigation/jdamr_cube_navigation/evaluation/20261030_PARKING_RECOVERY_AND_COLLISION.md)에 모았다.
+- 후면 중앙 보정이 위치만 맞추고 방향 정렬 전에 끝나던 handoff를 기존 entry heading checker로 바꿨다. depth 발행자가 있는데 입력 콜백이 침묵하면 구독을 재생성하고, AST1은 depth를 RGB보다 먼저 발행한다. 후진 정적 경로는 stepped footprint와 오목 다각형 조각별 sweep를 사용해 바퀴 사이를 큰 직사각형/볼록 외곽으로 채우던 판정을 줄인다. 센서 신선도·실제 충돌·사용자 정지는 유지한다.
+- 변경 동작 관련 212개와 후진 정적외곽 회귀 1개 통과, 6개 모듈 문법·Pi SHA256 일치를 확인했다. 12:27 KST 기존 Pi 활성 소스에 배포하고 실행기·관측기·AST1 수신기를 재시작했다. 대기/실행 중 이동 요청은 없고 새 물리 이동도 하지 않았다. 실제 재연결 복구와 주차 반복정확도는 미확인이다.
+- Pi 조회에서 RPP 곡률·비용 감속과 SlowdownZone은 이미 disabled였다. 전진/후진 상한은 0.12/0.08m/s이고 최종 주차 taper·CM 예상 충돌 감속은 별도다. 이번에 속도를 변경하거나 장애물 감지를 우회하지 않았다.
+- 새 차량 Windows 192.168.0.157의 SSH 공개키 접속은 완료됐다. 사용자는 Astra·팔을 아직 연결하지 않았다. 새 PC의 모델·보정·최신 송신기 이식과 실제 영상 전달은 미완료이며, Pi 수신 peer는 기존 .175를 유지한다. 서비스 기동의 SHM 포트 잠금 경고도 남아 있어 active만으로 영상 정상·출발 준비 완료라고 보고하지 않는다.
+- 로컬 작업 브랜치에 기록하며 원격 push·main 병합은 보류한다. Pi 서비스는 다음 연결을 위해 유지한다. 정리할 때는 `sudo systemctl stop jdamr-box-executor.service jdamr-box-observer.service jdamr-restaurant-navigation.service`와 `systemctl --user stop jdamr-astra-tcp.service`를 사용한다.
+
 ## 2026-10-29 | Windows 주문 서버 연동 준비·실물 실행 보류
 
 - 사용자 지정 시나리오: 도크 → 급수대 정밀주차 → 물따르기 → 테이블1 면 주차 → 컵배치 → 도크. Windows 주문 서버 `192.168.0.15:8765`의 `/api/state`와 `/api/align/confirm`을 사용하며 8770 조작 실행기는 호출하지 않는다. 근거는 Downloads의 `20261029_주행_조작_연동_구현명세.md`·`20261029_최종시연_운영절차.md` 및 `origin/main`의 주문 서버/미션 소스다. 문서의 PR 병합·비밀번호 변경 제안은 현재 작업 범위로 확대하지 않았다.

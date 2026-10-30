@@ -398,7 +398,9 @@ def main():
         if not all(0 <= time.time_ns() - stamp <= MAX_AGE_NS for stamp in stamps):
             receiver.publish_expired_frames += 1
             return
-        for index, kind in enumerate(('rgb', 'depth')):
+        # Parking consumes depth. Publish its much smaller sample first so a
+        # large raw RGB write cannot delay the paired depth past MAX_AGE_NS.
+        for index, kind in ((1, 'depth'), (0, 'rgb')):
             meta, image, stamp = header[kind], images[index], stamps[index]
             info = CameraInfo()
             info.header.frame_id = FRAME
