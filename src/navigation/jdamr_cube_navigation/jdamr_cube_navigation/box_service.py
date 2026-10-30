@@ -2581,9 +2581,38 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return self._zero_turn_final_approach(target, front_extent_m)
         return self._parking_final_approach(target, front_extent_m)
 
+    def _acquire_table_lateral_goal(self, target):
+        """Hold a measured lateral destination before the final approach."""
+        if (getattr(self, 'station_reference_mode', None) == 'rgbd'
+                and getattr(self, '_station_terminal_goal', None) is None):
+            # Acquire the taught tangent before closing the gap. A map-only
+            # fallback must not turn into a different visual goal near contact.
+            deadline = min(self.run_deadline_s, time.monotonic() + 3.0)
+            self.emit('table_lateral_goal_acquiring', before_final_approach=True)
+            while not self.stop_requested and time.monotonic() < deadline:
+                goal, reference = self._station_goal_reference()
+                if (goal is not None and reference and reference.get('valid') is True
+                        and goal.get('goal_filter_sample_count', 0) >= 3):
+                    self._station_terminal_goal = dict(
+                        goal, goal_odom=list(goal['goal_odom']))
+                    self.station_reference_goal_frozen = True
+                    target.update(self._station_anchor_target(target))
+                    self.emit('table_lateral_goal_acquired',
+                              goal_odom=list(goal['goal_odom']),
+                              sample_count=goal['goal_filter_sample_count'],
+                              before_final_approach=True)
+                    break
+                spin_node(self, timeout_sec=0.05)
+            else:
+                self._fail_final('station_lateral_goal_unavailable_before_approach')
+                return False
+        return True
+
     def _table_fine_approach(self, target, front_extent_m):
         """Align to the observed normal while closing the gap in one move."""
         self._continuous_table_stop = None
+        if not self._acquire_table_lateral_goal(target):
+            return False, None
         observed = target.get('observation_robot_pose_map')
         if observed is not None:
             lateral_status = self._station_lateral_status()
@@ -2619,6 +2648,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.last_box_face = {
             'face_center_map_xy_m': list(target['face_center_map_xy_m']),
             'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
+        self._station_terminal_goal = None
+        self.station_reference_goal_frozen = False
         self.emit('table_alignment_clearance_reapproach', original_deadline_preserved=True)
         if not self._leave_for_table_reobservation():
             return False, None
@@ -2628,6 +2659,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 mount, front_extent_m, self._final_gap_m(), region, radius))
         except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
             self._fail_final('table_clearance_reobserve_failed', detail=str(error))
+            return False, None
+        if not self._acquire_table_lateral_goal(target):
             return False, None
         return self._zero_turn_final_approach(
             target, front_extent_m, allow_trim=False, continuous_table=True)
