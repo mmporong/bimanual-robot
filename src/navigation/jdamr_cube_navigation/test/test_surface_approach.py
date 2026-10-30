@@ -4,12 +4,20 @@ import math
 
 from jdamr_cube_navigation.reverse_parking import static_corridor_clear
 from jdamr_cube_navigation.surface_approach import (
-    FACE_ALIGNMENT_ENTRY_MARGIN_M, FACE_ALIGNMENT_GAP_M,
+    FACE_ALIGNMENT_ENTRY_MARGIN_M,
     face_approach_command, face_approach_waypoints, filtered_face_heading,
     lateral_face_approach_command,
 )
 import pytest
 import yaml
+
+
+def test_lateral_steering_is_continuous_across_arrival_tolerance():
+    errors = (.004999, .005, .005001)
+    commands = [lateral_face_approach_command(.3, 0., error, .31, .005)
+                for error in errors]
+    assert all(angular > 0. for _linear, angular in commands)
+    assert commands[-1][1] - commands[0][1] < 1e-4
 
 
 @pytest.mark.parametrize('angle_deg', [-30.0, -12.0, 12.0, 30.0])
@@ -216,7 +224,9 @@ def _actual_lateral_rollout(start_y, start_yaw):
         face_error = -yaw
         center_gap = face_x - x - .065 * math.cos(face_error)
         gap = center_gap - .225 * abs(math.sin(face_error))
-        if gap <= FACE_ALIGNMENT_GAP_M + FACE_ALIGNMENT_ENTRY_MARGIN_M:
+        # Lateral tracking runs to the target-gap precision band (b4e5cdd),
+        # not the older 5 cm face-alignment band.
+        if gap <= .01 + FACE_ALIGNMENT_ENTRY_MARGIN_M:
             return poses, stopped_before_band
         remaining = (center_gap - .01) / math.cos(face_error)
         linear, angular = lateral_face_approach_command(

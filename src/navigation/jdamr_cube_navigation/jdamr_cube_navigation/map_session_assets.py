@@ -464,10 +464,35 @@ def prepare_map_session(pointer_path=DEFAULT_POINTER, output_dir=None,
                 'operating_registry_activated'),
         }
         if station_id == 'water_station':
-            profile['reference_mode'] = 'rgbd_auxiliary'
+            mode = station.get('reference_mode', 'rgbd_auxiliary')
+            if mode not in ('rgbd_auxiliary', 'rgbd'):
+                raise ValueError('unsupported water station reference mode')
+            if mode == 'rgbd':
+                capture = _mapping(
+                    _path(station['reference_capture'], station_path.parent),
+                    'station RGB-D capture')
+                # Imported here so map-only sessions do not load OpenCV.
+                from jdamr_cube_navigation.station_parking_reference import (
+                    capture_goal_left_offset)
+                binding = capture.get('goal_binding', {})
+                try:
+                    capture_goal_left_offset(binding)
+                except ValueError as error:
+                    raise ValueError(f'RGB-D capture goal binding invalid: {error}') from error
+                if (binding.get('station_id') != station_id
+                        or binding.get('registered_goal_map_pose') != list(
+                            _finite_pose(station, station_id))):
+                    raise ValueError('RGB-D capture must represent the registered station goal')
+                _verify_bound_map({'map': binding.get('map_identity')},
+                                  loaded['map'], 'RGB-D goal binding')
+            profile['reference_mode'] = mode
         else:
+            mode = station.get('reference_mode', 'map_pose_only')
+            if mode not in ('map_pose_only', 'surface_only'):
+                raise ValueError(f'unsupported table reference mode: {mode}')
             profile.update({
-                'reference_mode': 'map_pose_only',
+                'reference_mode': mode,
+                'lateral_control_enabled': mode != 'surface_only',
                 'rgbd_reference': None,
             })
         for key in ('lateral_reference', 'registration_status',

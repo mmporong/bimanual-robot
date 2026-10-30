@@ -1,5 +1,5 @@
 """
-Odom + gyro EKF (robot_localization). Not part of any bringup yet.
+Odom + gyro EKF with explicit input and output topics.
 
 Run only with the base driver started with publish_tf:=false, so that odom->base_footprint
 comes from the EKF alone. base_link->imu_link comes from the URDF (imu_joint: z down,
@@ -20,8 +20,13 @@ def generate_launch_description():
     sim = {'use_sim_time': LaunchConfiguration('use_sim_time')}
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument('wheel_odom_topic', default_value='/odom'),
+        DeclareLaunchArgument('filtered_odom_topic', default_value='/odometry/filtered'),
         Node(package='jdamr_cube_navigation', executable='imu_bias_relay',
-             name='imu_bias_relay', output='screen', parameters=[sim]),
+             name='imu_bias_relay', output='screen', parameters=[sim],
+             remappings=[('odom', LaunchConfiguration('wheel_odom_topic'))]),
         Node(package='robot_localization', executable='ekf_node', name='ekf_filter_node',
-             output='screen', parameters=[config, sim]),
+             output='screen', parameters=[config, sim,
+                                        {'odom0': LaunchConfiguration('wheel_odom_topic')}],
+             remappings=[('odometry/filtered', LaunchConfiguration('filtered_odom_topic'))]),
     ])

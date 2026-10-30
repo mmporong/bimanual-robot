@@ -478,7 +478,7 @@ def test_coarse_range_reaches_handoff_without_a_plane(monkeypatch):
     assert node._rear_coarse_step(GEOMETRY, .275, .275, .5)
 
 
-def test_range_reobserve_stops_as_soon_as_a_face_becomes_visible(monkeypatch):
+def test_range_reobserve_stops_only_after_face_is_stable_in_odom(monkeypatch):
     node = route_node()
     node.registry = {'map': {'yaml_path': '/map.yaml'},
                      'keepout': {'yaml_path': '/mask.yaml'}}
@@ -487,14 +487,22 @@ def test_range_reobserve_stops_as_soon_as_a_face_becomes_visible(monkeypatch):
         None, lambda x, y, yaw: (x, y, yaw)))
     node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
     node._rear_corridor_observation = Mock(return_value={'gap_m': .75})
-    node._rear_box_observation = Mock(return_value=face(.7))
+    observations = []
+    for stamp in range(1, 9):
+        observed = face(.7, stamp=float(stamp))
+        observed.update(
+            normal_odom=(1., 0.), face_odom=(-1.0, 0.))
+        observations.append(observed)
+    node._rear_box_observation = Mock(side_effect=observations)
     node.emit = Mock()
     monkeypatch.setattr(module, 'CachedStaticCorridorValidator',
                         Mock(return_value=Mock(return_value=True)))
 
     def drive(_distance, **kwargs):
-        reason = kwargs['watch']()
-        assert reason == 'rear box face available'
+        reasons = [kwargs['watch']() for _ in range(8)]
+        assert reasons[:7] == [None] * 7
+        reason = reasons[-1]
+        assert reason == 'rear box face stable'
         node._last_direct_motion_failure = reason
         return None
 
@@ -502,8 +510,39 @@ def test_range_reobserve_stops_as_soon_as_a_face_becomes_visible(monkeypatch):
     assert node._rear_coarse_step(
         GEOMETRY, .275, .275, .2, handoff_m=.2,
         stop_when_face_visible=True, face_half_width_m=.225)
-    node._rear_box_observation.assert_called_once_with(
-        GEOMETRY, .275, .225)
+    assert node._rear_box_observation.call_count == 8
+    node._rear_box_observation.assert_called_with(GEOMETRY, .275, .225)
+
+
+def test_range_reobserve_does_not_stop_for_one_transient_face(monkeypatch):
+    node = route_node()
+    node.registry = {'map': {'yaml_path': '/map.yaml'},
+                     'keepout': {'yaml_path': '/mask.yaml'}}
+    node._odom_pose = Mock(side_effect=[(0., 0., 0.)] + [(-.2, 0., 0.)] * 4)
+    node._frozen_in_odom = Mock(return_value=(
+        None, lambda x, y, yaw: (x, y, yaw)))
+    node._footprint_outline = Mock(return_value=[(-.28, -.275), (.07, .275)])
+    node._rear_corridor_observation = Mock(return_value={'gap_m': .75})
+    node._rear_box_observation = Mock(side_effect=[
+        face(.7, stamp=1.),
+        RuntimeError('rear box face unavailable'),
+        RuntimeError('rear box face unavailable'),
+    ])
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'CachedStaticCorridorValidator',
+                        Mock(return_value=Mock(return_value=True)))
+
+    def drive(_distance, **kwargs):
+        assert kwargs['watch']() is None
+        assert kwargs['watch']() is None
+        assert kwargs['watch']() is None
+        return -.2
+
+    node._drive_zero_turn = Mock(side_effect=drive)
+    assert node._rear_coarse_step(
+        GEOMETRY, .275, .275, .2, handoff_m=.2,
+        stop_when_face_visible=True, face_half_width_m=.225)
+    assert node._rear_box_observation.call_count == 3
 
 
 def test_temporary_face_loss_waits_in_same_task_then_recovers():
@@ -868,6 +907,33 @@ def test_final_confirmation_rejects_a_different_box_at_the_right_gap():
         module._same_target(face(.2), {**face(.01), 'face_odom': (-1., 0.)})
 
 
+@pytest.mark.parametrize('translation', [(0., 0.), (125., -84.)])
+def test_same_target_is_invariant_to_odom_origin_and_small_normal_noise(translation):
+    support = translation[0] - .475, translation[1] + .18
+
+    def fitted(angle):
+        observed = face(.2, angle)
+        normal = math.cos(angle), math.sin(angle)
+        offset = sum(normal[i] * support[i] for i in (0, 1))
+        observed.update(
+            normal_odom=normal,
+            face_odom=tuple(offset * value for value in normal),
+            midpoint_odom=support,
+        )
+        return observed
+
+    module._same_target(fitted(0.), fitted(math.radians(2.)))
+
+
+def test_same_target_rejects_a_locally_displaced_parallel_face():
+    reference = face(.2)
+    reference.update(face_odom=(10., -8.), midpoint_odom=(10., -8.))
+    observed = face(.2)
+    observed.update(face_odom=(10.08, -8.), midpoint_odom=(10.08, -8.))
+    with pytest.raises(RuntimeError, match='target changed'):
+        module._same_target(reference, observed)
+
+
 def test_one_noisy_close_range_scan_does_not_interrupt_an_aligned_approach(monkeypatch):
     node = route_node()
     node.registry = {'map': {'yaml_path': '/map.yaml'},
@@ -916,6 +982,26 @@ def test_stopped_confirmation_uses_all_eight_scans_not_the_last_angle_outlier():
     normal = result['normal_base_xy']
     point = result['face_center_base_xy_m']
     assert sum(normal[i]*point[i] for i in (0, 1)) == pytest.approx(result['line_offset_m'])
+
+
+def test_stopped_face_keeps_odom_plane_anchor_near_sensor_support():
+    support = (125., -84.)
+    observations = []
+    for index, angle in enumerate(math.radians(value) for value in (-1., -.5, .5, 1.)):
+        observed = face(.2, angle, stamp=5. + index * .1)
+        normal = math.cos(angle), math.sin(angle)
+        offset = sum(normal[i] * support[i] for i in (0, 1))
+        observed.update(
+            normal_odom=normal,
+            face_odom=tuple(offset * value for value in normal),
+            midpoint_odom=support,
+        )
+        observations.append(observed)
+
+    result = module._stationary_face(observations, .275, .225)
+
+    assert result['face_odom'] == pytest.approx(support)
+    assert result['midpoint_odom'] == pytest.approx(support)
 
 
 @pytest.mark.parametrize('raw_gap,angle,complete', [

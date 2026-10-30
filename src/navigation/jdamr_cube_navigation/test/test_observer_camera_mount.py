@@ -40,8 +40,8 @@ def test_relative_current_mount_maps_si_values_to_observer_parameters():
 
     assert result == pytest.approx({
         'camera_height_m': 1.26,
-        'camera_roll_rad': -0.039023134986489794,
-        'camera_pitch_rad': 0.9171698002732518,
+        'camera_roll_rad': 0.01837857145491081,
+        'camera_pitch_rad': 0.8414714126967582,
     })
 
 

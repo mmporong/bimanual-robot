@@ -138,6 +138,8 @@ DIRECT_STOP_LATENCY_S = 0.05
 # After the stop, wait at most this long for odometry to show the base at rest.
 DIRECT_SETTLE_S = 0.5
 DIRECT_STOP_CONFIRM_S = 0.08
+DIRECT_STOP_CONFIRM_SAMPLES = 2
+DIRECT_STOP_DECEL_GRACE_S = 0.5
 # Direct moves re-check the fail-closed inputs (fresh scan and odom, no latched
 # emergency stop) at this period and stop on the first failure.
 DIRECT_GUARD_PERIOD_S = 0.1
@@ -185,6 +187,12 @@ DEFAULT_TRANSIT = 'navfn-rpp'
 PARKED_CONFIRM_MAX_S = 5.0
 PARKED_HOLD_MAX_MOVE_M = 0.02
 PARKED_HOLD_MAX_TURN_RAD = math.radians(2.0)
+# FollowPath TF_ERROR: RPP could not get map->odom at the robot pose stamp within
+# its transform_tolerance. Nav2 Jazzy aborts on it at once (failure_tolerance covers
+# only NoValidControl) and WouldAControllerRecoveryHelp does not retry it, so the
+# transit tree ends (table_01_20261029_191747: map->odom 0.1115 s short).
+NAV2_CONTROLLER_TF_ERROR = 102
+NAV2_TF_ERROR_REASON = 'nav2 transform error'
 
 
 def _ahead(pose, distance_m):
@@ -811,6 +819,10 @@ class ServiceRoute(CorridorRoute):
         if not self.stop_requested and not final and error_code in PATH_BLOCKED_NAV2_CODES:
             self._retry_blocked_reason = f'path blocked: nav2 error {error_code}'
             self._retry_blocked_code = error_code
+        elif not self.stop_requested and error_code == NAV2_CONTROLLER_TF_ERROR:
+            # The existing input-gap path: wait for fresh, stopped inputs, then
+            # resend the current waypoint once; a second 102 still ends the leg.
+            self._retry_guard_reason = f'{NAV2_TF_ERROR_REASON} {error_code}'
 
     def _path_open(self):
         """Plan once from the current pose to the waypoints not yet reached."""
@@ -1212,6 +1224,9 @@ class ServiceRoute(CorridorRoute):
             self.emit('direct_motion_ready', setup_s=setup_s,
                       motion_budget_s=max(0.0, deadline_s - time.monotonic()))
         published_s = guarded_s = 0.0
+        # The velocity smoother ramps to zero after velocity_timeout (0.5 s) without
+        # a command, so a gap that long is a stop no event reports.
+        max_publish_gap_s = 0.0
         try:
             while not done(value) and not self.stop_requested and time.monotonic() < deadline_s:
                 now_s = time.monotonic()
@@ -1222,45 +1237,79 @@ class ServiceRoute(CorridorRoute):
                                or (watch() if watch else None))
                     if failure:
                         self._last_direct_motion_failure = failure
-                        self.emit(event, reason=failure)
+                        self.emit(event, reason=failure, max_publish_gap_s=max_publish_gap_s)
                         break
                 if now_s - published_s >= 0.05:
+                    if published_s:
+                        max_publish_gap_s = max(max_publish_gap_s, now_s - published_s)
                     publisher.publish(command)
                     published_s = time.monotonic()
-                spin_node(self, timeout_sec=0.02)
+                # Drain inputs over this control interval before running the
+                # geometry again; one callback per measurement can leave TF,
+                # depth and odometry queued behind expensive path previews.
+                input_deadline_s = time.monotonic() + 0.02
+                while not self.stop_requested:
+                    input_remaining_s = input_deadline_s - time.monotonic()
+                    if input_remaining_s <= 0.0:
+                        break
+                    spin_node(self, timeout_sec=min(0.002, input_remaining_s))
                 value = measure()
             if self.stop_requested:
                 self._last_direct_motion_failure = 'operator_stop'
             elif time.monotonic() >= deadline_s and not done(value):
                 self._last_direct_motion_failure = 'direct_motion_timeout'
-                self.emit(event, reason='direct_motion_timeout')
+                self.emit(event, reason='direct_motion_timeout',
+                          max_publish_gap_s=max_publish_gap_s)
         finally:
             for _repeat in range(5):
                 publisher.publish(Twist())
                 spin_node(self, timeout_sec=0.02)
         stopped_s = time.monotonic()
         stationary_since_s = None
+        stationary_samples = 0
         fresh_motion_samples = 0
         last_motion_stamp_s = None
         stopped_confirmed = not confirm_stopped
-        while time.monotonic() - stopped_s < DIRECT_SETTLE_S:
+        zero_published_s = 0.0
+        stop_contract = getattr(self, 'parking_contract', None) or {
+            'stopped_linear_mps': 0.01, 'stopped_angular_radps': 0.01}
+        stopped_linear_mps = stop_contract['stopped_linear_mps']
+        stopped_angular_radps = stop_contract['stopped_angular_radps']
+        # The smoother can still be decelerating at the old 0.5 s boundary.
+        # Keep commanding zero during that bounded grace period.  Confirm the
+        # stop from consecutive fresh odometry samples as well as elapsed time;
+        # otherwise a truly stopped base can fail merely because the first
+        # below-threshold sample arrived at the end of the settle window.
+        settle_deadline_s = (stopped_s + DIRECT_SETTLE_S
+                             + (DIRECT_STOP_DECEL_GRACE_S if confirm_stopped else 0.0))
+        while time.monotonic() < settle_deadline_s:
+            now_s = time.monotonic()
+            if now_s - zero_published_s >= 0.05:
+                publisher.publish(Twist())
+                zero_published_s = now_s
             motion = getattr(self, 'latest_motion', None)
-            if (motion is not None and motion[0] > stopped_s
-                    and motion[0] != last_motion_stamp_s):
+            fresh_sample = (motion is not None and motion[0] > stopped_s
+                            and motion[0] != last_motion_stamp_s)
+            if fresh_sample:
                 last_motion_stamp_s = motion[0]
                 fresh_motion_samples += 1
             if (motion is not None and motion[0] > stopped_s
-                    and abs(motion[1]) < 0.01 and abs(motion[2]) < 0.01):
+                    and abs(motion[1]) <= stopped_linear_mps
+                    and abs(motion[2]) <= stopped_angular_radps):
                 if not confirm_stopped:
                     stopped_confirmed = True
                     break
                 if stationary_since_s is None:
                     stationary_since_s = motion[0]
-                elif motion[0] - stationary_since_s >= DIRECT_STOP_CONFIRM_S:
+                if fresh_sample:
+                    stationary_samples += 1
+                if (stationary_samples >= DIRECT_STOP_CONFIRM_SAMPLES
+                        or motion[0] - stationary_since_s >= DIRECT_STOP_CONFIRM_S):
                     stopped_confirmed = True
                     break
-            elif motion is not None and motion[0] > stopped_s:
+            elif fresh_sample:
                 stationary_since_s = None
+                stationary_samples = 0
             spin_node(self, timeout_sec=0.02)
         if not stopped_confirmed:
             self._last_direct_motion_failure = 'odometry did not confirm stop'
@@ -1270,7 +1319,10 @@ class ServiceRoute(CorridorRoute):
                       last_odom_age_s=(None if motion is None else
                                        max(0.0, time.monotonic() - motion[0])),
                       last_odom_linear_mps=(None if motion is None else motion[1]),
-                      last_odom_angular_radps=(None if motion is None else motion[2]))
+                      last_odom_angular_radps=(None if motion is None else motion[2]),
+                      stopped_linear_mps=stopped_linear_mps,
+                      stopped_angular_radps=stopped_angular_radps,
+                      max_publish_gap_s=max_publish_gap_s)
             return None
         return measure()
 
@@ -1588,6 +1640,7 @@ class ServiceRoute(CorridorRoute):
             deadline_s = (time.monotonic() + abs(distance_m) / speed_mps
                           + STRAIGHT_ESCAPE_EXTRA_S)
         recoverable_depth_failures = {
+            'table approach stamped odom TF unavailable',
             'table approach observer silent',
             'table approach depth stale or future-dated',
             'table approach observer latency',
@@ -1603,6 +1656,19 @@ class ServiceRoute(CorridorRoute):
                 command, reached_stop_point, measure, deadline_s, 'straight_drive_stopped',
                 watch=motion_watch if hold_heading or target_update is not None else watch,
                 confirm_stopped=precision)
+            if (travelled_m is None and not self.stop_requested
+                    and target_update is not None
+                    and state['target_failure'] in recoverable_target_failures
+                    and getattr(self, '_last_direct_motion_failure', None)
+                    == 'odometry did not confirm stop'):
+                self.emit('precision_input_pause_waiting_for_stop',
+                          reason=state['target_failure'], target_preserved=True)
+                try:
+                    self.capture_stationary_pose(intermediate=True)
+                except (RuntimeError, ValueError, TransformException):
+                    break
+                travelled_m = state['travelled']
+                self._last_direct_motion_failure = None
             if (target_update is None or travelled_m is None or self.stop_requested
                     or state['tf_failure'] is not None
                     or state['target_failure'] not in recoverable_target_failures):
@@ -1660,6 +1726,12 @@ class ServiceRoute(CorridorRoute):
             if not rear_recovery:
                 deadline_s += time.monotonic() - paused_s
             timing['checked_s'] = None
+        # Recovery can discover a different terminal failure without entering
+        # _direct_motion again. Propagate that cause instead of the old pause.
+        if not self.stop_requested:
+            failure = state['tf_failure'] or state['target_failure']
+            if failure:
+                self._last_direct_motion_failure = failure
         if precision:
             self.emit('precision_straight_finished',
                       requested_distance_m=distance_m,
@@ -1761,8 +1833,35 @@ class ServiceRoute(CorridorRoute):
     @staticmethod
     def _input_gap_recoverable(reason):
         return (CorridorRoute._input_gap_recoverable(reason)
-                or (isinstance(reason, str) and reason.startswith(
-                    'stationary teaching unavailable: need fresh TF, odometry and localization')))
+                or (isinstance(reason, str) and reason.startswith((
+                    'stationary teaching unavailable: need fresh TF, odometry and localization',
+                    NAV2_TF_ERROR_REASON))))
+
+    def _wait_for_input_recovery(self, reason, timeout_s=8.0):
+        """After a controller TF error, also wait until AMCL publishes map->odom again."""
+        started_s = time.monotonic()
+        if not super()._wait_for_input_recovery(reason, timeout_s):
+            return False
+        tf_buffer = getattr(self, 'parking_tf', None)
+        if (tf_buffer is None or not isinstance(reason, str)
+                or not reason.startswith(NAV2_TF_ERROR_REASON)):
+            return True
+        # AMCL stamps map->odom at its scan time plus transform_tolerance, so a
+        # stamp ahead of the ROS time at this point is a publish newer than the
+        # stall. Resending into the same stall would only repeat the 102.
+        required_stamp_s = self.get_clock().now().nanoseconds * 1e-9
+        while not self.stop_requested and time.monotonic() - started_s < timeout_s:
+            try:
+                stamp = tf_buffer.lookup_transform(
+                    'odom', 'map', rclpy.time.Time()).header.stamp
+                if stamp.sec + stamp.nanosec * 1e-9 >= required_stamp_s:
+                    return True
+            except TransformException:
+                pass
+            spin_node(self, timeout_sec=0.05)
+        if not self.stop_requested:
+            self.emit('nav2_transform_recovery_timeout', reason=reason, timeout_s=timeout_s)
+        return False
 
     def execute(self, *, final_parking=True, alignment=False, staging=False, face=False):
         """Bound transit and parking actions and retain their terminal result."""
@@ -2229,10 +2328,18 @@ class ServiceRoute(CorridorRoute):
         """Capture fresh TF while odometry and consecutive poses remain still."""
         contract = ({**self.parking_contract, 'hold_s': DIRECT_STOP_CONFIRM_S}
                     if intermediate else self.parking_contract)
-        gate = ParkingHold(contract)
-        target = None
-        last_stamp = None
         revision = self.parking_motion_revision
+        window = getattr(self, '_stationary_capture_window', None)
+        self._stationary_capture_window = None
+        if (window is not None and window['contract'] == contract
+                and window['revision'] == revision):
+            # Continue the same measured hold, rather than adding another hold
+            # after an observation. ParkingHold still rejects gaps and motion;
+            # the last stamp forces a new odometry sample before returning.
+            gate, target, last_stamp = (
+                window['gate'], window['target'], window['last_stamp'])
+        else:
+            gate, target, last_stamp = ParkingHold(contract), None, None
         deadline_s = time.monotonic() + timeout_s
         last_guard_failure = None
         refresh_attempted = False
@@ -2279,6 +2386,10 @@ class ServiceRoute(CorridorRoute):
                 if result['reason'] in ('position_out_of_tolerance', 'yaw_out_of_tolerance'):
                     target = None
                 if result['confirmed']:
+                    self._stationary_capture_window = {
+                        'contract': dict(contract), 'revision': revision,
+                        'gate': gate, 'target': target, 'last_stamp': last_stamp,
+                    }
                     return actual, {
                         **result, 'source_ages_s': ages_s,
                         'amcl_xy_covariance_m2': list(self.amcl_covariance),
@@ -2505,7 +2616,7 @@ class ServiceRoute(CorridorRoute):
         if not static_corridor_clear(
                 Path(self.registry['map']['yaml_path']),
                 Path(self.registry['keepout']['yaml_path']), points,
-                self._reverse_footprint()):
+                self._footprint_outline()):
             self.emit('reverse_path_checked', valid=False,
                       reason='static_obstacle_unknown_keepout_or_map_boundary',
                       **phase_fields, **excluded)

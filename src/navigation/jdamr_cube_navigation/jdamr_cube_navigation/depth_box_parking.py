@@ -16,6 +16,7 @@ from jdamr_cube_navigation.box_top_detection import (
     DetectionStability,
 )
 from jdamr_cube_navigation.camera_info_history import CameraInfoHistory, stamp_nanoseconds
+from jdamr_cube_navigation.dedicated_tf import DedicatedTfListener
 from jdamr_cube_navigation.depth_obstacle_core import _depth_view
 from jdamr_cube_navigation.depth_obstacle_filter import camera_intrinsics, transform_matrix
 from jdamr_cube_navigation.observer_camera_mount import load_observer_camera_mount
@@ -41,7 +42,7 @@ from rclpy.qos import (
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
-from tf2_ros import Buffer, TransformException, TransformListener
+from tf2_ros import Buffer, TransformException
 
 
 LATEST_SENSOR_QOS = QoSProfile(
@@ -177,7 +178,10 @@ class DepthBoxParkingNode(Node):
                 'pointcloud request requires a selected region and calibration identity')
         if self._table_components:
             self._table_tf = Buffer()
-            self._table_tf_listener = TransformListener(self._table_tf, self)
+            # The 50 ms stamped lookups in _on_depth sleep-poll; on this node's own
+            # single-threaded spin no /tf callback could run meanwhile.
+            self._table_tf_listener = DedicatedTfListener(
+                self._table_tf, self, 'jdamr_depth_box_parking_tf')
         if self._table_tracking:
             self._table_tracker = TableSurfaceTracker(TrackConfig(
                 required_frames=int(self.get_parameter('stable_frames').value)))
@@ -210,20 +214,53 @@ class DepthBoxParkingNode(Node):
             self.get_parameter('calibration_model').value)
         self._minimum_period_s = 1.0 / processing_hz
         self._last_processed_s = -math.inf
+        self._last_depth_callback_s = time.monotonic()
         self._camera_info_history = CameraInfoHistory()
         self._camera_geometry = None
         self._status = self.create_publisher(
             String, '/box_parking/perception_status', 10)
-        self.create_subscription(
-            CameraInfo, '/camera/depth/camera_info',
-            self._on_camera_info, LATEST_SENSOR_QOS)
-        self.create_subscription(
-            Image, '/camera/depth/image_raw',
-            self._on_depth, LATEST_SENSOR_QOS)
+        self._create_depth_subscriptions()
+        self.create_timer(
+            self._max_image_age_s,
+            self._recover_silent_depth_subscriptions)
         self.add_on_set_parameters_callback(self._on_parameters)
         self.get_logger().info(
             'depth box parking perception started; '
             'velocity output is disabled')
+
+    def _create_depth_subscriptions(self) -> None:
+        """Create the paired calibration and depth subscriptions."""
+        self._camera_info_subscription = self.create_subscription(
+            CameraInfo, '/camera/depth/camera_info',
+            self._on_camera_info, LATEST_SENSOR_QOS)
+        self._depth_subscription = self.create_subscription(
+            Image, '/camera/depth/image_raw',
+            self._on_depth, LATEST_SENSOR_QOS)
+
+    def _recover_silent_depth_subscriptions(self) -> None:
+        """Rematch a stalled local DDS reader while a depth writer is present."""
+        depth_subscription = getattr(self, '_depth_subscription', None)
+        if (depth_subscription is None
+                or depth_subscription.get_publisher_count() == 0):
+            return
+        now_s = time.monotonic()
+        if now_s - self._last_depth_callback_s <= 4.0 * self._max_image_age_s:
+            return
+        self.destroy_subscription(self._camera_info_subscription)
+        self.destroy_subscription(depth_subscription)
+        self._camera_info_history = CameraInfoHistory()
+        self._camera_geometry = None
+        self._last_depth_callback_s = now_s
+        self._create_depth_subscriptions()
+        self._reject('depth_subscription_recreated_after_silence')
+
+    def destroy_node(self):
+        """Stop the dedicated TF thread before destroying this node."""
+        listener = getattr(self, '_table_tf_listener', None)
+        if listener is not None:
+            self._table_tf_listener = None
+            listener.shutdown()
+        return super().destroy_node()
 
     def _on_parameters(self, parameters) -> SetParametersResult:
         """Apply a bounded depth window or a complete camera/surface update."""
@@ -451,6 +488,7 @@ class DepthBoxParkingNode(Node):
 
     def _on_depth(self, message: Image) -> None:
         now_s = time.monotonic()
+        self._last_depth_callback_s = now_s
         if now_s - self._last_processed_s < self._minimum_period_s:
             return
         self._last_processed_s = now_s

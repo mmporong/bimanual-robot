@@ -15,6 +15,7 @@
   <exec_depend>jdamr_cube_node</exec_depend>
   <exec_depend>ros2bag</exec_depend>
   <exec_depend>jdamr_cube_description</exec_depend>
+  <exec_depend>jdamr_cube_bringup</exec_depend>
   <exec_depend>jdamr_cube_gazebo</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>

@@ -39,6 +39,7 @@ setup(
     license='TODO: License declaration',
     entry_points={
         'console_scripts': [
+            'astra_tcp_receiver = jdamr_cube_navigation.astra_tcp_receiver:main',
             'rviz_display_relay = '
             'jdamr_cube_navigation.rviz_display_relay:main',
             'box_service = jdamr_cube_navigation.box_service:main',

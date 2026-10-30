@@ -41,7 +41,7 @@ def laser_points(scan_json):
     s0 = scans[0]
     rmin, rmax = s0['range_min'], s0['range_max']
     # beam count varies per revolution: bin by angle (0.5 deg) and take the per-bin median
-    nb = 360
+    nb = 720
     arr = np.full((len(scans), nb), np.nan)
     for i, s in enumerate(scans):
         r = np.array([np.nan if v is None else v for v in s['ranges']], dtype=float)
@@ -52,9 +52,12 @@ def laser_points(scan_json):
             if np.isfinite(rv) and (not np.isfinite(arr[i, bi]) or rv < arr[i, bi]):
                 arr[i, bi] = rv
     valid_frac = np.mean(np.isfinite(arr), axis=0)
-    with np.errstate(all='ignore'):
-        med = np.nanmedian(arr, axis=0)
-        spread = np.nanmax(arr, axis=0) - np.nanmin(arr, axis=0)
+    observed = np.any(np.isfinite(arr), axis=0)
+    med = np.full(nb, np.nan)
+    spread = np.full(nb, np.nan)
+    med[observed] = np.nanmedian(arr[:, observed], axis=0)
+    spread[observed] = (np.nanmax(arr[:, observed], axis=0)
+                        - np.nanmin(arr[:, observed], axis=0))
     keep = (valid_frac >= 0.6) & np.isfinite(med) & (spread < 0.10)
     ang = (np.arange(nb) + 0.5) / nb * 2 * math.pi
     tf = next(t for t in d['tf_static'] if t['child'] == s0['frame'])

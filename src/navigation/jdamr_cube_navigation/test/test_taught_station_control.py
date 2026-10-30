@@ -4,6 +4,7 @@ import json
 import math
 import threading
 import time
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -57,6 +58,72 @@ def _node():
     node.create_subscription = Mock(side_effect=['info-sub', 'image-sub'])
     node.get_clock = Mock(return_value=_clock())
     return node
+
+
+def _rgbd_model(**kwargs):
+    # Status and worker arithmetic need the bound capture and run offsets.
+    return Mock(goal_left_offset_m=0., run_left_offset_m=0., **kwargs)
+
+
+def test_live_feedback_corrects_the_first_anchor_and_arrival_uses_the_same_goal():
+    node = _node()
+    node.station_reference = _rgbd_model()
+    node.station_reference_mode = 'rgbd'
+    reference = {'valid': True, 'stamp_s': 10., 'goal_odom': [.4, 0., 0.]}
+    node._fresh_station_reference = Mock(return_value=reference)
+    first, _ = node._station_goal_reference(freeze=True)
+    assert first['goal_odom'] == [.4, 0., 0.]
+
+    # Later observations agree on a 28 mm correction. The initial estimate must
+    # not remain the steering goal merely because the anchor has been frozen.
+    reference.update(stamp_s=10.2, goal_odom=[.4, .028, 0.])
+    node._station_goal_reference()
+    reference.update(stamp_s=10.4)
+    control, _ = node._station_goal_reference()
+    node._odom_pose = Mock(return_value=(.4, 0., 0.))
+    status = node._station_lateral_status()
+
+    assert node.station_reference_goal['goal_odom'] == [.4, 0., 0.]
+    assert control['goal_odom'][1] == pytest.approx(.028)
+    assert status['lateral_goal_odom'] == control['goal_odom']
+    assert status['internal_lateral_error_m'] == pytest.approx(.028)
+    assert status['internal_lateral_within_tolerance'] is False
+    assert status['millimeter_accuracy_validated'] is False
+
+
+def test_first_control_call_uses_observations_already_processed_in_background():
+    node = _node()
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    observations = [
+        {'valid': True, 'stamp_s': 10. + index * .2,
+         'goal_odom': [.4, y, 0.]}
+        for index, y in enumerate((.030, .031, .070))]
+    node._station_reference_goal_samples = deque(observations, maxlen=5)
+    node._fresh_station_reference = Mock(return_value=observations[-1])
+
+    goal, _ = node._station_goal_reference(freeze=True)
+
+    assert goal['goal_odom'][1] == pytest.approx(.031)
+    assert goal['goal_filter_sample_count'] == 3
+
+
+def test_lost_video_keeps_steering_goal_but_cannot_confirm_precision():
+    node = _node()
+    node.station_reference = _rgbd_model()
+    node.station_reference_mode = 'rgbd'
+    node._fresh_station_reference = Mock(return_value={
+        'valid': True, 'stamp_s': 10., 'goal_odom': [.4, .02, 0.]})
+    node._station_goal_reference(freeze=True)
+    node._fresh_station_reference.return_value = {'valid': False, 'reason': 'station_reference_stale'}
+
+    goal, _ = node._station_goal_reference()
+    status = node._station_lateral_status()
+
+    assert goal['goal_odom'] == [.4, .02, 0.]
+    assert status['lateral_goal_valid'] is True
+    assert status['lateral_reference_valid'] is False
+    assert status['internal_lateral_within_tolerance'] is False
 
 
 def _profiles(tmp_path):
@@ -249,20 +316,22 @@ def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction(mo
     # A fresh Jazzy process need not expose duration on the rclpy package.
     monkeypatch.delattr(box_service.rclpy, 'duration', raising=False)
     node = _node()
-    model = Mock(return_value=None)
+    model = _rgbd_model(contact_reference=None)
     model.observe.return_value = {
         'valid': True, 'reason': 'observed_registered_reference_pose',
-        'goal_odom': [1., .25, .2], 'stamp_s': 10.,
+        'goal_odom': [1., .25, .2], 'stamp_s': 10., 'goal_left_offset_m': 0.,
     }
     node.station_reference = model
     node.parking_tf = Mock()
 
-    def lookup(target, source, stamp, *, timeout):
-        assert stamp.nanoseconds == int(10e9)
-        assert 0 < timeout.nanoseconds <= int(.2e9)
+    def lookup(target, source, stamp, **kwargs):
         if (target, source) == ('odom', 'base_link'):
+            assert stamp.nanoseconds == int(10e9)
+            assert 0 < kwargs['timeout'].nanoseconds <= int(.2e9)
             return SimpleNamespace(transform=_pose(.8, .1, .05))
         assert (target, source) == ('map', 'odom')
+        # Map only presents the image-time odom goal: latest TF, no wait.
+        assert stamp.nanoseconds == 0 and 'timeout' not in kwargs
         return SimpleNamespace(transform=_pose(2., 3., math.pi / 2))
 
     node.parking_tf.lookup_transform.side_effect = lookup
@@ -370,8 +439,11 @@ def test_fresh_rgbd_goal_replaces_only_taught_tangent():
     node = _node()
     node.station_reference = Mock()
     node.station_reference_taught_map_pose = (1.2, -.4, .1)
+    node.station_reference_mode = 'rgbd'
+    # Control filters fresh results by stamp in odom and carries their map goal.
     node._fresh_station_reference = Mock(return_value={
         'valid': True, 'reason': 'observed_registered_reference_pose',
+        'stamp_s': 10., 'goal_odom': [.1, .08, .02],
         'goal_map': [1.1, .08, .02],
     })
     target = {
@@ -407,6 +479,12 @@ def test_invalid_or_stale_reference_never_claims_lateral_precision():
         'lateral_goal_valid': False,
         'lateral_goal_basis': None,
         'lateral_goal_observation_stamp_s': None,
+        'lateral_goal_frozen': False,
+        'lateral_goal_odom': None,
+        'lateral_actual_odom': None,
+        'lateral_anchor_odom': None,
+        'rgbd_observed_lateral_error_m': None,
+        'rgbd_goal_lateral_difference_m': None,
     }
 
 
@@ -422,7 +500,10 @@ def test_rejected_rgb_frame_retains_accepted_odom_goal_only_for_steering():
     first, current = node._station_goal_reference()
     carried, current = node._station_goal_reference()
 
-    assert first == carried == accepted
+    # The steering goal is the filtered accepted frame plus its filter metadata.
+    assert first == carried
+    assert {key: first[key] for key in accepted} == accepted
+    assert first['goal_filter_sample_count'] == 1
     assert current == rejected
     status = node._station_lateral_status()
     assert status['lateral_goal_valid'] is True
@@ -447,6 +528,29 @@ def test_final_lateral_status_uses_current_observation_even_after_goal_freezes()
 
     assert status['internal_lateral_error_m'] == pytest.approx(.028)
     assert status['internal_lateral_within_tolerance'] is False
+
+
+def test_auxiliary_rgb_rejection_does_not_replace_or_block_registered_goal():
+    node = _node()
+    node.station_reference_mode = 'rgbd_auxiliary'
+    node.station_reference = Mock()
+    node.station_reference_goal = {
+        'valid': True, 'goal_odom': [.4, .03, 0.], 'goal_map': [.4, .03, 0.],
+        'stamp_s': 9.8}
+    node.station_reference_goal_frozen = True
+    node._fresh_station_reference = Mock(return_value={
+        'valid': False, 'reason': 'camera_pose_has_excess_pitch_roll'})
+    node._navigation_ready = Mock(return_value=True)
+    node._odom_pose = Mock(return_value=(.4, .03, 0.))
+
+    status = node._station_lateral_status()
+
+    assert status['lateral_reference_valid'] is True
+    assert status['lateral_goal_basis'] == 'registered_map_pose_in_odom'
+    assert status['internal_lateral_within_tolerance'] is True
+    assert status['rgbd_reference_valid'] is False
+    assert status['rgbd_reference_reason'] == 'camera_pose_has_excess_pitch_roll'
+    assert status['millimeter_accuracy_validated'] is False
 
 
 def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
@@ -499,7 +603,9 @@ def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
     control = update((0., 0., 0.))
 
     assert control['remaining_m'] == pytest.approx(.425)
-    assert control['heading_rad'] > 0.
+    assert control['heading_rad'] == pytest.approx(0.)
+    assert control['lateral_tracking'] is True
+    assert control['lateral_error_m'] == pytest.approx(.10)
     stop = node._continuous_table_stop
     assert stop['target']['face_center_map_xy_m'] == pytest.approx((.50, .10))
     assert stop['target']['outward_normal_map_xy'] == pytest.approx((-1., 0.))
@@ -510,7 +616,8 @@ def test_moving_table_update_anchors_face_and_steers_on_existing_heading_path(
     # Entering the old 5 cm precision band must not discard a remaining
     # lateral error simply because the chassis is currently face-parallel.
     near = update((.39, 0., 0.))
-    assert near['heading_rad'] > 0.
+    assert near['heading_rad'] == pytest.approx(0.)
+    assert near['lateral_error_m'] == pytest.approx(.10)
     assert node._continuous_table_stop['basis'] != 'aligned_face_frozen_for_precision_band'
 
     aligned = update((.39, .10, 0.))

@@ -42,6 +42,7 @@ REAR_CENTER_TOLERANCE_M = 0.05
 REAR_COARSE_SEGMENT_M = 0.5
 REAR_REOBSERVE_SEGMENT_M = 0.2
 REAR_FACE_REOBSERVE_GAP_M = 0.2
+REAR_FINAL_TRIM_MAX_M = 0.01
 # Observation only: the swept footprint and gap calculation retain the chassis width.
 REAR_FACE_OBSERVATION_HALF_WIDTH_M = 1.2
 REAR_FACE_OBSERVATION_WIDTHS_M = (0.6, 0.9, REAR_FACE_OBSERVATION_HALF_WIDTH_M)
@@ -106,9 +107,26 @@ def _same_target(reference, observed):
     normal, old_normal = observed['normal_odom'], reference['normal_odom']
     change = abs(_angle(math.atan2(normal[1], normal[0])
                         - math.atan2(old_normal[1], old_normal[0])))
-    displacement = abs(sum(
-        (observed['face_odom'][i] - reference['face_odom'][i]) * old_normal[i]
-        for i in (0, 1)))
+
+    def local_support(item, item_normal):
+        candidate = item.get('midpoint_odom')
+        if candidate is None:
+            return item['face_odom']
+        residual = abs(sum((candidate[i] - item['face_odom'][i]) * item_normal[i]
+                           for i in (0, 1)))
+        return candidate if residual <= MAX_CANDIDATE_PLANE_DISTANCE_M else item['face_odom']
+
+    old_support = local_support(reference, old_normal)
+    support = local_support(observed, normal)
+    # Compare each fitted plane at the other scan's local support centre.  A
+    # closest-point-to-odom representation moves by origin * normal_noise even
+    # when both fits pivot around the same physical box face.
+    displacement = max(
+        abs(sum((support[i] - reference['face_odom'][i]) * old_normal[i]
+                for i in (0, 1))),
+        abs(sum((old_support[i] - observed['face_odom'][i]) * normal[i]
+                for i in (0, 1))),
+    )
     if (change > MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD
             or displacement > MAX_CANDIDATE_PLANE_DISTANCE_M):
         raise RuntimeError('rear box target changed')
@@ -130,15 +148,26 @@ def _clear_collision_target(command_watch):
 def _stationary_face(observations, extent, half_width):
     """Use the stopped scan window rather than its last noisy line fit."""
     result = dict(observations[-1])
-    for normal_key, face_key in (
-            ('normal_base_xy', 'face_center_base_xy_m'),
-            ('normal_odom', 'face_odom')):
+    for midpoint in ('face_midpoint_base_xy_m', 'midpoint_odom'):
+        if all(midpoint in item for item in observations):
+            result[midpoint] = tuple(sum(item[midpoint][i] for item in observations)
+                                     / len(observations) for i in (0, 1))
+    for normal_key, face_key, support_key in (
+            ('normal_base_xy', 'face_center_base_xy_m', 'face_midpoint_base_xy_m'),
+            ('normal_odom', 'face_odom', 'midpoint_odom')):
         normals = [item[normal_key] for item in observations]
         angle = math.atan2(sum(n[1] for n in normals), sum(n[0] for n in normals))
         normal = math.cos(angle), math.sin(angle)
-        offset = sum(sum(item[normal_key][i] * item[face_key][i] for i in (0, 1))
-                     for item in observations) / len(observations)
-        result[normal_key], result[face_key] = normal, tuple(offset*n for n in normal)
+        supports = [item.get(support_key, item[face_key]) for item in observations]
+        support = tuple(sum(point[i] for point in supports) / len(supports)
+                        for i in (0, 1))
+        local_offset = sum(
+            sum(item[normal_key][i] * (item[face_key][i] - supports[index][i])
+                for i in (0, 1))
+            for index, item in enumerate(observations)) / len(observations)
+        result[normal_key] = normal
+        result[face_key] = tuple(support[i] + local_offset * normal[i]
+                                 for i in (0, 1))
     nx, ny = result['normal_base_xy']
     point = result['face_center_base_xy_m']
     offset = sum(point[i] * result['normal_base_xy'][i] for i in (0, 1))
@@ -149,10 +178,6 @@ def _stationary_face(observations, extent, half_width):
         center_gap_m=-offset / nx - extent,
         gap_m=-offset - extent * nx - half_width * abs(ny),
         averaged_frames=len(observations))
-    for midpoint in ('face_midpoint_base_xy_m', 'midpoint_odom'):
-        if all(midpoint in item for item in observations):
-            result[midpoint] = tuple(sum(item[midpoint][i] for item in observations)
-                                     / len(observations) for i in (0, 1))
     result['observation_roi_clipped'] = any(
         item.get('observation_roi_clipped', False) for item in observations)
     return result
@@ -365,11 +390,10 @@ class RearBoxParkingMixin:
                            'yaw': target[2]}]
         self.emit('rear_dock_centering_started', target_odom=list(target_odom),
                   lateral_error_m=lateral, target_gap_m=REAR_FACE_REOBSERVE_GAP_M)
-        # Leave room between the odom endpoint handoff and the lateral-error
-        # acceptance band. Keep the position-only checker to avoid final-yaw trim.
+        # Complete both position and heading before the live face trim.
+        # A position-only handoff can leave the curve's final turn unfinished.
         completed = self._execute_reverse_once(
-            frozen, goal_checker_id='dock_position_checker', final=False,
-            position_handoff_m=REAR_CENTER_TOLERANCE_M / 2.,
+            frozen, goal_checker_id='entry_heading_checker', final=False,
             motion='rear_dock_centering')
         self._rear_center_moved = bool(completed)
         return completed
@@ -502,21 +526,43 @@ class RearBoxParkingMixin:
 
         validate(start)
         validated_pose = [start]
+        face_tracker = RearBoxFaceTracker(required_frames=8)
+        last_face_stamp = [None]
+
+        def stable_face_visible():
+            """Require one odom-stationary face, not a one-frame base-frame fit.
+
+            The base-frame line offset changes while reversing.  The same
+            physical face is stationary in odom, so track that line instead.
+            This keeps a transient furniture/edge fit from repeatedly stopping
+            a bounded range reapproach after only a few millimetres.
+            """
+            try:
+                observed = self._rear_box_observation(
+                    geometry, extent,
+                    half_width if face_half_width_m is None else face_half_width_m)
+            except RuntimeError:
+                face_tracker.update(None)
+                return False
+            if observed['stamp_s'] == last_face_stamp[0]:
+                return False
+            last_face_stamp[0] = observed['stamp_s']
+            normal = observed['normal_odom']
+            tracked = {
+                'normal_base_xy': normal,
+                'tangent_base_xy': (-normal[1], normal[0]),
+                'line_offset_m': sum(
+                    normal[i] * observed['face_odom'][i] for i in (0, 1)),
+            }
+            return face_tracker.update(tracked)
 
         def watch():
             try:
                 observed = self._rear_corridor_observation(geometry, extent, half_width)
                 if observed['gap_m'] <= handoff_m:
                     return 'rear box coarse handoff ready'
-                if stop_when_face_visible:
-                    try:
-                        self._rear_box_observation(
-                            geometry, extent,
-                            half_width if face_half_width_m is None else face_half_width_m)
-                    except RuntimeError:
-                        pass
-                    else:
-                        return 'rear box face available'
+                if stop_when_face_visible and stable_face_visible():
+                    return 'rear box face stable'
                 actual = self._odom_pose()
                 if (math.dist(actual[:2], validated_pose[0][:2]) >= 0.025
                         or abs(_angle(actual[2] - validated_pose[0][2])) >= math.radians(.3)):
@@ -530,7 +576,7 @@ class RearBoxParkingMixin:
         travelled = self._drive_zero_turn(
             -distance_m, watch=watch, hold_heading=True, **kwargs)
         failure = getattr(self, '_last_direct_motion_failure', None)
-        if failure in ('rear box coarse handoff ready', 'rear box face available'):
+        if failure in ('rear box coarse handoff ready', 'rear box face stable'):
             return True
         if travelled is None or failure or self.stop_requested:
             self.emit('rear_box_coarse_paused', reason=failure or 'coarse motion incomplete')
@@ -957,6 +1003,30 @@ class RearBoxParkingMixin:
             return confirmed, gap, far_gap, error
 
         confirmed, gap, far_gap, error = confirmation(final)
+        # The feedback drive can stop a few millimetres early while braking.
+        # Finish that residual inside this request instead of requiring a new
+        # coarse approach.  Keep this to one reverse-only trim; a larger miss
+        # or a face-angle miss still returns through the existing failure path.
+        center_gap = gap + half_width * abs(math.sin(error))
+        trim_m = (center_gap - target_gap) / math.cos(error)
+        trim_allowed = (
+            not confirmed
+            and gap > target_gap + 0.003
+            and 0.0 < trim_m <= REAR_FINAL_TRIM_MAX_M
+            and far_gap - gap <= 0.006
+        )
+        if trim_allowed:
+            self.emit('rear_box_final_trim_started', requested_distance_m=trim_m,
+                      nearest_gap_m=gap, farthest_gap_m=far_gap,
+                      angle_rad=error)
+            if approach(final):
+                final = self._observe_rear_box_recovering(
+                    geometry, extent, half_width, command_watch)
+                _same_target(initial, final)
+                confirmed, gap, far_gap, error = confirmation(final)
+                self.emit('rear_box_final_trim_finished', confirmed=confirmed,
+                          nearest_gap_m=gap, farthest_gap_m=far_gap,
+                          angle_rad=error)
         self.confirmation = {
             'confirmed': confirmed,
             'reason': ('confirmed' if confirmed

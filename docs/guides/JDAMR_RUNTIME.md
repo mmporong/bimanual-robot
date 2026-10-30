@@ -22,9 +22,10 @@ source .runtime/jdamr/pc_ws/install/setup.bash
 빌드하려면 `build-pc --all`을 사용한다. 빌드 산출물은 Git에서 제외한다.
 Astra의 별도 빌드와 장치 설정은 [배포 자료](../../src/navigation/deployment/README.md)를 따른다.
 
-`bootstrap`은 등록부·지도·keepout·route 중 없는 파일만 만든다.
+`bootstrap`은 현재 지도 포인터에서 등록부·지도·keepout·station 프로파일을 만든다.
 기존 도크, `state.json`, 마지막 초기 위치와 실행 기록을 초기화하지 않는다.
-새 PC에는 번들 자산을 준비하지만, 과거의 `localized=true` 상태를 복사하지 않는다.
+새 PC에는 현재 지도·등록·센서 참조를 함께 준비하며 과거의 `localized=true`를 복사하지 않는다.
+이전 지도 번들은 `bootstrap --legacy-map`을 명시했을 때만 사용한다.
 지도와 마스크는 실행 설정이며 rosbag·영상·원본 센서 데이터와 분리한다.
 
 ## Pi 배포
@@ -46,7 +47,8 @@ python3 tools/jdamr/runtime.py deploy-pi --promote
 검증한 stage의 소스·설치·도구 경로를 심볼릭 링크로 연결하고 기존 디렉터리·링크는 백업한다.
 중간 실패 시 변경한 경로를 역순으로 복구한다. 설치가 참조하는 승격 stage는 삭제하지 않는다.
 교체 파일은 Pi의 배포 백업에 보존한다. `--delete`를 사용하지 않으며 기존 `.git`은
-전송에서 제외한다. 기존 지도·도크 등록·카메라 설정은 기본적으로 유지한다.
+전송에서 제외한다. 배포 자산은 현재 지도 포인터가 선택한 runtime에서 가져오고,
+기존 지도·도크 등록·카메라 설정은 기본적으로 유지한다. 실행 상태·클릭·run 로그는 배포하지 않는다.
 정적 자산을 교체할 때만 `--replace-assets`를 사용하며 먼저 백업한다.
 이 명령은 서비스 재시작이나 이동을 실행하지 않는다. 코드 변경 후 실행기 재시작이
 필요한 경우 수정·배포 단계에서 마치며 다음 출발 때 빌드를 반복하지 않는다.
@@ -81,8 +83,9 @@ RViz는 `display-start`, PC 녹화까지 필요하면 `display-start --record-di
 상세 하위 명령과 `JDAMR_HOST`, `JDAMR_PI_HOME`, `JDAMR_PI_WS`,
 `JDAMR_DATA_ROOT`, `JDAMR_PC_WS` 등의 환경변수는
 [운영 도구 안내](../../tools/jdamr/README.md)를 참고한다.
-기본 데이터 위치는 `$HOME/jdamr_data/map_20260930_manual/aligned`다.
-여기에 남아 있는 과거 `tools/` 사본을 다음 개발의 원본으로 사용하지 않는다.
+현재 지도는 `$HOME/jdamr_data/maps/current_manual_mapping.json`, 실행 자산은 해당
+포인터가 선택한 디렉터리의 `runtime/`에 있다. 다른 포인터는 `--map-session` 또는
+`JDAMR_MAP_SESSION`으로 선택한다. 과거 `tools/` 사본을 개발 원본으로 사용하지 않는다.
 
 ## 지도 작성과 위치추정
 
@@ -110,14 +113,13 @@ cd "$HOME/bimanual-robot"
 git switch main
 git pull --ff-only origin main
 git switch -c feat/navigation-task
-python3 -m pytest -q
 ```
 
-기본 pytest는 기존 양팔·관제·물 감지 검사와 통합 도구 검사를 실행한다.
-ROS 회귀는 Jazzy와 새 설치 환경을 읽은 뒤 패키지별 `test/` 경로로 실행한다.
-ROS lint는 `colcon test` 또는 각 패키지의 ament 검사로 수행한다.
-기존 AMCL Axis B의 미해결 실패는 주행 알고리즘 변경이나 검사 생략으로 숨기지 않는다.
-수정 파일을 명시해 커밋하고 PR 필수 검사 통과 후 `main`에 병합한다.
+AMR 작업은 `src/navigation/AGENTS.md`를 따른다. 기능 수정과 실제 반영을 우선하고,
+변경한 기능의 필요한 구문·로드·비이동 확인을 수행한다. 별도 리뷰·pytest·전체 검사를
+출발 조건으로 자동 추가하지 않는다. 기존 AMCL Axis B 기록과 실차 정확도의 미확인
+항목은 보존한다. 수정 파일을 명시해 작업 브랜치에 커밋하며 push·PR·main 반영은
+사용자가 요청한 범위에서 수행한다.
 
 원본 파일별 SHA와 제외 범위는
 [가져오기 명세](../../config/navigation/jdamr_import_manifest.json),

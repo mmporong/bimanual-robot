@@ -24,6 +24,35 @@ REGISTERED_LATERAL_TOLERANCE_M = 0.005
 LATERAL_PRECISION_STATUS = 'NOT_VALIDATED'
 DEFAULT_MINIMUM_LOOKAHEAD_M = 0.10
 SHA256_PATTERN = re.compile(r'[0-9a-f]{64}')
+CAPTURE_EQUALS_GOAL = 'operator_confirmed_registered_station_goal'
+# The robot was photographed where the operator measured it, not on the goal.
+CAPTURE_OFFSET_FROM_GOAL = 'operator_measured_offset_from_capture'
+MAXIMUM_GOAL_LEFT_OFFSET_M = 0.05
+
+
+def capture_goal_left_offset(binding):
+    """Return the measured lateral goal offset in the capture's base frame."""
+    if not isinstance(binding, Mapping):
+        raise ValueError('reference_goal_binding_missing')
+    kind = binding.get('kind')
+    if kind == CAPTURE_EQUALS_GOAL:
+        if binding.get('robot_pose_equals_goal') is not True:
+            raise ValueError('reference_goal_binding_pose_mismatch')
+        return 0.0
+    if kind != CAPTURE_OFFSET_FROM_GOAL or binding.get('robot_pose_equals_goal') is not False:
+        raise ValueError('unsupported_reference_goal_binding')
+    offset = binding.get('goal_offset_in_capture_base_m')
+    if not isinstance(offset, Mapping) or set(offset) != {'forward_m', 'left_m'}:
+        raise ValueError('reference_goal_offset_must_be_forward_left')
+    # Depth owns the front gap; the image binding may move the goal sideways only.
+    if _finite(offset['forward_m'], 'reference_goal_forward_offset') != 0.0:
+        raise ValueError('reference_goal_offset_must_be_lateral_only')
+    left = _finite(offset['left_m'], 'reference_goal_left_offset')
+    if abs(left) > MAXIMUM_GOAL_LEFT_OFFSET_M:
+        raise ValueError('reference_goal_left_offset_out_of_bounds')
+    if not isinstance(binding.get('operator_measurement'), Mapping):
+        raise ValueError('reference_goal_offset_requires_operator_measurement')
+    return left
 
 
 def _finite(value, label):
@@ -57,6 +86,47 @@ def _xy(value, label):
 
 def _wrapped(angle):
     return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def filter_station_goal_observations(observations, max_age_s):
+    """Median one sample per image, expressed in the same odom frame.
+
+    The first valid image is usable immediately. Later images can correct its
+    error without changing the immutable taught reference or moving raw odom.
+    """
+    if _finite(max_age_s, 'max_age_s') <= 0.:
+        raise ValueError('max_age_s_must_be_positive')
+    by_stamp = {}
+    for observation in observations:
+        if observation.get('valid') is True:
+            stamp = _finite(observation['stamp_s'], 'stamp_s')
+            _pose(observation['goal_odom'], 'goal_odom')
+            by_stamp[stamp] = observation
+    if not by_stamp:
+        return None
+    latest_stamp = max(by_stamp)
+    samples = [by_stamp[stamp] for stamp in sorted(by_stamp)
+               if latest_stamp - stamp <= max_age_s]
+    result = deepcopy(samples[-1])
+    for frame in ('goal_odom', 'goal_map'):
+        poses = [sample[frame] for sample in samples if frame in sample]
+        if len(poses) != len(samples):
+            # Never combine an old map goal with a newly filtered odom goal.
+            result.pop(frame, None)
+            continue
+        heading = poses[-1][2]
+        result[frame] = [
+            float(np.median([pose[0] for pose in poses])),
+            float(np.median([pose[1] for pose in poses])),
+            _wrapped(heading + float(np.median([
+                _wrapped(pose[2] - heading) for pose in poses]))),
+        ]
+    result['goal_filter'] = 'recent_valid_pose_median'
+    result['goal_filter_sample_count'] = len(samples)
+    result['goal_filter_xy_spread_m'] = max(
+        math.dist(sample['goal_odom'][:2], result['goal_odom'][:2])
+        for sample in samples)
+    return result
 
 
 def _resolved_path(value, label):
@@ -240,17 +310,34 @@ class TaughtStationReference:
         )
         if not self.basis.valid:
             raise ValueError(f'invalid_reference_planar_basis:{self.basis.reason}')
-        self.prepared_reference = PreparedRGBDReference(
-            self.reference_rgb,
-            self.reference_depth,
-            self.reference_rgb_intrinsics,
-            self.reference_depth_intrinsics,
-            self.reference_rgb_rois,
-        )
+        self.observation_method = config.get('observation_method', 'rgbd_pnp')
+        if self.observation_method not in ('rgbd_pnp', 'table_contact_edges'):
+            raise ValueError('unsupported_station_observation_method')
+        self.contact_reference = None
+        self.prepared_reference = None
+        if self.observation_method == 'table_contact_edges':
+            from jdamr_cube_navigation.table_contact_reference import TableContactReference
+            contact_config = capture.get('table_contact_reference')
+            if not isinstance(contact_config, Mapping):
+                raise ValueError('missing_bound_table_contact_reference')
+            self.contact_reference = TableContactReference(
+                self.reference_rgb, self.reference_rgb_intrinsics, self.basis, contact_config)
+        else:
+            self.prepared_reference = PreparedRGBDReference(
+                self.reference_rgb,
+                self.reference_depth,
+                self.reference_rgb_intrinsics,
+                self.reference_depth_intrinsics,
+                self.reference_rgb_rois,
+            )
         self.reference_capture = deepcopy(capture)
+        self.goal_left_offset_m = capture_goal_left_offset(capture.get('goal_binding'))
+        # A per-run operator correction, bound to this image frame by the caller.
+        self.run_left_offset_m = 0.0
         self.R_base_from_optical = np.asarray(
             self.basis.R_base_from_optical, dtype=np.float64).copy()
         self.assumptions = {
+            'observation_method': self.observation_method,
             'reference_capture_path': str(capture_path),
             'reference_capture_sha256': config['reference_capture_sha256'],
             'reference_rgb_path': str(rgb_path),
@@ -265,6 +352,8 @@ class TaughtStationReference:
             'reference_rgb_stamp_s': rgb_stamp,
             'reference_depth_stamp_s': depth_stamp,
             'reference_rgb_depth_delta_s': recorded_delta,
+            'reference_goal_binding': deepcopy(capture.get('goal_binding')),
+            'goal_left_offset_from_capture_m': self.goal_left_offset_m,
             'mount_calibration_complete': self.basis.mount_calibration_complete,
             'millimeter_accuracy_validated': False,
             'registered_lateral_tolerance_m': REGISTERED_LATERAL_TOLERANCE_M,
@@ -272,9 +361,16 @@ class TaughtStationReference:
             'stale_age_checked_by_runtime_node': True,
         }
 
+    def set_run_left_offset(self, offset_m):
+        """Shift this run's goal sideways in the capture frame, never the capture."""
+        offset = _finite(offset_m, 'run_left_offset')
+        if abs(offset) > MAXIMUM_GOAL_LEFT_OFFSET_M:
+            raise ValueError('run_left_offset_out_of_bounds')
+        self.run_left_offset_m = offset
+
     def observe(self, current_rgb, current_info, odom_pose_at_image_stamp,
                 stamp_s):
-        """Return the recorded reference pose composed into the odom frame."""
+        """Return the bound goal (capture pose plus lateral offset) in odom."""
         try:
             stamp = _finite(stamp_s, 'stamp_s')
             actual = _pose(odom_pose_at_image_stamp, 'odom_pose')
@@ -285,38 +381,53 @@ class TaughtStationReference:
             return _invalid_observation(
                 'current_camera_intrinsics_identity_mismatch', stamp,
                 self.assumptions)
-        estimate = self.prepared_reference.observe(current_rgb, current_info)
-        quality = {
-            'match_count': estimate.match_count,
-            'inlier_count': estimate.inlier_count,
-            'reprojection_rmse_px': estimate.reprojection_rmse_px,
-            'roi_inliers': dict(estimate.roi_inliers),
+        if self.contact_reference is not None:
+            error, quality = self.contact_reference.observe(current_rgb)
+        else:
+            estimate = self.prepared_reference.observe(current_rgb, current_info)
+            quality = {
+                'observation_method': 'rgbd_pnp',
+                'match_count': estimate.match_count,
+                'inlier_count': estimate.inlier_count,
+                'reprojection_rmse_px': estimate.reprojection_rmse_px,
+                'roi_inliers': dict(estimate.roi_inliers),
+            }
+            if not estimate.valid:
+                return _invalid_observation(
+                    estimate.reason, stamp, self.assumptions, quality)
+            error = camera_reference_pose_to_planar_base_error(
+                estimate.T_current_from_reference, self.basis)
+        quality.update({
             'tabletop_point_count': self.basis.point_count,
             'tabletop_inlier_count': self.basis.inlier_count,
             'tabletop_inlier_ratio': self.basis.inlier_ratio,
             'tabletop_plane_rms_m': self.basis.plane_rms_m,
-        }
-        if not estimate.valid:
-            return _invalid_observation(
-                estimate.reason, stamp, self.assumptions, quality)
-        error = camera_reference_pose_to_planar_base_error(
-            estimate.T_current_from_reference, self.basis)
+        })
         if not error.valid:
             return _invalid_observation(
                 error.reason, stamp, self.assumptions, quality)
+        # The offset is along the capture base's left axis, seen from current base.
+        offset = self.goal_left_offset_m + self.run_left_offset_m
+        forward_m = error.forward_m - math.sin(error.yaw_rad) * offset
+        left_m = error.left_m + math.cos(error.yaw_rad) * offset
         cosine, sine = math.cos(actual[2]), math.sin(actual[2])
         goal = [
-            actual[0] + cosine * error.forward_m - sine * error.left_m,
-            actual[1] + sine * error.forward_m + cosine * error.left_m,
+            actual[0] + cosine * forward_m - sine * left_m,
+            actual[1] + sine * forward_m + cosine * left_m,
             _wrapped(actual[2] + error.yaw_rad),
         ]
         return {
             'valid': True,
             'reason': 'observed_registered_reference_pose',
+            'observation_method': self.observation_method,
             'goal_odom': goal,
-            'forward_m': error.forward_m,
-            'left_m': error.left_m,
+            'observation_odom_pose': list(actual),
+            'forward_m': forward_m,
+            'left_m': left_m,
             'yaw_rad': error.yaw_rad,
+            'capture_forward_m': error.forward_m,
+            'capture_left_m': error.left_m,
+            'goal_left_offset_m': offset,
             'stamp_s': stamp,
             'quality': quality,
             'assumptions': deepcopy(self.assumptions),

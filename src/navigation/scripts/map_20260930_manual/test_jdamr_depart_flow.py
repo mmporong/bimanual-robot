@@ -18,7 +18,8 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 # dock_survey and scan_match are the Phase 2 tools the departure tool imports.
-sys.path[:0] = [str(HERE), str(HERE.parent / 'phase2_20260930')]
+sys.path[:0] = [str(HERE), str(HERE.parent / 'phase2_20260930'),
+                str(HERE.parents[1] / 'jdamr_cube_navigation')]
 # Import with a disposable copy of bundled inputs; CI never needs a host's map
 # or live localization state, and every SSH interaction remains mocked below.
 _test_data = tempfile.TemporaryDirectory(prefix='jdamr-departure-flow-')
@@ -144,7 +145,18 @@ def _map_session_fixture(tmp_path):
         'home_pose': [-.8, .4, .1], 'pose_map': [-.8, .4, .1],
         'scan_path': str(scan),
     }))
-    pointer = tmp_path / 'current_manual_mapping.json'
+    profile_document = json.loads(profiles.read_text())
+    home_record = session / 'dock.json'
+    station_record = session / 'water_station.json'
+    home_record.write_text('{}\n')
+    station_record.write_text('{}\n')
+    profile_document['home'] = {
+        'source_record': str(home_record),
+        'dock_scan': {'reference_path': str(reference), 'scan_path': str(scan)}}
+    profile_document['stations']['water_station']['source_record'] = str(station_record)
+    profiles.write_text(json.dumps(profile_document))
+    pointer = data_root / 'maps/current_manual_mapping.json'
+    pointer.parent.mkdir(parents=True, exist_ok=True)
     pointer.write_text(json.dumps({
         'directory': str(session), 'map_yaml': str(map_yaml),
         'dock_scan_reference': str(reference),
@@ -158,7 +170,7 @@ def _map_session_fixture(tmp_path):
         'session_directory': str(session),
         'runtime_directory': str(runtime),
         'station_ids': ['water_station'],
-        'map_hashes': {'runtime': {
+        'map_hashes': {'source': {'yaml_path': str(map_yaml)}, 'runtime': {
             'yaml_sha256': map_identity[0], 'image_sha256': map_identity[1],
         }},
     }
@@ -174,7 +186,8 @@ def _configure_fixture_session(tmp_path, monkeypatch):
     for name in (
             'ACTIVE_MAP_SESSION', 'BASE', 'P2', 'MAP_YAML', 'KEEPOUT_YAML',
             'REGISTRY', 'ANNOTATION', 'CLICK', 'STATE', 'PI_BASE', 'PI_P2',
-            'PI_REGISTRY', 'DDS_PROFILE', 'DESTINATIONS', 'TABLES',
+            'PI_REGISTRY', 'ACTIVE_MAP_POINTER', 'PI_TOOLS', 'CAMERA_MOUNT_CONFIG',
+            'PI_MOUNT', 'DESTINATIONS', 'TABLES',
             'STATION_PROFILES'):
         monkeypatch.setattr(d, name, getattr(d, name))
     monkeypatch.setattr(d, 'DATA_ROOT', fixture.data_root)
@@ -206,6 +219,65 @@ def _add_taught_table_01(fixture):
     }
     destinations_path.write_text(json.dumps(destinations))
     fixture.profile['station_ids'] = ['water_station', 'table_01']
+
+
+def test_prepare_reference_mount_copies_selected_mount_independent_of_teaching_reference(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(d, 'P2', tmp_path)
+    station_profiles = tmp_path / 'station_profiles.json'
+    monkeypatch.setattr(d, 'STATION_PROFILES', station_profiles)
+    canonical = yaml.safe_load((HERE.parents[1] / 'jdamr_cube_navigation/config' /
+                                'camera_mount_current.yaml').read_text())
+
+    generated = []
+    for pitch in (0.1, 1.4):
+        station_profiles.write_text(json.dumps({
+            'stations': {'water_station': {'rgbd_reference': {
+                'camera_position_m': [-0.1, 0.2, 0.8],
+                'camera_yaw_rad': pitch,
+                'reference_capture_path': f'/changed/reference/{pitch}.json',
+            }}},
+        }))
+        assert d.prepare_reference_mount()
+        generated.append(yaml.safe_load((tmp_path / 'camera_mount.yaml').read_text()))
+
+    assert generated == [canonical, canonical]
+    mount = generated[0]['camera_mount']
+    assert mount['provenance']['mount_calibration_complete'] is False
+    assert mount['provenance']['millimeter_accuracy_validated'] is False
+    assert mount['table_edge_calibration'] == canonical['camera_mount']['table_edge_calibration']
+
+
+def test_prepare_reference_mount_preserves_future_measured_validation_state(
+        tmp_path, monkeypatch):
+    tools = tmp_path / 'scripts' / 'map_tools'
+    tools.mkdir(parents=True)
+    canonical_path = (tools.parents[1] / 'jdamr_cube_navigation/config' /
+                      'camera_mount_current.yaml')
+    canonical_path.parent.mkdir(parents=True)
+    measured = {
+        'camera_mount': {
+            'status': 'measured',
+            'parent_frame': 'base_link',
+            'child_frame': 'camera_link',
+            'transform': {
+                'x_m': -0.275, 'y_m': 0.0, 'z_m': 1.26,
+                'roll_rad': 0.01, 'pitch_rad': 0.84, 'yaw_rad': 0.0,
+            },
+            'table_edge_calibration': {'enabled': True, 'status': 'measured'},
+            'provenance': {
+                'mount_calibration_complete': True,
+                'millimeter_accuracy_validated': True,
+            },
+        },
+    }
+    canonical_path.write_text(yaml.safe_dump(measured, sort_keys=False))
+    monkeypatch.setattr(d, 'TOOLS', tools)
+    monkeypatch.setattr(d, 'P2', tmp_path / 'runtime')
+    d.P2.mkdir()
+
+    assert d.prepare_reference_mount()
+    assert yaml.safe_load((d.P2 / 'camera_mount.yaml').read_text()) == measured
 
 
 @pytest.mark.parametrize('mode,has_straight_departure', [
@@ -709,7 +781,7 @@ def test_go_passes_the_pointcloud_switch_only_when_asked(env, monkeypatch):
     ['--surface-mode', 'front'], ['--dock-only'], ['--rear-box-only'],
 ])
 def test_pointcloud_cli_rejects_tasks_that_do_not_use_table_observation(env, monkeypatch, extra):
-    monkeypatch.setattr(d.sys, 'argv', ['jdamr_depart.py', 'go', 'table_01',
+    monkeypatch.setattr(d.sys, 'argv', ['jdamr_depart.py', '--legacy-map', 'go', 'table_01',
                                       '--pointcloud-perception', *extra])
     monkeypatch.setattr(d, 'cmd_go', lambda _args: pytest.fail('invalid task was dispatched'))
     with pytest.raises(SystemExit) as error:
@@ -913,7 +985,7 @@ def test_taught_session_map_fallback_keeps_original_dock_anchor(tmp_path, monkey
     monkeypatch.setattr(d, 'sh', lambda *_a, **_kw: None)
     monkeypatch.setattr(d, 'pull_registry', lambda: {'home': home})
     monkeypatch.setattr(d, 'capture_scan', lambda _path: None)
-    monkeypatch.setattr(d, 'refine_at_registered_dock', lambda *_a: None)
+    monkeypatch.setattr(d, 'refine_at_registered_dock', lambda *_a, **_k: None)
     monkeypatch.setattr(d, 'refine_pose', lambda *_a: {
         'pose': [-.79, .35, .12], 'inlier_5cm': .5, 'global_agrees': False,
         'click_offset_m': .05, 'click_offset_deg': 1., 'click': [-.8, .4, .1],
@@ -969,7 +1041,8 @@ def test_taught_map_table_cycle_visits_water_then_table_and_returns(
     for name in (
             'ACTIVE_MAP_SESSION', 'BASE', 'P2', 'MAP_YAML', 'KEEPOUT_YAML',
             'REGISTRY', 'ANNOTATION', 'CLICK', 'STATE', 'PI_BASE', 'PI_P2',
-            'PI_REGISTRY', 'DDS_PROFILE', 'DESTINATIONS', 'TABLES',
+            'PI_REGISTRY', 'ACTIVE_MAP_POINTER', 'PI_TOOLS', 'CAMERA_MOUNT_CONFIG',
+            'PI_MOUNT', 'DESTINATIONS', 'TABLES',
             'STATION_PROFILES'):
         monkeypatch.setattr(d, name, getattr(d, name))
     monkeypatch.setattr(d, 'DATA_ROOT', fixture.data_root)
@@ -1038,7 +1111,10 @@ def test_sync_skips_map_pose_only_null_reference_and_keeps_water_rgbd(
     profiles['stations']['water_station']['rgbd_reference'] = dict(zip(
         ('reference_capture_path', 'reference_rgb_path', 'reference_depth_path'),
         map(str, references)))
+    table_record = fixture.session / 'table_01.json'
+    table_record.write_text('{}\n')
     profiles['stations']['table_01'] = {
+        'source_record': str(table_record),
         'reference_mode': 'map_pose_only', 'rgbd_reference': None,
     }
     fixture.station_profiles.write_text(json.dumps(profiles))
@@ -1053,7 +1129,12 @@ def test_sync_skips_map_pose_only_null_reference_and_keeps_water_rgbd(
         name: fixture.runtime / name
         for name in ('service_destinations.yaml', 'keepout.pgm', 'keepout.yaml')
     }
-    local_by_name.update({path.name: path for path in references})
+    reference_sources = [*references, fixture.runtime / 'map.yaml',
+                         fixture.runtime / 'map.pgm', fixture.session / 'dock.json',
+                         fixture.session / 'water_station.json', table_record,
+                         fixture.session / 'dock_scan_reference.json',
+                         fixture.session / 'dock_scan.json', fixture.pointer]
+    local_by_name.update({path.name: path for path in reference_sources})
 
     def fake_pi(command, **_kwargs):
         pi_calls.append(command)
@@ -1068,9 +1149,9 @@ def test_sync_skips_map_pose_only_null_reference_and_keeps_water_rgbd(
     d.cmd_sync(None)
 
     reference_syncs = [call for call in shell_calls if '--protect-args' in call]
-    assert len(reference_syncs) == 3
+    assert len(reference_syncs) == len(reference_sources)
     assert all(any(str(path) in call for call in reference_syncs) for path in references)
-    assert sum(command.startswith('sha256sum ') for command in pi_calls) == 6
+    assert sum(command.startswith('sha256sum ') for command in pi_calls) == 3 + len(reference_sources)
 
 
 def test_observation_waypoint_uses_mount_profile_without_changing_aisle_point(
@@ -1410,7 +1491,12 @@ def test_stop_never_reports_success_without_remote_reply(env, monkeypatch, reply
 
 def test_restart_executor_never_falls_back_or_restarts_sensors(env, monkeypatch):
     pi = Pi()
-    monkeypatch.setattr(d, 'pi', pi)
+    def stuck_executor(command, **kwargs):
+        result = pi(command, **kwargs)
+        if command.startswith('sudo -n systemctl stop'):
+            return SimpleNamespace(returncode=1, stdout='stop failed')
+        return result
+    monkeypatch.setattr(d, 'pi', stuck_executor)
     with pytest.raises(SystemExit):
         d.restart_executor()
     assert not any(unit in c for c in pi.calls for unit in d.SENSOR_UNITS)
@@ -1623,8 +1709,9 @@ def test_dock_reference_still_requires_activation_and_amcl_agreement(
     monkeypatch.setattr(d, 'capture_scan', lambda _path: None)
     monkeypatch.setattr(d, 'sh', lambda *_a, **_k: None)
     monkeypatch.setattr(d, 'refine_pose', lambda *_a: pytest.fail('unexpected map fallback'))
-    monkeypatch.setattr(d, 'refine_at_registered_dock', lambda *_a: {
+    monkeypatch.setattr(d, 'refine_at_registered_dock', lambda *_a, **_k: {
         'pose': [.12, .165, .134], 'inlier_5cm': .9, 'global_agrees': False,
+        'basis': 'anchored_dock_scan',
         'click_offset_m': 0., 'click_offset_deg': 0., 'click': [.12, .165, .134]})
     events = [] if activation == 'failed' else [{
         'event': 'navigation_activated_without_motion', 'stationary_pose': [.5, .165, .134]}]
@@ -1770,6 +1857,7 @@ def test_stop_without_request_state_still_signals_resident_executor(env, monkeyp
 
 
 def test_reference_camera_uses_single_driver_for_registered_rgb_and_depth(env, monkeypatch):
+    monkeypatch.setattr(d, 'CAMERA_TRANSPORT', 'usb')
     calls = []
     monkeypatch.setattr(d, 'ACTIVE_MAP_SESSION', {'session_directory': 'new'})
     def remote(command, **kwargs):

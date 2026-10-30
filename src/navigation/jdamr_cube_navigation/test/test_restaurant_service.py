@@ -1539,15 +1539,21 @@ def test_reverse_path_static_failure_never_calls_live_validator(monkeypatch):
     node = route()
     node.registry.update(map={'yaml_path': '/tmp/map.yaml'},
                          keepout={'yaml_path': '/tmp/mask.yaml'})
-    node._reverse_footprint = lambda: [(-.3, -.3), (.1, -.3), (.1, .3), (-.3, .3)]
+    outline = [(-.3, -.2), (-.1, -.2), (-.1, -.3), (.1, -.3),
+               (.1, .3), (-.1, .3), (-.1, .2), (-.3, .2)]
+    node._footprint_outline = Mock(return_value=outline)
+    node._reverse_footprint = Mock(side_effect=AssertionError('bounding rectangle used'))
     node.validate_reverse_path = Mock()
     path = RosPath()
     pose = PoseStamped()
     pose.pose.orientation.w = 1.0
     path.poses = [pose]
+    static_check = Mock(return_value=False)
     monkeypatch.setattr('jdamr_cube_navigation.restaurant_service.static_corridor_clear',
-                        lambda *args: False)
+                        static_check)
     assert not node._reverse_path_valid(path)
+    assert static_check.call_args.args[-1] == outline
+    node._reverse_footprint.assert_not_called()
     node.validate_reverse_path.call_async.assert_not_called()
 
 
@@ -2952,8 +2958,13 @@ def test_zero_turn_drive_commands_no_rotation_and_stops_at_the_distance(monkeypa
     travelled = node._drive_zero_turn(0.10)
     assert 0.10 - 1e-9 <= travelled <= 0.12 + 1e-9    # stops on the first odom step past it
     assert all(w == 0.0 for _v, w in published)
-    assert {v for v, _w in published[:-5]} == {restaurant_service.STRAIGHT_ESCAPE_SPEED_MPS}
-    assert published[-5:] == [(0.0, 0.0)] * 5
+    # Motion commands, then only zero commands: the stop burst and the settle
+    # window that keeps commanding zero while the smoother decelerates.
+    first_stop = published.index((0.0, 0.0))
+    assert {v for v, _w in published[:first_stop]} == {
+        restaurant_service.STRAIGHT_ESCAPE_SPEED_MPS}
+    assert published[first_stop:] == [(0.0, 0.0)] * (len(published) - first_stop)
+    assert len(published) - first_stop >= 5
 
 
 @pytest.mark.parametrize('distance_m, expected_speed, approach_time_s', [
@@ -3802,8 +3813,10 @@ def test_in_place_trim_commands_no_translation_and_stops_early_by_the_overshoot(
     early = restaurant_service.TRIM_STOP_RAD
     assert math.radians(2.0) - early <= turned <= math.radians(2.0) - early + 0.003
     assert all(v == 0.0 for v, _w in published)
-    assert {w for _v, w in published[:-5]} == {restaurant_service.TRIM_ANGULAR_RADPS}
-    assert published[-5:] == [(0.0, 0.0)] * 5
+    first_stop = published.index((0.0, 0.0))
+    assert {w for _v, w in published[:first_stop]} == {restaurant_service.TRIM_ANGULAR_RADPS}
+    assert published[first_stop:] == [(0.0, 0.0)] * (len(published) - first_stop)
+    assert len(published) - first_stop >= 5
 
 
 @pytest.mark.parametrize('points, poses, hit', [
@@ -4339,8 +4352,9 @@ def test_rear_input_gap_keeps_same_motion_and_respects_task_deadline(
 
 
 @pytest.mark.parametrize('intermediate', [True, False])
+@pytest.mark.parametrize('next_capture', ['continuous', 'motion', 'gap', 'contract'])
 def test_intermediate_stationary_capture_uses_short_hold_without_relaxing_inputs(
-        monkeypatch, intermediate):
+        monkeypatch, intermediate, next_capture):
     node = route()
     clock = [10.0]
     node._guard_failure = lambda *_a, **_k: None
@@ -4367,6 +4381,24 @@ def test_intermediate_stationary_capture_uses_short_hold_without_relaxing_inputs
     assert 0.08 <= clock[0]-10.0 < (.3 if intermediate else 1.3)
     if not intermediate:
         assert clock[0]-10.0 >= node.parking_contract['hold_s']
+    if next_capture == 'motion':
+        node.parking_motion_revision += 1
+    elif next_capture == 'gap':
+        clock[0] += max(node.parking_contract['sample_max_age_s'],
+                        node.parking_contract['observation_timeout_s']) + .1
+    elif next_capture == 'contract':
+        node.parking_contract = {**node.parking_contract,
+                                 'xy_tolerance_m': node.parking_contract['xy_tolerance_m'] / 2}
+    started_s = clock[0]
+    _, evidence = node.capture_stationary_pose(intermediate=intermediate)
+    assert evidence['confirmed']
+    elapsed_s = clock[0] - started_s
+    if next_capture == 'continuous':
+        assert 0.0 < elapsed_s < .1  # A fresh sample, without another full hold.
+    else:
+        required_s = (restaurant_service.DIRECT_STOP_CONFIRM_S if intermediate
+                      else node.parking_contract['hold_s'])
+        assert elapsed_s >= required_s
 
 
 @pytest.mark.parametrize('failure', [None, RuntimeError('controller_server parameter read timed out')])

@@ -1,6 +1,5 @@
-# Wheel odom + gyro yaw rate (robot_localization EKF, planar). Not included in any
-# bringup: see evaluation/20260930_ITEMS34_LOCALIZATION_LATTICE.md for the wiring
-# (base driver publish_tf false) and the measurements behind it.
+# Wheel velocity + bias-corrected gyro yaw rate. real_bringup_imu.launch.py
+# remaps the raw wheel stream and makes this filter the sole odom TF source.
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
@@ -12,7 +11,8 @@ ekf_filter_node:
     base_link_frame: base_footprint
     world_frame: odom
     # vx, vy (0 for a differential base) and vyaw from the wheels; the driver's twist
-    # covariance is 1e-3 for vx and 1e-2 for vyaw.
+    # covariance is 1e-3 for vx and 1e-2 for vyaw. Wheel yaw remains available
+    # as a fallback; corrected gyro rate has the stronger measurement weight.
     odom0: /odom
     odom0_config: [false, false, false,
                    false, false, false,

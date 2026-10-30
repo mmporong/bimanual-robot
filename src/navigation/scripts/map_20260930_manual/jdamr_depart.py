@@ -79,13 +79,14 @@ ROS_ENV = ('export ROS_DOMAIN_ID=12 ROS_LOCALHOST_ONLY=0 '
 # Nav2 session and every short-lived Pi participant use loopback UDP without shared
 # memory: under LOCALHOST rmw_fastrtps always adds shared memory, and a joining
 # participant froze the Nav2 container by invalidating its port (2026-09-30).
-DDS_PROFILE = P2 / 'fastdds_udp_loopback.xml'
-PI_DDS_ENV = ('export ROS_DOMAIN_ID=12 ROS_LOCALHOST_ONLY=0 ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET '
-              f'FASTRTPS_DEFAULT_PROFILES_FILE={DDS_PROFILE}; unset FASTDDS_BUILTIN_TRANSPORTS')
 # Loopback UDP did not stop the container deadlock (churn test 2026-09-30 10:55);
 # keep the project-standard LOCALHOST transport and test per-process Nav2 nodes.
 PI_SOURCE = f'set +u; source /opt/ros/jazzy/setup.bash; source {PI_WS}/install/setup.bash; {ROS_ENV}'
 SESSION_DISCOVERY = 'LOCALHOST'
+# The shared Astra is owned by Windows in the current serving scenario.
+CAMERA_TRANSPORT = os.environ.get('JDAMR_CAMERA_TRANSPORT', 'windows_tcp')
+if CAMERA_TRANSPORT not in ('windows_tcp', 'usb'):
+    raise ValueError('JDAMR_CAMERA_TRANSPORT must be windows_tcp or usb')
 # 9/29's last session ran without composition (plan v4.1 E4); a composed container
 # deadlocked when a participant joined (three reproductions on 2026-09-30).
 SESSION_COMPOSITION = 'false'
@@ -105,6 +106,7 @@ DESTINATIONS = (json.loads((P2 / 'destinations.json').read_text())['destinations
 VIA_ID = 'water_station'
 TABLES = ('table_01', 'table_02')
 ACTIVE_MAP_SESSION = None
+ACTIVE_MAP_POINTER = None
 STATION_PROFILES = None
 # Nominal observation and escape distances from destinations.json's face.
 # Table_01 joins its observation point along the aisle instead of returning
@@ -126,13 +128,13 @@ def configure_map_session(pointer):
     pi_base = Path(PI_HOME) / 'jdamr_data' / relative
     pi_runtime = pi_base / runtime.relative_to(base)
     paths = {
-        'ACTIVE_MAP_SESSION': profile, 'BASE': base, 'P2': runtime,
+        'ACTIVE_MAP_SESSION': profile, 'ACTIVE_MAP_POINTER': Path(pointer).expanduser().resolve(),
+        'BASE': base, 'P2': runtime,
         'MAP_YAML': runtime / 'map.yaml', 'KEEPOUT_YAML': runtime / 'keepout.yaml',
         'REGISTRY': runtime / 'service_destinations.yaml',
         'ANNOTATION': runtime / 'annotation.json', 'CLICK': runtime / 'rviz_initialpose.json',
         'STATE': runtime / 'state.json', 'PI_BASE': pi_base, 'PI_P2': pi_runtime,
         'PI_REGISTRY': pi_runtime / 'service_destinations.yaml',
-        'DDS_PROFILE': runtime / 'fastdds_udp_loopback.xml',
         'DESTINATIONS': json.loads((runtime / 'destinations.json').read_text())['destinations'],
         'TABLES': tuple(profile['station_ids']),
         'STATION_PROFILES': runtime / 'station_profiles.json',
@@ -155,8 +157,8 @@ def configure_map_session(pointer):
             'markers': {},
         }) + '\n')
     state = load_state()
-    pointer_doc = json.loads(Path(pointer).expanduser().read_text())
-    reference_path = Path(pointer_doc['dock_scan_reference']).expanduser()
+    profiles = json.loads(STATION_PROFILES.read_text())
+    reference_path = Path(profiles['home']['dock_scan']['reference_path'])
     reference = json.loads(reference_path.read_text())
     if reference['map_identity'] != dock_map_identity():
         raise ValueError('dock scan reference belongs to a different map')
@@ -183,47 +185,29 @@ def select_stop_state(pointer):
 
 
 def prepare_reference_mount():
-    """Derive a candidate tilt from the new reference, retaining nominal translation."""
-    import numpy as np
-    from jdamr_cube_navigation.station_parking_reference import TaughtStationReference
+    """Copy the selected mount; teaching references must not redefine hardware TF."""
+    from jdamr_cube_navigation.box_docking_target import _validated_mount
 
-    profiles = json.loads(STATION_PROFILES.read_text())
-    config = profiles['stations'][TABLES[0]].get('rgbd_reference')
-    if config is None:
-        raise ValueError('taught station requires an explicit RGB-D reference configuration')
-    model = TaughtStationReference(config)
-    position = config['camera_position_m']
-    if (len(position) != 3 or not all(
-            isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value) for value in position)):
-        raise ValueError('nominal camera position must have three finite metre values')
-    optical_to_unpitched = np.asarray([[0., 0., 1.], [-1., 0., 0.], [0., -1., 0.]])
-    rotation = model.R_base_from_optical @ optical_to_unpitched.T
-    roll = math.atan2(rotation[2, 1], rotation[2, 2])
-    pitch = math.atan2(-rotation[2, 0], math.hypot(rotation[0, 0], rotation[1, 0]))
-    yaw = math.atan2(rotation[1, 0], rotation[0, 0])
-    document = {'camera_mount': {
-        'status': 'derived', 'parent_frame': 'base_link', 'child_frame': 'camera_link',
-        'transform': dict(zip(('x_m', 'y_m', 'z_m', 'roll_rad', 'pitch_rad', 'yaw_rad'),
-                              [*map(float, position), roll, pitch, yaw])),
-        'table_observation': {'base_offset_m': 0.5},
-        'table_edge_calibration': {'enabled': False},
-        'provenance': {'source': config['reference_capture_path'],
-                       'basis_source': model.basis.basis_source,
-                       'plane_rms_m': model.basis.plane_rms_m,
-                       'camera_position_source': config.get('camera_position_source'),
-                       'camera_yaw_source': config.get('camera_yaw_source'),
-                       'translation_basis': 'existing_urdf_nominal_mount_geometry',
-                       'orientation_basis': 'reference_tabletop_plane_fit_with_nominal_yaw',
-                       'mount_calibration_complete': False,
-                       'millimeter_accuracy_validated': False},
-    }}
+    canonical = (TOOLS.parents[1]
+                 / 'jdamr_cube_navigation/config/camera_mount_current.yaml')
+    document = yaml.safe_load(canonical.read_text())
+    _validated_mount(document)
     (P2 / 'camera_mount.yaml').write_text(yaml.safe_dump(document, sort_keys=False))
     return True
 
 
 def prepare_reference_camera():
-    """Enable both reference streams on the existing single Astra driver."""
+    """Prepare the selected sensor source without restarting it between tasks."""
+    if CAMERA_TRANSPORT == 'windows_tcp':
+        # The user unit owns the sole receiver. The USB unit must stay inactive.
+        active = pi('systemctl is-active jdamr-box-rgbd.service', check=False).stdout.strip()
+        if active == 'active':
+            pi('sudo -n systemctl stop jdamr-box-rgbd.service')
+        pi('export XDG_RUNTIME_DIR=/run/user/$(id -u); '
+           'systemctl --user start jdamr-astra-tcp.service && '
+           'sudo -n systemctl start jdamr-box-observer.service')
+        log('camera: continuous Windows AST1 receiver and observer; no USB launch')
+        return
     if ACTIVE_MAP_SESSION is None:
         return
     source = (f'source /opt/ros/jazzy/setup.bash; '
@@ -302,16 +286,16 @@ def station_escape_xy(dest_id):
 
 
 def station_region(state, dest_id):
-    """Use a saved region, or the taught-map face when this map introduced the stop."""
-    region = state.get('regions', {}).get(dest_id)
-    if region is not None:
-        return region
+    """Derive current-map regions from current teaching, not a cached old pose."""
     if ACTIVE_MAP_SESSION is not None and dest_id in DESTINATIONS:
         return {
             'xy': list(DESTINATIONS[dest_id]['face_xy']),
             'radius_m': REGION_RADIUS_M,
             'basis': 'taught-map destination face',
         }
+    region = state.get('regions', {}).get(dest_id)
+    if region is not None:
+        return region
     fail(f'{dest_id} region is missing')
 
 
@@ -414,8 +398,12 @@ def mark_localized(value):
 
 
 def session_active():
-    return pi('systemctl is-active jdamr-restaurant-navigation.service',
-              timeout=SSH_READ_TIMEOUT_S, check=False).stdout.strip() == 'active'
+    for _attempt in range(2):
+        result = pi('systemctl is-active jdamr-restaurant-navigation.service',
+                    timeout=SSH_READ_TIMEOUT_S, check=False)
+        if result.returncode != 255:
+            return result.returncode == 0
+    return False
 
 
 def refuse_during_cycle(action):
@@ -528,8 +516,16 @@ def cmd_sync(_args):
             fail(f'{name} differs after sync')
     if ACTIVE_MAP_SESSION is not None:
         profiles = json.loads(STATION_PROFILES.read_text())
-        reference_paths = set()
+        source_map = Path(ACTIVE_MAP_SESSION['map_hashes']['source']['yaml_path'])
+        reference_paths = {
+            source_map,
+            source_map.parent / yaml.safe_load(source_map.read_text())['image'],
+            Path(profiles['home']['source_record']),
+            Path(profiles['home']['dock_scan']['reference_path']),
+            Path(profiles['home']['dock_scan']['scan_path']),
+        }
         for station_id, station in profiles['stations'].items():
+            reference_paths.add(Path(station['source_record']))
             config = station.get('rgbd_reference')
             if config is None:
                 continue
@@ -545,6 +541,14 @@ def cmd_sync(_args):
                f'{HOST}:{shlex.quote(str(remote))}')
             if pi(f'sha256sum {shlex.quote(str(remote))}').stdout.split()[0] != sha256(source):
                 fail(f'{source.name} reference differs after sync')
+        # Publish selection after its inputs, including departure mode and IDs.
+        remote_pointer = Path(PI_HOME) / 'jdamr_data' / ACTIVE_MAP_POINTER.relative_to(DATA_ROOT)
+        pi(f'mkdir -p {shlex.quote(str(remote_pointer.parent))}')
+        sh(f'rsync -a --protect-args {shlex.quote(str(ACTIVE_MAP_POINTER))} '
+           f'{HOST}:{shlex.quote(str(remote_pointer))}')
+        if pi(f'sha256sum {shlex.quote(str(remote_pointer))}').stdout.split()[0] != sha256(
+                ACTIVE_MAP_POINTER):
+            fail('map session pointer differs after sync')
     log('map assets and taught references synced to the Pi (hashes match)')
 
 
@@ -712,8 +716,12 @@ def cmd_session_start(_args):
 
 
 def executor_active():
-    return pi(f'systemctl is-active {EXECUTOR_UNIT}',
-              timeout=SSH_READ_TIMEOUT_S, check=False).stdout.strip() == 'active'
+    for _attempt in range(2):
+        result = pi(f'systemctl is-active {EXECUTOR_UNIT}',
+                    timeout=SSH_READ_TIMEOUT_S, check=False)
+        if result.returncode != 255:
+            return result.returncode == 0
+    return False
 
 
 def start_executor():
@@ -724,7 +732,8 @@ def start_executor():
                f'--serve {EXECUTOR_SPOOL}')
     pi(f'mkdir -p {EXECUTOR_SPOOL} && sudo -n systemd-run --unit={EXECUTOR_UNIT} --collect '
        f'--property=User={PI_USER} --property=KillSignal=SIGTERM --property=TimeoutStopSec=30 '
-       f'--setenv=HOME={PI_HOME} --working-directory={PI_WS} /bin/bash -c {shlex.quote(command)}',
+       f'--setenv=HOME={PI_HOME} --setenv=OPENBLAS_NUM_THREADS=1 --setenv=OMP_NUM_THREADS=1 '
+       f'--working-directory={PI_WS} /bin/bash -c {shlex.quote(command)}',
        check=False)
     active = executor_active()
     log(f'{EXECUTOR_UNIT}: ' + ('active' if active else 'not active'))
@@ -751,6 +760,36 @@ def cmd_session_stop(_args):
 
 
 # ---------------------------------------------------------------- init
+def capture_motion_failure(odometry):
+    """Reject sustained motion and an unsettled capture end, not isolated spikes."""
+    if not odometry:
+        return 'scan capture returned no odometry'
+    moving_since_s = None
+    previous_stamp_s = None
+    for sample in odometry:
+        stamp_s, linear_mps, angular_radps = (
+            sample['stamp'], sample['v'], sample['w'])
+        if (not all(math.isfinite(value) for value in (
+                stamp_s, linear_mps, angular_radps))
+                or previous_stamp_s is not None and stamp_s < previous_stamp_s):
+            return 'scan capture odometry is invalid or time-regressed'
+        previous_stamp_s = stamp_s
+        moving = abs(linear_mps) > 0.02 or abs(angular_radps) > 0.02
+        if not moving:
+            moving_since_s = None
+            continue
+        if moving_since_s is None:
+            moving_since_s = stamp_s
+        # Match the existing precision stop confirmation interval. A lone EKF
+        # angular-velocity spike must not invalidate otherwise stationary scans.
+        if stamp_s - moving_since_s >= 0.08:
+            return ('robot is moving during capture '
+                    f'(linear={linear_mps:.3f} m/s, angular={angular_radps:.3f} rad/s)')
+    if moving_since_s is not None:
+        return 'scan capture ended before odometry confirmed stop'
+    return None
+
+
 def capture_scan(path):
     script = (TOOLS / 'capture_scan2.py').read_text()
     result = pi(f'{PI_SOURCE}; python3 - 40', stdin=script, timeout=60)
@@ -761,9 +800,9 @@ def capture_scan(path):
     data = json.loads(line[5:])
     if len(data['scans']) < 20:
         fail(f'only {len(data["scans"])} scans captured')
-    moving = max(max(abs(o['v']), abs(o['w'])) for o in data['odom'])
-    if moving > 0.02:
-        fail(f'robot is moving during capture (odom {moving:.3f})')
+    motion_failure = capture_motion_failure(data['odom'])
+    if motion_failure:
+        fail(motion_failure)
     return data
 
 
@@ -775,12 +814,18 @@ def refine_pose(scan_path, click):
     local_score, pose = scan_match.search(score, pts, seed, xy_half=MATCH_CLICK_XY_M,
                                           yaw_half=MATCH_CLICK_YAW_RAD)
     inlier = float((score(pts, *pose)[1] < 0.05).mean())
-    ranked = dock_survey.global_pose(score, pts, free, res, origin)
-    best = ranked[0]['pose']
-    agree = (math.dist(best[:2], pose[:2]) <= 0.1
-             and abs(wrap(best[2] - pose[2])) <= math.radians(3.0))
+    registered_dock = (ACTIVE_MAP_SESSION is not None
+                       and click.get('source') == 'registered_dock')
+    best, agree = None, False
+    if not registered_dock:
+        ranked = dock_survey.global_pose(score, pts, free, res, origin)
+        best = ranked[0]['pose']
+        agree = (math.dist(best[:2], pose[:2]) <= 0.1
+                 and abs(wrap(best[2] - pose[2])) <= math.radians(3.0))
     return {'pose': [float(v) for v in pose], 'mean_dist_m': float(local_score),
-            'inlier_5cm': float(inlier), 'global_best': [float(v) for v in best],
+            'inlier_5cm': float(inlier),
+            'global_best': None if best is None else [float(v) for v in best],
+            'global_search_performed': not registered_dock,
             'global_agrees': bool(agree), 'click': [float(v) for v in seed],
             'click_offset_m': float(math.dist(seed[:2], pose[:2])),
             'click_offset_deg': float(math.degrees(wrap(seed[2] - pose[2])))}
@@ -791,10 +836,15 @@ def dock_map_identity():
     return [sha256(MAP_YAML), sha256(MAP_YAML.parent / meta['image'])]
 
 
-def refine_at_registered_dock(scan_path, click, reference):
+def refine_at_registered_dock(scan_path, click, reference, *, diagnostics=None):
     """Match a stated dock placement to its anchored scan, never to a rolling seed."""
-    if click.get('source') != 'registered_dock' or not isinstance(reference, dict):
+    def reject(reason, **values):
+        if diagnostics is not None:
+            diagnostics.update(accepted=False, reason=reason, **values)
         return None
+
+    if click.get('source') != 'registered_dock' or not isinstance(reference, dict):
+        return reject('registered_dock_reference_not_selected')
     import numpy as np
     try:
         for key in ('home_pose', 'pose_map'):
@@ -802,11 +852,11 @@ def refine_at_registered_dock(scan_path, click, reference):
             if (not isinstance(values, (tuple, list)) or len(values) != 3
                     or not all(isinstance(v, (float, int)) and not isinstance(v, bool)
                                and math.isfinite(v) for v in values)):
-                return None
+                return reject('dock_reference_pose_invalid', field=key)
         if (reference['map_identity'] != dock_map_identity()
                 or math.dist(reference['home_pose'][:2], (click['x_m'], click['y_m'])) > .001
                 or abs(wrap(reference['home_pose'][2] - click['yaw_rad'])) > .001):
-            return None
+            return reject('dock_reference_identity_mismatch')
         current, *_c, laser, _data = scan_match.laser_points(str(scan_path))
         anchored, *_a, old_laser, _old = scan_match.laser_points(reference['scan_path'])
         minimum_matched_points = 80
@@ -814,27 +864,40 @@ def refine_at_registered_dock(scan_path, click, reference):
                 or math.dist(laser[:2], old_laser[:2]) > .001
                 or abs(wrap(laser[2] - old_laser[2])) > .001
                 or not np.isfinite(current).all() or not np.isfinite(anchored).all()):
-            return None
+            return reject('dock_scan_geometry_or_support_invalid',
+                          current_points=len(current), reference_points=len(anchored),
+                          current_laser=list(laser), reference_laser=list(old_laser))
 
         def transformed(pose):
             c, s = math.cos(pose[2]), math.sin(pose[2])
             return current @ np.array([[c, s], [-s, c]]) + pose[:2]
 
+        def support_distances(relative_pose):
+            moved = transformed(relative_pose)
+            squared = np.sum(
+                (moved[:, None, :] - anchored[None, :, :]) ** 2, axis=2)
+            distances = np.sqrt(np.min(squared, axis=1))
+            reverse_distances = np.sqrt(np.min(squared, axis=0))
+            return distances, reverse_distances
+
         def score(_points, x_m, y_m, yaw_rad):
-            moved = transformed((x_m, y_m, yaw_rad))
-            distances = np.sqrt(np.min(np.sum(
-                (moved[:, None, :] - anchored[None, :, :]) ** 2, axis=2), axis=1))
-            return float(np.mean(np.sort(distances)[:int(.65 * len(distances))])), distances
+            distances, reverse_distances = support_distances((x_m, y_m, yaw_rad))
+            # Fit the common support required below in both directions. New
+            # chairs/occlusions can change most returns without moving the dock;
+            # scoring 65% of all current returns forced those outliers into the fit.
+            common_mean = max(
+                np.mean(np.sort(distances)[:minimum_matched_points]),
+                np.mean(np.sort(reverse_distances)[:minimum_matched_points]))
+            return float(common_mean), distances
 
         best, relative = scan_match.search(
             score, current, (0., 0., 0.), xy_half=.15, yaw_half=math.radians(10))
         if (math.hypot(*relative[:2]) >= .145 or abs(relative[2]) >= math.radians(9.5)
                 or best > .02):
-            return None
-        _, distances = score(current, *relative)
+            return reject('dock_match_residual_or_search_boundary',
+                          relative_pose=list(relative), common_mean_m=best)
+        distances, reverse_distances = support_distances(relative)
         inliers = distances < .05
-        reverse_distances = np.sqrt(np.min(np.sum(
-            (anchored[:, None, :] - transformed(relative)[None, :, :]) ** 2, axis=2), axis=1))
         sectors = np.floor((np.arctan2(current[inliers, 1], current[inliers, 0])
                             + math.pi) / (math.pi / 2)).astype(int) % 4
         supported_sectors = sum(np.count_nonzero(sectors == i) >= 8 for i in range(4))
@@ -845,34 +908,92 @@ def refine_at_registered_dock(scan_path, click, reference):
         if (min(np.count_nonzero(inliers), np.count_nonzero(reference_inliers))
                 < minimum_matched_points
                 or supported_sectors < 3):
-            return None
-        # A corridor wall or rotationally symmetric landmark cannot anchor a pose.
+            return reject('dock_match_common_support_insufficient',
+                          current_support=int(np.count_nonzero(inliers)),
+                          reference_support=int(np.count_nonzero(reference_inliers)),
+                          supported_sectors=supported_sectors)
+        # Compare the same support in every uniqueness trial. Reselecting the
+        # nearest 80 points lets a different wall fragment replace the dock and
+        # makes a distinct anchored placement appear ambiguous.
+        fixed_support_mean = max(
+            float(np.mean(distances[inliers])),
+            float(np.mean(reverse_distances[reference_inliers])))
+        uniqueness_trials = []
+        ambiguous_translations = []
+        origin = reference['pose_map']
+        c, s = math.cos(origin[2]), math.sin(origin[2])
+
+        def registered_pose(relative_pose):
+            return [float(origin[0] + c * relative_pose[0] - s * relative_pose[1]),
+                    float(origin[1] + s * relative_pose[0] + c * relative_pose[1]),
+                    float(wrap(origin[2] + relative_pose[2]))]
+
+        def inside_registered_region(candidate):
+            return (math.dist(candidate[:2], (click['x_m'], click['y_m'])) <= .2
+                    and abs(wrap(candidate[2] - click['yaw_rad'])) <= math.radians(15))
+
         for axis, delta in ((0, .06), (1, .06), (2, math.radians(3))):
             for sign in (-1, 1):
                 trial = list(relative)
                 trial[axis] += sign * delta
-                if score(current, *trial)[0] <= best + .003:
-                    return None
-        origin = reference['pose_map']
-        c, s = math.cos(origin[2]), math.sin(origin[2])
-        pose = [float(origin[0] + c * relative[0] - s * relative[1]),
-                float(origin[1] + s * relative[0] + c * relative[1]),
-                float(wrap(origin[2] + relative[2]))]
-        if (math.dist(pose[:2], (click['x_m'], click['y_m'])) > .2
-                or abs(wrap(pose[2] - click['yaw_rad'])) > math.radians(15)):
-            return None
+                forward_trial, reverse_trial = support_distances(trial)
+                trial_mean = max(
+                    float(np.mean(forward_trial[inliers])),
+                    float(np.mean(reverse_trial[reference_inliers])))
+                uniqueness_trials.append({
+                    'axis': axis, 'delta': sign * delta,
+                    'fixed_support_mean_m': trial_mean})
+                if trial_mean <= fixed_support_mean + .003:
+                    # The stated registered dock supplies the location prior.
+                    # A bounded translation along a wall is seed uncertainty,
+                    # not proof of a unique millimetre pose. Keep rotational
+                    # ambiguity and candidates outside that prior as failures.
+                    if axis == 2 or not inside_registered_region(registered_pose(trial)):
+                        return reject('dock_match_ambiguous_fixed_support',
+                                      fixed_support_mean_m=fixed_support_mean,
+                                      trial=uniqueness_trials[-1])
+                    ambiguous_translations.append(uniqueness_trials[-1])
+        pose = registered_pose(relative)
+        if not inside_registered_region(pose):
+            return reject('dock_match_outside_registered_region', matched_pose=pose)
+        seed_covariance = dict(INIT_COVARIANCE)
+        if ambiguous_translations:
+            deltas = [(entry['delta'] if entry['axis'] == 0 else 0.,
+                       entry['delta'] if entry['axis'] == 1 else 0.)
+                      for entry in ambiguous_translations]
+            seed_covariance['covariance_x_m2'] += max(
+                (c * dx - s * dy) ** 2 for dx, dy in deltas)
+            seed_covariance['covariance_y_m2'] += max(
+                (s * dx + c * dy) ** 2 for dx, dy in deltas)
+        basis = ('anchored_dock_scan_registered_prior' if ambiguous_translations
+                 else 'anchored_dock_scan')
+        if diagnostics is not None:
+            diagnostics.update(accepted=True, reason=basis,
+                               current_support=int(np.count_nonzero(inliers)),
+                               reference_support=int(np.count_nonzero(reference_inliers)),
+                               supported_sectors=supported_sectors,
+                               fixed_support_mean_m=fixed_support_mean,
+                               uniqueness_trials=uniqueness_trials,
+                               ambiguous_translation_trials=ambiguous_translations,
+                               seed_covariance=seed_covariance)
         return {'pose': pose, 'mean_dist_m': best, 'inlier_5cm': float(inliers.mean()),
+                'score_basis': 'bidirectional_common_dock_support',
                 'reference_inlier_5cm': float(reference_inliers.mean()),
                 'current_inlier_count': int(np.count_nonzero(inliers)),
                 'reference_inlier_count': int(np.count_nonzero(reference_inliers)),
                 'minimum_matched_points': minimum_matched_points,
-                'global_agrees': False, 'basis': 'anchored_dock_scan',
+                'uniqueness_basis': 'fixed_bidirectional_inlier_support',
+                'fixed_support_mean_m': fixed_support_mean,
+                'uniqueness_trials': uniqueness_trials,
+                'ambiguous_translation_trials': ambiguous_translations,
+                'seed_covariance': seed_covariance,
+                'global_agrees': False, 'basis': basis,
                 'reference': reference, 'relative_pose': [float(v) for v in relative],
                 'click': [click['x_m'], click['y_m'], click['yaw_rad']],
                 'click_offset_m': math.dist(pose[:2], (click['x_m'], click['y_m'])),
                 'click_offset_deg': math.degrees(wrap(pose[2] - click['yaw_rad']))}
-    except (OSError, ValueError, KeyError, TypeError, StopIteration):
-        return None
+    except (OSError, ValueError, KeyError, TypeError, StopIteration) as error:
+        return reject('dock_reference_read_or_calculation_error', detail=str(error))
 
 
 # The cycle runs on the Pi; a PC that loses ssh keeps polling this long before it
@@ -945,14 +1066,23 @@ def cmd_init(args):
     log(f'click ({click["x_m"]:.3f}, {click["y_m"]:.3f}, '
         f'{math.degrees(click["yaw_rad"]):.1f} deg), age {age:.0f} s')
     capture_scan(run_dir / 'scan.json')
+    anchor_diagnostic = {}
     refined = refine_at_registered_dock(
-        run_dir / 'scan.json', click, state.get('dock_scan_reference'))
+        run_dir / 'scan.json', click, state.get('dock_scan_reference'),
+        diagnostics=anchor_diagnostic)
+    (run_dir / 'dock_anchor_diagnostic.json').write_text(
+        json.dumps(anchor_diagnostic, indent=1))
     dock_reference_used = refined is not None
     if refined is None:
+        log('dock anchor: ' + anchor_diagnostic.get('reason', 'not_available'))
         refined = refine_pose(run_dir / 'scan.json', click)
     pose = refined['pose']
-    basis = 'anchored dock scan' if dock_reference_used else 'map scan'
-    global_result = 'not evaluated for dock scan' if dock_reference_used else refined['global_agrees']
+    basis = ('bounded dock-prior scan' if refined.get('ambiguous_translation_trials')
+             else 'anchored dock scan' if dock_reference_used else 'map scan')
+    global_result = ('not evaluated for dock scan' if dock_reference_used else
+                     'not required for registered dock'
+                     if refined.get('global_search_performed') is False else
+                     refined['global_agrees'])
     log(f'{basis} match ({pose[0]:.3f}, {pose[1]:.3f}, {math.degrees(pose[2]):.1f} deg) '
         f'inlier {refined["inlier_5cm"]:.2f}, click offset {refined["click_offset_m"]:.2f} m / '
         f'{refined["click_offset_deg"]:.1f} deg, global agrees {global_result}')
@@ -965,20 +1095,33 @@ def cmd_init(args):
         if not args.local_only or override < MATCH_OVERRIDE_FLOOR:
             fail(f'--min-inlier needs --local-only and >= {MATCH_OVERRIDE_FLOOR}')
         min_inlier = override
+    # A stated dock placement already supplies the global location. Keep the
+    # normal map inlier bound and the anchor's existing 20 cm / 15 deg window;
+    # an unrelated global winner must not veto this bounded local match.
+    dock_local_match = (
+        ACTIVE_MAP_SESSION is not None and click['source'] == 'registered_dock'
+        and refined['inlier_5cm'] >= MATCH_MIN_INLIER
+        and refined['click_offset_m'] <= .2
+        and abs(refined['click_offset_deg']) <= 15.)
+    refined['registered_dock_local_match'] = dock_local_match
     refined['min_inlier_used'] = None if dock_reference_used else min_inlier
-    refined['threshold_basis'] = 'anchored_dock_scan' if dock_reference_used else 'map_scan'
+    refined['threshold_basis'] = (refined['basis'] if dock_reference_used else
+                                  'registered_dock_local_map' if dock_local_match else 'map_scan')
     (run_dir / 'refine.json').write_text(json.dumps(refined, indent=1))
     if not dock_reference_used and (
             refined['inlier_5cm'] < min_inlier
-            or not (refined['global_agrees'] or args.local_only)):
+            or not (refined['global_agrees'] or args.local_only or dock_local_match)):
         fail('scan does not match the map near the click; check placement or click again')
     initial = {'frame_id': 'map', 'x_m': pose[0], 'y_m': pose[1], 'yaw_rad': pose[2],
-               **INIT_COVARIANCE,
+               **refined.get('seed_covariance', INIT_COVARIANCE),
                'provenance': {'purpose': ('localization_seed_from_anchored_dock_scan'
                                           if dock_reference_used else
                                           'localization_seed_from_scan_match'),
                               'click': refined['click'], 'refine': 'refine.json',
-                              'covariance_basis': 'seed spread (5 cm, 5 deg), not measured'}}
+                              'covariance_basis': (
+                                  'seed spread plus bounded dock translation ambiguity, not measured'
+                                  if refined.get('ambiguous_translation_trials') else
+                                  'seed spread (5 cm, 5 deg), not measured')}}
     (run_dir / 'initial_pose.yaml').write_text(yaml.safe_dump(initial, sort_keys=False))
     sh(f'rsync -a {shlex.quote(str(run_dir))}/ {HOST}:{shlex.quote(str(pi_run_dir))}/')
     log('activating navigation (no motion) with the scan-matched seed')
@@ -1169,7 +1312,9 @@ def run_cycle(args, state, table_id):
                    f'--log {pi_run_dir}/cycle_events.jsonl '
                    f'--candidate-trial --execute --task-timeout-s {TASK_TIMEOUT_S} '
                    + ('--rear-box-only ' if rear_box_only else
+                      '--search ' if getattr(args, 'park_only', False) else
                       f'--search --return-home --return-timeout-s {RETURN_TIMEOUT_S} ')
+                   + ('--camera-always-on ' if CAMERA_TRANSPORT == 'windows_tcp' else '')
                    + f'--operator-heartbeat {heartbeat} '
                    f'--surface-mode {surface_mode} '
                    + (' --home-only ' if args.dock_only else '')
@@ -1186,6 +1331,12 @@ def run_cycle(args, state, table_id):
                       if getattr(args, 'dwell_s', None) is not None else '')
                    + (' --zero-turn-final ' if getattr(args, 'zero_turn_final', False) else '')
                    + (' --resume-at-observation ' if args.resume_at_observation else '')
+                   + (f' --reapproach-m {args.reapproach_m} '
+                      if getattr(args, 'reapproach_m', None) is not None else '')
+                   + (f' --station-left-correction-m {args.station_left_correction_m} '
+                      if getattr(args, 'station_left_correction_m', 0.0) else '')
+                   + (f' --reapproach-from-log {shlex.quote(str(pi_path(args.reapproach_from_log)))} '
+                      if getattr(args, 'reapproach_from_log', None) else '')
                    + (f' --resume-parked-from-log {shlex.quote(args.resume_parked_log)} '
                       if args.resume_parked_log else '')
                    + ('' if not include_via else
@@ -1258,7 +1409,8 @@ def run_cycle(args, state, table_id):
         stops = ('rear box only' if rear_box_only else 'dock only' if args.dock_only else
                  f'{VIA_ID} -> {table_id}' if include_via else f'{table_id}')
         submission_label = 'SUBMISSION_UNCONFIRMED' if submission_uncertain else 'SUBMITTED'
-        log(f'{submission_label} {stops} -> dock: unit {unit}, log {run_dir}/cycle_events.jsonl, '
+        ending = ' (hold at station)' if getattr(args, 'park_only', False) else ' -> dock'
+        log(f'{submission_label} {stops}{ending}: unit {unit}, log {run_dir}/cycle_events.jsonl, '
             f'request_submit_s={time.monotonic() - requested_s:.3f}')
         seen, bag_checked, departed_s, lost_since = 0, False, time.monotonic(), None
         first_event_reported = False
@@ -1413,6 +1565,19 @@ def cmd_go(args):
     if with_via and surface_mode != 'table_edge':
         fail('--with-via is only valid with --surface-mode table_edge')
     tables = list(getattr(args, 'table_ids', None) or [args.table_id])
+    reapproach_m = getattr(args, 'reapproach_m', None)
+    correction_m = getattr(args, 'station_left_correction_m', 0.0)
+    if reapproach_m is not None:
+        if not (math.isfinite(reapproach_m) and 0.2 <= reapproach_m <= 0.3
+                and len(tables) == 1 and args.park_only and surface_mode == 'table_edge'
+                and not (args.dock_only or args.rear_box_only or with_via
+                         or args.resume_parked_log or tables[0] != VIA_ID and not args.skip_via)):
+            fail('--reapproach-m requires one --park-only table_edge station, 0.2–0.3 m')
+    if (not math.isfinite(correction_m) or abs(correction_m) > 0.05
+            or correction_m and reapproach_m is None):
+        fail('--station-left-correction-m requires --reapproach-m and at most 0.05 m')
+    if getattr(args, 'reapproach_from_log', None) is not None and reapproach_m is None:
+        fail('--reapproach-from-log requires --reapproach-m')
     if getattr(args, 'rear_box_only', False) and (
             len(tables) != 1 or args.dock_only or with_via or args.resume_parked_log):
         fail('--rear-box-only requires one standalone parking attempt')
@@ -1470,7 +1635,8 @@ def go_one(args, table_id):
     fresh_departure = not any(getattr(args, flag, False) for flag in (
         'resume_at_observation', 'resume_at_final_approach', 'resume_parked_log',
         'dock_only', 'rear_box_only', 'route', 'region', 'skip_via'))
-    if (fresh_departure and state.get('init_pose_source') == 'anchored_dock_scan'
+    if (fresh_departure and state.get('init_pose_source') in (
+            'anchored_dock_scan', 'registered_dock_local_map')
             and state.get('init_local_only') is not True
             and controller_wait_failed(events)):
         log('controller unavailable before motion; restoring only Nav2/executor '
@@ -1489,6 +1655,12 @@ def go_one(args, table_id):
         if not parked or parked[-1].get('confirmed') is not True:
             fail('rear box parking not confirmed; see the run log')
         log('후면 박스 1cm 주차 완료(라이다 내부 추정)')
+        return
+    if getattr(args, 'park_only', False):
+        if not any(e.get('event') == 'box_approach_finished'
+                   and e.get('table_id') == table_id for e in events):
+            fail('selected station parking not confirmed; holding position')
+        log(f'{table_id}: 정밀주차 완료(센서 내부 추정), 현 위치 유지')
         return
     arrived = [e for e in events if e.get('event') == 'home_arrived']
     home = bool(arrived) and arrived[-1].get('confirmation', {}).get('confirmed') is True
@@ -1698,7 +1870,8 @@ def cmd_status(_args):
 def main():
     context = argparse.ArgumentParser(add_help=False)
     context.add_argument('--map-session', type=Path,
-                         default=os.environ.get('JDAMR_MAP_SESSION'))
+                         default=os.environ.get('JDAMR_MAP_SESSION', str(
+                             DATA_ROOT / 'maps/current_manual_mapping.json')))
     context.add_argument('--legacy-map', action='store_true',
                          help='Explicit archival access to the previous map; never selected by default')
     selected, remaining = context.parse_known_args()
@@ -1707,7 +1880,7 @@ def main():
         if remaining and remaining[0] in (
                 'stop', 'estop', 'session-stop', 'display-stop', 'status'):
             select_stop_state(selected.map_session)
-        else:
+        elif ACTIVE_MAP_POINTER != selected.map_session.expanduser().resolve():
             configure_map_session(selected.map_session)
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1747,6 +1920,14 @@ def main():
     go.add_argument('--with-via', action='store_true',
                     help='explicitly include the water-station stop (already the default)')
     go.add_argument('--dock-only', action='store_true', help='return to the dock only (re-dock)')
+    go.add_argument('--park-only', action='store_true',
+                    help='park at the selected station and hold there without returning home')
+    go.add_argument('--reapproach-m', type=float,
+                    help='retreat from the current observed table, then approach it again')
+    go.add_argument('--station-left-correction-m', type=float, default=0.0,
+                    help='this reapproach only: shift the current lateral position left')
+    go.add_argument('--reapproach-from-log', type=Path,
+                    help='carry the previous confirmed parked face to the retreat')
     go.add_argument('--rear-box-only', action='store_true',
                     help='current-location rear LiDAR box parking, without transit')
     go.add_argument('--surface-mode', choices=('front', 'table_edge'), default='table_edge',

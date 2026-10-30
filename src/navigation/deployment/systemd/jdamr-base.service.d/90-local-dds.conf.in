@@ -3,4 +3,4 @@ Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 Environment=ROS_LOCALHOST_ONLY=0
 Environment=FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 ExecStart=
-ExecStart=/bin/bash -c "set +u; source /opt/ros/jazzy/setup.bash; source @JDAMR_WS@/install/setup.bash; exec ros2 launch jdamr_cube_bringup real_bringup.launch.py wheel_radius:=0.0329 wheel_separation:=0.510 discovery_range:=LOCALHOST"
+ExecStart=/bin/bash -c "set +u; source /opt/ros/jazzy/setup.bash; source @JDAMR_WS@/install/setup.bash; exec ros2 launch jdamr_cube_navigation real_bringup_imu.launch.py wheel_radius:=0.0329 wheel_separation:=0.510 discovery_range:=LOCALHOST"

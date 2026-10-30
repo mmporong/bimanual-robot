@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import importlib.util
+import argparse
 from pathlib import Path
 import sys
 
 from _common import (
-    DATA_ROOT, PC_WORKSPACE, REPO_ROOT, bootstrap_assets, prepare_user_service_environment,
+    PC_WORKSPACE, REPO_ROOT, bootstrap_assets, map_session_pointer,
+    prepare_user_service_environment,
 )
 
 
@@ -20,15 +22,19 @@ def _load_helper():
     # The helper reads these during import.  setdefault keeps explicit operator
     # overrides authoritative.
     import os
-    pointer = Path(os.environ.get(
-        'JDAMR_MAP_SESSION', str(DATA_ROOT / 'maps/current_manual_mapping.json')))
-    if '--legacy-map' in sys.argv:
-        bootstrap_assets()
-        os.environ.pop('JDAMR_MAP_SESSION', None)
-    elif not any(arg == '--map-session' or arg.startswith('--map-session=')
-                 for arg in sys.argv[1:]):
+    context = argparse.ArgumentParser(add_help=False)
+    context.add_argument('--map-session', type=Path)
+    context.add_argument('--legacy-map', action='store_true')
+    selected, remaining = context.parse_known_args(sys.argv[1:])
+    pointer = map_session_pointer(selected.map_session)
+    readonly_context = any(arg in (
+        '--help', '-h', 'stop', 'estop', 'session-stop', 'display-stop', 'status'
+    ) for arg in remaining)
+    if selected.legacy_map:
+        bootstrap_assets(legacy=True)
+    else:
         if not pointer.is_file() and not any(
-                arg in ('--help', '-h', 'stop', 'estop', 'session-stop', 'display-stop')
+                arg in ('--help', '-h', 'stop', 'estop', 'session-stop', 'display-stop', 'status')
                 for arg in sys.argv[1:]):
             raise FileNotFoundError(
                 f'current taught-map pointer is missing: {pointer}; '
@@ -45,7 +51,13 @@ def _load_helper():
         raise RuntimeError("cannot load the preserved JD-AMR departure helper")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-
+    # API callers and the CLI bind the same current map before any operation.
+    # Importing this helper must never leave its archival defaults active.
+    if not selected.legacy_map and pointer.is_file():
+        if readonly_context:
+            module.select_stop_state(pointer)
+        else:
+            module.configure_map_session(pointer)
     return module
 
 

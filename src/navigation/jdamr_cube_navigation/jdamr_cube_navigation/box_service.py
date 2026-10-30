@@ -18,7 +18,10 @@ from ament_index_python.packages import get_package_share_directory
 from jdamr_cube_navigation.box_docking_target import (
     _validated_mount, compute_box_docking_target, MINIMUM_DISTANCE_M,
 )
-from jdamr_cube_navigation.box_lidar_witness import witness_box_face_with_lidar
+from jdamr_cube_navigation.box_lidar_witness import (
+    MAX_CANDIDATE_PLANE_DISTANCE_M, MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD,
+    witness_box_face_with_lidar,
+)
 from jdamr_cube_navigation.corridor_route import (
     load_route, spin_node, TRANSIT_PLAN_END_TOLERANCE_M)
 from jdamr_cube_navigation.docking_stop_profile import apply_docking_stop_profile
@@ -34,6 +37,9 @@ from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
 from jdamr_cube_navigation.station_parking_reference import (
     anchor_face_to_taught_lateral,
+    CAPTURE_EQUALS_GOAL,
+    CAPTURE_OFFSET_FROM_GOAL,
+    filter_station_goal_observations,
     LATERAL_PRECISION_STATUS,
     TaughtStationReference,
 )
@@ -48,7 +54,7 @@ import rclpy
 from rclpy.duration import Duration
 from rclpy.parameter import Parameter, parameter_value_to_python
 from rclpy.parameter_client import AsyncParameterClient
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import CameraInfo, Image
 from tf2_ros import TransformException
@@ -66,6 +72,8 @@ FINAL_PLAN_END_TOLERANCE_M = 0.06
 # That plan check still ends 5 cm from the face; the straight approach then closes to
 # the contract's target_front_gap_m.
 FINAL_PLAN_GAP_M = 0.05
+# The face-alignment leg squares the base this far in front of the observed face.
+FACE_ALIGNMENT_FRONT_GAP_M = 0.45
 # The Parking straight stops inside its 1 cm goal checker before the goal: 38 parks
 # at a 5 cm target (09-30 to 10-02) ended at 5.51 cm on average (sd 0.10 cm, internal
 # estimate), so the Parking straight runs this much further (no record for Graceful).
@@ -74,7 +82,15 @@ FINAL_STOP_SHORT_M = 0.005
 FINAL_GAP_TOLERANCE_M = 0.01
 TABLE_FINE_GAP_TOLERANCE_M = 0.003
 TABLE_FINE_MAX_CORRECTIONS = 3
+# Also the smallest fine correction worth commanding: a shorter move can neither
+# be executed reliably (0.7-1.7 mm stop latency at 0.01 m/s) nor shown as progress.
 TABLE_FINE_MIN_PROGRESS_M = 0.001
+# surface_only has no lateral tracking. Farther from the registered lateral
+# position than the face-alignment goal checker's own tolerance, the existing
+# Nav2 face-alignment leg re-stages the base instead of a straight approach.
+SURFACE_ONLY_RESTAGE_LATERAL_M = MAXIMUM_CONTRACT_VALUES['xy_tolerance_m']
+# One sideways re-stage per visit; a second would repeat the same Nav2 leg.
+TABLE_LATERAL_RESTAGE_LIMIT = 1
 # Before the straight the base is turned onto the face normal when it is off by more
 # than this: face alignment ended 2.9 deg off (inside its 3 deg), the straight added
 # 0.4 deg and the 3.28 deg stop failed the contract (2026-10-06 16:00, water station).
@@ -141,6 +157,8 @@ STOP_DWELL_S = 0.0
 SURFACE_MODES = ('front', 'table_edge')
 STATION_REFERENCE_MAX_AGE_S = 0.5
 STATION_REFERENCE_MIN_PERIOD_S = 0.2
+STATION_REFERENCE_QOS = QoSProfile(
+    depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 def front_lead_m(front_extent_m, half_width_m, heading_error_rad):
@@ -248,7 +266,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.station_reference_result = None
         self.station_reference_result_received_s = None
         self.station_reference_goal = None
+        self.station_reference_control_goal = None
+        self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
+        self._station_reference_goal_samples = deque(maxlen=5)
         self.station_reference_image_subscription = None
         self.station_reference_info_subscription = None
         self._station_reference_pending = None
@@ -339,6 +360,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 continue
             started_s = time.monotonic()
             image, info, stamp_s = pending
+            contact_reference = None
+            tracking_checkpoint = None
             try:
                 stamp = rclpy.time.Time(seconds=stamp_s)
                 base = self.parking_contract['robot_base_frame']
@@ -352,16 +375,22 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     STATION_REFERENCE_MAX_AGE_S - age_s))
                 odom_transform = self.parking_tf.lookup_transform(
                     'odom', base, stamp, timeout=wait).transform
-                map_from_odom = self.parking_tf.lookup_transform(
-                    'map', 'odom', stamp, timeout=wait).transform
                 odom_pose = (
                     odom_transform.translation.x,
                     odom_transform.translation.y,
                     self._yaw(odom_transform.rotation),
                 )
+                contact_reference = self.station_reference.contact_reference
+                if contact_reference is not None:
+                    tracking_checkpoint = contact_reference.tracking_checkpoint()
                 result = self.station_reference.observe(
                     image, info, odom_pose, stamp_s)
                 if result.get('valid') is True:
+                    # The correction is measured in odom at image time. Map is
+                    # its current presentation frame, not a second image-time
+                    # dependency that may hold up fresh lateral feedback.
+                    map_from_odom = self.parking_tf.lookup_transform(
+                        'map', 'odom', rclpy.time.Time()).transform
                     goal = result['goal_odom']
                     turn = self._yaw(map_from_odom.rotation)
                     cosine, sine = math.cos(turn), math.sin(turn)
@@ -371,6 +400,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         map_from_odom.translation.y + sine * goal[0] + cosine * goal[1],
                         math.atan2(math.sin(goal[2] + turn), math.cos(goal[2] + turn)),
                     ]
+                    result['goal_map_transform_time'] = 'latest_at_completion'
             except Exception as error:
                 result = {
                     'valid': False,
@@ -378,9 +408,65 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     'detail': str(error),
                     'stamp_s': stamp_s,
                 }
+            result['runtime_processing_s'] = time.monotonic() - started_s
+            result['image_age_at_completion_s'] = (
+                self.get_clock().now().nanoseconds * 1e-9 - stamp_s)
+            if (result.get('valid') is True
+                    and not 0.0 <= result['image_age_at_completion_s']
+                    <= STATION_REFERENCE_MAX_AGE_S):
+                # Expired images cannot seed the control filter or its static
+                # consistency baseline, even when their image match succeeded.
+                result = dict(result, valid=False,
+                              reason='processing_exceeded_image_age')
             with self._station_reference_lock:
+                reference = self.station_reference
+                if (result.get('valid') is True
+                        and result.get('goal_left_offset_m')
+                        != reference.goal_left_offset_m + reference.run_left_offset_m):
+                    # Computed before this run's correction was bound; drop it.
+                    continue
+                samples = getattr(self, '_station_reference_goal_samples', None)
+                if (result.get('valid') is True and contact_reference is not None
+                        and samples is not None and len(samples) >= 3):
+                    goals = [sample['goal_odom'] for sample in samples]
+                    baseline = np.median(np.asarray(goals)[:, :2], axis=0)
+                    heading = goals[-1][2]
+                    candidate = result['goal_odom']
+                    lateral_jump = ((candidate[0] - baseline[0]) * -math.sin(heading)
+                                    + (candidate[1] - baseline[1]) * math.cos(heading))
+                    yaw_jump = math.atan2(math.sin(candidate[2] - heading),
+                                          math.cos(candidate[2] - heading))
+                    lateral_limit = 4. * self.station_reference_profile['lateral_tolerance_m']
+                    yaw_limit = self.parking_contract['yaw_tolerance_rad']
+                    result['quality'].update(
+                        static_goal_lateral_jump_m=lateral_jump,
+                        static_goal_yaw_jump_rad=yaw_jump)
+                    if abs(lateral_jump) > lateral_limit or abs(yaw_jump) > yaw_limit:
+                        # The taught cup/bottle pair is static in this run.
+                        # An isolated wrong pair must not steer the base or
+                        # move the next frame's tracking window.
+                        contact_reference.restore_tracking(tracking_checkpoint)
+                        result = dict(result, valid=False,
+                                      reason='station_reference_inconsistent_static_goal')
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
+                if result.get('valid') is True:
+                    # Collect during transit/observation, not just when the
+                    # moving controller first asks for a destination.
+                    if samples is None:
+                        samples = self._station_reference_goal_samples = deque(maxlen=5)
+                    if not samples or stamp_s > samples[-1]['stamp_s']:
+                        samples.append(dict(result))
+            status = (result.get('reason') if result.get('valid') is not True else
+                      'fresh' if result['image_age_at_completion_s'] <= STATION_REFERENCE_MAX_AGE_S
+                      else 'processing_exceeded_image_age')
+            if status != getattr(self, '_station_reference_reported_status', None):
+                self._station_reference_reported_status = status
+                self.emit('station_reference_input_status', status=status,
+                          processing_s=result['runtime_processing_s'],
+                          image_age_s=result['image_age_at_completion_s'],
+                          quality=result.get('quality', {}),
+                          detail=result.get('detail'))
             remaining_s = STATION_REFERENCE_MIN_PERIOD_S - (
                 time.monotonic() - started_s)
             if remaining_s > 0.0:
@@ -431,13 +517,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         taught = tuple(float(value) for value in taught)
         rgbd = profile.get('rgbd_reference')
         mode = profile.get('reference_mode', 'rgbd_auxiliary')
-        if mode not in ('rgbd', 'rgbd_auxiliary', 'map_pose_only'):
+        if mode not in ('rgbd', 'rgbd_auxiliary', 'map_pose_only', 'surface_only'):
             raise ValueError(f'unsupported station reference mode: {mode}')
-        if mode != 'map_pose_only' and not isinstance(rgbd, dict):
+        visual_reference = mode not in ('map_pose_only', 'surface_only')
+        if visual_reference and not isinstance(rgbd, dict):
             raise ValueError(f'RGB-D station reference missing: {table_id}')
-        if mode == 'map_pose_only' and rgbd is not None:
-            raise ValueError('map-only station must not carry an RGB-D reference')
-        reference = TaughtStationReference(rgbd) if mode != 'map_pose_only' else None
+        if not visual_reference and rgbd is not None:
+            raise ValueError('non-visual station must not carry an RGB-D reference')
+        reference = TaughtStationReference(rgbd) if visual_reference else None
         self._station_reference_stop.set()
         self._station_reference_wake.set()
         worker = getattr(self, '_station_reference_thread', None)
@@ -451,21 +538,24 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.station_reference_result = None
             self.station_reference_result_received_s = None
         self.station_reference_goal = None
+        self.station_reference_control_goal = None
+        self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
+        self._station_reference_goal_samples = deque(maxlen=5)
         self.station_reference = reference
         self.station_reference_mode = mode
         self.station_reference_profile = profile
         self.station_reference_taught_map_pose = taught
         self.station_reference_table_id = table_id
-        if mode != 'map_pose_only':
+        if visual_reference:
             if self.station_reference_info_subscription is None:
                 self.station_reference_info_subscription = self.create_subscription(
                     CameraInfo, '/camera/color/camera_info',
-                    self._station_info_callback, qos_profile_sensor_data)
+                    self._station_info_callback, STATION_REFERENCE_QOS)
             if self.station_reference_image_subscription is None:
                 self.station_reference_image_subscription = self.create_subscription(
                     Image, '/camera/color/image_raw',
-                    self._station_image_callback, qos_profile_sensor_data)
+                    self._station_image_callback, STATION_REFERENCE_QOS)
             self._station_reference_stop.clear()
             self._station_reference_wake.clear()
             self._station_reference_thread = threading.Thread(
@@ -476,6 +566,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             'station_reference_configured', table_id=table_id,
             target_role='operator_taught_map_pose_and_heading',
             reference_mode=mode,
+            lateral_control_enabled=self._station_reference_enabled(),
             lateral_tolerance_m=0.005,
             lateral_precision_status=LATERAL_PRECISION_STATUS,
             millimeter_accuracy_validated=False)
@@ -542,21 +633,150 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return {'valid': False, 'reason': 'station_reference_stale'}
         return result
 
-    def _station_goal_reference(self):
-        """Carry an accepted fixed goal in odom across rejected RGB frames.
+    def _station_goal_reference(self, *, freeze=False):
+        """Hold the reference anchor while steering on recent visual feedback.
 
-        The stored object is a destination, never obstacle or sensor evidence.
-        Its original stamp and current observation validity remain visible.
+        Both control and arrival use the same filtered goal in raw odom. The
+        frozen anchor remains diagnostic until the aligned terminal band.
+        In that band the accepted goal is held while RGB-D remains diagnostic.
+        A carried destination is never fresh obstacle or sensor evidence.
         """
         reference = self._fresh_station_reference()
-        if (reference and reference.get('valid') is True
+        terminal_goal = getattr(self, '_station_terminal_goal', None)
+        if terminal_goal is not None:
+            # Keep the accepted terminal destination; fresh images still
+            # report diagnostics, but cannot move it during the last cm.
+            return terminal_goal, reference
+        mode = getattr(self, 'station_reference_mode', None)
+        frozen = getattr(self, 'station_reference_goal_frozen', False)
+        anchor = getattr(self, 'station_reference_goal', None)
+        if (frozen and anchor and anchor.get('reason')
+                == 'operator_measured_relative_lateral_correction'):
+            return anchor, reference
+        if mode == 'rgbd_auxiliary':
+            # The taught destination is primary. A rejected visual pose is
+            # diagnostic evidence, not permission to move the goal or go home.
+            if not getattr(self, 'station_reference_goal_frozen', False):
+                mapped = self._map_station_reference()
+                if mapped.get('valid') is True:
+                    self.station_reference_goal = dict(mapped)
+            return getattr(self, 'station_reference_goal', None), reference
+        if reference and reference.get('valid') is True:
+            if mode == 'map_pose_only':
+                if not frozen:
+                    self.station_reference_goal = dict(reference)
+            else:
+                with self._station_reference_lock:
+                    samples = getattr(self, '_station_reference_goal_samples', None)
+                    if samples is None:
+                        samples = self._station_reference_goal_samples = deque(maxlen=5)
+                    stamp_s = reference['stamp_s']
+                    if not samples or stamp_s > samples[-1]['stamp_s']:
+                        samples.append(dict(reference))
+                    recent = [dict(sample) for sample in samples
+                              if sample['stamp_s'] <= stamp_s] + [reference]
+                filtered = filter_station_goal_observations(
+                    recent, STATION_REFERENCE_MAX_AGE_S)
+                previous = getattr(self, 'station_reference_control_goal', None)
+                self.station_reference_control_goal = filtered
+                if not frozen:
+                    self.station_reference_goal = dict(filtered)
+                if previous is None or filtered['stamp_s'] > previous['stamp_s']:
+                    self.emit('table_station_feedback_updated',
+                              reference_frame='odom', goal_odom=filtered['goal_odom'],
+                              observation_stamp_s=filtered['stamp_s'],
+                              observation_odom_pose=reference.get('observation_odom_pose'),
+                              sample_count=filtered['goal_filter_sample_count'],
+                              xy_spread_m=filtered['goal_filter_xy_spread_m'],
+                              anchor_frozen=frozen)
+        anchor = getattr(self, 'station_reference_goal', None)
+        goal = (getattr(self, 'station_reference_control_goal', None) or anchor
+                if mode != 'map_pose_only' else anchor)
+        if (freeze and goal is not None
+                and getattr(self, 'station_reference_mode', None) == 'rgbd'
+                and reference and reference.get('valid') is True
                 and not getattr(self, 'station_reference_goal_frozen', False)):
-            self.station_reference_goal = dict(reference)
-        goal = getattr(self, 'station_reference_goal', None)
+            self.station_reference_goal_frozen = True
+            self.emit('table_station_goal_frozen', reference_frame='odom',
+                      reason='rgbd_anchor_held_live_feedback_continues',
+                      goal_odom=list(anchor['goal_odom']),
+                      observation_stamp_s=goal.get('stamp_s'),
+                      reference_capture_path=self.station_reference.assumptions.get(
+                          'reference_capture_path'),
+                      reference_capture_sha256=self.station_reference.assumptions.get(
+                          'reference_capture_sha256'))
         return goal, reference
+
+    def _bind_station_correction_to_rgbd(self, correction_m, sample_count=5,
+                                         timeout_s=3.0):
+        """Express an operator's lateral correction in the image reference frame.
+
+        The base is still parked where the operator measured it. The median of
+        fresh stationary observations is the bound goal's left offset from the
+        base; shifting the goal by ``correction_m - median`` puts it
+        ``correction_m`` left of the base, and later live images keep steering
+        to that place instead of a fixed raw-odom point.
+        """
+        reference = getattr(self, 'station_reference', None)
+        if reference is None:
+            return None
+        deadline_s = time.monotonic() + timeout_s
+        lefts, observation = {}, None
+        while (not self.stop_requested and time.monotonic() < deadline_s
+               and len(lefts) < sample_count):
+            observation = self._fresh_station_reference()
+            if observation and observation.get('valid') is True:
+                lefts[observation['stamp_s']] = observation['left_m']
+            time.sleep(0.05)
+        if len(lefts) < 3:
+            self.emit('station_correction_rgbd_binding_unavailable',
+                      reason='fewer_than_three_stationary_rgbd_observations',
+                      sample_count=len(lefts),
+                      last_reason=(observation.get('reason') if observation else None))
+            return None
+        median_m = float(np.median(list(lefts.values())))
+        run_offset_m = reference.run_left_offset_m + correction_m - median_m
+        try:
+            with self._station_reference_lock:
+                reference.set_run_left_offset(run_offset_m)
+                # Results with the previous offset must not reach the filter.
+                self.station_reference_result = None
+                self.station_reference_result_received_s = None
+                self._station_reference_goal_samples = deque(maxlen=5)
+        except ValueError as error:
+            self.emit('station_correction_rgbd_binding_unavailable', reason=str(error),
+                      sample_count=len(lefts), stationary_left_median_m=median_m)
+            return None
+        self.station_reference_goal = None
+        self.station_reference_control_goal = None
+        self._station_terminal_goal = None
+        self.station_reference_goal_frozen = False
+        return {
+            'basis': 'operator_correction_bound_to_rgbd_reference',
+            'operator_left_correction_m': correction_m,
+            'stationary_sample_count': len(lefts),
+            'stationary_left_median_m': median_m,
+            'stationary_left_spread_m': max(lefts.values()) - min(lefts.values()),
+            'capture_goal_left_offset_m': reference.goal_left_offset_m,
+            'run_left_offset_m': run_offset_m,
+        }
 
     def _station_anchor_target(self, target, *, reference_frame='map'):
         """Keep the measured normal/gap and select only the taught tangent."""
+        mode = getattr(self, 'station_reference_mode', None)
+        taught_map = getattr(self, 'station_reference_taught_map_pose', None)
+        if mode == 'surface_only' and reference_frame == 'map' and taught_map is not None:
+            # Coarse placement only. The visible edge midpoint follows the
+            # camera view, so the face-alignment goal uses the registered
+            # lateral position; the 1 cm approach still applies no lateral
+            # fine correction and never confirms a lateral arrival.
+            anchored = anchor_face_to_taught_lateral(target, taught_map[:2])
+            anchored.update(lateral_reference_mode='surface_only_registered_map_pose',
+                            lateral_reference='registered_map_pose_coarse_placement',
+                            lateral_tolerance_m=SURFACE_ONLY_RESTAGE_LATERAL_M,
+                            lateral_fine_correction=False, rgbd_reference_valid=False,
+                            millimeter_accuracy_validated=False)
+            return anchored
         if not self._station_reference_enabled():
             return target
         goal, reference = self._station_goal_reference()
@@ -565,6 +785,23 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         else:
             taught = goal.get('goal_map') if goal else None
         if taught is None:
+            if mode == 'rgbd':
+                # The observed face still supplies its normal and gap. Until
+                # the current taught RGB-D goal is available, the map target
+                # steers to the registered pose like the live controller does;
+                # it is never lateral arrival evidence.
+                pending = {'lateral_reference_mode': 'rgbd',
+                           'lateral_goal_pending': True,
+                           'rgbd_reference_valid': False,
+                           'rgbd_reference_reason': (
+                               reference.get('reason') if reference
+                               else 'station_reference_not_observed'),
+                           'millimeter_accuracy_validated': False}
+                if reference_frame == 'map' and taught_map is not None:
+                    return {**anchor_face_to_taught_lateral(target, taught_map[:2]),
+                            **pending,
+                            'lateral_goal_basis': 'registered_map_pose_until_rgbd_match'}
+                return {**target, **pending}
             if reference_frame == 'map':
                 taught = self.station_reference_taught_map_pose
             else:
@@ -585,9 +822,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if not self._station_reference_enabled():
             return {}
         goal_reference, reference = self._station_goal_reference()
+        registered_goal = getattr(self, 'station_reference_mode', None) in (
+            'map_pose_only', 'rgbd_auxiliary')
+        auxiliary = getattr(self, 'station_reference_mode', None) == 'rgbd_auxiliary'
+        valid_reference = bool(reference and reference.get('valid') is True)
+        if auxiliary:
+            valid_reference = bool(goal_reference is not None
+                                   and self._navigation_ready(require_fresh_amcl=False))
         status = {
-            'lateral_reference_valid': bool(
-                reference and reference.get('valid') is True),
+            'lateral_reference_valid': valid_reference,
             'lateral_reference_reason': (
                 reference.get('reason') if reference
                 else 'station_reference_not_observed'),
@@ -599,21 +842,70 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             'lateral_goal_valid': goal_reference is not None,
             'lateral_goal_basis': (
                 ('registered_map_pose_in_odom'
-                 if getattr(self, 'station_reference_mode', None) == 'map_pose_only'
+                 if registered_goal
                  else 'accepted_rgbd_goal_in_odom') if goal_reference is not None else None),
             'lateral_goal_observation_stamp_s': (
                 goal_reference.get('stamp_s') if goal_reference else None),
+            'lateral_goal_frozen': bool(
+                getattr(self, 'station_reference_goal_frozen', False)),
+            'lateral_goal_odom': None,
+            'lateral_actual_odom': None,
+            'lateral_anchor_odom': (list(self.station_reference_goal['goal_odom'])
+                                    if getattr(self, 'station_reference_goal', None)
+                                    else None),
+            'rgbd_observed_lateral_error_m': None,
+            'rgbd_goal_lateral_difference_m': None,
         }
+        if getattr(self, 'station_reference_mode', None) == 'rgbd':
+            status.update(
+                rgbd_reference_valid=bool(reference and reference.get('valid') is True),
+                rgbd_reference_reason=(reference.get('reason') if reference else
+                                       'station_reference_not_observed'),
+                rgbd_observation_stamp_s=(reference.get('stamp_s') if reference else None),
+                rgbd_goal_left_offset_m=(self.station_reference.goal_left_offset_m
+                                         + self.station_reference.run_left_offset_m),
+                reference_capture_path=self.station_reference.assumptions.get(
+                    'reference_capture_path'),
+                reference_capture_sha256=self.station_reference.assumptions.get(
+                    'reference_capture_sha256'))
+        if auxiliary:
+            status.update(
+                lateral_reference_reason='registered_map_pose_with_auxiliary_rgbd',
+                rgbd_reference_valid=bool(reference and reference.get('valid') is True),
+                rgbd_reference_reason=(reference.get('reason') if reference else
+                                       'station_reference_not_observed'))
+        if (goal_reference and goal_reference.get('reason')
+                == 'operator_measured_relative_lateral_correction'):
+            status['lateral_goal_basis'] = 'operator_measured_relative_goal_in_odom'
+            status['lateral_reference_reason'] = 'operator_measured_relative_lateral_correction'
         if reference and reference.get('detail'):
             status['lateral_reference_detail'] = reference['detail']
         if goal_reference is None or not status['lateral_reference_valid']:
             return status
         try:
             actual = self._odom_pose()
-            goal = reference['goal_odom']
-            left = (-math.sin(goal[2]), math.cos(goal[2]))
+            goal = goal_reference['goal_odom']
+            # Use the same measured face tangent as the moving controller.
+            heading = getattr(self, '_station_face_heading_odom_rad', None)
+            if heading is None:
+                heading = goal[2]
+            left = (-math.sin(heading), math.cos(heading))
             error_m = ((goal[0] - actual[0]) * left[0]
                        + (goal[1] - actual[1]) * left[1])
+            status.update(lateral_goal_odom=list(goal), lateral_actual_odom=list(actual),
+                          lateral_face_heading_odom_rad=heading,
+                          lateral_feedback_sample_count=goal_reference.get(
+                              'goal_filter_sample_count'),
+                          lateral_feedback_xy_spread_m=goal_reference.get(
+                              'goal_filter_xy_spread_m'))
+            if (getattr(self, 'station_reference_mode', None) == 'rgbd'
+                    and reference and reference.get('valid') is True):
+                observed_goal = reference['goal_odom']
+                status['rgbd_observed_lateral_error_m'] = sum(
+                    (observed_goal[i] - actual[i]) * left[i] for i in (0, 1))
+                anchor = self.station_reference_goal['goal_odom']
+                status['rgbd_goal_lateral_difference_m'] = sum(
+                    (observed_goal[i] - anchor[i]) * left[i] for i in (0, 1))
         except (KeyError, RuntimeError, TypeError, ValueError):
             status['lateral_reference_valid'] = False
             status['lateral_goal_valid'] = False
@@ -1096,13 +1388,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         One recoverable input gap restarts the window from a new stationary
         capture. Each observer stamp is judged once. A verdict with fewer than
         stable_frames fresh frames after an input delay is latency-limited.
+        One motion-triggered recapture discards the old window without extending
+        the current deadline; repeated movement remains a failed observation.
         """
         if getattr(self, 'candidate_trial', False) is not True:
             raise RuntimeError(
                 'box observation consumption requires explicit candidate trial')
         call_started_s = time.monotonic()
         self._ensure_depth_info()
-        robot_pose, _ = self.capture_stationary_pose(intermediate=True)
+        robot_pose, _ = self.capture_stationary_pose(intermediate=False)
         self._observation_pose_diagnostic(robot_pose, camera_mount, region_xy)
         self._observer_camera_mount = camera_mount
         if getattr(self, 'pointcloud_perception', False):
@@ -1132,6 +1426,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         fresh_rejection_reasons = set()
         evaluated_stamps = set()
         counted_rejection_s = None
+        motion_recaptured = False
 
         def emit_evidence(reason, retryable):
             latency_limited = bool(latency_reasons) and (
@@ -1145,6 +1440,35 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 region_xy=list(region_xy))
             return latency_limited
 
+        def recapture_after_motion():
+            nonlocal robot_pose, revision, cutoff_s, cutoff_monotonic_s
+            nonlocal motion_recaptured, fresh_since_latency
+            nonlocal last_failure, last_failure_retryable
+            if motion_recaptured or self.stop_requested:
+                raise RuntimeError('robot moved during stationary box observation')
+            remaining_s = deadline_s - time.monotonic()
+            if remaining_s <= 0.:
+                raise RuntimeError('stationary observation recapture timed out')
+            # Discard the moving window. A new hold and fresh TF are mandatory;
+            # the original observation deadline is never extended by motion.
+            robot_pose, _ = self.capture_stationary_pose(
+                timeout_s=remaining_s, intermediate=False)
+            revision = self.parking_motion_revision
+            now_monotonic_s = time.monotonic()
+            cutoff_s += now_monotonic_s - cutoff_monotonic_s
+            cutoff_monotonic_s = now_monotonic_s
+            motion_recaptured = True
+            latency_reasons.add('stationary_motion_recapture')
+            fresh_since_latency = 0
+            fresh_rejection_reasons.clear()
+            evaluated_stamps.clear()
+            rejected_observation_stamps.clear()
+            last_failure = 'no_stable_box'
+            last_failure_retryable = False
+            self.emit('box_observation_stationary_recaptured',
+                      motion_revision=revision, cutoff_s=cutoff_s,
+                      robot_pose=list(robot_pose), original_deadline_preserved=True)
+
         while not self.stop_requested and time.monotonic() < deadline_s:
             spin_node(self, timeout_sec=0.05)
             if not self._navigation_ready(require_fresh_amcl=False):
@@ -1157,7 +1481,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     latency_reasons.add('input_gap')
                     fresh_since_latency = 0
                     fresh_rejection_reasons.clear()
-                    robot_pose, _ = self.capture_stationary_pose(intermediate=True)
+                    robot_pose, _ = self.capture_stationary_pose(intermediate=False)
                     self._observation_pose_diagnostic(robot_pose, camera_mount, region_xy)
                     self._observer_camera_mount = camera_mount
                     if (not self._set_depth_window(region_radius_m)
@@ -1177,7 +1501,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 emit_evidence(reason, False)
                 raise RuntimeError(reason)
             if self.parking_motion_revision != revision:
-                raise RuntimeError('robot moved during stationary box observation')
+                recapture_after_motion()
+                continue
             observation = self.box_status
             received_s = getattr(self, 'box_status_received_s', None)
             if (isinstance(observation, dict) and received_s is not None
@@ -1235,7 +1560,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     })
                     retryable = False
                     if self.parking_motion_revision != revision:
-                        raise ValueError('robot moved during table edge observation')
+                        recapture_after_motion()
+                        continue
                     retryable = True
                     if math.dist(target['face_center_map_xy_m'], region_xy) > region_radius_m:
                         raise ValueError('observed_table_edge_outside_selected_table_region')
@@ -1327,7 +1653,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 })
                 retryable = False
                 if self.parking_motion_revision != revision:
-                    raise ValueError('robot moved during box sensor witness')
+                    recapture_after_motion()
+                    continue
                 retryable = True
                 if math.dist(target['face_center_map_xy_m'], region_xy) > region_radius_m:
                     raise ValueError('observed_box_outside_selected_table_region')
@@ -1572,7 +1899,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                            table_id, region_xy, region_radius_m, execute=False,
                            candidate_trial=False, resume_at_observation=False,
                            resume_at_final_approach=False, search=False,
-                           task_timeout_s=240.0):
+                           task_timeout_s=240.0, reapproach_m=None,
+                           station_left_correction_m=0.0, reapproach_from_log=None):
         """Separate transit, face alignment and final approach in the result log."""
         if execute and candidate_trial is not True:
             raise RuntimeError(
@@ -1615,7 +1943,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             raise ValueError('observation route must use map')
         self.table_id = table_id
         self.station_reference_goal = None
+        self.station_reference_control_goal = None
+        self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
+        # Per-visit bounds on the large re-approach motions (issue: repeated
+        # reverse-and-realign cycles within one visit).
+        self._table_clearance_reapproaches = 0
+        self._table_lateral_restages = 0
+        self._station_face_heading_odom_rad = None
+        if reapproach_m is not None:
+            resume_at_observation = True
         self.verify_live_maps()
         if execute and resume_at_observation:
             # An observation resume continues the mission's running battery bound.
@@ -1639,7 +1976,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 raise ValueError('observation route requires a bounded start pose')
             actual, _ = self.capture_stationary_pose(intermediate=True)
         reference = route['waypoints'][-1] if resume_at_observation else start
-        if math.dist(actual[:2], (reference['x'], reference['y'])) > limit_m:
+        if (reapproach_m is None
+                and math.dist(actual[:2], (reference['x'], reference['y'])) > limit_m):
             if resume_at_observation:
                 raise RuntimeError('robot is not at the reached observation region')
             raise RuntimeError('robot is not at the observation route starting place')
@@ -1673,12 +2011,99 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             self.emit('failed', phase='box_camera_ready')
             return False
         search_budget = BoxSearchBudget(target_directed=surface_mode == 'table_edge')
+        if (reapproach_m is not None
+                and (reapproach_from_log is None or station_left_correction_m)
+                and getattr(self, 'station_reference_mode', None) == 'rgbd'):
+            binding = self.station_reference.assumptions.get('reference_goal_binding') or {}
+            # A measured correction follows the image frame, not raw odom: the
+            # fixed odom goal kept every 10 mm correction (2026-10-29 B-D)
+            # inside wheel/IMU drift. Without fresh images the old path remains.
+            bound_correction = (self._bind_station_correction_to_rgbd(
+                station_left_correction_m) if station_left_correction_m else None)
+            goal, observation = self._station_goal_reference()
+            if (binding.get('kind') in (CAPTURE_EQUALS_GOAL, CAPTURE_OFFSET_FROM_GOAL)
+                    and (not station_left_correction_m or bound_correction is not None)):
+                # The requested retreat uses the existing guarded straight
+                # controller. Neither the parked edge nor the first visual
+                # match is needed for an explicitly requested retreat. Fresh
+                # depth and visual feedback are acquired after moving away.
+                self.emit('station_reapproach_started', retreat_m=reapproach_m,
+                          station_left_correction_m=station_left_correction_m,
+                          lateral_goal_reference=goal,
+                          rgbd_bound_correction=bound_correction,
+                          registered_station_unchanged=True,
+                          retreat_basis=(bound_correction['basis'] if bound_correction
+                                         else 'observed_operator_bound_rgbd_goal'),
+                          rgbd_reference_valid=bool(observation and observation.get('valid')),
+                          rgbd_reference_reason=(observation.get('reason')
+                                                 if observation else 'not_observed_yet'),
+                          near_table_edge_required=False)
+                if not self._drive_straight(
+                        -reapproach_m, 'station_reapproach_retreat_finished'):
+                    return False
+                reapproach_m = None
+        if reapproach_m is not None:
+            if reapproach_from_log is None:
+                target = self.observe_target(
+                    camera_mount, front_extent_m, self._final_gap_m(),
+                    region_xy, region_radius_m)
+            else:
+                target = self._logged_reapproach_target(
+                    reapproach_from_log, table_id, region_xy, region_radius_m,
+                    front_extent_m)
+            if target is None:
+                self.emit('failed', phase='station_reapproach', reason='table_face_unavailable')
+                return False
+            actual, _ = self.capture_stationary_pose(intermediate=True)
+            face = target['face_center_map_xy_m']
+            normal = target['outward_normal_map_xy']
+            distance_m = sum((actual[i] - face[i]) * normal[i] for i in (0, 1))
+            clearance_m = distance_m + reapproach_m
+            if not 0.2 <= clearance_m <= ESCAPE_CLEARANCE_M:
+                raise RuntimeError('station reapproach exceeds table escape clearance')
+            self.last_box_face = {
+                'face_center_map_xy_m': list(face),
+                'outward_normal_map_xy': list(normal)}
+            if station_left_correction_m:
+                if not self._station_reference_enabled():
+                    raise RuntimeError('station lateral correction requires a taught reference')
+                # This run's relative correction leaves the registered map pose intact.
+                heading = target['yaw_rad']
+                goal_map = [actual[0] - math.sin(heading) * station_left_correction_m,
+                            actual[1] + math.cos(heading) * station_left_correction_m,
+                            heading]
+                retreat_target = (actual[0] - reapproach_m * math.cos(actual[2]),
+                                  actual[1] - reapproach_m * math.sin(actual[2]), actual[2])
+                _, to_odom = self._frozen_in_odom(self._make_reverse_path(
+                    actual, retreat_target, path_contract=ESCAPE_PATH_CONTRACT))
+                self.station_reference_goal = {
+                    'valid': True, 'reason': 'operator_measured_relative_lateral_correction',
+                    'goal_map': goal_map, 'goal_odom': list(to_odom(*goal_map)),
+                    'stamp_s': self.get_clock().now().nanoseconds * 1e-9,
+                    'reference_mode': self.station_reference_mode}
+                self.station_reference_goal_frozen = True
+            elif reapproach_from_log is not None:
+                # A repeat keeps the preceding fixed goal, rather than teaching
+                # the most recent stopping error as a new destination.
+                previous_goal = target.get('reapproach_goal_reference')
+                if previous_goal is None:
+                    raise RuntimeError('fixed station goal missing from reapproach log')
+                self.station_reference_goal = dict(previous_goal)
+                self.station_reference_goal_frozen = True
+            self.emit('station_reapproach_started', retreat_m=reapproach_m,
+                      station_left_correction_m=station_left_correction_m,
+                      lateral_goal_reference=self.station_reference_goal,
+                      registered_station_unchanged=True)
+            if not self._leave_parked_pose(clearance_m=clearance_m):
+                return False
         # Face alignment happens while depth is still in its usable range.
         straight_to_odom = None
         phases = ((('final_approach', FINAL_PLAN_GAP_M),)
                   if resume_at_final_approach else
-                  (('face_alignment', 0.45), ('final_approach', FINAL_PLAN_GAP_M)))
+                  (('face_alignment', FACE_ALIGNMENT_FRONT_GAP_M),
+                   ('final_approach', FINAL_PLAN_GAP_M)))
         continuous_target = None
+        alignment_restaged = False
         for phase, gap_m in phases:
             # Observation and face alignment are intermediate; the final approach,
             # its confirmation and the final capture keep the strict AMCL bounds.
@@ -1720,21 +2145,49 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                                        - front_lead_m(front_extent_m,
                                                       self.box_front_half_width_m, residual)
                                        - self._final_gap_m())
-                        if (self._final_gap_m() <= 0.01
-                                and abs(residual) <= FINAL_TRIM_MAX_RAD
-                                and 0.0 < remaining_m / math.cos(residual) <= LIVE_APPROACH_MAX_M):
+                        continuous_range = (
+                            self._final_gap_m() <= 0.01
+                            and abs(residual) <= FINAL_TRIM_MAX_RAD
+                            and 0.0 < remaining_m / math.cos(residual) <= LIVE_APPROACH_MAX_M)
+                        forward_m = (
+                            (target['x_m'] - observed_pose[0]) * math.cos(observed_pose[2])
+                            + (target['y_m'] - observed_pose[1]) * math.sin(observed_pose[2]))
+                        restage_reason = lateral_offset_m = None
+                        if self._final_gap_m() <= 0.01 and (continuous_range or forward_m <= 0.0):
+                            # Only where this leg would otherwise be skipped; when it runs
+                            # anyway it already moves to the anchored lateral target.
+                            restage_reason, lateral_offset_m = (
+                                self._table_lateral_restage_reason(target, front_extent_m))
+                            unavailable = (None if restage_reason is None else
+                                           self._table_restage_unavailable(target, observed_pose))
+                            if unavailable is not None:
+                                self.emit('table_lateral_restage_unavailable',
+                                          reason=restage_reason, detail=unavailable,
+                                          lateral_offset_m=lateral_offset_m)
+                                restage_reason = None
+                        if continuous_range and restage_reason is None:
                             # No motion occurred: reuse this accepted face for the final
                             # plan, then refine it from stamped depth while approaching.
                             continuous_target = dict(target)
                             self.emit('table_alignment_transit_skipped',
                                       reason='within_continuous_approach_range',
-                                      remaining_m=remaining_m, heading_error_rad=residual)
+                                      remaining_m=remaining_m, heading_error_rad=residual,
+                                      lateral_offset_m=lateral_offset_m)
                             planned = {'ok': True, 'alignment_skipped': True}
                             break
-                        forward_m = (
-                            (target['x_m'] - observed_pose[0]) * math.cos(observed_pose[2])
-                            + (target['y_m'] - observed_pose[1]) * math.sin(observed_pose[2]))
-                        if forward_m <= 0.0:
+                        if restage_reason is not None:
+                            # A straight approach would keep this lateral offset (or
+                            # cannot absorb it). Use the face-alignment leg below,
+                            # which can move sideways, from turning room; once per
+                            # visit even if an input gap repeats this observation.
+                            if not alignment_restaged:
+                                alignment_restaged = True
+                                if not self._begin_table_lateral_restage(
+                                        target, restage_reason, lateral_offset_m):
+                                    self.emit('failed', phase=phase,
+                                              reason='table_lateral_restage_clearance_failed')
+                                    return False
+                        elif forward_m <= 0.0:
                             # A nearby table needs a normal trim and forward approach,
                             # not a forward-only navigation goal behind the base.
                             self.emit('table_alignment_transit_skipped',
@@ -1747,6 +2200,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         planned = self.plan_pose(
                             target, single=True,
                             end_tolerance_m=MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'])
+                    elif surface_mode == 'table_edge' and self._final_gap_m() <= 0.01:
+                        # The local face controller validates its actual swept
+                        # footprint and live inputs. A Nav2 endpoint is not the
+                        # path executed for this centimetre-scale approach.
+                        planned = {'ok': True, 'controller': 'continuous_table_approach'}
+                        self.emit('table_final_control_selected',
+                                  controller='continuous_table_approach',
+                                  corridor_validation='local_swept_footprint')
                     else:
                         planned = self.plan_pose(
                             target, single=True, end_tolerance_m=FINAL_PLAN_END_TOLERANCE_M)
@@ -1788,6 +2249,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         reverse_correction_error_m = None
         realignment_reapproached = False
         near_alignment_attempted = False
+        previous_near_alignment = None
         previous_gap_m = None
         frozen_target_odom = None
         if not fine_table:
@@ -1971,6 +2433,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     and nearest_gap_m < target_gap_m - gap_tolerance_m
                     and max(corner_gaps) - nearest_gap_m <= 2.0 * gap_tolerance_m):
                 error_m = target_gap_m - sum(corner_gaps) / len(corner_gaps)
+                if error_m < TABLE_FINE_MIN_PROGRESS_M:
+                    # A shorter retreat cannot be executed or verified; it only
+                    # hunts around the same stop (issue: small fore/aft moves).
+                    self.emit('failed', phase='final_approach',
+                              reason='final_gap_correction_below_resolution',
+                              requested_correction_m=-error_m,
+                              estimated_front_corner_gaps_m=corner_gaps,
+                              target_front_gap_m=target_gap_m)
+                    return False
                 if (reverse_correction_error_m is not None
                         and reverse_correction_error_m - error_m < TABLE_FINE_MIN_PROGRESS_M):
                     self.emit('failed', phase='final_approach', reason='final_gap_no_progress')
@@ -2001,10 +2472,12 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and nearest_gap_m <= FINAL_PLAN_GAP_M
                 and (yaw_error > allowed_yaw_error_rad
                      or corner_spread_m > 2.0 * gap_tolerance_m))
-            if close_table_misalignment and near_alignment_attempted:
+            if (close_table_misalignment and previous_near_alignment is not None
+                    and yaw_error >= previous_near_alignment[0]
+                    and estimated_gap_m >= previous_near_alignment[1]):
                 self.emit('failed', phase='final_approach',
                           reason='final_table_alignment_unconfirmed',
-                          near_alignment_attempted=True,
+                          near_alignment_attempted=near_alignment_attempted,
                           estimated_front_corner_gaps_m=corner_gaps)
                 return False
             if (close_table_misalignment and final_depth_measurement
@@ -2015,6 +2488,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         or not self._navigation_ready(require_fresh_amcl=False)):
                     return False
                 near_alignment_attempted = True
+                previous_near_alignment = (yaw_error, estimated_gap_m)
                 self.emit('table_near_alignment_correction',
                           estimated_front_corner_gaps_m=corner_gaps,
                           estimated_face_yaw_error_rad=yaw_error,
@@ -2054,7 +2528,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     target, front_extent_m)
                 if not approached:
                     return False
+                # Backed out and re-approached: a new stop for the reversal guard.
                 previous_gap_m = None
+                reverse_correction_error_m = None
                 continue
             if close_table_misalignment:
                 self.emit(
@@ -2073,6 +2549,23 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if (self.stop_requested or not self._operator_link_ready()
                     or not self._navigation_ready(require_fresh_amcl=False)):
                 self.emit('failed', phase='final_approach', reason='navigation_not_ready')
+                return False
+            if reverse_correction_error_m is not None:
+                # A retreat already answered an overshoot of this approach.
+                # Advancing again would alternate around the same target.
+                self.emit('failed', phase='final_approach',
+                          reason='final_gap_reversal_blocked',
+                          estimated_front_corner_gaps_m=corner_gaps,
+                          target_front_gap_m=target_gap_m)
+                return False
+            requested_m = ((estimated_gap_m - target_gap_m) if straight_correction
+                           else nearest_gap_m - target_gap_m)
+            if requested_m < TABLE_FINE_MIN_PROGRESS_M:
+                self.emit('failed', phase='final_approach',
+                          reason='final_gap_correction_below_resolution',
+                          requested_correction_m=requested_m,
+                          estimated_front_corner_gaps_m=corner_gaps,
+                          target_front_gap_m=target_gap_m)
                 return False
             if (previous_gap_m is not None
                     and previous_gap_m - nearest_gap_m < TABLE_FINE_MIN_PROGRESS_M):
@@ -2209,6 +2702,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         self.parking_contract['yaw_tolerance_rad'], FINAL_HEADING_TRIM_RAD)):
                 # Centre the two corner gaps on the unchanged final target.
                 # The leading corner alone would leave the far corner too far out.
+                self._station_goal_reference(freeze=True)
                 return self._zero_turn_final_approach(
                     target, front_extent_m, gap_m=self._final_gap_m() - span_m / 2,
                     allow_trim=False, continuous_table=False)
@@ -2216,29 +2710,159 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             target, front_extent_m, allow_trim=False, continuous_table=True)
         if (result[0] or getattr(self, '_last_direct_motion_failure', None) not in {
                 'table alignment requires more clearance',
-                'table lateral alignment requires more clearance'}):
+                'table lateral alignment requires more clearance',
+                'table approach preview heading out of range'}):
             return result
         if (self.stop_requested or not self._operator_link_ready()
                 or not self._navigation_ready(require_fresh_amcl=False)):
             return result
+        if getattr(self, '_table_clearance_reapproaches', 0) >= 1:
+            # The same reverse-and-approach already ran in this visit.
+            self.emit('table_alignment_clearance_reapproach_exhausted',
+                      reason=self._last_direct_motion_failure)
+            return result
+        self._table_clearance_reapproaches = (
+            getattr(self, '_table_clearance_reapproaches', 0) + 1)
         self.last_box_face = {
             'face_center_map_xy_m': list(target['face_center_map_xy_m']),
             'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
+        self._station_terminal_goal = None
+        self.station_reference_goal_frozen = False
         self.emit('table_alignment_clearance_reapproach', original_deadline_preserved=True)
         if not self._leave_for_table_reobservation():
             return False, None
         mount, region, radius = self._table_observation_context
         try:
             target.update(self.observe_target(
-                mount, front_extent_m, self._final_gap_m(), region, radius,
-                reuse_configuration=True))
+                mount, front_extent_m, self._final_gap_m(), region, radius))
         except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
             self._fail_final('table_clearance_reobserve_failed', detail=str(error))
             return False, None
+        restage_reason, lateral_offset_m = self._table_lateral_restage_reason(
+            target, front_extent_m)
+        if restage_reason is not None:
+            # A straight reverse keeps the lateral offset; repeating the same
+            # curve from here would fail the same way. Move sideways once.
+            if getattr(self, '_table_lateral_restages', 0) >= TABLE_LATERAL_RESTAGE_LIMIT:
+                self._fail_final('table_lateral_restage_exhausted', detail=restage_reason,
+                                 lateral_offset_m=lateral_offset_m)
+                return False, None
+            if not self._restage_table_face_alignment(
+                    target, front_extent_m, restage_reason, lateral_offset_m):
+                return False, None
+            try:
+                target.update(self.observe_target(
+                    mount, front_extent_m, self._final_gap_m(), region, radius))
+            except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
+                self._fail_final('table_restage_reobserve_failed', detail=str(error))
+                return False, None
         return self._zero_turn_final_approach(
             target, front_extent_m, allow_trim=False, continuous_table=True)
 
+    def _table_lateral_restage_reason(self, target, front_extent_m):
+        """Say why the continuous approach cannot absorb the observed lateral offset.
+
+        Returns ``(reason or None, lateral offset to the anchored target)``. The
+        lateral-tracking stations run the same preview the live controller
+        validates; ``surface_only`` has no lateral tracking, so any offset
+        beyond the face-alignment checker tolerance would be kept as is.
+        """
+        pose = target.get('observation_robot_pose_map')
+        mode = getattr(self, 'station_reference_mode', None)
+        if pose is None or not (mode == 'surface_only' or self._station_reference_enabled()):
+            return None, None
+        face = target['face_center_map_xy_m']
+        normal = target['outward_normal_map_xy']
+        heading = math.atan2(-normal[1], -normal[0])
+        left = (-math.sin(heading), math.cos(heading))
+        goal = (target['x_m'], target['y_m'], target['yaw_rad'])
+        lateral_m = sum((goal[i] - pose[i]) * left[i] for i in (0, 1))
+        if mode == 'surface_only':
+            if abs(lateral_m) > SURFACE_ONLY_RESTAGE_LATERAL_M:
+                return 'surface_only_lateral_offset_exceeds_alignment_tolerance', lateral_m
+            return None, lateral_m
+        try:
+            face_approach_waypoints(
+                pose, face, normal, front_extent_m, self.box_front_half_width_m,
+                self._final_gap_m(), command_heading_rad=target['yaw_rad'],
+                allow_near_alignment=True, continuous_table=True, lateral_tracking=True,
+                lateral_goal_odom=goal,
+                lateral_tolerance_m=self.station_reference_profile['lateral_tolerance_m'],
+                max_lateral_heading_rad=FINAL_TRIM_MAX_RAD)
+        except ValueError as error:
+            return str(error), lateral_m
+        return None, lateral_m
+
+    def _table_restage_unavailable(self, target, pose):
+        """Say why the turning-room escape before a re-stage cannot run, or None.
+
+        Mirrors the straight-reverse preconditions of _leave_parked_pose so an
+        observation it would refuse keeps the earlier continuous approach.
+        """
+        face = target['face_center_map_xy_m']
+        outward = target['outward_normal_map_xy']
+        distance_m = sum((pose[i] - face[i]) * outward[i] for i in (0, 1))
+        if distance_m >= ESCAPE_CLEARANCE_M - ESCAPE_PATH_CONTRACT['xy_tolerance_m']:
+            return None
+        facing = -(math.cos(pose[2]) * outward[0] + math.sin(pose[2]) * outward[1])
+        if facing < math.cos(ESCAPE_MAX_FACE_ANGLE_RAD):
+            return 'heading_not_facing_box_face'
+        if distance_m <= 0.0:
+            return 'face_distance_outside_escape_range'
+        return None
+
+    def _begin_table_lateral_restage(self, target, reason, lateral_offset_m):
+        """Count and log one sideways re-stage, then back out to turning room."""
+        self._table_lateral_restages = getattr(self, '_table_lateral_restages', 0) + 1
+        self.emit('table_lateral_restage', reason=reason, lateral_offset_m=lateral_offset_m,
+                  motion='nav2_face_alignment', original_deadline_preserved=True)
+        self.last_box_face = {
+            'face_center_map_xy_m': list(target['face_center_map_xy_m']),
+            'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
+        return self._leave_parked_pose(clearance_m=ESCAPE_CLEARANCE_M)
+
+    def _restage_table_face_alignment(self, target, front_extent_m, reason, lateral_offset_m):
+        """Move sideways once with the existing Nav2 face-alignment leg."""
+        if not self._begin_table_lateral_restage(target, reason, lateral_offset_m):
+            self._fail_final('table_lateral_restage_clearance_failed')
+            return False
+        face = target['face_center_map_xy_m']
+        normal = target['outward_normal_map_xy']
+        # The observed face is already anchored to the station's lateral goal;
+        # place the same face-alignment pose the visit's first phase uses.
+        offset_m = front_extent_m + FACE_ALIGNMENT_FRONT_GAP_M
+        alignment = {**target, 'id': 'face_alignment', 'priority': 1,
+                     'approach_offset_m': 0.5,
+                     'x_m': face[0] + normal[0] * offset_m,
+                     'y_m': face[1] + normal[1] * offset_m}
+        saved = (getattr(self, 'config', None), getattr(self, 'waypoints', None),
+                 getattr(self, 'pose_id', None))
+        try:
+            with self._localization_bound(True):
+                planned = self.plan_pose(
+                    alignment, single=True,
+                    end_tolerance_m=MAXIMUM_CONTRACT_VALUES['xy_tolerance_m'])
+                if not planned['ok']:
+                    self._fail_final('table_lateral_restage_unplanned', planning=planned)
+                    return False
+                if not self.execute(final_parking=False, alignment=True, face=True):
+                    self._fail_final('table_lateral_restage_failed')
+                    return False
+        finally:
+            # Later events and legs of this final approach keep their own pose.
+            self.config, self.waypoints, self.pose_id = saved
+        return True
+
     def _leave_for_table_reobservation(self):
+        # Backing out starts a new approach: neither the last-centimetre hold
+        # nor the previous approach's map/odom goal snapshot may steer it.
+        # Operator corrections and logged fixed goals keep their own reason.
+        self._station_terminal_goal = None
+        anchor = getattr(self, 'station_reference_goal', None)
+        if (isinstance(anchor, dict) and anchor.get('reason')
+                == 'registered_map_pose_frozen_with_table_face'):
+            self.station_reference_goal = None
+            self.station_reference_goal_frozen = False
         mount, _region, _radius = self._table_observation_context
         profile = mount.get('camera_mount', {}).get('table_observation', {})
         clearance_m = profile.get('base_offset_m')
@@ -2254,7 +2878,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         check = CachedStaticCorridorValidator(map_yaml, keepout_yaml, footprint)
 
         def validate(actual, face, normal, command_heading_rad, span_m=None, *,
-                     lateral_goal_odom=None):
+                     lateral_goal_odom=None, support_endpoints=None):
             try:
                 preview = face_approach_waypoints(
                     actual, face, normal, front_extent_m, self.box_front_half_width_m,
@@ -2266,6 +2890,13 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         'max_lateral_heading_rad': FINAL_TRIM_MAX_RAD}
                        if lateral_goal_odom is not None else {}))
             except ValueError as error:
+                self.emit('table_approach_preview_rejected', reason=str(error),
+                          reference_frame='odom', start_pose_odom=list(actual),
+                          face_center_odom=list(face), outward_normal_odom=list(normal),
+                          front_extent_m=front_extent_m,
+                          half_width_m=self.box_front_half_width_m,
+                          lateral_goal_odom=(None if lateral_goal_odom is None
+                                             else list(lateral_goal_odom)))
                 raise RuntimeError(str(error)) from error
             if len(preview) == 1:
                 # The observed-face precision band already closes beyond the
@@ -2274,13 +2905,30 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             mapped = [to_map_pose(pose) for pose in preview]
             kwargs = {}
             if span_m is not None:
-                center = to_map_pose((*face, 0.))
-                tip = to_map_pose((face[0] + normal[0], face[1] + normal[1], 0.))
+                surface_center = face
+                half_span = span_m / 2.
+                if support_endpoints is not None:
+                    tangent = (-normal[1], normal[0])
+                    offsets = [sum((point[i] - face[i]) * tangent[i] for i in (0, 1))
+                               for point in support_endpoints]
+                    midpoint = (min(offsets) + max(offsets)) / 2.
+                    surface_center = tuple(face[i] + midpoint * tangent[i] for i in (0, 1))
+                    half_span = (max(offsets) - min(offsets)) / 2.
+                center = to_map_pose((*surface_center, 0.))
+                tip = to_map_pose((surface_center[0] + normal[0],
+                                   surface_center[1] + normal[1], 0.))
                 kwargs['target_surface'] = {
                     'point_xy_m': center[:2],
                     'normal_xy': (tip[0] - center[0], tip[1] - center[1]),
-                    'half_span_m': span_m / 2.}
+                    'half_span_m': half_span,
+                    # The exact swept footprint must stay outside this measured
+                    # plane and within its observed span. Only its target raster
+                    # fringe can override unknown; occupied cells stay blocked.
+                    'allow_precision_unknown': True}
             if not check(mapped, **kwargs):
+                self.emit('table_approach_static_blocked',
+                          blockage=check.last_blockage, reference_frame='map',
+                          start_pose_map=list(mapped[0]), end_pose_map=list(mapped[-1]))
                 raise RuntimeError('table approach static corridor blocked')
 
         return validate
@@ -2302,29 +2950,74 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         normal = target['outward_normal_map_xy']
         frozen_face = to_odom(*face, 0.0)[:2]
         tip = to_odom(face[0] + normal[0], face[1] + normal[1], 0.0)
+        def surface_support(face, normal, width, shift=0., previous=None):
+            if width is None:
+                return previous
+            tangent = (-normal[1], normal[0])
+            center = tuple(face[i] - shift * tangent[i] for i in (0, 1))
+            points = [tuple(center[i] + sign * width / 2. * tangent[i] for i in (0, 1))
+                      for sign in (-1., 1.)]
+            points.extend(previous or ())
+            offsets = [sum((point[i] - face[i]) * tangent[i] for i in (0, 1))
+                       for point in points]
+            return tuple(tuple(face[i] + offset * tangent[i] for i in (0, 1))
+                         for offset in (min(offsets), max(offsets)))
+
+        if (getattr(self, 'station_reference_mode', None) in ('map_pose_only', 'rgbd_auxiliary')
+                and not (getattr(self, 'station_reference_goal_frozen', False)
+                         and getattr(self, 'station_reference_goal', None) is not None)):
+            # The face and the taught tangent must share this one map→odom
+            # snapshot. Later AMCL corrections cannot move just the destination
+            # against an already frozen face during a centimetre approach.
+            taught = self.station_reference_taught_map_pose
+            self.station_reference_goal = {
+                'valid': True, 'reason': 'registered_map_pose_frozen_with_table_face',
+                'goal_map': list(taught), 'goal_odom': list(to_odom(*taught)),
+                'stamp_s': self.get_clock().now().nanoseconds * 1e-9,
+                'reference_mode': self.station_reference_mode}
+            self.station_reference_goal_frozen = True
+            self.emit('table_station_goal_frozen', reference_frame='odom',
+                      map_to_odom_anchor=list(anchor),
+                      start_pose_odom=list(self._odom_pose()),
+                      face_center_odom=list(frozen_face),
+                      outward_normal_odom=[tip[i] - frozen_face[i] for i in (0, 1)],
+                      goal_odom=self.station_reference_goal['goal_odom'],
+                      front_extent_m=front_extent_m,
+                      half_width_m=self.box_front_half_width_m)
         initial = getattr(self, 'box_status', {}) or {}
         state = {'face': frozen_face,
                  'normal': (tip[0] - frozen_face[0], tip[1] - frozen_face[1]),
                  'stamp': initial.get('stamp_s'), 'input_stamp': initial.get('stamp_s'),
                  'basis': 'initial_stopped_face', 'start': self._odom_pose(),
+                 'deferred_observation': None,
                  'last_valid_s': time.monotonic(), 'occluded_frames': 0,
                  'occlusion_latched': False, 'precision_band_latched': False,
                  'validated_input': None, 'validated_pose': None,
                  'validated_heading': None, 'validated_goal': None,
+                 'control_goal': None,
+                 'surface_support': surface_support(
+                     frozen_face, (tip[0] - frozen_face[0], tip[1] - frozen_face[1]),
+                     target.get('observed_face_span_m'), target.get('lateral_shift_m', 0.)),
                  'span_m': target.get('observed_face_span_m')}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
         def station_goal_odom():
             if not self._station_reference_enabled():
                 return None, None
-            goal, reference = self._station_goal_reference()
+            goal, reference = self._station_goal_reference(freeze=True)
             if goal is not None:
                 return tuple(goal['goal_odom']), reference
+            # Before the taught objects become matchable, steer toward the
+            # registered lateral position using this approach's map/odom
+            # anchor. Never silently approach without a lateral destination.
+            # This fallback is not RGB-D arrival evidence.
             taught = self.station_reference_taught_map_pose
             return to_odom(*taught), reference
 
         def validate_control(actual, filtered_heading):
-            goal, _reference = station_goal_odom()
+            # Validate precisely the goal used to compute this control tick,
+            # even if the RGB worker finishes another image in the meantime.
+            goal = state['control_goal']
             previous_goal = state['validated_goal']
             goal_changed = (
                 (goal is None) != (previous_goal is None)
@@ -2339,9 +3032,38 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     or math.dist(actual[:2], state['validated_pose'][:2]) >= 0.025
                     or heading_change >= FINAL_TRIM_TOLERANCE_RAD):
                 validate(actual, state['face'], state['normal'], filtered_heading, state['span_m'],
+                         support_endpoints=state['surface_support'],
                          **({'lateral_goal_odom': goal} if goal is not None else {}))
                 state.update(validated_input=state['input_stamp'], validated_pose=actual,
                              validated_heading=filtered_heading, validated_goal=goal)
+
+        def carry_late_frame(stamp, now_s):
+            """Keep the held face instead of stopping for a frame finished too late.
+
+            The late frame is never consumed: no face, stamp or occlusion count
+            changes. It is allowed only while depth keeps arriving and both the
+            last consumed input and the held face (unless a healthy occlusion
+            froze it) are within OBSERVER_SILENT_S, as for a quiet observer.
+            """
+            previous = state['input_stamp']
+            face_stamp = state['stamp']
+
+            def recent(value):
+                return (isinstance(value, (float, int)) and not isinstance(value, bool)
+                        and 0.0 <= now_s - value <= OBSERVER_SILENT_S)
+
+            if not (recent(previous) and stamp > previous and now_s - stamp > 0.5
+                    and (state['occlusion_latched'] or recent(face_stamp))
+                    and self._fresh_depth_frame_after(previous, now_s)):
+                return False
+            if stamp != state.get('late_frame_stamp'):
+                state['late_frame_stamp'] = stamp
+                state['late_frames_skipped'] = state.get('late_frames_skipped', 0) + 1
+                self.emit('table_approach_late_frame_skipped',
+                          observation_stamp_s=stamp, observation_age_s=now_s - stamp,
+                          carried_input_stamp_s=previous, carried_face_stamp_s=face_stamp,
+                          skipped=state['late_frames_skipped'])
+            return True
 
         def update(actual):
             observation = self.box_status
@@ -2351,6 +3073,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 raise RuntimeError('table approach observer silent')
             stamp = observation.get('stamp_s')
             now_s = self.get_clock().now().nanoseconds * 1e-9
+            deferred = state.pop('deferred_observation', None)
+            if deferred is not None:
+                deferred_stamp_s = deferred['stamp_s']
+                if (deferred_stamp_s > state['input_stamp']
+                        and 0.0 <= now_s - deferred_stamp_s <= 0.5):
+                    # Consume the frame that was waiting for TF before a newer
+                    # image can replace it and repeat the same future-TF miss.
+                    observation, stamp = deferred, deferred_stamp_s
             if (isinstance(stamp, (float, int)) and not isinstance(stamp, bool)
                     and math.isfinite(stamp) and now_s - stamp > 0.5):
                 # Consume callbacks already waiting behind TF/odometry before
@@ -2368,6 +3098,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         break
             valid_stamp = (not isinstance(stamp, bool)
                            and isinstance(stamp, (float, int)) and math.isfinite(stamp))
+            if valid_stamp and carry_late_frame(stamp, now_s):
+                stamp = state['input_stamp']
             carried_live_frame = (valid_stamp and stamp == state['input_stamp']
                                   and now_s - stamp > 0.5
                                   and self._fresh_depth_frame_after(stamp, now_s))
@@ -2376,15 +3108,60 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 raise RuntimeError('table approach depth stale or future-dated')
             if observation.get('reason') in OBSERVER_LATENCY_REASONS:
                 raise RuntimeError('table approach observer latency')
+            if (stamp != state['input_stamp']
+                    and observation.get('detected') is True
+                    and observation.get('surface_kind') == 'table_edge'):
+                image_time = rclpy.time.Time(seconds=stamp)
+                base_frame = self.parking_contract['robot_base_frame']
+                wait_deadline_s = time.monotonic() + min(0.05, max(0., 0.5 - (now_s - stamp)))
+                waited = False
+                while not self.parking_tf.can_transform('odom', base_frame, image_time):
+                    if self.stop_requested:
+                        raise RuntimeError('operator stop during table TF alignment')
+                    if time.monotonic() >= wait_deadline_s:
+                        break
+                    # TF arrives on its own thread; keep this node's other inputs
+                    # flowing instead of converting a short lag into a stop.
+                    spin_node(self, timeout_sec=0.005)
+                    waited = True
+                if waited:
+                    now_s = self.get_clock().now().nanoseconds * 1e-9
+                    if not 0.0 <= now_s - stamp <= 0.5:
+                        # The frame aged out while its TF arrived: skip it as late.
+                        if not carry_late_frame(stamp, now_s):
+                            raise RuntimeError('table approach depth stale or future-dated')
+                        stamp = state['input_stamp']
+                    actual = self._odom_pose()
+            previous_face_stamp = state['stamp']
+            if (state['input_stamp'] is not None and stamp > state['input_stamp']
+                    and isinstance(previous_face_stamp, (float, int))
+                    and 0.0 <= now_s - previous_face_stamp <= 0.5
+                    and observation.get('detected') is True
+                    and observation.get('surface_kind') == 'table_edge'
+                    and observation.get('frame_id') == 'camera_color_optical_frame'
+                    and observation.get('control_ready') is False
+                    and not self.parking_tf.can_transform(
+                        'odom', self.parking_contract['robot_base_frame'],
+                        rclpy.time.Time(seconds=stamp))):
+                # A newer image can arrive before its odom TF callback. Keep the
+                # previously accepted, still-fresh plane in odom for this tick;
+                # do not consume the new image or renew the old plane's timestamp.
+                self.emit('table_approach_stamped_tf_deferred',
+                          observation_stamp_s=stamp,
+                          retained_observation_stamp_s=previous_face_stamp,
+                          retained_observation_age_s=now_s - previous_face_stamp)
+                state['deferred_observation'] = observation
+                stamp = state['input_stamp']
             if stamp != state['input_stamp']:
                 if state['input_stamp'] is not None and stamp < state['input_stamp']:
                     raise RuntimeError('table approach depth clock regressed')
+                previous_input_stamp = state['input_stamp']
                 state['input_stamp'] = stamp
-                if state['occlusion_latched'] or state['precision_band_latched']:
-                    pass
-                elif (observation.get('detected') is True
-                        and observation.get('stable') is True
-                        and observation.get('surface_kind') == 'table_edge'):
+                if (observation.get('detected') is True
+                        and observation.get('surface_kind') == 'table_edge'
+                        and (observation.get('stable') is True
+                             or (observation.get('stable') is False
+                                 and observation.get('reason') == 'collecting_stability'))):
                     if (observation.get('frame_id') != 'camera_color_optical_frame'
                             or observation.get('control_ready') is not False):
                         raise RuntimeError('invalid moving table observation frame or mode')
@@ -2392,7 +3169,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         transform = self.parking_tf.lookup_transform(
                             'odom', self.parking_contract['robot_base_frame'],
                             rclpy.time.Time(seconds=stamp)).transform
-                    except Exception as error:
+                    except TransformException as error:
+                        # Retry this same image after its stamped transform arrives.
+                        state['input_stamp'] = previous_input_stamp
+                        self.emit('table_approach_stamped_tf_wait', observation_stamp_s=stamp,
+                                  detail=str(error), target_preserved=True)
                         raise RuntimeError('table approach stamped odom TF unavailable') from error
                     rotation = transform.rotation
                     yaw = math.atan2(
@@ -2402,7 +3183,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         observation, camera_mount,
                         {'x_m': transform.translation.x, 'y_m': transform.translation.y,
                          'yaw_rad': yaw}, requested_gap_m=self._final_gap_m(),
-                        front_extent_m=front_extent_m, now_s=now_s)
+                        front_extent_m=front_extent_m, now_s=now_s,
+                        require_stable=False)
                     goal_odom, station_observation = station_goal_odom()
                     if goal_odom is not None:
                         measured = anchor_face_to_taught_lateral(
@@ -2422,31 +3204,47 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         raise RuntimeError('moving table face outside selected region')
                     if sum(normal[i] * state['normal'][i] for i in (0, 1)) <= 0.0:
                         raise RuntimeError('moving table normal reversed')
+                    angle_change = abs(math.atan2(
+                        state['normal'][0] * normal[1] - state['normal'][1] * normal[0],
+                        sum(normal[i] * state['normal'][i] for i in (0, 1))))
+                    # Compare at the robot, independent of the odom origin.
+                    distance_change = abs(sum(
+                        (actual[i] - face[i]) * normal[i]
+                        - (actual[i] - state['face'][i]) * state['normal'][i]
+                        for i in (0, 1)))
+                    same_surface = (angle_change <= MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD
+                                    and distance_change <= MAX_CANDIDATE_PLANE_DISTANCE_M)
+                    if observation.get('stable') is False:
+                        if not same_surface:
+                            raise RuntimeError('moving table candidate changed surface')
+                    # Preserve the edge already seen in odom when close-up FOV
+                    # clips it. A lateral goal never moves these observed ends.
+                    support = surface_support(
+                        face, normal, observation.get('width_m'),
+                        measured.get('lateral_shift_m', 0.),
+                        state['surface_support'] if same_surface else None)
                     state.update(face=face, normal=normal, stamp=stamp,
+                                 surface_support=support,
                                  span_m=observation.get('width_m'),
                                  last_valid_s=time.monotonic(), occluded_frames=0,
-                                 basis='moving_depth_at_stamped_odom')
+                                 occlusion_latched=False,
+                                 basis=('moving_depth_at_stamped_odom'
+                                        if observation.get('stable') is True else
+                                        'moving_candidate_at_stamped_odom'))
                     self.emit('table_approach_face_updated', observation_stamp_s=stamp,
                               reference_frame='odom', face_center_xy_m=list(face),
+                              visible_span_m=state['span_m'],
+                              observed_support_endpoints_odom=support,
                               outward_normal_xy=list(normal))
                 elif observation.get('reason') == 'no_table_edge_candidate':
                     state['occluded_frames'] += 1
                     if state['occluded_frames'] >= quorum:
                         state['basis'] = 'healthy_edge_occlusion_frozen_odom'
                         state['occlusion_latched'] = True
-                elif (observation.get('reason') == 'collecting_stability'
-                      and observation.get('detected') is True
-                      and observation.get('stable') is False
-                      and observation.get('surface_kind') == 'table_edge'
-                      and observation.get('frame_id') == 'camera_color_optical_frame'
-                      and observation.get('control_ready') is False):
-                    # Carry the accepted face only until moving stability recovers.
-                    # A visible candidate must not permanently disable depth updates.
-                    state['occluded_frames'] = 0
-                    state['basis'] = 'moving_stability_reset_carried_odom'
                 elif time.monotonic() - state['last_valid_s'] > OBSERVER_SILENT_S:
                     raise RuntimeError('table approach stable face unavailable')
             heading = math.atan2(-state['normal'][1], -state['normal'][0])
+            self._station_face_heading_odom_rad = heading
             residual = math.atan2(math.sin(heading - actual[2]),
                                   math.cos(heading - actual[2]))
             if abs(residual) > FINAL_TRIM_MAX_RAD:
@@ -2456,7 +3254,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             gap = center_gap - self.box_front_half_width_m * abs(math.sin(residual))
             remaining = (center_gap - self._final_gap_m()) / math.cos(residual)
             goal_odom, station_observation = station_goal_odom()
-            lateral_ready = True
+            state['control_goal'] = goal_odom
+            lateral_ready = not self._station_reference_enabled()
             lateral_error = None
             if goal_odom is not None:
                 left = (-math.sin(heading), math.cos(heading))
@@ -2472,6 +3271,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 state['basis'] = 'aligned_face_frozen_for_precision_band'
                 if getattr(self, 'station_reference_goal', None) is not None:
                     self.station_reference_goal_frozen = True
+                    if (getattr(self, '_station_terminal_goal', None) is None
+                            and station_observation
+                            and station_observation.get('valid') is True
+                            and goal_odom is not None):
+                        goal, _ = self._station_goal_reference()
+                        if goal is not None:
+                            self._station_terminal_goal = dict(goal, goal_odom=list(goal_odom))
+                            self.emit('table_station_terminal_goal_held',
+                                      goal_odom=list(goal_odom), gap_m=gap,
+                                      lateral_error_m=lateral_error)
             travelled = math.hypot(actual[0] - state['start'][0],
                                    actual[1] - state['start'][1])
             if travelled + max(0.0, remaining) > LIVE_APPROACH_MAX_M:
@@ -2667,6 +3476,38 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         elif (getattr(self, 'surface_mode', 'front') == 'table_edge'
               and self._final_gap_m() <= 0.01):
             self._continuous_table_stop = None
+            # The already-aligned short leg uses the same local corridor check
+            # as continuous steering, including the frozen odom/map transform.
+            origin = to_odom(0., 0., 0.) if not allow_trim else (0., 0., 0.)
+            cosine, sine = math.cos(origin[2]), math.sin(origin[2])
+
+            def to_map_pose(pose):
+                dx, dy = pose[0] - origin[0], pose[1] - origin[1]
+                return (cosine * dx + sine * dy, -sine * dx + cosine * dy,
+                        math.atan2(math.sin(pose[2] - origin[2]),
+                                   math.cos(pose[2] - origin[2])))
+
+            steps = max(1, int(math.ceil(travel_m / 0.01)))
+            swept = [to_map_pose((
+                actual[0] + travel_m * k / steps * math.cos(actual[2]),
+                actual[1] + travel_m * k / steps * math.sin(actual[2]), actual[2]))
+                for k in range(steps + 1)]
+            check = CachedStaticCorridorValidator(
+                Path(self.registry['map']['yaml_path']),
+                Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
+            kwargs = {}
+            span = target.get('observed_face_span_m')
+            if span is not None:
+                center = to_map_pose((*face, 0.))
+                tip = to_map_pose((face[0] + outward[0], face[1] + outward[1], 0.))
+                kwargs['target_surface'] = {
+                    'point_xy_m': center[:2],
+                    'normal_xy': (tip[0] - center[0], tip[1] - center[1]),
+                    'half_span_m': span / 2., 'allow_precision_unknown': True}
+            if not check(swept, **kwargs):
+                self._fail_final('table_precision_corridor_blocked',
+                                 blockage=check.last_blockage)
+                return False, to_odom
             travelled_m = self._drive_zero_turn(travel_m, precision=True, hold_heading=True)
         else:
             travelled_m = self._drive_zero_turn(travel_m)
@@ -2757,6 +3598,66 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         finally:
             self.config, self.waypoints = saved
         return bool(reached), to_odom
+
+    def _logged_reapproach_target(self, path, table_id, region_xy, radius_m, front_extent_m):
+        """Reuse observed static geometry only within the same running odom session."""
+        events = [json.loads(line) for line in Path(path).read_text().splitlines()]
+        finished = next((e for e in reversed(events)
+                         if e.get('event') in ('box_approach_finished',
+                                               'table_approach_face_updated')), None)
+        face_event = next((e for e in reversed(events)
+                           if e.get('event') == 'table_approach_face_updated'), None)
+        if (finished is None or face_event is None
+                or finished.get('table_id') != table_id
+                or face_event.get('table_id') != table_id
+                or face_event.get('reference_frame') != 'odom'):
+            raise RuntimeError('same-station observed odom face missing from reapproach log')
+        boot_wall_s = time.time() - time.monotonic()
+        logged_boot_wall_s = finished['wall_time_s'] - finished['monotonic_s']
+        base_started_us = int(subprocess.check_output([
+            'systemctl', 'show', 'jdamr-base.service',
+            '--property=ActiveEnterTimestampMonotonic', '--value'], text=True).strip())
+        if (abs(boot_wall_s - logged_boot_wall_s) > 2.0
+                or not 0 < base_started_us * 1e-6 < face_event['monotonic_s']):
+            raise RuntimeError('reapproach log is outside the current base odom session')
+        center = face_event['face_center_xy_m']
+        normal = face_event['outward_normal_xy']
+        if (len(center) != 2 or len(normal) != 2
+                or not all(math.isfinite(v) for v in (*center, *normal))
+                or not math.isclose(math.hypot(*normal), 1.0, abs_tol=1e-6)):
+            raise RuntimeError('invalid logged reapproach face')
+        actual_map, _ = self.capture_stationary_pose(intermediate=True)
+        actual = self._odom_pose()
+        distance_m = sum((actual[i] - center[i]) * normal[i] for i in (0, 1))
+        heading = math.atan2(-normal[1], -normal[0])
+        residual = math.atan2(math.sin(heading-actual[2]), math.cos(heading-actual[2]))
+        if not (0 < distance_m - front_extent_m < ESCAPE_CLEARANCE_M-front_extent_m
+                and abs(residual) <= ESCAPE_MAX_FACE_ANGLE_RAD):
+            raise RuntimeError('current odom pose no longer matches the logged parked face')
+        turn = actual_map[2] - actual[2]
+        cosine, sine = math.cos(turn), math.sin(turn)
+        dx, dy = center[0] - actual[0], center[1] - actual[1]
+        face_map = (actual_map[0] + cosine*dx - sine*dy,
+                    actual_map[1] + sine*dx + cosine*dy)
+        normal_map = (cosine*normal[0] - sine*normal[1],
+                      sine*normal[0] + cosine*normal[1])
+        if math.dist(face_map, region_xy) > radius_m:
+            raise RuntimeError('logged reapproach face is outside the selected station')
+        self.emit('station_reapproach_face_carried', source_log=str(path),
+                  geometry_reference='previous_observed_static_face',
+                  fresh_depth_measurement=False, current_face_distance_m=distance_m)
+        reapproach_event = next((e for e in events
+                                if e.get('event') == 'station_reapproach_started'), {})
+        previous_goal = reapproach_event.get('lateral_goal_reference')
+        if previous_goal is not None:
+            goal_odom = previous_goal.get('goal_odom')
+            if (not isinstance(goal_odom, list) or len(goal_odom) != 3
+                    or not all(math.isfinite(v) for v in goal_odom)
+                    or previous_goal.get('valid') is not True):
+                raise RuntimeError('invalid fixed station goal in reapproach log')
+        return {'face_center_map_xy_m': face_map, 'outward_normal_map_xy': normal_map,
+                'yaw_rad': math.atan2(-normal_map[1], -normal_map[0]),
+                'reapproach_goal_reference': previous_goal}
 
     def _leave_parked_pose(self, *, clearance_m=ESCAPE_CLEARANCE_M):
         """
@@ -3033,7 +3934,35 @@ def parse_args(argv=None):
                              'target_front_gap_m for either surface mode')
     parser.add_argument('--dwell-s', type=float, default=STOP_DWELL_S,
                         help='held stop at each box (longer for an external gap measurement)')
+    parser.add_argument('--reapproach-m', type=float,
+                        help='retreat from the currently observed table, then park there again')
+    parser.add_argument('--station-left-correction-m', type=float, default=0.0,
+                        help='this reapproach only: shift the current lateral position left')
+    parser.add_argument('--reapproach-from-log', type=Path,
+                        help='carry a confirmed parked face when it is hidden at close range')
+    parser.add_argument('--station-capture-retreat-m', type=float,
+                        help='one guarded straight reverse step between station reference '
+                             'captures; the camera and the capture stay outside this task')
     args = parser.parse_args(argv)
+    if args.station_capture_retreat_m is not None and not (
+            math.isfinite(args.station_capture_retreat_m)
+            and 0.0 < args.station_capture_retreat_m <= 0.05 and args.execute
+            and args.reapproach_m is None
+            and not (args.return_home or args.via_id or args.home_only
+                     or args.rear_box_only or args.resume_parked_from_log)):
+        parser.error('--station-capture-retreat-m requires one executed step of at most 0.05 m')
+    if args.reapproach_m is not None and not (
+            math.isfinite(args.reapproach_m) and 0.2 <= args.reapproach_m <= 0.3
+            and args.execute and args.surface_mode == 'table_edge'
+            and not (args.return_home or args.via_id or args.home_only
+                     or args.rear_box_only or args.resume_parked_from_log)):
+        parser.error('--reapproach-m requires a standalone executed table_edge task, 0.2–0.3 m')
+    if (not math.isfinite(args.station_left_correction_m)
+            or abs(args.station_left_correction_m) > 0.05
+            or (args.station_left_correction_m and args.reapproach_m is None)):
+        parser.error('--station-left-correction-m requires --reapproach-m and at most 0.05 m')
+    if args.reapproach_from_log is not None and args.reapproach_m is None:
+        parser.error('--reapproach-from-log requires --reapproach-m')
     if args.pointcloud_perception and (
             args.surface_mode != 'table_edge' or args.home_only or args.rear_box_only):
         parser.error('--pointcloud-perception requires a table_edge approach task')
@@ -3080,15 +4009,16 @@ def parse_args(argv=None):
     if any(value is not None for value in via):
         if any(value is None for value in via):
             parser.error('--via-id, --via-route and --via-region-xy go together')
-        if not args.return_home:
-            parser.error('a via stop requires --return-home')
+        if not args.return_home and args.resume_parked_from_log is None:
+            parser.error('a via stop requires --return-home or --resume-parked-from-log')
         if (not all(math.isfinite(v) for v in args.via_region_xy)
                 or not math.isfinite(args.via_region_radius_m)
                 or not 0.0 < args.via_region_radius_m <= 0.6):
             parser.error('via region must be finite and radius in (0, 0.6] m')
     if args.resume_parked_from_log is not None:
-        if not (args.execute and args.return_home):
-            parser.error('--resume-parked-from-log requires --execute and --return-home')
+        if not args.execute or (not args.return_home and args.via_id is None):
+            parser.error('--resume-parked-from-log requires --execute and '
+                         'either --return-home or a via station')
         if args.resume_at_observation:
             parser.error('--resume-parked-from-log cannot be combined with '
                          '--resume-at-observation')
@@ -3143,6 +4073,24 @@ def run_attempt(args, active=None):
             node.operator_link_timeout_s = args.operator_link_timeout_s
             node.final_gap_override_m = args.final_gap_m
             ok = True
+            if getattr(args, 'station_capture_retreat_m', None) is not None:
+                # The same guarded reverse as a station reapproach, one short step,
+                # so a stationary reference can be captured at each stop.
+                node.verify_live_maps()
+                node._mission_started = True
+                with node._localization_bound(True):
+                    if not node.wait_until_ready(timeout=10.0):
+                        raise RuntimeError(node.readiness_failure_reason())
+                    if not node._parking_parameters_ready():
+                        raise RuntimeError(
+                            getattr(node, 'last_parking_parameters_failure', None)
+                            or 'parking controller parameters unavailable')
+                    if not node._precision_collision_ready(geometry):
+                        raise RuntimeError('precision collision-monitor profile unavailable')
+                    node.capture_stationary_pose(intermediate=True)
+                ok = node._drive_straight(-args.station_capture_retreat_m,
+                                          'station_capture_retreat_finished')
+                return 0 if ok else 1
             if getattr(args, 'rear_box_only', False):
                 ok = node.park_rear_box(
                     geometry, args.approach_route,
@@ -3204,18 +4152,17 @@ def run_attempt(args, active=None):
                                        and (args.via_id is None or via_done)),
                 resume_at_final_approach=(args.resume_at_final_approach
                                           and (args.via_id is None or via_done)),
-                search=args.search, task_timeout_s=args.task_timeout_s)
+                search=args.search, task_timeout_s=args.task_timeout_s,
+                reapproach_m=args.reapproach_m,
+                station_left_correction_m=args.station_left_correction_m,
+                reapproach_from_log=args.reapproach_from_log)
             # Exit 0 only when every requested stage, including the return, succeeded.
             if ok and args.return_home:
                 ok = node.dwell_and_return_home(args.dwell_s, args.return_timeout_s)
-            elif (args.return_home and getattr(node, 'incomplete_gap_stop', False)
-                    and not node.stop_requested and node._operator_link_ready()
-                    and node._navigation_ready(require_fresh_amcl=False)):
-                node.emit('incomplete_parking_return_started', parking_success=False)
-                node._camera(False)
-                returned = node.go_home(execute=True, timeout_s=args.return_timeout_s)
-                node.emit('incomplete_parking_return_finished', home_confirmed=returned,
-                          parking_success=False)
+            elif args.return_home and not ok:
+                node.emit('parking_incomplete_holding_position',
+                          automatic_return=False, failed_table_id=node.table_id,
+                          resume_required=True)
             return 0 if ok else 1
         except (ValueError, RuntimeError) as error:
             if node is not None:

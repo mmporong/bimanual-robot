@@ -304,7 +304,15 @@ def _nearest_rear_layer(points):
         depth_steps > MAX_CANDIDATE_PLANE_DISTANCE_M)
     if len(splits) == 0:
         return ordered, 1
-    return ordered[:int(splits[0]) + 1], int(len(splits) + 1)
+    layers = np.split(ordered, splits + 1)
+    # A few side-leg returns cannot define a docking plane. Keep them in
+    # rear_corridor_clearance and the collision monitor, but do not let them
+    # hide the nearest layer with enough evidence to fit a face. A supported
+    # but invalid foreground still fails; we never search through that face.
+    for layer in layers:
+        if len(layer) >= MINIMUM_SUPPORT:
+            return layer, len(layers)
+    return layers[0], len(layers)
 
 
 def rear_corridor_clearance(
