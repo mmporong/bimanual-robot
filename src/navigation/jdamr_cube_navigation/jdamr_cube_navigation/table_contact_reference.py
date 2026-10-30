@@ -268,20 +268,31 @@ class TableContactReference:
                 return invalid('table_contact_match_unavailable')
             candidates.append(peaks)
         best_pair = None
+        rigid_pair_found = False
         for first in candidates[0]:
             for second in candidates[1]:
-                distance_m = float(np.linalg.norm(second[1] - first[1]))
+                vector_m = second[1] - first[1]
+                distance_m = float(np.linalg.norm(vector_m))
                 if abs(distance_m - self.reference_baseline_m) > self.maximum_baseline_error_m:
                     continue
+                rigid_pair_found = True
+                yaw_rad = math.atan2(vector_m[1], vector_m[0]) - self._reference_heading_rad
+                yaw_rad = math.atan2(math.sin(yaw_rad), math.cos(yaw_rad))
+                if abs(yaw_rad) > self.maximum_yaw_rad:
+                    continue
                 score = (first[0] + second[0]) / 2.
-                if best_pair is None or score > best_pair[0]:
-                    best_pair = score, first, second
+                selection = min(first[0], second[0]), score
+                if best_pair is None or selection > best_pair[0]:
+                    best_pair = selection, score, first, second
         if best_pair is None:
-            return invalid('table_contact_pair_not_rigid')
-        quality['contact_pair_score'] = best_pair[0]
+            return invalid('table_contact_heading_out_of_range' if rigid_pair_found
+                           else 'table_contact_pair_not_rigid')
+        quality['contact_pair_score'] = best_pair[1]
+        quality['contact_pair_min_score'] = best_pair[0][0]
+        quality['contact_pair_selection'] = 'maximum_minimum_score_then_mean'
         current = []
         for (name, match), (score, point_m) in zip(
-                quality['contact_matches'].items(), best_pair[1:]):
+                quality['contact_matches'].items(), best_pair[2:]):
             match.update(score=score, base_xy_m=point_m.tolist())
             current.append(point_m)
         vector_m = current[1] - current[0]
