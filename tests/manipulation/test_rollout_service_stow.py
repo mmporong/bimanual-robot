@@ -119,3 +119,32 @@ def test_after_pour_only_the_right_arm_folds(svc):
     arms = service._stow_right_after_pour(SimpleNamespace(robot_wrapper=robot), result)
     assert arms == "carrying_cup" and result["right_stow"] == "ok"
     assert robot.inner.left_arm.sent == [] and robot.inner.left_arm.pos == CUP_HOLD
+
+
+class BusArm(FakeArm):
+    """실제 SOFollower처럼 모터 버스(bus.sync_read)를 가진 가짜 팔."""
+
+    def __init__(self, joints):
+        super().__init__(joints)
+        self.bus = SimpleNamespace(sync_read=lambda name, num_retry=3: {
+            k.removesuffix(".pos"): v for k, v in self.pos.items()})
+
+
+class CameraLostRobot(FakeRobot):
+    """손목캠 USB가 빠져 get_observation()이 실패하는 로봇."""
+
+    def __init__(self, left, right):
+        self.inner = SimpleNamespace(left_arm=BusArm(left), right_arm=BusArm(right), is_connected=True)
+
+    def get_observation(self):
+        raise RuntimeError("OpenCVCamera(2) latest frame is too old: 756.1 ms (max allowed: 500 ms).")
+
+
+def test_right_fold_after_pour_works_without_cameras(svc):
+    robot = CameraLostRobot(CUP_HOLD, RIGHT_AFTER_POUR)
+    service = make_service(svc, robot)
+    result = {}
+    arms = service._stow_right_after_pour(SimpleNamespace(robot_wrapper=robot), result)
+    assert arms == "carrying_cup" and result["right_stow"] == "ok"
+    assert robot.inner.left_arm.sent == []
+    assert robot.inner.right_arm.pos["elbow_flex.pos"] == pytest.approx(95.7)
