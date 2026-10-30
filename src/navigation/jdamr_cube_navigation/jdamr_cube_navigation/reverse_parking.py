@@ -9,7 +9,9 @@ Nav2 costmaps and the collision monitor.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from copy import deepcopy  # noqa: I100
+from itertools import chain
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -724,6 +726,7 @@ def _corridor_blockage(
         ignored_keepout_cells=frozenset(),
         *, skip_clearly_free_cells: bool = False,
         ignored_unknown_cells=frozenset(),
+        nonfree_columns_by_row=None,
 ) -> dict | None:
     resolution = source['resolution']
     origin_x, origin_y, _origin_yaw = source['origin']
@@ -745,7 +748,19 @@ def _corridor_blockage(
             / resolution) + 1
         for map_row in range(minimum_map_row, maximum_map_row + 1):
             cell_bottom = origin_y + map_row * resolution
-            for column in range(minimum_column, maximum_column + 1):
+            columns = range(minimum_column, maximum_column + 1)
+            if (skip_clearly_free_cells and nonfree_columns_by_row is not None
+                    and 0 <= map_row < height):
+                row = height - 1 - map_row
+                nonfree_columns = nonfree_columns_by_row[row]
+                first = bisect_left(nonfree_columns, max(0, minimum_column))
+                last = bisect_right(
+                    nonfree_columns, min(width - 1, maximum_column))
+                columns = chain(
+                    range(minimum_column, min(0, maximum_column + 1)),
+                    nonfree_columns[first:last],
+                    range(max(width, minimum_column), maximum_column + 1))
+            for column in columns:
                 cell_left = origin_x + column * resolution
                 inside_grid = (
                     0 <= map_row < height and 0 <= column < width)
@@ -825,7 +840,9 @@ def _cell_overlap_polygon(polygon, bounds, padding):
     return result
 
 
-def _observed_surface_corridor_clear(source, keepout, poses, footprint, surface):
+def _observed_surface_corridor_clear(
+        source, keepout, poses, footprint, surface,
+        *, nonfree_columns_by_row=None):
     """Resolve target raster cells outside a measured plane, never occupied cells."""
     face = tuple(_finite_number(v, 'surface point') for v in surface['point_xy_m'])
     normal = tuple(_finite_number(v, 'surface normal') for v in surface['normal_xy'])
@@ -851,7 +868,8 @@ def _observed_surface_corridor_clear(source, keepout, poses, footprint, surface)
     while True:
         blocked = _corridor_blockage(source, keepout, pieces, ignored,
                                      skip_clearly_free_cells=True,
-                                     ignored_unknown_cells=ignored_unknown)
+                                     ignored_unknown_cells=ignored_unknown,
+                                     nonfree_columns_by_row=nonfree_columns_by_row)
         if blocked is None:
             return True
         target_mask = (blocked.get('grid') == 'keepout'
@@ -931,6 +949,11 @@ class CachedStaticCorridorValidator:
 
         self._source = source
         self._keepout = keepout
+        self._nonfree_columns_by_row = tuple(
+            tuple(column for column in range(source['width'])
+                  if (not _clearly_free(source, row, column)
+                      or not _clearly_free(keepout, row, column)))
+            for row in range(source['height']))
         self._footprint = tuple(_convex_hull(footprint_points))
         edge_normals = []
         for start, end in zip(
@@ -975,12 +998,15 @@ class CachedStaticCorridorValidator:
         self.last_blockage = _corridor_blockage(
             self._source, self._keepout,
             [(swept_hull, maximum_sagitta)],
-            skip_clearly_free_cells=True)
+            skip_clearly_free_cells=True,
+            nonfree_columns_by_row=self._nonfree_columns_by_row)
         clear = self.last_blockage is None
         if clear or target_surface is None:
             return clear
         clear = _observed_surface_corridor_clear(
-            self._source, self._keepout, checked_poses, self._footprint, target_surface)
+            self._source, self._keepout, checked_poses, self._footprint,
+            target_surface,
+            nonfree_columns_by_row=self._nonfree_columns_by_row)
         if clear:
             self.last_blockage = None
         return clear

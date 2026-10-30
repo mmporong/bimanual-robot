@@ -472,6 +472,75 @@ def test_cached_static_corridor_bounds_swept_polygon_axes(tmp_path, monkeypatch)
     assert vertex_counts and max(vertex_counts) <= 16
 
 
+def test_cached_static_corridor_reuses_nonfree_cell_index(tmp_path, monkeypatch):
+    """Avoid rescanning clearly free map cells after cache construction."""
+    width = height = 20
+    source_pixels = [254] * (width * height)
+    keepout_pixels = list(source_pixels)
+    keepout_pixels[10 * width + 12] = 0
+    source = _write_grid(
+        tmp_path, 'map', source_pixels, width=width, height=height,
+        resolution=0.05)
+    keepout = _write_grid(
+        tmp_path, 'keepout', keepout_pixels, width=width, height=height,
+        resolution=0.05)
+    validate = CachedStaticCorridorValidator(
+        source, keepout,
+        [(-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+    from jdamr_cube_navigation import reverse_parking
+
+    def unexpected_lookup(*_args, **_kwargs):
+        raise AssertionError('cached corridor validation rescanned a free cell')
+
+    monkeypatch.setattr(reverse_parking, '_clearly_free', unexpected_lookup)
+
+    assert validate([(0.2, 0.2, 0.0), (0.4, 0.2, 0.0)])
+
+
+@pytest.mark.parametrize('negate', [0, 1])
+def test_cached_nonfree_index_matches_full_scan_first_blockage(tmp_path, negate):
+    """Keep exact first-block ordering across boundaries and ignored cells."""
+    width, height = 13, 9
+    pixel_values = (0, 100, 200, 205, 254)
+    source_pixels = [pixel_values[(row * 3 + column * 2) % len(pixel_values)]
+                     for row in range(height) for column in range(width)]
+    keepout_pixels = [pixel_values[(row * 2 + column * 3 + 1) % len(pixel_values)]
+                      for row in range(height) for column in range(width)]
+    source = _write_grid(
+        tmp_path, 'map', source_pixels, width=width, height=height,
+        resolution=0.05, origin=(-0.1, -0.15, 0.0), negate=negate)
+    keepout = _write_grid(
+        tmp_path, 'keepout', keepout_pixels, width=width, height=height,
+        resolution=0.05, origin=(-0.1, -0.15, 0.0), negate=negate)
+    validate = CachedStaticCorridorValidator(
+        source, keepout,
+        [(-0.04, -0.03), (0.04, -0.03), (0.04, 0.03), (-0.04, 0.03)])
+    from jdamr_cube_navigation import reverse_parking
+
+    ignored_keepout = {(2, 2), (7, 5)}
+    ignored_unknown = {(3, 1), (8, 6)}
+    for index in range(60):
+        left = -0.16 + (index % 15) * 0.055
+        bottom = -0.21 + (index % 11) * 0.047
+        polygon = [(left, bottom), (left + 0.09, bottom),
+                   (left + 0.08, bottom + 0.07),
+                   (left - 0.01, bottom + 0.06)]
+        pieces = [(polygon, (index % 3) * 0.004)]
+        arguments = (validate._source, validate._keepout, pieces,
+                     ignored_keepout)
+        keywords = {
+            'skip_clearly_free_cells': True,
+            'ignored_unknown_cells': ignored_unknown,
+        }
+        full_scan = reverse_parking._corridor_blockage(
+            *arguments, **keywords)
+        indexed = reverse_parking._corridor_blockage(
+            *arguments, **keywords,
+            nonfree_columns_by_row=validate._nonfree_columns_by_row)
+
+        assert indexed == full_scan
+
+
 def test_cached_static_corridor_uses_body_edge_axes_at_rotated_pose(tmp_path):
     """Avoid a fixed-world support corner touching keepout beside the body."""
     width = height = 80

@@ -3079,9 +3079,17 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     or state['validated_pose'] is None
                     or math.dist(actual[:2], state['validated_pose'][:2]) >= 0.025
                     or heading_change >= FINAL_TRIM_TOLERANCE_RAD):
-                validate(actual, state['face'], state['normal'], filtered_heading, state['span_m'],
-                         support_endpoints=state['surface_support'],
-                         **({'lateral_goal_odom': goal} if goal is not None else {}))
+                validation_started_s = time.monotonic()
+                try:
+                    validate(actual, state['face'], state['normal'], filtered_heading,
+                             state['span_m'], support_endpoints=state['surface_support'],
+                             **({'lateral_goal_odom': goal} if goal is not None else {}))
+                finally:
+                    duration_s = time.monotonic() - validation_started_s
+                    state['validation_duration_s'] = duration_s
+                    if duration_s >= .05:
+                        self.emit('table_control_validation_slow', duration_s=duration_s,
+                                  observation_stamp_s=state['input_stamp'])
                 state.update(validated_input=state['input_stamp'], validated_pose=actual,
                              validated_heading=filtered_heading, validated_goal=goal)
 
@@ -3153,6 +3161,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                                   and self._fresh_depth_frame_after(stamp, now_s))
             if (not valid_stamp
                     or not (0.0 <= now_s - stamp <= 0.5 or carried_live_frame)):
+                self.emit('table_approach_latency_breakdown',
+                          observation_age_s=(now_s - stamp if valid_stamp else None),
+                          observer_input_age_s=observation.get('input_age_s'),
+                          observer_processing_s=observation.get('processing_duration_s'),
+                          observer_calculation_s=observation.get('calculation_duration_s'),
+                          status_callback_age_s=time.monotonic() - received,
+                          previous_control_validation_s=state.get('validation_duration_s'),
+                          fresh_depth_available=(self._fresh_depth_frame_after(stamp, now_s)
+                                                 if valid_stamp else False))
                 raise RuntimeError('table approach depth stale or future-dated')
             if observation.get('reason') in OBSERVER_LATENCY_REASONS:
                 raise RuntimeError('table approach observer latency')
