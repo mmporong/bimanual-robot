@@ -67,6 +67,8 @@ def _reference_files(tmp_path):
         'rgb': {'shape': [48, 64, 3], 'frame': 'optical', 'stamp': 10.0},
         'depth': {'shape': [24, 32], 'frame': 'optical', 'stamp': 10.01},
         'rgb_depth_delta_s': .01,
+        'goal_binding': {
+            'kind': station.CAPTURE_EQUALS_GOAL, 'robot_pose_equals_goal': True},
     }
     capture_path = tmp_path / 'reference_capture.json'
     capture_path.write_text(json.dumps(capture), encoding='utf-8')

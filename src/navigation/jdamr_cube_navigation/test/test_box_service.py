@@ -1673,6 +1673,7 @@ def test_failed_visit_returns_only_after_confirmed_incomplete_stop(
 
         def __init__(self, *args, **kwargs):
             self.kwargs = kwargs
+            self.table_id = None
             self.visit_observed_box = Mock(return_value=Route.visit_ok)
             self.dwell_and_return_home = Mock(return_value=True)
             self.go_home = Mock(return_value=True)
@@ -1817,6 +1818,7 @@ def _via_main(monkeypatch, tmp_path, via_ok=True, leave_ok=True, battery_low=Fal
 
     class Route:
         def __init__(self, *args, **kwargs):
+            self.table_id = None
             self.visit_observed_box = Mock(side_effect=lambda route, *a, **k: calls.append(
                 ('visit', Path(route).name, a[2], list(a[3]), k['search'])) or (
                     via_ok if Path(route).name == 'water.yaml' else True))
@@ -3412,7 +3414,9 @@ def _moving_table_route(monkeypatch):
     lookup = Mock(return_value=SimpleNamespace(transform=SimpleNamespace(
         translation=SimpleNamespace(x=0.1, y=0.0),
         rotation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))))
-    node.parking_tf = SimpleNamespace(lookup_transform=lookup)
+    # The stamped odom TF for each image is already in the buffer.
+    node.parking_tf = SimpleNamespace(lookup_transform=lookup,
+                                      can_transform=Mock(return_value=True))
     update = node._table_approach_update(
         _table_edge_final_target(0.5), 0.065, lambda x, y, yaw: (x, y, yaw))
     clock[0] = 10.2
@@ -3467,15 +3471,21 @@ def test_missing_rgbd_goal_cannot_latch_the_final_precision_band(monkeypatch):
     node, _clock, update, _lookup = _moving_table_route(monkeypatch)
     node.station_reference = Mock()
     node.station_reference_mode = 'rgbd'
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.station_reference_taught_map_pose = (.5, .003, 0.)
     node.station_reference_goal = None
     node._station_goal_reference = Mock(return_value=(None, {
         'valid': False, 'reason': 'station_reference_not_observed'}))
 
     control = update((.42, 0., 0.))
 
-    assert control['lateral_tracking'] is False
+    # Before the first match the base steers to the registered pose (ede1022),
+    # but that fallback is never lateral arrival evidence.
+    assert control['lateral_tracking'] is True
+    assert control['lateral_error_m'] == pytest.approx(.003)
     assert node._continuous_table_stop['basis'] != 'aligned_face_frozen_for_precision_band'
     assert node._continuous_table_stop['lateral_reference_valid'] is False
+    assert getattr(node, '_station_terminal_goal', None) is None
 
 
 def test_map_station_goal_shares_the_faces_frozen_odom_transform(monkeypatch):
@@ -3581,6 +3591,7 @@ def test_live_table_corridor_uses_frozen_map_conversion_and_runtime_footprint(mo
     node.box_front_half_width_m = 0.225
     node._final_gap_m = Mock(return_value=0.01)
     node._footprint_outline = Mock(return_value=[(-0.28, -0.275), (0.07, 0.275)])
+    node.emit = Mock()
     monkeypatch.setattr(box_service, 'face_approach_waypoints', Mock(return_value=[
         (0.0, 0.0, 0.1), (0.1, 0.01, 0.0)]))
     check = Mock(return_value=clear)
@@ -3885,3 +3896,283 @@ def test_failed_preflight_reports_controller_failure_without_motion(mission):
                    if call.args == ('failed',) and call.kwargs.get('phase') == 'preflight')
     assert failure.kwargs['reason'] == mission.last_preflight_failure
     mission.execute.assert_not_called()
+
+
+# --- 2026-10-29 driving review: fore/aft hunting, re-approach holds, lateral re-stage ---
+
+def test_fine_correction_never_advances_again_after_an_overshoot_retreat(mission):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    near = ((.932, 0, 0), {})   # front 3 mm from the face: overshoot
+    long = ((.915, 0, 0), {})   # 20 mm after the retreat
+    mission.capture_stationary_pose.side_effect = [((0, 0, 0), {}), near, long]
+    mission._retreat_table_gap = Mock(return_value=True)
+    assert not invoke(mission)
+    mission._straight_final_approach.assert_called_once()
+    mission._retreat_table_gap.assert_called_once()
+    assert mission.emit.call_args.args == ('failed',)
+    assert mission.emit.call_args.kwargs['reason'] == 'final_gap_reversal_blocked'
+
+
+def _corner_gap_visit(mission, left_gap_m, right_gap_m):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    pose = _table_edge_pose_for_corner_gaps(left_gap_m, right_gap_m)
+    mission.capture_stationary_pose.side_effect = [((0., 0., 0.), {}), (pose, {})]
+    mission._retreat_table_gap = Mock(side_effect=AssertionError('sub-millimetre retreat'))
+    return mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540},
+                      'frame_width': {'value': .450}},
+        'table_01', (1., 0.), .6, execute=True, candidate_trial=True)
+
+
+@pytest.mark.parametrize('left_gap_m, right_gap_m', [
+    (.0078, .0136),   # centring advance of 0.7 mm
+    (.0069, .0126),   # centring retreat of 0.25 mm
+])
+def test_fine_correction_below_the_base_resolution_is_not_commanded(
+        mission, left_gap_m, right_gap_m):
+    assert not _corner_gap_visit(mission, left_gap_m, right_gap_m)
+    mission._straight_final_approach.assert_called_once()
+    mission._retreat_table_gap.assert_not_called()
+    assert mission.emit.call_args.kwargs['reason'] == 'final_gap_correction_below_resolution'
+    assert abs(mission.emit.call_args.kwargs['requested_correction_m']) < (
+        box_service.TABLE_FINE_MIN_PROGRESS_M)
+
+
+@pytest.mark.parametrize('reason, released', [
+    ('registered_map_pose_frozen_with_table_face', True),
+    ('operator_measured_relative_lateral_correction', False),
+])
+def test_backing_out_releases_only_the_previous_approach_goal_holds(reason, released):
+    node = object.__new__(BoxServiceRoute)
+    node._table_observation_context = (
+        {'camera_mount': {'table_observation': {'base_offset_m': .5}}}, (1., 0.), .6)
+    node._leave_parked_pose = Mock(return_value=True)
+    node._station_terminal_goal = {'goal_odom': [1., 0., 0.]}
+    node.station_reference_goal = {'valid': True, 'reason': reason, 'goal_odom': [1., .02, 0.]}
+    node.station_reference_goal_frozen = True
+    assert node._leave_for_table_reobservation()
+    node._leave_parked_pose.assert_called_once_with(clearance_m=.5)
+    assert node._station_terminal_goal is None
+    assert (node.station_reference_goal is None) is released
+    assert node.station_reference_goal_frozen is (not released)
+
+
+def _fine_approach_node(restage=(None, 0.)):
+    node = object.__new__(BoxServiceRoute)
+    node.surface_mode = 'table_edge'
+    node.final_gap_override_m = .01
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._navigation_ready = Mock(return_value=True)
+    node._table_observation_context = ({}, (1., 0.), .6)
+    node.emit = Mock()
+    node._table_clearance_reapproaches = 0
+    node._table_lateral_restages = 0
+    target = _table_edge_final_target(1.0)
+    order = []
+    node.observe_target = Mock(side_effect=lambda *a, **k: order.append('observe') or dict(target))
+    node._leave_for_table_reobservation = Mock(
+        side_effect=lambda: order.append('reverse') or True)
+    node._table_lateral_restage_reason = Mock(return_value=restage)
+    node._restage_table_face_alignment = Mock(
+        side_effect=lambda *a: order.append('restage') or True)
+
+    def failed_approach(*_args, **_kwargs):
+        order.append('approach')
+        node._last_direct_motion_failure = 'table lateral alignment requires more clearance'
+        return False, None
+
+    node._zero_turn_final_approach = Mock(side_effect=failed_approach)
+    return node, target, order
+
+
+def test_table_clearance_reapproach_runs_once_per_visit():
+    node, target, order = _fine_approach_node()
+    assert node._table_fine_approach(dict(target), .065) == (False, None)
+    assert node._table_fine_approach(dict(target), .065) == (False, None)
+    assert order == ['approach', 'reverse', 'observe', 'approach', 'approach']
+    assert any(call.args[0] == 'table_alignment_clearance_reapproach_exhausted'
+               for call in node.emit.call_args_list)
+
+
+def test_infeasible_lateral_reapproach_restages_sideways_before_approaching_again():
+    reason = 'table approach preview heading out of range'
+    node, target, order = _fine_approach_node(restage=(reason, .2))
+    results = iter([(False, None), (True, 'to_odom')])
+
+    def approach(*_args, **_kwargs):
+        order.append('approach')
+        result = next(results)
+        node._last_direct_motion_failure = None if result[0] else reason
+        return result
+
+    node._zero_turn_final_approach.side_effect = approach
+    assert node._table_fine_approach(dict(target), .065) == (True, 'to_odom')
+    assert order == ['approach', 'reverse', 'observe', 'restage', 'observe', 'approach']
+    assert node._restage_table_face_alignment.call_args.args[1:] == (.065, reason, .2)
+
+
+def test_lateral_restage_is_bounded_per_visit():
+    node, target, order = _fine_approach_node(restage=('surface_only_lateral_offset', .2))
+    node._table_lateral_restages = box_service.TABLE_LATERAL_RESTAGE_LIMIT
+    assert node._table_fine_approach(dict(target), .065) == (False, None)
+    assert order == ['approach', 'reverse', 'observe']
+    assert node.emit.call_args.kwargs['reason'] == 'table_lateral_restage_exhausted'
+
+
+def test_lateral_restage_uses_the_face_alignment_leg_from_turning_room():
+    node = object.__new__(BoxServiceRoute)
+    node.emit = Mock()
+    order = []
+    node._leave_parked_pose = Mock(side_effect=lambda **k: order.append(('escape', k)) or True)
+    node.plan_pose = Mock(
+        side_effect=lambda pose, **k: order.append(('plan', pose, k)) or {'ok': True})
+    node.execute = Mock(side_effect=lambda **k: order.append(('execute', k)) or True)
+    target = {**_table_edge_final_target(1.0), 'face_center_map_xy_m': (1.0, .2)}
+    assert node._restage_table_face_alignment(target, .065, 'reason', .2)
+    assert order[0] == ('escape', {'clearance_m': box_service.ESCAPE_CLEARANCE_M})
+    planned = order[1][1]
+    assert planned['id'] == 'face_alignment'
+    assert planned['x_m'] == pytest.approx(1.0 - .065 - box_service.FACE_ALIGNMENT_FRONT_GAP_M)
+    assert planned['y_m'] == pytest.approx(.2)
+    assert order[1][2] == {'single': True, 'end_tolerance_m': .05}
+    assert order[2] == ('execute', {'final_parking': False, 'alignment': True, 'face': True})
+    assert node.last_box_face == {'face_center_map_xy_m': [1.0, .2],
+                                  'outward_normal_map_xy': [-1.0, 0.0]}
+    assert node._table_lateral_restages == 1
+
+
+@pytest.mark.parametrize('offset_m, restaged', [(.20, True), (.02, False)])
+def test_surface_only_table_restages_a_large_lateral_offset_before_the_straight_approach(
+        mission, offset_m, restaged):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    mission.station_reference = None
+    mission.station_reference_mode = 'surface_only'
+    box_service.load_route('route')['waypoints'][-1].update(x=.5, y=offset_m)
+    # The face-alignment target is already anchored to the registered y=0.
+    observed = {'x_m': 1.0 - .065 - .45, 'y_m': 0.0, 'yaw_rad': 0.0,
+                'face_center_map_xy_m': (1.0, 0.0), 'outward_normal_map_xy': (-1.0, 0.0),
+                'observation_robot_pose_map': [.5, offset_m, 0.0]}
+    later = {**observed, 'observation_robot_pose_map': [.925, 0.0, 0.0]}
+    views = iter([observed])
+    mission.observe_target = Mock(side_effect=lambda *a, **k: dict(next(views, later)))
+    mission.capture_stationary_pose.side_effect = [((.5, offset_m, 0), {}), ((.925, 0, 0), {})]
+    mission._leave_parked_pose = Mock(return_value=True)
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540}},
+        'table_01', (1, 0), .6, execute=True, candidate_trial=True,
+        resume_at_observation=True)
+    events = [call.args[0] for call in mission.emit.call_args_list]
+    assert ('table_lateral_restage' in events) is restaged
+    assert ('table_alignment_transit_skipped' in events) is (not restaged)
+    if restaged:
+        mission._leave_parked_pose.assert_called_once_with(
+            clearance_m=box_service.ESCAPE_CLEARANCE_M)
+        mission.execute.assert_called_once_with(
+            final_parking=False, alignment=True, face=True)
+        assert mission.plan_pose.call_args_list[0].args[0]['y_m'] == 0.0
+    else:
+        mission._leave_parked_pose.assert_not_called()
+        mission.execute.assert_not_called()
+
+
+def _surface_only_visit(mission, observed_pose):
+    mission.surface_mode = 'table_edge'
+    mission.final_gap_override_m = .01
+    mission.station_reference = None
+    mission.station_reference_mode = 'surface_only'
+    box_service.load_route('route')['waypoints'][-1].update(x=observed_pose[0], y=observed_pose[1])
+    observed = {'x_m': 1.0 - .065 - .45, 'y_m': 0.0, 'yaw_rad': 0.0,
+                'face_center_map_xy_m': (1.0, 0.0), 'outward_normal_map_xy': (-1.0, 0.0),
+                'observation_robot_pose_map': list(observed_pose)}
+    later = {**observed, 'observation_robot_pose_map': [.925, 0.0, 0.0]}
+    views = iter([observed])
+    mission.observe_target = Mock(side_effect=lambda *a, **k: dict(next(views, later)))
+    mission.capture_stationary_pose.side_effect = [(tuple(observed_pose), {}), ((.925, 0, 0), {})]
+    mission._leave_parked_pose = Mock(return_value=True)
+    assert mission.visit_observed_box(
+        'route', {}, {'front_to_wheel_axis': {'value': .065},
+                      'wheel_outer_width': {'value': .540}},
+        'table_01', (1, 0), .6, execute=True, candidate_trial=True,
+        resume_at_observation=True)
+    return [call.args[0] for call in mission.emit.call_args_list]
+
+
+def test_far_observation_uses_the_normal_alignment_leg_without_a_counted_restage(mission):
+    # 0.8 m from the face: the face-alignment leg runs anyway and already moves
+    # to the anchored lateral target, so no escape and no restage budget is used.
+    events = _surface_only_visit(mission, (.2, .2, 0.))
+    assert 'table_lateral_restage' not in events
+    mission._leave_parked_pose.assert_not_called()
+    mission.execute.assert_called_once_with(final_parking=False, alignment=True, face=True)
+    assert mission._table_lateral_restages == 0
+
+
+def test_restage_that_its_escape_would_refuse_keeps_the_continuous_approach(mission):
+    # 20 deg off the face normal and inside turning room: the straight escape
+    # refuses this heading, so the earlier continuous approach is kept.
+    events = _surface_only_visit(mission, (.5, .2, math.radians(20.)))
+    assert 'table_lateral_restage_unavailable' in events
+    assert 'table_alignment_transit_skipped' in events
+    mission._leave_parked_pose.assert_not_called()
+    mission.execute.assert_not_called()
+
+
+@pytest.mark.parametrize('lateral_m, feasible', [(.02, True), (.20, False)])
+def test_lateral_restage_reason_uses_the_live_controller_preview(lateral_m, feasible):
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.box_front_half_width_m = .225
+    node._final_gap_m = Mock(return_value=.01)
+    target = {'x_m': .925, 'y_m': lateral_m, 'yaw_rad': 0.,
+              'face_center_map_xy_m': (1., 0.), 'outward_normal_map_xy': (-1., 0.),
+              'observation_robot_pose_map': [.5, 0., 0.]}
+    reason, offset_m = node._table_lateral_restage_reason(target, .065)
+    assert offset_m == pytest.approx(lateral_m)
+    assert (reason is None) is feasible
+
+
+def test_surface_only_face_target_uses_the_registered_lateral_position():
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = None
+    node.station_reference_mode = 'surface_only'
+    node.station_reference_taught_map_pose = (.485, 0., 0.)
+    target = {'x_m': .485, 'y_m': .2, 'yaw_rad': 0.,
+              'face_center_map_xy_m': (1., .2), 'outward_normal_map_xy': (-1., 0.)}
+    anchored = node._station_anchor_target(target)
+    assert anchored['x_m'] == pytest.approx(.485)
+    assert anchored['y_m'] == pytest.approx(0.)
+    assert anchored['face_center_map_xy_m'] == pytest.approx([1., 0.])
+    # The shift is signed along the face tangent (-n_y, n_x) = (0, -1).
+    assert anchored['lateral_shift_m'] == pytest.approx(.2)
+    assert anchored['lateral_reference_mode'] == 'surface_only_registered_map_pose'
+    assert anchored['lateral_fine_correction'] is False
+    assert anchored['rgbd_reference_valid'] is False
+    # The odom-frame control path keeps surface_only without any lateral goal.
+    assert node._station_anchor_target(target, reference_frame='odom') is target
+
+
+def test_rgbd_station_before_its_first_match_targets_the_registered_pose_in_map_only():
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_taught_map_pose = (.485, .03, 0.)
+    node._station_goal_reference = Mock(return_value=(None, {
+        'valid': False, 'reason': 'station_reference_not_observed'}))
+    target = {'x_m': .485, 'y_m': .2, 'yaw_rad': 0.,
+              'face_center_map_xy_m': (1., .2), 'outward_normal_map_xy': (-1., 0.)}
+    anchored = node._station_anchor_target(target)
+    assert anchored['y_m'] == pytest.approx(.03)
+    assert anchored['lateral_goal_pending'] is True
+    assert anchored['rgbd_reference_valid'] is False
+    assert anchored['lateral_goal_basis'] == 'registered_map_pose_until_rgbd_match'
+    pending = node._station_anchor_target(target, reference_frame='odom')
+    assert pending['y_m'] == .2
+    assert pending['lateral_goal_pending'] is True
