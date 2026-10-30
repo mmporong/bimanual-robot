@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-10-30 | OMEN 16 주소로 주행 연동 전환
+
+- 차량 노트북 교체 공지에 따라 주문 서버 주소와 Astra 허용 송신 IP를 `192.168.0.157`로 변경했다. Pi `.159`, 주행 PC `.217`, 포트 8765/5600과 기존 API·시나리오는 유지한다. 노트북은 DHCP이므로 주소 변경 시 실제 주행 API의 `--order-url`과 Pi 수신 서비스의 `--peer`를 함께 바꾼다. 허용 IP 검사는 유지한다.
+- 저장소의 수신기 기본값·systemd 서비스 원본·ASTRA_TCP 안내·주행 API 실행 예시 4곳을 갱신했다. Pi 활성 수신 모듈의 문법·로컬 SHA256 일치를 확인하고 사용자 서비스의 peer를 바꾼 뒤 재기동했다. 로그에 `AST1 listening on 0.0.0.0:5600; peer=192.168.0.157`이 남았다. 변경 전 백업은 Pi `$HOME/jdamr_deploy/backups/omen-endpoint-20261030_124205/`다.
+- 주행 PC는 기존 미션이 실행 중이 아님을 확인하고 `$HOME/.config/systemd/user/jdamr-water-service-api.service.d/20-order-endpoint.conf`에서 새 주소와 `JDAMR_ORDER_URL`을 설정했다. 기존 transient 서비스에 drop-in을 적용해 재시작했고 API status의 `order_url`이 새 주소임을 확인했다. 보존된 `state=failed`는 이전 주문 261030003의 기록이며 새 실행 결과가 아니다.
+- 현재 주행 PC와 Pi에서 새 주문 서버 `/api/state`는 시간 초과다. Windows SSH 조회상 8765·8770 대기 포트가 0개이므로 서버 실행 대기 상태다. ready 통보 전 출발·주문·align/confirm·팔 동작을 실행하지 않는다. 실제 영상·송신 FPS 확인도 장치 연결과 송신기 시작 후 남아 있다.
+- 교체 공지의 “새 노트북 SSH 미설정”은 현재와 다르다. 사용자 승인으로 OpenSSH와 공개키를 설정했고 주행 PC에서 `user@192.168.0.157` 접속을 확인했다. 역방향 Windows→Pi 공개키와 관제 `--robot-ssh`는 별도이며 이번에 설정하지 않았다. 새 모델·환경 준비는 팀원 보고이며 이 세션의 실물 실행 확인으로 바꾸지 않는다.
+- 변경은 작업 브랜치 로컬 커밋에 남기며 원격 push·PR 병합은 하지 않는다. 다음 연결용 기존 주행 API·Pi 수신기는 유지한다. 종료는 주행 PC `systemctl --user stop jdamr-water-service-api.service`, Pi `systemctl --user stop jdamr-astra-tcp.service`다.
+
 ## 2026-10-30 | 주차 입력 복구·후면 방향 정렬·차체 외곽 수정 배포
 
 - 급수대·테이블1·도크 주차는 사용자 수용 성공으로 보존한다. 최종 도크 내부 추정은 양끝 약12.9/13.3mm, 자동 confirmed=false이며 외부 1cm 실측 성공으로 바꾸지 않는다. 컵배치는 Windows 팔 연결 오류로 실패했다. 상세 실행 ID와 근거는 [주차 복구 기록](src/navigation/jdamr_cube_navigation/evaluation/20261030_PARKING_RECOVERY_AND_COLLISION.md)에 모았다.

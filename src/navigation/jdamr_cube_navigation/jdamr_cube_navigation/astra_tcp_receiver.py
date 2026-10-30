@@ -353,7 +353,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', type=int, default=5600)
-    parser.add_argument('--peer', default='192.168.0.175')
+    parser.add_argument('--peer', default='192.168.0.157')
     parser.add_argument('--publish-optical-tf', action='store_true',
                         help='publish existing calibrated lens-origin optical convention')
     parser.add_argument('--clock-hold-s', type=float, default=120.0)

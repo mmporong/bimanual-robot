@@ -9,7 +9,7 @@ Environment=ROS_LOCALHOST_ONLY=0
 Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 Environment=FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -c 'source /opt/ros/jazzy/setup.bash; source %h/jdamr_ws/install/setup.bash; exec python3 -m jdamr_cube_navigation.astra_tcp_receiver --peer 192.168.0.175 --port 5600 --publish-optical-tf'
+ExecStart=/bin/bash -c 'source /opt/ros/jazzy/setup.bash; source %h/jdamr_ws/install/setup.bash; exec python3 -m jdamr_cube_navigation.astra_tcp_receiver --peer 192.168.0.157 --port 5600 --publish-optical-tf'
 Restart=on-failure
 RestartSec=2
 
