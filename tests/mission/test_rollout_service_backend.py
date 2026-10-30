@@ -274,3 +274,144 @@ def test_drive_hint_follows_the_mission(fake):
     assert done.wait(5)
     assert seen == [{"next": "kitchen", "arms_ready": True}, {"next": "table", "arms_ready": True}]
     assert fake.calls == ["stow", "pour", "place"]
+
+
+@pytest.mark.parametrize("web_order_first", [True, False], ids=["qr-order", "mission-order"])
+def test_water_mission_http_handoffs_continue_through_physical_dock_completion(
+    fake, tmp_path, monkeypatch, web_order_first,
+):
+    """Use real HTTP controllers; isolate all actuator commands behind one fake base."""
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "tools/jdamr"))
+    import water_service_api
+
+    fake.stow_pose = "place_end"
+    backend = RolloutServiceBackend(url=fake.url)
+    app = ServiceApplication(MissionController(), tmp_path / "orders", backend)
+    order_http = ThreadingHTTPServer(("127.0.0.1", 0), handler_factory(app))
+    order_thread = threading.Thread(target=order_http.serve_forever, daemon=True)
+    order_thread.start()
+    order_url = f"http://127.0.0.1:{order_http.server_port}"
+
+    data_root = tmp_path / "data"
+    session = data_root / "maps/classroom"
+    runtime = session / "runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "state.json").write_text("{}")
+    pointer = tmp_path / "map.json"
+    pointer.write_text(json.dumps({"directory": str(session)}))
+    monkeypatch.setenv("JDAMR_DATA_ROOT", str(data_root))
+    node = water_service_api.WaterServiceController(
+        inference_url=order_url, state_directory=tmp_path / "mission",
+        map_session=pointer, inference_timeout_s=10,
+    )
+    dock_entered, release_dock, auto_stop = (threading.Event() for _ in range(3))
+    legs, errors = [], []
+
+    def fake_base(arguments):
+        destination = ("dock" if "--skip-via" in arguments
+                       else "kitchen" if arguments[1] == "water_station" else "table")
+        expected_policies = {"kitchen": ["stow"], "table": ["stow", "pour"],
+                             "dock": ["stow", "pour", "place"]}
+        assert fake.calls == expected_policies[destination]
+        assert node._drive_ready(app.state(), destination)
+        legs.append((destination, list(arguments)))
+        if destination == "dock":
+            dock_entered.set()
+            assert release_dock.wait(10), "test did not release simulated dock completion"
+            return
+        assert "--park-only" in arguments
+        run = runtime / "runs" / destination
+        run.mkdir(parents=True)
+        (run / "command.txt").write_text(f"--table-id {arguments[1]} --search")
+        (runtime / "state.json").write_text(json.dumps({"last_run": str(run)}))
+
+    def forbid_actuator_process(*args, **kwargs):
+        raise AssertionError("a simulated scenario must never invoke an actuator subprocess")
+
+    monkeypatch.setattr(node, "_run_helper", fake_base)
+    # The fake base above covers the only actuator boundary, including stop paths.
+    monkeypatch.setattr(node, "_run_stop_helper", forbid_actuator_process)
+    monkeypatch.setattr(node._run_mission.__globals__["subprocess"], "Popen", forbid_actuator_process)
+    mission_http = water_service_api._MissionServer(("127.0.0.1", 0), node, "test-token", None)
+    mission_thread = threading.Thread(target=mission_http.serve_forever, daemon=True)
+    mission_thread.start()
+    mission_url = f"http://127.0.0.1:{mission_http.server_port}"
+
+    def http(base, path, body=None, token=None):
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        request = Request(base + path, headers=headers,
+                          data=None if body is None else json.dumps(body).encode())
+        with urlopen(request, timeout=3) as response:
+            raw = response.read()
+            return json.loads(raw) if "application/json" in response.headers.get("Content-Type", "") else raw
+
+    def auto_step():
+        try:
+            while not auto_stop.is_set():
+                app.execute_next()
+                auto_stop.wait(.01)
+        except Exception as error:
+            errors.append(error)
+
+    order_worker = threading.Thread(target=auto_step, daemon=True)
+    order_worker.start()
+    try:
+        assert b"<html" in http(order_url, "/order?table=1").lower()
+        if web_order_first:
+            order = http(order_url, "/api/orders", {
+                "order_id": "QR-ORDER", "table_id": "table_1", "drink": "COLD_WATER",
+            })["order"]
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                waiting = app.state()["execution_backend"].get("waiting_alignment")
+                if waiting and waiting["station"] == "kitchen":
+                    break
+                time.sleep(.01)
+            else:
+                pytest.fail("web order did not reach kitchen alignment")
+            # QR alone cannot start the separately hosted base controller.
+            assert node.status()["state"] != "running"
+            assert legs == []
+
+        request_id = "simulated-full-service"
+        accepted = http(mission_url, "/api/mission/start", {"request_id": request_id}, "test-token")
+        assert accepted["accepted"]
+        assert dock_entered.wait(10), node.status()
+        assert app.state()["orders"][0]["state"] == "SUCCEEDED"
+        assert node.status()["state"] == "running"
+        assert node.status()["phase"] == "returning_to_dock"
+        release_dock.set()
+        node._worker_thread.join(timeout=3)
+        assert not node._worker_thread.is_alive()
+        final = http(mission_url, "/api/mission/status", token="test-token")
+        assert (final["state"], final["phase"], final["error"]) == ("succeeded", "complete", None)
+        assert [destination for destination, _ in legs] == ["kitchen", "table", "dock"]
+        assert fake.calls == ["stow", "pour", "place"]
+        assert fake.stops == 0
+        assert len(app.state()["orders"]) == 1
+        if web_order_first:
+            assert final["order_id"] == order["order_id"]
+        for index, state_key in ((1, "parking_log_on_pi"), (2, "table_parking_log_on_pi")):
+            arguments = legs[index][1]
+            assert arguments[arguments.index("--resume-parked-log") + 1] == final[state_key]
+        duplicate = http(mission_url, "/api/mission/start", {"request_id": request_id}, "test-token")
+        assert duplicate["duplicate"] and not duplicate["accepted"]
+        assert len(legs) == 3
+        assert not errors
+    finally:
+        auto_stop.set()
+        release_dock.set()
+        backend.cancel_active()
+        if node._worker_thread:
+            node._worker_thread.join(timeout=3)
+        order_worker.join(timeout=3)
+        for server, thread in ((mission_http, mission_thread), (order_http, order_thread)):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+        app.close()
+        assert not order_worker.is_alive()
