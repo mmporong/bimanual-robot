@@ -2043,7 +2043,24 @@ class ServiceRoute(CorridorRoute):
                         and not departure.get('rear_release_complete', False)):
                     found = self._scan_in_base()
                     if found is None:
-                        self.emit(f'{motion}_release_failed', reason='no fresh scan')
+                        # Path preparation can outlast the scan freshness window.
+                        # Stay stopped while callbacks refresh the snapshot; never
+                        # extend the age accepted by _scan_in_base.
+                        self.emit(f'{motion}_release_waiting_scan')
+                        deadline = min(self.run_deadline_s,
+                                       time.monotonic() + ESCAPE_SCAN_MAX_AGE_S)
+                        while (found is None and not self.stop_requested
+                               and time.monotonic() < deadline):
+                            spin_node(self, timeout_sec=0.02)
+                            found = self._scan_in_base()
+                    if self.stop_requested:
+                        return False
+                    if found is None:
+                        received = (getattr(self, 'samples', None) or {}).get('scan')
+                        self.emit(f'{motion}_release_failed', reason='no fresh scan',
+                                  scan_callback_age_s=(time.monotonic() - received
+                                                       if received is not None else None),
+                                  scan_present=getattr(self, 'last_scan', None) is not None)
                         return False
                     if self._footprint_intrusion(found=found) in ('front', 'both'):
                         self.emit(f'{motion}_release_failed',

@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-10-31 | 팀원 통합 시험 결과 인계·도크 스캔 공백 수정
+
+- 팀원 보고: 웹 START 자동 출발과 급수대 주차 정상, 새 노트북 물따르기 첫 성공1회/64.7초. 테이블 주차·컵배치 통합 미시험, 전체 완주0회. 이는 사용자에게 전달받은 결과이며 로컬 로그만으로 팔 성공을 재판정하지 않는다.
+- `tools/jdamr/water_service.py`, `water_service_api.py`의 웹 START/STOP 추종·heartbeat 변경86줄은 팀원 미커밋 작업이다. 파일별 SHA와 사본을 `$HOME/jdamr_data/handoffs/20261031_team_web_changes/`에 보존했다. fetch만 수행하고 pull·덮어쓰기·팀원 변경 커밋은 하지 않았다. 팀원 PR 반영 전 git checkout으로 두 파일을 되돌리지 않는다.
+- `table_01_20261031_182702_46ed27ea`: 도크 후면 관측/접근 후 좌우 오차-0.0663m에 대한 전진 여유0.8027m를 준비했다. 준비 시작→0.011초 뒤 `_scan_in_base()`가 None이라 release_failed, 상위 rear_box_parking_not_confirmed로 종료. 그 직전에는 stable face로 직진을 종료했다. 실제 라이다 단절·TF 부재·경로 준비 중 콜백 지연 중 어느 것인지는 당시 세부 로그가 없어 확정하지 않는다. 전진80cm나 최종도킹은 이 기록에서 실행 완료되지 않았다.
+- 수정: 전진 여유 시작 전 유효 snapshot이 없으면 정지 상태에서 기존0.5초 freshness window 동안 콜백을 처리해 새 snapshot을 재취득한다. 입력 나이/충돌 기준은 유지하며 사용자 정지·run deadline을 우선한다. 실패 시 scan 존재·콜백 나이를 기록해 원인을 분리한다. 관련6개 최소 확인 통과, Pi 기존 파일 해시와 baseline 일치 확인 후 백업·교체·문법·해시 확인. 실행기/주행 세션은 중지 상태를 유지했고 로봇·팔 이동 없음. 실차 재발 해소는 아직 미확인.
+- session-start code3: 팀원이 보존한 Pi `~/jdamr_deploy/backups/jdamr-restaurant-navigation.service.20261031_180843` 및 중지 transient 삭제 기록을 확인. 현재 Nav2 unit은 not-found/inactive로 잔존 unit 없음. 당시 start 거부 원문은 확보하지 못해 stale unit/설정 identity 불일치를 확정 원인으로 쓰지 않는다. 추가 유닛 삭제·재시작은 하지 않았다.
+- 저녁 run `20261031_200402_beac093c/controller.log`4096바이트 중간 절단 확인. 디스크 부족 보고와 부합하지만 ENOSPC 원문/해당 code120 stderr가 없어 원인은 미확정. 현재 /home 여유2.1GB(97%) 관측, 용량 정리는 사용자 별도 작업으로 아무 파일도 삭제하지 않았다.
+- 이 PC에 jdamr-water-service-api.service unit과 serve 프로세스는 현재 발견되지 않았다. 웹 자동출발을 임의로 다시 켜지 않았다. 내일 Windows 모델 ready·카메라송신과 기존 주문/긴급정지 상태를 확인한 뒤 도크에서 prepare→session-start→init, 주행 PC에서 `python3 tools/jdamr/water_service_api.py serve --order-url http://192.168.0.157:8765 --follow-web`을 한 번 실행한다. 웹 START가 실제 팔 접기·출발을 시작하므로 serve 준비와 구분한다. 주소 변경 시 새 주소 사용. 실차 준비 완료 판정은 아직 하지 않는다.
+
+
 ## 2026-10-30 | 도크 출발·급수대 주차·물따르기 진행 확인 후 노트북 전원 종료
 
 - 미션 `20261030_210526_c0191d20`, 주문 `261030002`. 도크 스캔 기반 초기화 후 급수대 주차 `water_station_20261030_210536_aa2379a4` 완료, 21:06:49 kitchen 정렬 완료 전달. Windows GRASP_CUP / running_policy=pour 확인.

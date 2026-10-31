@@ -266,6 +266,33 @@ def test_return_clearance_uses_guarded_motion_without_a_departure_waypoint(
         node._depart_dock_straight(.2)
 
 
+@pytest.mark.parametrize('refresh', [True, False])
+def test_return_clearance_refreshes_scan_without_accepting_stale_input(
+        dock_departure_static_corridor, monkeypatch, refresh):
+    node = dock_departure_route()
+    node.emit = Mock()
+    node.registry['home'] = {'rear_parking_reference': 'lidar_box'}
+    node.run_deadline_s = 10.0
+    node.waypoints = [{'id': 'home_dock_approach', 'x': 0.1, 'y': 0.0}]
+    node.config = {**node.config, 'waypoints': node.waypoints}
+    clock = [0.0]
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service, 'spin_node',
+                        lambda *_a, **_k: clock.__setitem__(0, clock[0] + .1))
+    snapshot = object()
+    node._scan_in_base = Mock(side_effect=lambda: snapshot if refresh and clock[0] else None)
+    node._footprint_intrusion = Mock(return_value=None)
+    node._rear_swing_need = Mock(return_value=0.0)
+    assert node._clear_rear_dock_straight(.2) is refresh
+    assert clock[0] <= restaurant_service.ESCAPE_SCAN_MAX_AGE_S
+    if refresh:
+        node._footprint_intrusion.assert_called_once_with(found=snapshot)
+        node._execute_reverse_once.assert_called_once()
+    else:
+        node._footprint_intrusion.assert_not_called()
+        node._execute_reverse_once.assert_not_called()
+
+
 @pytest.mark.parametrize('blocked,stopped,failed', [
     (True, False, False), (False, True, False), (False, False, True)])
 def test_return_clearance_preserves_obstacle_stop_and_action_failure(
