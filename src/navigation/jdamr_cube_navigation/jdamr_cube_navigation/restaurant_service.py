@@ -901,12 +901,13 @@ class ServiceRoute(CorridorRoute):
         keyframes = [(pose, frame) for stamp_s, pose, frame
                      in getattr(self, 'scan_memory', None) or ()
                      if now_s - stamp_s <= SCAN_MEMORY_MAX_AGE_S]
+        self._blind_point_sources = []
         if not keyframes:
             return []
         current_pose = self._odom_pose()
         return remembered_blind_points(
             keyframes, current_pose, laser, scan.range_min,
-            source_point_filter=source_point_filter)
+            source_point_filter=source_point_filter, source_records=self._blind_point_sources)
 
     def _remember_scan(self, scan):
         """Keep a scan whenever the base moved SCAN_MEMORY_STEP_M or turned STEP_RAD."""
@@ -1654,6 +1655,7 @@ class ServiceRoute(CorridorRoute):
             'table approach observer silent',
             'table approach depth stale or future-dated',
             'table approach observer latency',
+            'table approach tape reference pending',
         }
         recoverable_rear_failures = {
             'rear box scan unavailable', 'rear box scan stale or future-dated',
@@ -1687,8 +1689,9 @@ class ServiceRoute(CorridorRoute):
             resume_speed = state.get('resume_speed_mps', speed_mps)
             paused_s = time.monotonic()
             rear_recovery = reason in recoverable_rear_failures
+            bounded_recovery = rear_recovery or reason == 'table approach tape reference pending'
             recovery_deadline_s = (min(deadline_s, getattr(self, 'run_deadline_s', deadline_s))
-                                   if rear_recovery else math.inf)
+                                   if bounded_recovery else math.inf)
             event_prefix = 'rear_box' if rear_recovery else 'table_approach'
             self.emit(f'{event_prefix}_waiting_for_input', reason=reason,
                       travelled_m=state['travelled'], target_preserved=True)
@@ -1733,7 +1736,7 @@ class ServiceRoute(CorridorRoute):
             if self.stop_requested or state['tf_failure'] or state['target_failure']:
                 command.linear.x = command.angular.z = 0.0
                 break
-            if not rear_recovery:
+            if not bounded_recovery:
                 deadline_s += time.monotonic() - paused_s
             timing['checked_s'] = None
         # Recovery can discover a different terminal failure without entering

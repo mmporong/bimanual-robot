@@ -19,7 +19,8 @@ CASES = json.loads((Path(__file__).parent / 'fixtures/kitchen_tape_restage_20261
 @pytest.mark.parametrize('case', CASES, ids=lambda c: c['run'])
 @pytest.mark.parametrize('map_shift', [0., .16])
 @pytest.mark.parametrize('reported_errors', [False, True])
-def test_rejected_tape_goal_survives_reverse_and_drives_sideways_restage(monkeypatch, case, map_shift, reported_errors):
+@pytest.mark.parametrize('rebase', [False, True])
+def test_rejected_tape_goal_survives_reverse_and_drives_sideways_restage(monkeypatch, case, map_shift, reported_errors, rebase):
     node = object.__new__(BoxServiceRoute)
     actual = list(case['start_pose_odom'])
     goal = case['lateral_goal_odom']
@@ -108,6 +109,15 @@ def test_rejected_tape_goal_survives_reverse_and_drives_sideways_restage(monkeyp
         validator = node._table_approach_validator(extent, lambda p: (p[0], p[1]-map_shift, p[2]))
         held = node.station_reference_goal
         try:
+            if rebase and len(attempts) == 1:
+                # A near three-frame consensus arrives after the old target froze.
+                fresh = dict(held, goal_filter_sample_count=3)
+                node._fresh_station_reference = lambda: fresh
+                node._station_reference_rebase_goal = fresh
+                node._station_reference_goal_challenged = True
+                node._station_goal_reference(freeze=True)
+                assert node._table_rebase_requires_restage
+                raise RuntimeError('table lateral alignment requires more clearance')
             validator(tuple(actual), face, normal, heading,
                       lateral_goal_odom=held['goal_odom'])
         except RuntimeError as error:
@@ -123,7 +133,8 @@ def test_rejected_tape_goal_survives_reverse_and_drives_sideways_restage(monkeyp
     assert order.index('reverse') < order.index('restage')
     held = node._table_restage_tape_goal
     assert held['goal_odom'] == goal
-    assert held['rejection_lateral_m'] == pytest.approx(sum((goal[i]-attempts[0][i])*left[i] for i in (0,1)))
+    rejection_left = (-math.sin(goal[2]), math.cos(goal[2])) if rebase else left
+    assert held['rejection_lateral_m'] == pytest.approx(sum((goal[i]-attempts[0][i])*rejection_left[i] for i in (0,1)))
     assert node.station_reference_goal_frozen
     assert len(node._station_reference_goal_samples) == 1
     assert abs(sum((goal[i]-actual[i])*left[i] for i in (0,1))) < 1e-9

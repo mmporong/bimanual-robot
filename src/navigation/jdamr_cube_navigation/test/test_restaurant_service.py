@@ -3888,6 +3888,11 @@ def test_filtered_blind_memory_uses_one_current_pose_snapshot(monkeypatch):
 
     assert len(found) == 1 and found[0] == pytest.approx((.19, 0.0))
     node._odom_pose.assert_called_once_with()
+    source_pose, source_scan, point, current = node._blind_point_sources[0]
+    assert source_pose == (0., 0., 0.)
+    assert source_scan is scan
+    assert point == pytest.approx((.39, 0.))
+    assert current == (.20, 0., 0.)
 
 
 def test_escape_snapshot_needs_a_fresh_scan_and_carries_the_blind_memory(monkeypatch):
@@ -4336,7 +4341,7 @@ def test_live_depth_gap_waits_stopped_and_resumes_same_target(monkeypatch, inter
 
 @pytest.mark.parametrize('failure', [
     'rear box face unavailable', 'rear box target changed',
-    'rear docking swept footprint occupied'])
+    'rear docking swept footprint occupied', 'table approach tape reference pending'])
 @pytest.mark.parametrize('recovers', [True, False])
 def test_rear_input_gap_keeps_same_motion_and_respects_task_deadline(
         monkeypatch, failure, recovers):
@@ -4365,17 +4370,18 @@ def test_rear_input_gap_keeps_same_motion_and_respects_task_deadline(
     monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
     result = node._drive_zero_turn(.04, precision=True, hold_heading=True, target_update=update)
-    waiting = next(e for e in _events(node) if e['event'] == 'rear_box_waiting_for_input')
+    prefix = 'table_approach' if failure.startswith('table ') else 'rear_box'
+    waiting = next(e for e in _events(node) if e['event'] == f'{prefix}_waiting_for_input')
     assert waiting['target_preserved']
     assert all(v == 0. for t, v in commands if waiting['monotonic_s'] <= t < 11.5)
     assert clock[0] < 14.6
     if recovers:
         assert result == pytest.approx(.04, abs=.003)
-        assert any(e['event'] == 'rear_box_input_recovered' for e in _events(node))
+        assert any(e['event'] == f'{prefix}_input_recovered' for e in _events(node))
     else:
         assert result is None
         assert position[0] < .02
-        assert not any(e['event'] == 'rear_box_input_recovered' for e in _events(node))
+        assert not any(e['event'] == f'{prefix}_input_recovered' for e in _events(node))
 
 
 @pytest.mark.parametrize('intermediate', [True, False])

@@ -270,6 +270,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
         self._station_reference_goal_samples = deque(maxlen=5)
+        self._station_reference_rebase_samples = []
+        self._station_reference_rebase_goal = None
+        self._station_reference_goal_challenged = False
+        self._table_rebase_requires_restage = False
         self.station_reference_image_subscription = None
         self.station_reference_info_subscription = None
         self._station_reference_pending = None
@@ -345,6 +349,40 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         with self._station_reference_lock:
             self._station_reference_pending = (image, info, stamp_s)
         self._station_reference_wake.set()
+
+    def _consider_tape_rebase(self, result):
+        """Collect three fresh, distinct close views; caller holds the worker lock."""
+        if (getattr(self.station_reference, 'observation_method', None) != 'table_front_tape'
+                or not result.get('valid')
+                or not 0. <= result.get('image_age_at_completion_s', math.inf)
+                <= STATION_REFERENCE_MAX_AGE_S):
+            self._station_reference_rebase_samples = []
+            return None
+        center = result.get('quality', {}).get('tape_center_base_xy_m')
+        if center is None or not .05 <= center[0] <= .45:
+            self._station_reference_rebase_samples = []
+            return None
+        candidates = getattr(self, '_station_reference_rebase_samples', [])
+        stamp = result['stamp_s']
+        if candidates and stamp <= candidates[-1]['stamp_s']:
+            return None
+        candidates = [item for item in candidates if stamp-item['stamp_s'] <= 2.]
+        goal = result['goal_odom']
+        if any(math.dist(goal[:2], item['goal_odom'][:2]) > .01
+               or abs(math.atan2(math.sin(goal[2]-item['goal_odom'][2]),
+                                 math.cos(goal[2]-item['goal_odom'][2]))) > math.radians(2.)
+               for item in candidates):
+            candidates = []
+        candidates.append(dict(result))
+        self._station_reference_rebase_samples = candidates[-3:]
+        if len(candidates) < 3:
+            return None
+        goals = np.asarray([item['goal_odom'] for item in candidates[-3:]])
+        return dict(result, goal_odom=[float(np.median(goals[:,0])),
+                                      float(np.median(goals[:,1])),
+                                      math.atan2(float(np.sin(goals[:,2]).mean()),
+                                                 float(np.cos(goals[:,2]).mean()))],
+                    reason='consistent_near_tape_rebase', goal_filter_sample_count=3)
 
     def _station_reference_loop(self):
         """Process at most the newest RGB frame on one managed worker."""
@@ -447,9 +485,23 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         # The taught cup/bottle pair is static in this run.
                         # An isolated wrong pair must not steer the base or
                         # move the next frame's tracking window.
-                        contact_reference.restore_tracking(tracking_checkpoint)
-                        result = dict(result, valid=False,
-                                      reason='station_reference_inconsistent_static_goal')
+                        rebased = self._consider_tape_rebase(result)
+                        if reference.observation_method == 'table_front_tape':
+                            self._station_reference_goal_challenged = True
+                        if rebased is not None:
+                            self._station_reference_rebase_goal = rebased
+                            samples.clear()
+                            samples.extend(self._station_reference_rebase_samples)
+                            result = rebased
+                        else:
+                            contact_reference.restore_tracking(tracking_checkpoint)
+                            result = dict(result, valid=False,
+                                          reason='station_reference_inconsistent_static_goal')
+                    elif getattr(self, '_station_reference_rebase_goal', None) is None:
+                        self._station_reference_rebase_samples = []
+                        self._station_reference_goal_challenged = False
+                elif result.get('valid') is not True:
+                    self._station_reference_rebase_samples = []
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
                 if result.get('valid') is True:
@@ -544,6 +596,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_terminal_goal = None
         self.station_reference_goal_frozen = False
         self._station_reference_goal_samples = deque(maxlen=5)
+        self._station_reference_rebase_samples = []
+        self._station_reference_rebase_goal = None
+        self._station_reference_goal_challenged = False
+        self._table_rebase_requires_restage = False
         self.station_reference = reference
         self.station_reference_mode = mode
         self.station_reference_profile = profile
@@ -644,6 +700,35 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         A carried destination is never fresh obstacle or sensor evidence.
         """
         reference = self._fresh_station_reference()
+        rebased = None
+        if getattr(self, '_station_reference_rebase_goal', None) is not None:
+            with self._station_reference_lock:
+                if reference and reference.get('valid') is True:
+                    rebased = self._station_reference_rebase_goal
+                    self._station_reference_rebase_goal = None
+                    self._station_reference_goal_challenged = False
+        if getattr(self, '_station_reference_goal_challenged', False):
+            self._station_terminal_goal = None
+        if rebased is not None:
+            actual = self._odom_pose()
+            goal = rebased['goal_odom']
+            heading = goal[2]
+            lateral = sum((goal[i]-actual[i])*v for i,v in enumerate(
+                (-math.sin(heading), math.cos(heading))))
+            self.station_reference_goal = dict(rebased)
+            self.station_reference_control_goal = dict(rebased)
+            self.station_reference_goal_frozen = True
+            self._station_terminal_goal = None
+            self._table_restage_tape_goal = dict(
+                rebased, rejection_pose_odom=list(actual), rejection_lateral_m=lateral,
+                rejection_heading_rad=math.atan2(math.sin(heading-actual[2]),
+                                                 math.cos(heading-actual[2])))
+            self._table_rebase_requires_restage = (
+                abs(lateral) > self.station_reference_profile['lateral_tolerance_m'])
+            self.emit('table_station_goal_rebased', goal_odom=list(goal),
+                      lateral_error_m=lateral, sample_count=3,
+                      restage_required=self._table_rebase_requires_restage,
+                      final_parking_confirmed=False)
         terminal_goal = getattr(self, '_station_terminal_goal', None)
         if terminal_goal is not None:
             # Keep the accepted terminal destination; fresh images still
@@ -842,6 +927,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         This grants destination continuity, never fresh sensor evidence. Depth,
         odom, geometry and stop guards remain owned by the approach controller.
         """
+        if (getattr(self, '_station_reference_goal_challenged', False)
+                or getattr(self, '_table_rebase_requires_restage', False)):
+            return False
         if reference and reference.get('valid') is True:
             return True
         anchor = getattr(self, 'station_reference_goal', None)
@@ -867,6 +955,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             == 'table_front_tape'
             and getattr(self, '_station_terminal_goal', None) is not None
             and goal_reference is not None)
+        if (getattr(self, '_station_reference_goal_challenged', False)
+                or getattr(self, '_table_rebase_requires_restage', False)):
+            valid_reference = False
+            tape_terminal = False
         if tape_terminal:
             # The aligned terminal band already accepted a visual goal in odom.
             # Tape leaves the downward camera's view near contact; keep that goal,
@@ -2000,6 +2092,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._table_clearance_reapproaches = 0
         self._table_lateral_restages = 0
         self._table_restage_tape_goal = None
+        self._station_reference_rebase_samples = []
+        self._station_reference_rebase_goal = None
+        self._station_reference_goal_challenged = False
+        self._table_rebase_requires_restage = False
         self._station_face_heading_odom_rad = None
         if reapproach_m is not None:
             resume_at_observation = True
@@ -2743,6 +2839,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
 
     def _table_fine_approach(self, target, front_extent_m):
         """Align to the observed normal while closing the gap in one move."""
+        approach_options = {'allow_trim': False, 'continuous_table': True}
         self._continuous_table_stop = None
         observed = target.get('observation_robot_pose_map')
         if observed is not None:
@@ -2764,11 +2861,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 # Centre the two corner gaps on the unchanged final target.
                 # The leading corner alone would leave the far corner too far out.
                 self._station_goal_reference(freeze=True)
-                return self._zero_turn_final_approach(
-                    target, front_extent_m, gap_m=self._final_gap_m() - span_m / 2,
-                    allow_trim=False, continuous_table=False)
+                approach_options.update(gap_m=self._final_gap_m() - span_m / 2,
+                                        continuous_table=False)
         result = self._zero_turn_final_approach(
-            target, front_extent_m, allow_trim=False, continuous_table=True)
+            target, front_extent_m, **approach_options)
         if (result[0] or getattr(self, '_last_direct_motion_failure', None) not in {
                 'table alignment requires more clearance',
                 'table lateral alignment requires more clearance',
@@ -2951,6 +3047,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         finally:
             # Later events and legs of this final approach keep their own pose.
             self.config, self.waypoints, self.pose_id = saved
+        self._table_rebase_requires_restage = False
         return True
 
     def _leave_for_table_reobservation(self):
@@ -3141,6 +3238,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if not self._station_reference_enabled():
                 return None, None
             goal, reference = self._station_goal_reference(freeze=True)
+            if getattr(self, '_station_reference_goal_challenged', False):
+                raise RuntimeError('table approach tape reference pending')
+            if getattr(self, '_table_rebase_requires_restage', False):
+                raise RuntimeError('table lateral alignment requires more clearance')
             if goal is not None:
                 return tuple(goal['goal_odom']), reference
             # Before the taught objects become matchable, steer toward the
@@ -3428,8 +3529,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                             and self._table_terminal_reference_ready(station_observation)
                             and goal_odom is not None):
                         goal, _ = self._station_goal_reference()
-                        if goal is not None:
-                            self._station_terminal_goal = dict(goal, goal_odom=list(goal_odom))
+                        if (goal is not None
+                                and self._table_terminal_reference_ready(station_observation)):
+                            self._station_terminal_goal = dict(goal, goal_odom=list(goal['goal_odom']))
                             self.emit('table_station_terminal_goal_held',
                                       goal_odom=list(goal_odom), gap_m=gap,
                                       lateral_error_m=lateral_error)
@@ -3441,8 +3543,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     and lateral_ready and goal_odom is not None
                     and self._table_terminal_reference_ready(station_observation)):
                 goal, _ = self._station_goal_reference()
-                if goal is not None and goal.get('goal_filter_sample_count', 0) >= 3:
-                    self._station_terminal_goal = dict(goal, goal_odom=list(goal_odom))
+                if (goal is not None and goal.get('goal_filter_sample_count', 0) >= 3
+                        and self._table_terminal_reference_ready(station_observation)):
+                    self._station_terminal_goal = dict(goal, goal_odom=list(goal['goal_odom']))
                     self.station_reference_goal_frozen = True
                     self.emit('table_station_terminal_goal_held',
                               reason='tape_aligned_before_close_approach',
