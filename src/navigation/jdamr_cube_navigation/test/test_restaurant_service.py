@@ -1017,10 +1017,10 @@ def test_reverse_follow_path_preserves_verifier_and_terminal_outcome(status, con
     assert node._verify_parking_stop.called is (status == GoalStatus.STATUS_SUCCEEDED)
 
 
-@pytest.mark.parametrize('case', ['handoff', 'outside', 'stop', 'link', 'nav', 'cancel_failed'])
+@pytest.mark.parametrize('case', ['handoff', 'outside', 'stop', 'link', 'nav', 'cancel_failed', 'arrived_abort'])
 def test_intermediate_reverse_position_handoff_keeps_abort_and_cancel_checks(monkeypatch, case):
     node = reverse_route()
-    running = SimpleNamespace(done=Mock(side_effect=[False, True]), result=Mock(
+    running = SimpleNamespace(done=Mock(side_effect=([True] if case == 'arrived_abort' else [False, True])), result=Mock(
         return_value=SimpleNamespace(status=GoalStatus.STATUS_ABORTED,
                                      result=SimpleNamespace(error_code=105))))
     accepted = handle(future=running)
@@ -1054,7 +1054,7 @@ def test_intermediate_reverse_position_handoff_keeps_abort_and_cancel_checks(mon
         with pytest.raises(RuntimeError, match='cancellation unconfirmed'):
             node._execute_reverse_once(path, **kwargs)
     else:
-        assert node._execute_reverse_once(path, **kwargs) is (case == 'handoff')
+        assert node._execute_reverse_once(path, **kwargs) is (case in ('handoff', 'arrived_abort'))
     node.finish_navigation.assert_called_once()
     node._verify_parking_stop.assert_not_called()
     if case == 'handoff':

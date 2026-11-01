@@ -3276,6 +3276,19 @@ class ServiceRoute(CorridorRoute):
                               terminal_status_code=int(wrapped.status),
                               nav2_error_code=int(wrapped.result.error_code))
             self.navigation_result = None
+            # A progress abort at an intermediate XY endpoint may only mean
+            # the heading checker could not finish. The caller must reobserve
+            # and align the face; this never confirms final docking.
+            if (handoff_target is not None and not self.stop_requested
+                    and wrapped.status == GoalStatus.STATUS_ABORTED
+                    and wrapped.result.error_code == 105
+                    and self._navigation_ready(require_fresh_amcl=False)
+                    and self._operator_link_ready()
+                    and math.dist(self._odom_pose()[:2], handoff_target) <= position_handoff_m):
+                self.emit('reverse_position_handoff', motion=motion,
+                          tolerance_m=position_handoff_m, target_odom=list(handoff_target),
+                          nav2_error_code=105, final_parking=False)
+                return True
             if (self.stop_requested or wrapped.status != GoalStatus.STATUS_SUCCEEDED
                     or wrapped.result.error_code):
                 return False

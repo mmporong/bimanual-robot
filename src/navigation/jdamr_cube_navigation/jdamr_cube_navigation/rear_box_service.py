@@ -390,11 +390,11 @@ class RearBoxParkingMixin:
                            'yaw': target[2]}]
         self.emit('rear_dock_centering_started', target_odom=list(target_odom),
                   lateral_error_m=lateral, target_gap_m=REAR_FACE_REOBSERVE_GAP_M)
-        # Complete both position and heading before the live face trim.
-        # A position-only handoff can leave the curve's final turn unfinished.
+        # This is an observation waypoint, not the final dock pose.
+        # Reobserve the same face and finish heading before terminal approach.
         completed = self._execute_reverse_once(
             frozen, goal_checker_id='entry_heading_checker', final=False,
-            motion='rear_dock_centering')
+            motion='rear_dock_centering', position_handoff_m=.05)
         self._rear_center_moved = bool(completed)
         return completed
 
@@ -403,7 +403,8 @@ class RearBoxParkingMixin:
         initial = observed
         if observed['gap_m'] < 0.05:
             return observed
-        for _attempt in range(2):
+        gain = 1.0
+        for _attempt in range(4):
             error = observed['normal_yaw_error_rad']
             if abs(error) <= math.radians(3.):
                 return observed
@@ -412,13 +413,21 @@ class RearBoxParkingMixin:
                       self._guard_failure(False))
             if reason:
                 raise RuntimeError(reason)
+            correction = gain * error
             self.emit('rear_dock_face_heading_alignment', angle_rad=error,
-                      translation_requested=False)
-            if self._rotate_in_place(error) is None:
+                      correction_rad=correction, gain=gain, translation_requested=False)
+            if self._rotate_in_place(correction) is None:
                 raise RuntimeError(getattr(self, '_last_direct_motion_failure', None)
                                    or 'rear dock heading alignment incomplete')
             observed = self._observe_rear_box_recovering(geometry, extent, half_width)
             _same_target(initial, observed)
+            residual = observed['normal_yaw_error_rad']
+            # A sign reversal measures overshoot against the same stationary face.
+            # Reduce the next command; never amplify it or accept a bad heading.
+            if error * residual < 0.0:
+                gain = min(gain, max(.25, abs(correction / (error - residual))))
+            self.emit('rear_dock_face_heading_alignment_result',
+                      before_rad=error, residual_rad=residual, next_gain=gain)
         if abs(observed['normal_yaw_error_rad']) > math.radians(3.):
             raise RuntimeError('rear dock face heading alignment not converged')
         return observed

@@ -274,6 +274,24 @@ def test_face_heading_is_corrected_before_a_large_straight_clearance(interrupted
     node._clear_rear_dock_straight.assert_not_called()
 
 
+
+def test_rear_heading_overshoot_reduces_next_command():
+    node = route_node()
+    initial = face(.2, math.radians(6.4))
+    overshot = face(.2, math.radians(-7.1))
+    aligned = face(.2, math.radians(1.))
+    for observation in (initial, overshot, aligned):
+        observation.update(normal_odom=(1., 0.), face_odom=(-.475, 0.))
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node._rotate_in_place = Mock(return_value=.1)
+    node._observe_rear_box_recovering = Mock(side_effect=[overshot, aligned])
+    node.emit = Mock()
+    assert node._align_rear_face_before_clearance(initial, GEOMETRY, .275, .225) is aligned
+    commands = [call.args[0] for call in node._rotate_in_place.call_args_list]
+    assert commands == pytest.approx([math.radians(6.4), math.radians(-7.1) * 6.4 / 13.5])
+
 def face(gap=0.01, angle=0.0, stamp=5.0):
     normal = math.cos(angle), math.sin(angle)
     tangent = -normal[1], normal[0]
