@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-11-01 | 11회차 도크 곡선 조기 인계·주방 terminal hold·실측 편차 보정
+
+- 팀원 결과: 주문261101010 SUCCEEDED / 미션20261101_173634_e9abe2b3. 서빙 완료, 최종 후면 도킹 실패. 주문 성공을 전체 왕복 도킹 성공으로 집계하지 않는다.
+- 도크 근거 `table_01_20261101_174119_a3059423`: 곡선 시작 후3.909초에5cm XY handoff, 재관측 gap0.139m/yaw0.379rad/좌우-0.09884m로 실패. 이른 인계를 넣은 앞선 수정이 곡선을 조기에 끝낼 수 있음을 확인. 보이는 span 변화가 midpoint 편차에 기여한 크기는 미확정.
+- 수정: 진행 중 XY 인계를1.5cm로 축소(105 결과에서도 동일 XY/입력 조건 확인). 인계 후 같은 면의 각도를 정렬·재관측한 다음 좌우 잔차 판정. 좌우 허용범위 안이고 gap<=0.58m이면 곡선 생략 후 면 방향을 맞추고 정밀 진입(0.6m fine travel bound 여유 유지). 도크 최종 두 모서리1cm±3mm 조건 유지, 각도·모서리 차를 confirmation에 명시. 폭0.45m에서 모서리 차6mm 조건은 약0.764도이며 잘못된 자세를 confirmed로 바꾸지 않는다.
+- 주방9회차 `water_station_20261101_155334_43bfd97d`: frozen tape goal은 있으나 tape_pair_missing으로 terminal hold 미설정→station_lateral_arrival_unconfirmed. 11회차 `water_station_20261101_173637_d19f61c0`는 gap0.027647m에서 hold. Pi와 로컬 비교 결과 추가 terminal 수정은 들어가 있지 않았다.
+- terminal 수정: 3개 이상 유효 관측으로 수용·고정한 테이프 목표는 현재 영상이 신선한 tape_pair_missing일 때도 근거리 정렬 완료 후 hold 가능. 3~15cm 사이의 hold 공백도 제거. stale/연결끊김/미관측 목표는 인정하지 않으며 깊이·odom·충돌·최종간격 조건 유지.
+- 주방 보정: 실제 mount yaw0, 별도 table_edge_calibration yaw+0.00443252rad/bias0.06079044m 확인. 9회차 외부 실측 왼쪽0.005m·오른쪽0m와 같은 run 내부 corner gaps[0.0095231181,0.0088732921]를 대조. 코드 배열은 [오른쪽,왼쪽]이며 yaw 로그는 절댓값이다. 같은 pose의 양 모서리에서 signed yaw와 법선거리를 재산출해 task yaw -0.0125553981rad(-0.71937도), distance -0.0067021498m 보정. 새 task값 yaw -0.0081228754rad / bias0.0540882886m. 실제 camera transform은 변경하지 않음. config field_recheck_20261101에 원자료·계산식 기록, 한 회차 잠정 보정이며 독립 실차 정확도 미검증. 11회차 외부 좌우 수치가 완전하지 않아 추가 피팅에는 사용하지 않음.
+- 관련131개 확인 통과. 57cm/좌우3mm 곡선 생략, 기울어진 중앙 관측의 정렬 후 판정, fresh missing-pair terminal hold, 무목표/stale 거부, 기존 후면 보호, 보정값의 원측정 재현 포함. 실물 주행/팔 실행 없음.
+- Pi 백업 `~/jdamr_deploy/backups/parking_11_20261101_180043/`. box_service/rear_box_service 해시 로컬 일치, config source·deploy camera_mount_current·runtime camera_mount의 보정값 일치. system jdamr-box-executor 재시작18:00:46 KST, PID2322→7467 active/running. 큐/진행 요청 없는 상태에서 반영. 다음 실제 실행의 결과는 아직 미확인.
+
+
 ## 2026-11-01 | 급수대 테이프 오차 보존·실제 좌우 재정렬
 
 - 우선순위 변경: 실물 시연 급수대 정렬을 우선. 사용자 보고6회 중2회 실패. 도크 후속 수정은 하지 않았다.

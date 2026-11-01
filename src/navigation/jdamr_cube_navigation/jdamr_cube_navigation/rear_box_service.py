@@ -38,6 +38,8 @@ from tf2_ros import TransformException
 REAR_COARSE_HANDOFF_M = 0.5
 REAR_CENTER_HANDOFF_M = 1.0
 REAR_CENTER_MIN_GAP_M = 0.9
+# Keep 2 cm of the fine controller's 0.6 m travel bound for heading correction.
+REAR_STRAIGHT_HANDOFF_M = 0.58
 REAR_CENTER_TOLERANCE_M = 0.05
 REAR_COARSE_SEGMENT_M = 0.5
 REAR_REOBSERVE_SEGMENT_M = 0.2
@@ -353,6 +355,7 @@ class RearBoxParkingMixin:
     def _center_rear_box(self, observed, extent, *, after_clearance=False):
         """Use one guarded reverse curve while there is room to remove lateral error."""
         self._rear_center_moved = False
+        self._rear_center_skipped = False
         if observed.get('observation_roi_clipped', True):
             raise RuntimeError('rear box midpoint is clipped')
         odom = self._odom_pose()
@@ -363,7 +366,8 @@ class RearBoxParkingMixin:
         self.emit('rear_dock_center_observed', lateral_error_m=lateral,
                   angle_rad=observed['normal_yaw_error_rad'], basis='live_rear_face_midpoint')
         if (not after_clearance and abs(lateral) <= REAR_CENTER_TOLERANCE_M
-                and observed['gap_m'] <= REAR_COARSE_HANDOFF_M):
+                and observed['gap_m'] <= REAR_STRAIGHT_HANDOFF_M):
+            self._rear_center_skipped = True
             return True
         target_odom = _rear_center_target(observed, extent)
         _path, to_odom = self._frozen_in_odom(RosPath())
@@ -394,7 +398,7 @@ class RearBoxParkingMixin:
         # Reobserve the same face and finish heading before terminal approach.
         completed = self._execute_reverse_once(
             frozen, goal_checker_id='entry_heading_checker', final=False,
-            motion='rear_dock_centering', position_handoff_m=.05)
+            motion='rear_dock_centering', position_handoff_m=.015)
         self._rear_center_moved = bool(completed)
         return completed
 
@@ -898,6 +902,10 @@ class RearBoxParkingMixin:
             if getattr(self, '_rear_center_moved', False):
                 centered = self._observe_rear_box_recovering(geometry, extent, half_width)
                 _same_target(initial, centered)
+                # Finish heading before using the visible midpoint: a skewed
+                # face can lose endpoints and report a false lateral residual.
+                centered = self._align_rear_face_before_clearance(
+                    centered, geometry, extent, half_width)
                 tangent = -centered['normal_odom'][1], centered['normal_odom'][0]
                 actual = self._odom_pose()
                 lateral = sum((actual[i] - centered['midpoint_odom'][i]) * tangent[i]
@@ -910,8 +918,9 @@ class RearBoxParkingMixin:
                               reason='rear box centering residual exceeds tolerance',
                               lateral_error_m=lateral, forward_retry_requested=False)
                     return False
+            elif getattr(self, '_rear_center_skipped', False):
                 initial = self._align_rear_face_before_clearance(
-                    centered, geometry, extent, half_width)
+                    initial, geometry, extent, half_width)
             break
         else:
             self.emit('failed', phase='rear_box_centering', reason=(
@@ -1041,6 +1050,9 @@ class RearBoxParkingMixin:
             'reason': ('confirmed' if confirmed
                        else 'rear_box_gap_out_of_tolerance'),
             'reference': 'live_rear_lidar_face',
+            'angle_rad': error,
+            'corner_gap_span_m': far_gap - gap,
+            'maximum_corner_gap_span_m': 0.006,
             'nearest_gap_m': gap,
             'farthest_gap_m': far_gap,
             'internal_estimate_only': True,

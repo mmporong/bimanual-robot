@@ -836,6 +836,23 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         anchored['millimeter_accuracy_validated'] = False
         return anchored
 
+    def _table_terminal_reference_ready(self, reference):
+        """A fresh missing-pair image may carry a previously confirmed tape goal.
+
+        This grants destination continuity, never fresh sensor evidence. Depth,
+        odom, geometry and stop guards remain owned by the approach controller.
+        """
+        if reference and reference.get('valid') is True:
+            return True
+        anchor = getattr(self, 'station_reference_goal', None)
+        return bool(
+            getattr(getattr(self, 'station_reference', None), 'observation_method', None)
+            == 'table_front_tape'
+            and getattr(self, 'station_reference_goal_frozen', False)
+            and anchor and anchor.get('valid') is True
+            and anchor.get('goal_filter_sample_count', 0) >= 3
+            and reference and reference.get('reason') == 'tape_pair_missing')
+
     def _station_lateral_status(self):
         """Report only internal lateral evidence; external millimetres stay unvalidated."""
         if not self._station_reference_enabled():
@@ -3408,8 +3425,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 if getattr(self, 'station_reference_goal', None) is not None:
                     self.station_reference_goal_frozen = True
                     if (getattr(self, '_station_terminal_goal', None) is None
-                            and station_observation
-                            and station_observation.get('valid') is True
+                            and self._table_terminal_reference_ready(station_observation)
                             and goal_odom is not None):
                         goal, _ = self._station_goal_reference()
                         if goal is not None:
@@ -3420,10 +3436,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if (getattr(getattr(self, 'station_reference', None), 'observation_method', None)
                     == 'table_front_tape'
                     and getattr(self, '_station_terminal_goal', None) is None
-                    and .15 <= gap <= .35
+                    and FINAL_PLAN_GAP_M < gap <= .35
                     and abs(residual) <= self.parking_contract['yaw_tolerance_rad']
                     and lateral_ready and goal_odom is not None
-                    and station_observation and station_observation.get('valid') is True):
+                    and self._table_terminal_reference_ready(station_observation)):
                 goal, _ = self._station_goal_reference()
                 if goal is not None and goal.get('goal_filter_sample_count', 0) >= 3:
                     self._station_terminal_goal = dict(goal, goal_odom=list(goal_odom))
