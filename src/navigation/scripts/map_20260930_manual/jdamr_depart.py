@@ -907,8 +907,7 @@ def refine_at_registered_dock(scan_path, click, reference, *, diagnostics=None):
         # Use matched support in both scans; residual, sectors and uniqueness
         # still distinguish the anchor from another placement.
         if (min(np.count_nonzero(inliers), np.count_nonzero(reference_inliers))
-                < minimum_matched_points
-                or supported_sectors < 3):
+                < minimum_matched_points):
             return reject('dock_match_common_support_insufficient',
                           current_support=int(np.count_nonzero(inliers)),
                           reference_support=int(np.count_nonzero(reference_inliers)),
@@ -954,6 +953,17 @@ def refine_at_registered_dock(scan_path, click, reference, *, diagnostics=None):
                                       fixed_support_mean_m=fixed_support_mean,
                                       trial=uniqueness_trials[-1])
                     ambiguous_translations.append(uniqueness_trials[-1])
+        # Quadrant boundaries are arbitrary: the same spatial support can move
+        # between bins after a small pose change. Sector count never rejects a
+        # match by itself. With support in fewer than three bins, however, every
+        # fixed-support translation and rotation trial must be strictly worse;
+        # the registered-region translation allowance is disabled.
+        if supported_sectors < 3 and ambiguous_translations:
+            return reject('dock_match_limited_angular_support_not_unique',
+                          fixed_support_mean_m=fixed_support_mean,
+                          supported_sectors=supported_sectors,
+                          uniqueness_trials=uniqueness_trials,
+                          ambiguous_translation_trials=ambiguous_translations)
         pose = registered_pose(relative)
         if not inside_registered_region(pose):
             return reject('dock_match_outside_registered_region', matched_pose=pose)

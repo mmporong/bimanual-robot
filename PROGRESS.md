@@ -5,6 +5,16 @@
 ---
 
 
+## 2026-11-02 | 도크 초기화 방향 구역 수 오판 제거
+
+- 사용자 웹 초기화 init_20261102_164936/165004가 dock_match_common_support_insufficient 뒤 map inlier0.427<0.45로 거부. accepted 주문261102001은 실행되지 않고 보존. 임의 방향 구역 수만으로 출발 준비를 막지 않도록 요청.
+- 실제 실패 anchor는 양방향 지지88/90점으로 최소80을 넘음. sector counts [12,0,2,74]/[12,0,1,75], 성공163924는[13,0,11,79]. 연속 각 범위는 동일(-171.1~172.1도)이나 구역 경계점9~10개 때문에3sector 기준의 통과여부가 달라짐.
+- sector 개수 단독 차단 제거. 3개 미만 관측은 기존 fixed-support ±x/±y/±yaw 6시험이 모두 엄격히 악화돼야 통과하고, 그 경우 평행 이동 모호성까지 등록 prior로 허용하지 않음. 양방향80점·잔차2cm·검색경계·장착identity·등록20cm/15도·AMCL대조는 유지. 실제 충돌·전압·센서 단절 조건 제거 아님.
+- 실제 두 실패 scan 재생은 fixed support mean9.55/9.71mm, 6시험15.89~62.90mm로 모두 통과. 이전 성공3sector 보존. 전용172건 PASS, py_compile·fatal flake8·diff-check PASS.
+- 관제의 init failed인데 START ready=true인 표시/동작 불일치도 수정. 실패면 drive_init_failed로 표시하고 accepted주문은 유지. server.py/control.js만 Windows 기준리포에 반영하고 관제 역할만 재기동, 팔ready와Astra 유지. 관련init회귀5건 PASS. 초기화 결과는 관제 재시작 시 idle로 시작하는 기존 계약이므로 재기동 뒤 새초기화로 확인.
+- 실기 무이동 초기화 c48c5c4c 성공16:56:51. anchored pose(-2.776,0.558,-1.0도), 등록도크 대비약1cm, AMCL 대조11mm/0.5도. init_succeeded, 팔ready, 주문261102001 accepted/STARTready 유지. 초기화 로그 ~/.local/state/bimanual-robot/water-service/init/20261102_165612_c48c5c4c.log.
+- 주행은 요청하지 않아 이동·팔접기·추론 실행 없음. 수정 helper는 PC에서 실행돼 Pi 코드 교체·실행기 재시작이 필요하지 않음. 원격 push 없음.
+
 ## 2026-11-02 | 주행 PC에서 Windows 서비스 통합 준비·종료
 
 - 사용자 요청: Windows 화면을 거치지 않고 이 PC에서 Astra·관제·팔 실행기를 모두 관리. tools/jdamr/scenario_runtime.py prepare/status/stop과 Windows SSH 관리 스크립트 windows_runtime.ps1 추가. 기존 jdamr_depart init은 도크 위치초기화 계약을 유지하며 전체 준비는 새 prepare 진입점 사용.
