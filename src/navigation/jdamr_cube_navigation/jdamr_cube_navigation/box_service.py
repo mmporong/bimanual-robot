@@ -358,8 +358,20 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 <= STATION_REFERENCE_MAX_AGE_S):
             self._station_reference_rebase_samples = []
             return None
+        geometry = getattr(self, 'box_geometry', None)
+        front_extent = (geometry.get('front_to_wheel_axis', {}).get('value')
+                        if isinstance(geometry, dict) else None)
+        if (isinstance(front_extent, bool)
+                or not isinstance(front_extent, (int, float))
+                or not math.isfinite(front_extent) or front_extent <= 0.):
+            self._station_reference_rebase_samples = []
+            return None
         center = result.get('quality', {}).get('tape_center_base_xy_m')
-        if center is None or not .05 <= center[0] <= .45:
+        if (not isinstance(center, (list, tuple)) or len(center) < 2
+                or isinstance(center[0], bool)
+                or not isinstance(center[0], (int, float))
+                or not math.isfinite(center[0])
+                or not .05 <= center[0] <= front_extent + FACE_ALIGNMENT_FRONT_GAP_M):
             self._station_reference_rebase_samples = []
             return None
         candidates = getattr(self, '_station_reference_rebase_samples', [])
@@ -478,15 +490,37 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                                           math.cos(candidate[2] - heading))
                     lateral_limit = 4. * self.station_reference_profile['lateral_tolerance_m']
                     yaw_limit = self.parking_contract['yaw_tolerance_rad']
+                    tape = reference.observation_method == 'table_front_tape'
+                    terminal_lateral_jump = 0.
+                    terminal_yaw_jump = 0.
+                    terminal_goal = getattr(self, '_station_terminal_goal', None)
+                    if tape and isinstance(terminal_goal, dict):
+                        terminal = terminal_goal.get('goal_odom')
+                        if isinstance(terminal, (list, tuple)) and len(terminal) >= 3:
+                            terminal_heading = terminal[2]
+                            terminal_lateral_jump = (
+                                (candidate[0] - terminal[0]) * -math.sin(terminal_heading)
+                                + (candidate[1] - terminal[1]) * math.cos(terminal_heading))
+                            terminal_yaw_jump = math.atan2(
+                                math.sin(candidate[2] - terminal_heading),
+                                math.cos(candidate[2] - terminal_heading))
                     result['quality'].update(
                         static_goal_lateral_jump_m=lateral_jump,
-                        static_goal_yaw_jump_rad=yaw_jump)
-                    if abs(lateral_jump) > lateral_limit or abs(yaw_jump) > yaw_limit:
+                        static_goal_yaw_jump_rad=yaw_jump,
+                        terminal_goal_lateral_jump_m=terminal_lateral_jump,
+                        terminal_goal_yaw_jump_rad=terminal_yaw_jump)
+                    inconsistent = (
+                        abs(lateral_jump) > lateral_limit
+                        or abs(yaw_jump) > yaw_limit
+                        or abs(terminal_lateral_jump) > lateral_limit
+                        or abs(terminal_yaw_jump) > yaw_limit)
+                    if inconsistent or (tape and getattr(
+                            self, '_station_reference_goal_challenged', False)):
                         # The taught cup/bottle pair is static in this run.
                         # An isolated wrong pair must not steer the base or
                         # move the next frame's tracking window.
                         rebased = self._consider_tape_rebase(result)
-                        if reference.observation_method == 'table_front_tape':
+                        if tape:
                             self._station_reference_goal_challenged = True
                         if rebased is not None:
                             self._station_reference_rebase_goal = rebased

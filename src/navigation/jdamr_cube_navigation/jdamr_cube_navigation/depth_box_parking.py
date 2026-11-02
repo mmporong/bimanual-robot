@@ -790,6 +790,23 @@ class DepthBoxParkingNode(Node):
             'camera_info_age_s': stamp_s - info_stamp_s if info_stamp_s else None,
             'camera_info_mode': 'stamped' if info_stamp_s else 'static',
         }
+        if (not math.isfinite(age_s)
+                or not 0.0 <= age_s <= self._max_image_age_s):
+            self._reset_measurements()
+            self._publish({
+                'stamp_s': stamp_s,
+                'age_s': age_s,
+                **timing,
+                **table_fields,
+                'frame_id': message.header.frame_id,
+                'detected': False,
+                'stable': False,
+                'stable_frame_count': 0,
+                'reason': 'expired_during_processing',
+                'control_ready': False,
+            }, timing_markers=(
+                now_s, calculation_started_s, calculation_finished_s))
+            return
         lock = getattr(self, '_processing_state_lock', None)
         if lock is None:
             stable = self._stability.update(detection)

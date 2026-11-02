@@ -592,8 +592,8 @@ def test_observer_declares_camera_mount_angles_for_front_detection():
         "('camera_pitch_rad', defaults.camera_pitch_rad)") == 1
 
 
-def test_age_includes_detection_processing_time(monkeypatch):
-    """A fast input must not hide a slow detector in published diagnostics."""
+def test_result_expiring_during_detection_is_rejected_with_latency_details(monkeypatch):
+    """A slow detector must not turn an expired frame into stable evidence."""
     info, image = _messages(np.ones((2, 2), dtype='<u2') * 1000)
     node = object.__new__(DepthBoxParkingNode)
     node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
@@ -601,16 +601,25 @@ def test_age_includes_detection_processing_time(monkeypatch):
     node._optical_frame = OPTICAL_FRAME
     node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
     node._surface_mode, node._config = 'front', BoxTopConfig()
-    node._stability = SimpleNamespace(update=lambda detection: False, frame_count=0)
+    stability_updates = []
+    node._stability = SimpleNamespace(
+        update=lambda detection: stability_updates.append(detection) or False,
+        frame_count=7)
     clock_ticks = iter((10_100_000_000, 10_700_000_000))
     node.get_clock = lambda: SimpleNamespace(
         now=lambda: SimpleNamespace(nanoseconds=next(clock_ticks)))
+    detection = SimpleNamespace(surface_kind='front')
     monkeypatch.setattr(
-        'jdamr_cube_navigation.depth_box_parking.detect_box_front', lambda *_: None)
+        'jdamr_cube_navigation.depth_box_parking.detect_box_front', lambda *_: detection)
     messages = []
     node._status = SimpleNamespace(publish=messages.append)
     node._on_depth(image)
     document = json.loads(messages[0].data)
+    assert stability_updates == [None]
+    assert document['reason'] == 'expired_during_processing'
+    assert document['detected'] is False
+    assert document['stable'] is False
+    assert document['stable_frame_count'] == 0
     assert document['input_age_s'] == pytest.approx(.1)
     assert document['age_s'] == pytest.approx(.7)
     assert document['processing_duration_s'] >= 0.
@@ -621,6 +630,46 @@ def test_age_includes_detection_processing_time(monkeypatch):
     assert document['previous_status_serialization_duration_s'] is None
     assert document['previous_status_publish_duration_s'] is None
     assert document['control_ready'] is False
+
+
+def test_expired_result_from_replaced_generation_does_not_reset_or_publish(
+        monkeypatch):
+    info, image = _messages(np.ones((2, 2), dtype='<u2') * 1000)
+    node = object.__new__(DepthBoxParkingNode)
+    node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
+    node._on_camera_info(info)
+    node._optical_frame = OPTICAL_FRAME
+    node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
+    node._surface_mode, node._config = 'front', BoxTopConfig()
+    node._processing_state_lock = threading.RLock()
+    node._processing_generation = 0
+    node._processing_context = threading.local()
+    node._processing_context.generation = 0
+    stability_updates = []
+    node._stability = SimpleNamespace(
+        update=lambda detection: stability_updates.append(detection) or False,
+        frame_count=7)
+    clock_calls = 0
+
+    def now():
+        nonlocal clock_calls
+        clock_calls += 1
+        if clock_calls == 2:
+            node._processing_generation = 1
+            return SimpleNamespace(nanoseconds=10_700_000_000)
+        return SimpleNamespace(nanoseconds=10_100_000_000)
+
+    node.get_clock = lambda: SimpleNamespace(now=now)
+    monkeypatch.setattr(
+        'jdamr_cube_navigation.depth_box_parking.detect_box_front',
+        lambda *_: SimpleNamespace(surface_kind='front'))
+    messages = []
+    node._status = SimpleNamespace(publish=messages.append)
+
+    node._on_depth(image)
+
+    assert stability_updates == []
+    assert messages == []
 
 
 def test_publish_reports_previous_output_cost_without_hiding_current_phases(monkeypatch):

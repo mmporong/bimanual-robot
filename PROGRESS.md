@@ -5,6 +5,18 @@
 ---
 
 
+## 2026-11-02 | 전체 주행 중단 원인 분리와 급수대 목표 불일치 수정
+
+- 사용자 전체 주행 요청으로 급수대→테이블1→도크 실행. 최초 `table_01_20261102_123220_b50b80b1`은 급수대 관측점 도착 후 AST1 RGB payload 수신3초 초과/관측 stale로 실패. `123537_d9a5f0d9`는 재정렬 후 테이프 x=0.478m, 이전 목표와 좌우약38mm 차이를 계속 폐기해 tape reference pending으로 종료. `123745_bb3d98a1`은 약0.303m 접근 중 PC–Pi SSH 단절과 operator_link_lost로 종료. 테이블1 주차·도크 복귀는 완료하지 못함.
+- `water_station_20261102_124118_c26a670b` 20cm 후진 재접근은 내부완료지만 사용자 실물위치 불일치 보고. 내부앞간격8.63/8.73mm·고정목표좌우0.82mm와 fresh RGB 좌우33.18mm/목표차이32.36mm가 공존. 실물 정밀주차 성공으로 세지 않음. 테이블 진행 요청 `20261102_124249_8b0677ce`는 사용자 정지로 cancelled 파일 생성·request 부재 확인, 실행기 SIGINT 전달. 이후 이동·팔 명령 없음. 도크로 옮기겠다는 사용자 발언을 위치초기화 완료로 처리하지 않음.
+- 확정 로직1: rebase gate의 base_link x<=0.45m와 face alignment의 차체 앞끝 간격0.45m 기준 불일치. front_to_wheel_axis + FACE_ALIGNMENT_FRONT_GAP_M(현행0.065+0.45=0.515m)로 통일. 3개 fresh 관측 일치 조건 유지.
+- 확정 로직2: rolling 영상 목표는 이동했지만 terminal 고정 목표와의 차이는 완료판정에 반영되지 않음. terminal 대비 lateral/yaw도 일관성 판정에 포함하고 challenge를 기존 3프레임 rebase 및 bounded restage로 연결. final거리·충돌·입력유효 조건 유지.
+- 깊이 worker 변경9a0170a 전후 검출 수학·보정값 변경 없음. worker 자체가 잘못된 주차 원인이라는 증거는 없음. 계산 완료 시 시간만료를 다시 거절하지 않아 오래된 검출이 stability에 들어가는 기존 버그 수정: expired_during_processing/비검출·안정초기화, 지연 수치와 generation 보호 유지. 계산량 감소나 모든 지연 해결을 주장하지 않음.
+- PC와 Pi 모두 aicampus_286_5G로 전환. Pi 5220MHz, IP192.168.0.159 유지; Windows .157 AST1 자동 재연결. Pi 네트워크 백업 `~/jdamr_deploy/backups/wifi_20261102_1252/`, 전환 확인 후 임시 rollback timer/service inactive 확인. 비밀번호는 저장소에 기록하지 않음.
+- 정지12초 수신 비교: 전환 전 depth10.02Hz/수신나이 median145ms,max307ms, AST1 깊이 촬영→수신p95 270ms. 5GHz전환 후 depth10.03Hz/median104ms,max161ms, AST1 수신·유효10.01Hz/깊이p95 107ms, PONG RTT16.4ms. 동일 주행 재현이 아닌 정지 비교이며 이동 중 재단절 부재는 아직 미검증. 계산 max1.365초 꼬리는 남음. 원본 `~/jdamr_data/analysis_20261102/full_route_failure/{current_input,input_5g}.json`.
+- 변경관련 station35/observer68 회귀 및 독립 검토 통과, CameraInfo/table edge74 통과. 팀원 water_service.py·water_service_api.py 미커밋 변경 보존.
+- Pi box_service SHA256 `3aea7cea8269ca5f7fc181a9317b01e66ab75c64ad1bba799ad8e92c24e0bee5`, depth_box_parking `8400a7ed14c9341e5ba3361ee1d0ae24d96c65ffe78bab8f50e6a269a99f6171` 대조 완료. 백업 `~/jdamr_deploy/backups/kitchen_recovery_20261102_125123/`. 기존 카메라 보정·관측 파라미터 복원, 12:52 관측기/실행기 active. 재배치 후 위치초기화나 물리 재주행은 하지 않음.
+
 ## 2026-11-02 | 후면 도킹 마지막 구간의 실측 외곽 적용과 복귀 완료
 
 - 충돌 polygon 후면 -0.280m와 실측 후면 -0.275m의 5mm 차이 확인. 이전 뒤왼쪽 live point는 padded 외곽 안에 있었으나 실측 뒤끝 밖에 있었음. 물체가 의자다리인지 잡음인지는 확정하지 않음.
