@@ -3277,11 +3277,20 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             if abs(lateral_m) > SURFACE_ONLY_RESTAGE_LATERAL_M:
                 return 'surface_only_lateral_offset_exceeds_alignment_tolerance', lateral_m
             return None, lateral_m
-        if (getattr(self, '_table_restage_tape_goal', None) is not None
-                and abs(lateral_m) > self.station_reference_profile['lateral_tolerance_m']):
-            # This visit already rejected a curve to this tape destination.
-            # Align its lateral coordinate in turning room before closing again.
-            return 'carried_tape_lateral_offset_requires_restage', lateral_m
+        held = getattr(self, '_table_restage_tape_goal', None)
+        if held is not None:
+            held_goal = tuple(held.get('goal_odom', ()))
+            arrival = getattr(self, 'station_reference_goal', None)
+            control = getattr(self, 'station_reference_control_goal', None)
+            if (len(held_goal) != 3
+                    or not all(isinstance(anchor, dict)
+                               and tuple(anchor.get('goal_odom', ())) == held_goal
+                               for anchor in (arrival, control))):
+                return 'carried_tape_goal_changed', lateral_m
+            # The intermediate Nav2 leg uses a 0.1 m position checker, so its
+            # residual need not be inside the 5 mm final tolerance. Validate
+            # that the unchanged carried goal can be absorbed by the same
+            # continuous lateral-tracking preview used by the live controller.
         try:
             face_approach_waypoints(
                 pose, face, normal, front_extent_m, self.box_front_half_width_m,

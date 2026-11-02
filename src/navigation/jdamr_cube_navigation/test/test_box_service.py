@@ -4360,6 +4360,55 @@ def test_rebased_goal_latch_is_cleared_only_after_fresh_restage_preview():
                for call in node.emit.call_args_list)
 
 
+def test_rebased_carried_goal_uses_fresh_face_preview_for_39mm_residual():
+    node, target, order = _fine_approach_node()
+    target.update({
+        'x_m': -.01971494504454926,
+        'y_m': .0002479096141441983,
+        'yaw_rad': -.03896649846376743,
+        'face_center_map_xy_m': (.05522812260968554, -.0026738382484875756),
+        'outward_normal_map_xy': (-.9992409020564634, .03895663816842355),
+        'observation_robot_pose_map': [
+            -.4955679159790058, -.020388242462137163, -.02630271665530448],
+    })
+    node.observe_target.side_effect = (
+        lambda *a, **k: order.append('observe') or dict(target))
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node._station_lateral_status = Mock(return_value={
+        'internal_lateral_within_tolerance': False})
+    node.box_front_half_width_m = .225
+    held = {'goal_odom': [
+        3.7034227016747776, -3.6981294938726355, -1.2482680393951404]}
+    node._table_restage_tape_goal = held
+    node.station_reference_goal = dict(held)
+    node.station_reference_control_goal = dict(held)
+    node._table_rebase_requires_restage = True
+    node._table_restage_tape_target = Mock(side_effect=lambda current: current)
+    node._table_lateral_restage_reason = (
+        BoxServiceRoute._table_lateral_restage_reason.__get__(node))
+    results = iter([(False, None), (True, 'to_odom')])
+
+    def approach(*_args, **_kwargs):
+        order.append('approach')
+        result = next(results)
+        node._last_direct_motion_failure = (
+            None if result[0] else 'table lateral alignment requires more clearance')
+        return result
+
+    node._zero_turn_final_approach.side_effect = approach
+
+    assert node._table_fine_approach(dict(target), .065) == (True, 'to_odom')
+    assert order == ['approach', 'reverse', 'observe', 'restage', 'observe', 'approach']
+    assert node._table_rebase_requires_restage is False
+    confirmed = next(call for call in node.emit.call_args_list
+                     if call.args[0] == 'table_lateral_restage_confirmed')
+    assert confirmed.kwargs['lateral_offset_m'] == pytest.approx(.0391581194)
+    assert confirmed.kwargs['fresh_observation'] is True
+    assert confirmed.kwargs['preview_valid'] is True
+
+
 def test_rebased_goal_latch_remains_when_fresh_restage_preview_fails():
     reason = 'rebased_station_goal_requires_restage'
     node, target, order = _fine_approach_node(restage=(reason, .002))
@@ -4499,6 +4548,36 @@ def test_lateral_restage_reason_uses_the_live_controller_preview(lateral_m, feas
     reason, offset_m = node._table_lateral_restage_reason(target, .065)
     assert offset_m == pytest.approx(lateral_m)
     assert (reason is None) is feasible
+
+
+@pytest.mark.parametrize(('lateral_m', 'goal_matches', 'expected_reason'), [
+    (.039, True, None),
+    (.20, True, 'table approach preview heading out of range'),
+    (.039, False, 'carried_tape_goal_changed'),
+])
+def test_carried_tape_restage_requires_same_goal_and_feasible_continuous_preview(
+        lateral_m, goal_matches, expected_reason):
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.box_front_half_width_m = .225
+    node._final_gap_m = Mock(return_value=.01)
+    target = {'x_m': .925, 'y_m': lateral_m, 'yaw_rad': 0.,
+              'face_center_map_xy_m': (1., 0.), 'outward_normal_map_xy': (-1., 0.),
+              'observation_robot_pose_map': [.5, 0., 0.]}
+    held = {'goal_odom': [target['x_m'], target['y_m'], target['yaw_rad']]}
+    node._table_restage_tape_goal = held
+    node.station_reference_goal = dict(held)
+    node.station_reference_control_goal = dict(held)
+    if not goal_matches:
+        node.station_reference_control_goal['goal_odom'] = [.925, lateral_m + .01, 0.]
+    node._table_restage_tape_target = Mock(return_value=target)
+
+    reason, offset_m = node._table_lateral_restage_reason(target, .065)
+
+    assert offset_m == pytest.approx(lateral_m)
+    assert reason == expected_reason
 
 
 def test_lateral_restage_reason_honors_a_rebased_goal_latch():

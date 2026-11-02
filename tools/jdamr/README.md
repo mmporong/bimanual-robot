@@ -249,6 +249,16 @@ python3 tools/jdamr/water_service_api.py serve --order-url http://192.168.0.157:
 - 주문 서버는 수락과 START 전에는 주문을 시작하지 않는다. `--follow-web` 없이 `start`만 실행하면
   진행 중 주문에 연결되고, 진행 중 주문이 없으면 새 주문이 `PENDING`에 머물러 300초 뒤 실패한다.
 
+미션 출력과 Pi 주행 이벤트는 아래 명령으로 조회한다. `watch`를 끝내도 로봇에 정지 명령을 보내지 않는다.
+
+```bash
+cd "$HOME/bimanual-robot"
+python3 tools/jdamr/water_service_api.py logs
+python3 tools/jdamr/water_service_api.py watch
+```
+
+인증된 `GET /api/mission/logs`도 같은 자료를 반환한다. 웹 START 이후 시나리오는 주행 PC 서비스가 수행하며, Codex 대화를 자동으로 시작하지는 않는다. 대화가 활성 상태일 때 이 자료로 진행 상황과 오류를 확인할 수 있다.
+
 ### 주행 PC에서 전체 서비스 준비·종료
 
 Windows SSH가 설정돼 있으면 아래 명령으로 Windows 화면을 조작하지 않고 관리한다.

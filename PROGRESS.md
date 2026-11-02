@@ -5,6 +5,14 @@
 ---
 
 
+## 2026-11-02 | 급수대 재정렬 후 연속 접근·웹 미션 로그 조회
+
+- 주문261102001 / mission20261102_170807_d124db97 / water_station_20261102_170812_fabd2f83: 테이프 목표 재기준3.7cm 뒤 후진·Nav2 정렬은 성공했지만, 잔여39.158mm를 carried_tape_lateral_offset_requires_restage로 거부하며 종료. 중간 Nav2 위치 허용10cm와 최종5mm를 중간점부터 요구한 조건 충돌 확인. 초기 목표3.7cm 이동의 원인은 원시 영상·rosbag 미저장으로 확정하지 않음.
+- 보존한 테이프 목표와 arrival/control goal의 동일성을 확인하고, 기존 연속 lateral tracking preview가 남은 오차를 흡수할 수 있을 때 접근을 연결. 큰 오차·변경 목표·센서·충돌·최종 간격 조건 유지. 실제 로그의39.158mm 사례를 포함한 box347건 통과.
+- 실패한 helper도 자기 controller.log의 SUBMITTED 기록으로 현재 Pi run·구체적 종료 사유를 저장. 과거 parking log 잔존 초기화. 인증된 GET /api/mission/logs와 CLI logs/watch로 PC 출력·Pi 최근80이벤트 읽기 제공. 수동 별도 run 혼입 차단 포함32건 통과. 로그 조회는 이동·재시작·정지 명령을 보내지 않음.
+- Pi box_service 파일 백업 후 반영, SHA256 일치·구문 확인, jdamr-box-executor active 확인. 실패 상태의 PC 미션 API만 재시작했으며 이전 실패 회차의 Pi80이벤트 조회 성공. 새 실차 재주행은 하지 않음. 웹 START는 PC 서비스가 시나리오를 수행하며 Codex 대화를 자동 기동하지 않음.
+- 전체 로그 묶음: ~/jdamr_data/analysis_20261102/mission_20261102_170807_d124db97.zip. 사용자 도크 재배치를 반영해 출발 없이 위치초기화만 수행.
+
 ## 2026-11-02 | 도크 초기화 방향 구역 수 오판 제거
 
 - 사용자 웹 초기화 init_20261102_164936/165004가 dock_match_common_support_insufficient 뒤 map inlier0.427<0.45로 거부. accepted 주문261102001은 실행되지 않고 보존. 임의 방향 구역 수만으로 출발 준비를 막지 않도록 요청.
