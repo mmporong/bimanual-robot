@@ -212,6 +212,43 @@ def _is_target_face_point(point, target):
             and lower_m <= tangent_m <= upper_m)
 
 
+def _point_inside_outline(point, outline):
+    """Return whether point is strictly inside a possibly stepped outline."""
+    x_m, y_m = point
+    inside = False
+    previous = outline[-1]
+    for current in outline:
+        ax, ay = previous
+        bx, by = current
+        dx, dy = bx - ax, by - ay
+        length2 = dx * dx + dy * dy
+        fraction = 0.0 if length2 == 0.0 else max(
+            0.0, min(1.0, ((x_m - ax) * dx + (y_m - ay) * dy) / length2))
+        if math.hypot(
+                x_m - ax - fraction * dx,
+                y_m - ay - fraction * dy) <= 1e-9:
+            return False
+        if ((ay > y_m) != (by > y_m)
+                and x_m < (bx - ax) * (y_m - ay) / (by - ay) + ax):
+            inside = not inside
+        previous = current
+    return inside
+
+
+def _impossible_turned_memory_projection(point, source, chassis_outline):
+    """Identify an old external return now projected inside the physical chassis."""
+    try:
+        source_pose, _scan, source_point, current_pose = source
+        heading_change = abs(math.atan2(
+            math.sin(current_pose[2] - source_pose[2]),
+            math.cos(current_pose[2] - source_pose[2])))
+    except (IndexError, TypeError, ValueError):
+        return False
+    return (heading_change > math.radians(5.0)
+            and not _point_inside_outline(source_point, chassis_outline)
+            and _point_inside_outline(point, chassis_outline))
+
+
 class _RearCollisionWatch:
     """Callable direct-motion guard with a scoped fine-target exception."""
 
@@ -371,6 +408,27 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
             remembered_points = state['filtered_memory']
             remembered_sources = state['filtered_sources']
             remembered_diagnostics = state['filtered_diagnostics']
+            if len(remembered_diagnostics) != len(remembered_points):
+                remembered_diagnostics = (None,) * len(remembered_points)
+            # A return acquired outside the chassis before a substantial turn
+            # can be projected inside the measured body by accumulated odometry
+            # error. It cannot describe a collision that the next reverse step
+            # will newly create. Drop only that provenance-backed impossible
+            # projection; live returns and every point outside the physical
+            # chassis continue through the swept-footprint guard.
+            if ('terminal_outline' in state
+                    and len(remembered_sources) == len(remembered_points)):
+                kept = [
+                    (point, source, diagnostic)
+                    for point, source, diagnostic in zip(
+                        remembered_points, remembered_sources,
+                        remembered_diagnostics)
+                    if not _impossible_turned_memory_projection(
+                        point, source, state['terminal_outline'])
+                ]
+                remembered_points = tuple(item[0] for item in kept)
+                remembered_sources = tuple(item[1] for item in kept)
+                remembered_diagnostics = tuple(item[2] for item in kept)
         points = [*live_points, *remembered_points]
         poses = _prediction_poses(linear_mps, angular_radps, horizon_s)
         witness = {}

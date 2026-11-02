@@ -1569,6 +1569,13 @@ def test_fresh_corner_confirmation_can_end_filtered_rear_approach(raw_gap, angle
         assert result['remaining_m'] > 0.
 
 
+def test_corner_confirmation_accepts_one_lidar_bin_but_not_more():
+    error = 0.008083628030596349
+    assert module._rear_gap_confirmed(
+        0.009541270916847748, error, .225, .01)
+    assert not module._rear_gap_confirmed(.0095, 0.0085, .225, .01)
+
+
 def test_straight_entry_heading_failure_does_not_start_fine(monkeypatch):
     node = route_node()
     initial, skewed = face(.77), face(.2, math.radians(3.1))
@@ -1664,7 +1671,7 @@ def test_five_cm_lateral_offset_never_starts_curve_or_forward(lateral):
 def test_far_corner_only_miss_gets_reverse_trim():
     node = route_node()
     initial = face(.08, 0., stamp=1.)
-    missed = face(.012273624984817724, .001772308112680764, stamp=2.)
+    missed = face(.012273624984817724, .0023, stamp=2.)
     final = face(.01, 0., stamp=3.)
     missed['face_odom'] = final['face_odom'] = initial['face_odom']
     node._observe_rear_box_recovering = Mock(side_effect=[missed, final])

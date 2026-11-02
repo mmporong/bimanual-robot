@@ -281,6 +281,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_rebase_goal = None
         self._station_reference_goal_challenged = False
         self._station_reference_challenged_goal = None
+        self._station_reference_goal_correction_pending = False
         self._table_rebase_requires_restage = False
         self.station_reference_image_subscription = None
         self.station_reference_info_subscription = None
@@ -510,6 +511,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     yaw_jump = math.atan2(math.sin(candidate[2] - heading),
                                           math.cos(candidate[2] - heading))
                     lateral_limit = 4. * self.station_reference_profile['lateral_tolerance_m']
+                    held_lateral_tolerance = self.station_reference_profile[
+                        'lateral_tolerance_m']
                     yaw_limit = self.parking_contract['yaw_tolerance_rad']
                     tape = reference.observation_method == 'table_front_tape'
                     terminal_lateral_jump = 0.
@@ -557,6 +560,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         or abs(terminal_yaw_jump) > yaw_limit
                         or abs(held_lateral_jump) > lateral_limit
                         or abs(held_yaw_jump) > yaw_limit)
+                    held_correction_needed = (
+                        tape and abs(held_lateral_jump) > held_lateral_tolerance)
                     if inconsistent or (tape and getattr(
                             self, '_station_reference_goal_challenged', False)):
                         # The taught cup/bottle pair is static in this run.
@@ -579,10 +584,23 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                             contact_reference.restore_tracking(tracking_checkpoint)
                             result = dict(result, valid=False,
                                           reason='station_reference_inconsistent_static_goal')
+                    elif held_correction_needed:
+                        # A small distance-dependent tape correction can be
+                        # absorbed by the active continuous curve. Confirm it
+                        # without stopping that curve or accepting a terminal
+                        # destination from an unconfirmed single frame.
+                        self._station_reference_goal_correction_pending = True
+                        rebased = self._consider_tape_rebase(result)
+                        if rebased is not None:
+                            self._station_reference_rebase_goal = rebased
+                            samples.clear()
+                            samples.extend(self._station_reference_rebase_samples)
+                            result = rebased
                     elif getattr(self, '_station_reference_rebase_goal', None) is None:
                         self._station_reference_rebase_samples = []
                         self._station_reference_goal_challenged = False
                         self._station_reference_challenged_goal = None
+                        self._station_reference_goal_correction_pending = False
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
                 if result.get('valid') is True:
@@ -674,6 +692,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_rebase_goal = None
         self._station_reference_goal_challenged = False
         self._station_reference_challenged_goal = None
+        self._station_reference_goal_correction_pending = False
         self._table_rebase_requires_restage = False
         self.station_reference = reference
         self.station_reference_mode = mode
@@ -792,7 +811,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return {'valid': False, 'reason': 'station_reference_stale'}
         return result
 
-    def _station_goal_reference(self, *, freeze=False):
+    def _station_goal_reference(self, *, freeze=False, continuous_rebase=False):
         """Hold the reference anchor while steering on recent visual feedback.
 
         Both control and arrival use the same filtered goal in raw odom. The
@@ -802,13 +821,21 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         """
         reference = self._fresh_station_reference()
         rebased = None
+        continuous_correction = False
         if getattr(self, '_station_reference_rebase_goal', None) is not None:
             with self._station_reference_lock:
                 if reference and reference.get('valid') is True:
                     rebased = self._station_reference_rebase_goal
+                    continuous_correction = (
+                        continuous_rebase
+                        and getattr(
+                            self, '_station_reference_goal_correction_pending', False)
+                        and not getattr(
+                            self, '_station_reference_goal_challenged', False))
                     self._station_reference_rebase_goal = None
                     self._station_reference_goal_challenged = False
                     self._station_reference_challenged_goal = None
+                    self._station_reference_goal_correction_pending = False
         if getattr(self, '_station_reference_goal_challenged', False):
             self._station_terminal_goal = None
         if rebased is not None:
@@ -825,11 +852,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 rebased, rejection_pose_odom=list(actual), rejection_lateral_m=lateral,
                 rejection_heading_rad=math.atan2(math.sin(heading-actual[2]),
                                                  math.cos(heading-actual[2])))
+            requires_restage = (
+                abs(lateral) > self.station_reference_profile['lateral_tolerance_m']
+                and not continuous_correction)
             self._table_rebase_requires_restage = (
-                abs(lateral) > self.station_reference_profile['lateral_tolerance_m'])
+                getattr(self, '_table_rebase_requires_restage', False)
+                or requires_restage)
             self.emit('table_station_goal_rebased', goal_odom=list(goal),
                       lateral_error_m=lateral, sample_count=3,
                       restage_required=self._table_rebase_requires_restage,
+                      continuous_approach_validation=continuous_correction,
                       final_parking_confirmed=False)
         terminal_goal = getattr(self, '_station_terminal_goal', None)
         if terminal_goal is not None:
@@ -1030,6 +1062,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         odom, geometry and stop guards remain owned by the approach controller.
         """
         if (getattr(self, '_station_reference_goal_challenged', False)
+                or getattr(self, '_station_reference_goal_correction_pending', False)
                 or getattr(self, '_table_rebase_requires_restage', False)):
             return False
         if reference and reference.get('valid') is True:
@@ -1058,6 +1091,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             and getattr(self, '_station_terminal_goal', None) is not None
             and goal_reference is not None)
         if (getattr(self, '_station_reference_goal_challenged', False)
+                or getattr(self, '_station_reference_goal_correction_pending', False)
                 or getattr(self, '_table_rebase_requires_restage', False)):
             valid_reference = False
             tape_terminal = False
@@ -2411,6 +2445,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_rebase_goal = None
         self._station_reference_goal_challenged = False
         self._station_reference_challenged_goal = None
+        self._station_reference_goal_correction_pending = False
         self._table_rebase_requires_restage = False
         self._station_face_heading_odom_rad = None
         if reapproach_m is not None:
@@ -3587,7 +3622,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         def station_goal_odom():
             if not self._station_reference_enabled():
                 return None, None
-            goal, reference = self._station_goal_reference(freeze=True)
+            goal, reference = self._station_goal_reference(
+                freeze=True, continuous_rebase=True)
             if getattr(self, '_station_reference_goal_challenged', False):
                 raise RuntimeError('table approach tape reference pending')
             if getattr(self, '_table_rebase_requires_restage', False):

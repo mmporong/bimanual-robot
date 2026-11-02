@@ -871,11 +871,90 @@ def test_frozen_tape_goal_detects_recorded_drift_against_held_destination():
             assert node._station_terminal_goal is None
 
     node.emit.side_effect = None
-    goal, _ = node._station_goal_reference(freeze=True)
+    goal, _ = node._station_goal_reference(
+        freeze=True, continuous_rebase=True)
 
     assert goal['goal_odom'] == pytest.approx([.4, .0395, 0.])
     assert node._table_rebase_requires_restage
     assert node._station_terminal_goal is None
+    rebased = [call for call in node.emit.call_args_list
+               if call.args and call.args[0] == 'table_station_goal_rebased']
+    assert rebased[-1].kwargs['continuous_approach_validation'] is False
+
+
+def test_first_continuous_approach_absorbs_coherent_five_mm_tape_correction():
+    node = _node()
+    contact = Mock()
+    node.station_reference = _rgbd_model(contact_reference=contact,
+                                        observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.station_reference_mode = 'rgbd'
+    node.parking_contract['yaw_tolerance_rad'] = .03
+    held = {'valid': True, 'stamp_s': 9., 'goal_odom': [.4, 0., 0.]}
+    node._station_reference_goal_samples = deque([
+        {'valid': True, 'stamp_s': 9. + index * .2,
+         'goal_odom': [.4, lateral, 0.]}
+        for index, lateral in enumerate((-.0055, -.0060, -.0065))
+    ], maxlen=5)
+    node.station_reference_goal = dict(held)
+    node.station_reference_goal_frozen = True
+    node._station_terminal_goal = None
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(transform=_pose())
+    node._odom_pose = Mock(return_value=(.39, 0., 0.))
+
+    goal = None
+    for index, lateral in enumerate((-.0070, -.0072, -.0071)):
+        stamp = 10. + index * .3
+        node.get_clock.return_value = _clock(stamp + .1)
+        node.station_reference.observe.return_value = {
+            'valid': True, 'stamp_s': stamp, 'goal_odom': [.4, lateral, 0.],
+            'goal_left_offset_m': 0.,
+            'quality': {'tape_center_base_xy_m': [.241, -.031]},
+        }
+        node._station_reference_pending = (None, None, stamp)
+        node._station_reference_stop.clear()
+        node._station_reference_reported_status = None
+        node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
+        node._station_reference_wake.set()
+        node._station_reference_loop()
+        node._fresh_station_reference = lambda: node.station_reference_result
+        goal, _ = node._station_goal_reference(
+            freeze=True, continuous_rebase=True)
+        if index == 0:
+            assert node.station_reference_result['valid'] is True
+            assert node._station_reference_goal_correction_pending
+            assert not getattr(node, '_station_reference_goal_challenged', False)
+            assert not node._table_terminal_reference_ready(
+                node.station_reference_result)
+            status = node._station_lateral_status()
+            # The old frozen goal is still exactly centred at the base, but
+            # one soft correction frame cannot confirm final parking.
+            assert status['lateral_reference_valid'] is False
+            assert status['internal_lateral_within_tolerance'] is False
+            missing_stamp = stamp + .1
+            node.get_clock.return_value = _clock(missing_stamp + .1)
+            node.station_reference.observe.return_value = {
+                'valid': False, 'stamp_s': missing_stamp,
+                'reason': 'tape_pair_missing', 'quality': {},
+            }
+            node._station_reference_pending = (None, None, missing_stamp)
+            node._station_reference_stop.clear()
+            node._station_reference_reported_status = None
+            node._station_reference_wake.set()
+            node._station_reference_loop()
+            assert node._station_reference_goal_correction_pending
+            assert len(node._station_reference_rebase_samples) == 1
+            assert not node._table_terminal_reference_ready(
+                node.station_reference_result)
+
+    assert goal['goal_odom'] == pytest.approx([.4, -.0071, 0.])
+    assert node.station_reference_goal['goal_odom'] == goal['goal_odom']
+    assert not node._table_rebase_requires_restage
+    rebased = [call for call in node.emit.call_args_list
+               if call.args and call.args[0] == 'table_station_goal_rebased']
+    assert rebased[-1].kwargs['continuous_approach_validation'] is True
+    assert rebased[-1].kwargs['restage_required'] is False
 
 
 def test_terminal_tape_goal_is_challenged_by_three_fresh_drifted_views():

@@ -52,6 +52,11 @@ ROTATION_SCAN_INPUT_GAPS = frozenset({
 # stopped same-face observation before the final live-gap controller.
 REAR_CENTER_REOBSERVE_GAPS_M = (REAR_FACE_REOBSERVE_GAP_M, 0.15, 0.1)
 REAR_FINAL_TRIM_MAX_M = 0.01
+# The saved mission ranges used by the live and stopped face fits lie on a
+# 0.25 mm grid. Keep both confirmation paths on one boundary without rejecting
+# a pose for a sub-bin corner-gap difference; this is an observed input bound,
+# not a broader target-gap allowance.
+REAR_GAP_CONFIRMATION_EPSILON_M = 0.00025
 # Observation only: the swept footprint and gap calculation retain the chassis width.
 REAR_FACE_OBSERVATION_HALF_WIDTH_M = 1.2
 REAR_FACE_OBSERVATION_WIDTHS_M = (0.6, 0.9, REAR_FACE_OBSERVATION_HALF_WIDTH_M)
@@ -63,8 +68,9 @@ def _angle(value):
 
 def _rear_gap_confirmed(gap_m, error_rad, half_width_m, target_gap_m):
     far_gap_m = gap_m + 2. * half_width_m * abs(math.sin(error_rad))
-    return (target_gap_m - .003 <= gap_m <= target_gap_m + .003
-            and target_gap_m - .003 <= far_gap_m <= target_gap_m + .003)
+    lower_m = target_gap_m - .003 - REAR_GAP_CONFIRMATION_EPSILON_M
+    upper_m = target_gap_m + .003 + REAR_GAP_CONFIRMATION_EPSILON_M
+    return lower_m <= gap_m <= upper_m and lower_m <= far_gap_m <= upper_m
 
 
 def _rear_center_target(observed, extent, gap_m=REAR_FACE_REOBSERVE_GAP_M):

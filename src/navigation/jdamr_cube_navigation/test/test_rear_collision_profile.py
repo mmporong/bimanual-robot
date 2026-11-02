@@ -367,6 +367,76 @@ def test_unverified_or_different_source_memory_still_blocks(monkeypatch):
             'rear docking swept footprint occupied')
 
 
+def test_turned_memory_projected_inside_physical_chassis_does_not_hold_dock(
+        monkeypatch):
+    remembered = (-.27168920228390203, -.0948226257381165)
+    source_scan = scan()
+    source = ((1.4079365054397368, -.38436400281713257, -2.8540292428385063),
+              source_scan, (-.5033593359334124, .7924763722111895),
+              (1.8588671637060996, -.8711378052246369, 2.335495866508298))
+    route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
+    route._blind_point_sources = [source]
+    route._remembered_blind_points.side_effect = None
+    route._remembered_blind_points.return_value = [remembered]
+    with module.rear_collision_profile(route) as watch:
+        watch.set_rear_extent(.275)
+        watch.set_target(*target_face(), lambda *_args: False)
+        assert watch(command(-.05)) is None
+
+
+def test_turned_memory_outside_physical_chassis_still_blocks(monkeypatch):
+    remembered = (-.279, 0.)
+    source_scan = scan()
+    source = ((0., 0., -1.), source_scan, (-.5, .4), (0., 0., 0.))
+    route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
+    route._blind_point_sources = [source]
+    route._remembered_blind_points.side_effect = None
+    route._remembered_blind_points.return_value = [remembered]
+    with module.rear_collision_profile(route) as watch:
+        watch.set_rear_extent(.275)
+        watch.set_target(*target_face(), lambda *_args: False)
+        assert watch(command(-.05)) == 'rear docking swept footprint occupied'
+
+
+def test_filtered_provider_without_diagnostics_keeps_external_memory(monkeypatch):
+    remembered = (-.279, 0.)
+    source_scan = scan()
+    source = ((0., 0., -1.), source_scan, (-.5, .4), (0., 0., 0.))
+    route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
+
+    def filtered_memory(_laser, _scan, source_point_filter=None):
+        assert source_point_filter is not None
+        route._blind_point_sources = [source]
+        route._blind_point_diagnostics = []
+        return [remembered]
+
+    route._remembered_blind_points.side_effect = filtered_memory
+    with module.rear_collision_profile(route) as watch:
+        watch.set_rear_extent(.275)
+        watch.set_target(*target_face(), lambda *_args: False)
+        assert watch(command(-.05)) == 'rear docking swept footprint occupied'
+
+
+@pytest.mark.parametrize('remembered,angular', [
+    ((-.275, 0.), 0.),
+    ((-.2, .23), -.1),
+    ((-.275, .23), -.1),
+])
+def test_physical_chassis_boundary_memory_remains_in_guard(
+        monkeypatch, remembered, angular):
+    source_scan = scan()
+    source = ((0., 0., -1.), source_scan, (-.5, .4), (0., 0., 0.))
+    route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
+    route._blind_point_sources = [source]
+    route._remembered_blind_points.side_effect = None
+    route._remembered_blind_points.return_value = [remembered]
+    with module.rear_collision_profile(route) as watch:
+        watch.set_rear_extent(.275)
+        watch.set_target(*target_face(), lambda *_args: False)
+        assert watch(command(-.05, angular)) == (
+            'rear docking swept footprint occupied')
+
+
 @pytest.mark.parametrize('point', [(-.289, 0.0), (-.2925, .20)])
 def test_non_target_blind_range_memory_still_blocks(monkeypatch, point):
     route, _monitor, _clock = node(monkeypatch, memory=(point,))
