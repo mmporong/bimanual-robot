@@ -1052,6 +1052,7 @@ def static_corridor_clear(
         poses: Sequence[Sequence[float]],
         footprint: Sequence[Sequence[float]],
         *, allow_rear_keepout_escape: bool = False,
+        live_checked_dock_occupancy: bool = False,
 ) -> bool:
     """
     Check a sampled footprint corridor against static map pixels.
@@ -1068,6 +1069,12 @@ def static_corridor_clear(
             or source['width'] != keepout['width']
             or source['height'] != keepout['height']):
         raise ValueError('map and keepout grids must have identical geometry')
+    if live_checked_dock_occupancy:
+        # Only fully occupied map pixels may yield to a live-checked dock path.
+        # Unknown pixels, keepout, map boundaries and the on-disk map stay intact.
+        occupied, free = (0, 255) if source['negate'] == 0 else (255, 0)
+        source = dict(source, pixels=bytes(
+            free if pixel == occupied else pixel for pixel in source['pixels']))
     resolution = source['resolution']
     if not math.isfinite(resolution) or resolution <= 0.0:
         raise ValueError('map resolution must be positive and finite')
