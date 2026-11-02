@@ -484,7 +484,11 @@ class DepthBoxParkingNode(Node):
         """Adapt optional component/tracking output to the existing observer contract."""
         if (not getattr(self, '_table_components', False)
                 or not getattr(self, '_table_request_enabled', False)):
-            return detect_table_edge(depth_mm, intrinsics, self._table_config), {}, None
+            plane = {}
+            detection = detect_table_edge(
+                depth_mm, intrinsics, self._table_config, plane_result=plane)
+            fields = {'tabletop_plane': plane} if plane else {}
+            return detection, fields, None
         region_map = getattr(self, '_table_region_map', None)
         needs_transform = self._table_tracker is not None or region_map is not None
         transform, transform_error = None, None

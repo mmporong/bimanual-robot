@@ -41,6 +41,8 @@ def _node():
     node.parking_contract = {'robot_base_frame': 'base_link'}
     node.box_geometry = {'front_to_wheel_axis': {'value': .065}}
     node.station_reference = None
+    # Isolate worker state-machine cases from the separately tested depth join.
+    node._station_tape_surface = Mock(return_value={})
     node.station_reference_profile = None
     node.station_reference_rgb_info = None
     node.station_reference_result = None
@@ -385,7 +387,7 @@ def test_expired_match_never_seeds_control_but_can_seed_fresh_image_search():
                 'stamp_s': 10., 'goal_left_offset_m': 0.}
 
     model.observe.side_effect = observe
-    node._station_reference_pending = (None, None, 10.)
+    node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), 10.)
     # End after this iteration, without timing-dependent sleeps.
     node.emit.side_effect = lambda *args, **kwargs: node._station_reference_stop.set()
     node._station_reference_wake.set()
@@ -402,7 +404,7 @@ def test_worker_preserves_tf_failure_detail_for_final_diagnostics():
     node.parking_tf = Mock()
     node.parking_tf.lookup_transform.side_effect = box_service.TransformException(
         'image timestamp is newer than available TF')
-    node._station_reference_pending = (None, None, 10.)
+    node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), 10.)
     worker = threading.Thread(target=node._station_reference_loop)
     worker.start()
     node._station_reference_wake.set()
@@ -759,7 +761,7 @@ def test_station_worker_drops_inflight_result_when_perception_stops():
     node.parking_tf = Mock()
     node.parking_tf.lookup_transform.return_value = SimpleNamespace(transform=_pose())
     node.get_clock.return_value = _clock(10.1)
-    node._station_reference_pending = (None, None, 10.)
+    node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), 10.)
     worker = threading.Thread(target=node._station_reference_loop)
     node._station_reference_thread = worker
     worker.start()
@@ -801,7 +803,7 @@ def test_three_consistent_near_tape_views_replace_challenged_goal_without_arriva
             'goal_left_offset_m': 0.,
             'quality': {'tape_center_base_xy_m': [.2, lateral]},
         }
-        node._station_reference_pending = (None, None, stamp)
+        node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), stamp)
         node._station_reference_stop.clear()
         # Stop after a single worker iteration, including repeated statuses.
         node._station_reference_reported_status = None
@@ -854,7 +856,7 @@ def test_frozen_tape_goal_detects_recorded_drift_against_held_destination():
             'goal_left_offset_m': 0.,
             'quality': {'tape_center_base_xy_m': [.0484566, .0405519]},
         }
-        node._station_reference_pending = (None, None, stamp)
+        node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), stamp)
         node._station_reference_stop.clear()
         node._station_reference_reported_status = None
         node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
@@ -912,7 +914,7 @@ def test_first_continuous_approach_absorbs_coherent_five_mm_tape_correction():
             'goal_left_offset_m': 0.,
             'quality': {'tape_center_base_xy_m': [.241, -.031]},
         }
-        node._station_reference_pending = (None, None, stamp)
+        node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), stamp)
         node._station_reference_stop.clear()
         node._station_reference_reported_status = None
         node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
@@ -938,7 +940,7 @@ def test_first_continuous_approach_absorbs_coherent_five_mm_tape_correction():
                 'valid': False, 'stamp_s': missing_stamp,
                 'reason': 'tape_pair_missing', 'quality': {},
             }
-            node._station_reference_pending = (None, None, missing_stamp)
+            node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), missing_stamp)
             node._station_reference_stop.clear()
             node._station_reference_reported_status = None
             node._station_reference_wake.set()
@@ -986,7 +988,7 @@ def test_terminal_tape_goal_is_challenged_by_three_fresh_drifted_views():
             'goal_left_offset_m': 0.,
             'quality': {'tape_center_base_xy_m': [.0484566, lateral]},
         }
-        node._station_reference_pending = (None, None, stamp)
+        node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), stamp)
         node._station_reference_stop.clear()
         node._station_reference_reported_status = None
         node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
@@ -1004,7 +1006,7 @@ def test_terminal_tape_goal_is_challenged_by_three_fresh_drifted_views():
                 'valid': False, 'stamp_s': missing_stamp,
                 'reason': 'tape_pair_missing', 'quality': {},
             }
-            node._station_reference_pending = (None, None, missing_stamp)
+            node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), missing_stamp)
             node._station_reference_stop.clear()
             node._station_reference_reported_status = None
             node._station_reference_wake.set()
@@ -1107,7 +1109,7 @@ def test_missing_pair_discards_only_unconfirmed_soft_goal_candidate(hard, age, d
     node.get_clock.return_value = _clock(10. + age)
     node.station_reference.observe.return_value = {
         'valid': False, 'stamp_s': 10., 'reason': 'tape_pair_missing', 'quality': {}}
-    node._station_reference_pending = (None, None, 10.)
+    node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), 10.)
     node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
     node._station_reference_wake.set()
     node._station_reference_loop()
@@ -1165,7 +1167,7 @@ def test_terminal_tape_worker_keeps_small_coherent_change_diagnostic():
             'valid': True, 'stamp_s': stamp, 'goal_odom': [.4, lateral, 0.],
             'goal_left_offset_m': 0.,
             'quality': {'tape_center_base_xy_m': [.10, lateral]}}
-        node._station_reference_pending = (None, None, stamp)
+        node._station_reference_pending = (None, SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame')), stamp)
         node._station_reference_stop.clear()
         node._station_reference_reported_status = None
         node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
@@ -1177,3 +1179,40 @@ def test_terminal_tape_worker_keeps_small_coherent_change_diagnostic():
         assert reference['goal_odom'][1] == lateral
         assert not getattr(node, '_station_reference_goal_correction_pending', False)
         assert getattr(node, '_station_reference_rebase_goal', None) is None
+
+
+@pytest.mark.parametrize('case', ['stale', 'wrong_frame', 'not_detected', 'skew'])
+def test_tape_depth_join_rejects_unusable_observer_geometry(case):
+    node = _node()
+    node._table_observation_context = ({'camera_mount': {}}, None, None)
+    node.get_clock.return_value = _clock(10.2)
+    doc = {'detected': True, 'frame_id': 'camera_color_optical_frame', 'stamp_s': 10.1}
+    if case == 'stale': doc['stamp_s'] = 9.6
+    if case == 'wrong_frame': doc['frame_id'] = 'unregistered_depth_frame'
+    if case == 'not_detected': doc['detected'] = False
+    if case == 'skew': doc['stamp_s'] = 9.8
+    node.box_status = doc
+    node.box_status_history = deque()
+    node.parking_tf = Mock()
+    with pytest.raises(ValueError, match='live depth table plane unavailable'):
+        BoxServiceRoute._station_tape_surface(
+            node, 10.15, (0.,0.,0.), 'camera_color_optical_frame')
+    node.parking_tf.lookup_transform.assert_not_called()
+
+
+def test_tape_worker_always_forwards_matched_live_surface():
+    node = _node()
+    node.station_reference = _rgbd_model(observation_method='table_front_tape')
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(transform=_pose())
+    node.station_reference.observe.return_value = {
+        'valid': False, 'stamp_s': 10., 'reason': 'tape_pair_missing', 'quality': {}}
+    surface = {'source': 'live_depth_table_plane'}
+    node._station_tape_surface.return_value = surface
+    info = SimpleNamespace(header=SimpleNamespace(frame_id='camera_color_optical_frame'))
+    node._station_reference_pending = (None, info, 10.)
+    node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
+    node._station_reference_wake.set()
+    node._station_reference_loop()
+    node.station_reference.observe.assert_called_once_with(
+        None, info, (0.,0.,0.), 10., surface=surface)

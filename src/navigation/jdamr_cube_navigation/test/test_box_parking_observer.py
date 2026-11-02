@@ -775,7 +775,7 @@ def test_table_edge_json_carries_endpoints_and_calibration_without_velocity(monk
         now=lambda: SimpleNamespace(nanoseconds=10_100_000_000))
     called = []
 
-    def detect(_depth, _intrinsics, config):
+    def detect(_depth, _intrinsics, config, *, plane_result=None):
         called.append(config)
         return detection
 
@@ -1049,8 +1049,22 @@ def test_disabling_pointcloud_request_clears_selection_and_uses_legacy_detector(
     assert node._table_calibration_id == '' and node.resets
     legacy = object()
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_edge',
-                        lambda *a: legacy)
+                        lambda *a, **kw: legacy)
     monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_scene',
                         lambda *a: pytest.fail('disabled request used experimental detection'))
     result, fields, stable = node._table_observation(None, None, 10., OPTICAL_FRAME)
     assert result is legacy and fields == {} and stable is None
+
+
+def test_tabletop_plane_is_published_even_when_front_edge_is_occluded(monkeypatch):
+    node = object.__new__(DepthBoxParkingNode)
+    node._table_components = False
+    node._table_config = object()
+    measured = {'source': 'current_depth_tabletop_fit', 'inlier_count': 200}
+    def detect(_depth, _intrinsics, _config, *, plane_result):
+        plane_result.update(measured)
+        return None
+    monkeypatch.setattr('jdamr_cube_navigation.depth_box_parking.detect_table_edge', detect)
+    detection, fields, stable = node._table_observation(None, None, 10., OPTICAL_FRAME)
+    assert detection is None and stable is None
+    assert fields == {'tabletop_plane': measured}

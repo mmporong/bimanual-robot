@@ -377,7 +377,7 @@ class TaughtStationReference:
         self.run_left_offset_m = offset
 
     def observe(self, current_rgb, current_info, odom_pose_at_image_stamp,
-                stamp_s):
+                stamp_s, *, surface=None):
         """Return the bound goal (capture pose plus lateral offset) in odom."""
         try:
             stamp = _finite(stamp_s, 'stamp_s')
@@ -390,7 +390,11 @@ class TaughtStationReference:
                 'current_camera_intrinsics_identity_mismatch', stamp,
                 self.assumptions)
         if self.contact_reference is not None:
-            error, quality = self.contact_reference.observe(current_rgb)
+            if self.observation_method == 'table_front_tape' and surface is not None:
+                error, quality = self.contact_reference.observe(
+                    current_rgb, surface=surface, rgb_info=current_info)
+            else:
+                error, quality = self.contact_reference.observe(current_rgb)
         else:
             estimate = self.prepared_reference.observe(current_rgb, current_info)
             quality = {

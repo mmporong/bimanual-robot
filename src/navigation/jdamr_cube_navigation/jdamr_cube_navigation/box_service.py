@@ -46,7 +46,10 @@ from jdamr_cube_navigation.station_parking_reference import (
 from jdamr_cube_navigation.surface_approach import (
     FACE_APPROACH_TIME_S, face_approach_waypoints,
 )
-from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
+from jdamr_cube_navigation.table_edge_target import (
+    compute_table_edge_docking_target, table_tape_surface_at_rgb,
+    MAXIMUM_TAPE_RGB_DEPTH_DELTA_S,
+)
 from geometry_msgs.msg import Twist
 from nav2_msgs.action import Spin
 from nav_msgs.msg import Path as RosPath
@@ -344,6 +347,40 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
     def _station_info_callback(self, message):
         self.station_reference_rgb_info = message
 
+    def _station_tape_surface(self, rgb_stamp_s, rgb_pose_odom, rgb_frame_id):
+        """Match one measured depth plane to RGB; never use a saved plane."""
+        context = getattr(self, '_table_observation_context', None)
+        if context is None:
+            raise ValueError('tape live table context unavailable')
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+        documents = [item[1] for item in list(
+            getattr(self, 'box_status_history', None) or ())]
+        current = getattr(self, 'box_status', None)
+        if isinstance(current, dict):
+            documents.append(current)
+        candidates = [doc for doc in documents if isinstance(doc, dict)
+                      and (doc.get('detected') is True
+                           or isinstance(doc.get('tabletop_plane'), dict))
+                      and doc.get('frame_id') == rgb_frame_id
+                      and isinstance(doc.get('stamp_s'), (float, int))
+                      and not isinstance(doc.get('stamp_s'), bool)
+                      and 0. <= now_s - doc['stamp_s'] <= STATION_REFERENCE_MAX_AGE_S
+                      and abs(doc['stamp_s'] - rgb_stamp_s)
+                      <= MAXIMUM_TAPE_RGB_DEPTH_DELTA_S]
+        for doc in sorted(candidates, key=lambda item: abs(item['stamp_s'] - rgb_stamp_s)):
+            try:
+                transform = self.parking_tf.lookup_transform(
+                    'odom', self.parking_contract['robot_base_frame'],
+                    rclpy.time.Time(seconds=doc['stamp_s']),
+                    timeout=Duration(seconds=.02)).transform
+                depth_pose = (transform.translation.x, transform.translation.y,
+                              self._yaw(transform.rotation))
+                return table_tape_surface_at_rgb(
+                    doc, context[0], depth_pose, rgb_pose_odom, rgb_stamp_s, now_s)
+            except (TransformException, ValueError):
+                continue
+        raise ValueError('tape live depth table plane unavailable')
+
     def _station_image_callback(self, message):
         """Replace the pending frame; the subscription callback never runs ORB."""
         if (getattr(self, 'station_reference', None) is None
@@ -445,8 +482,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 contact_reference = self.station_reference.contact_reference
                 if contact_reference is not None:
                     tracking_checkpoint = contact_reference.tracking_checkpoint()
-                result = self.station_reference.observe(
-                    image, info, odom_pose, stamp_s)
+                if self.station_reference.observation_method == 'table_front_tape':
+                    surface = self._station_tape_surface(
+                        stamp_s, odom_pose, info.header.frame_id)
+                    result = self.station_reference.observe(
+                        image, info, odom_pose, stamp_s, surface=surface)
+                else:
+                    result = self.station_reference.observe(
+                        image, info, odom_pose, stamp_s)
                 if (self._station_reference_stop.is_set()
                         or not getattr(self, '_station_reference_perception_active', True)):
                     if contact_reference is not None:
@@ -1432,7 +1475,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if reason in ('perception_disabled', 'perception_enabled_waiting_for_depth'):
             return
         super()._box_callback(message)
-        # Recent statuses are failure evidence only, never an observation.
+        # Tape projection may match a measured, fresh plane by exposure stamp.
+        # Predicted, invalid and expired statuses are never geometry input.
         history = getattr(self, 'box_status_history', None)
         if history is None:
             history = self.box_status_history = deque(maxlen=16)
