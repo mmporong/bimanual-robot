@@ -12,6 +12,8 @@
 - RGB·깊이 같은 등록 optical frame과 촬영 시각을 대조. 깊이 촬영 때 base→odom 변환과 RGB 촬영 때 변환으로 현재 광선 좌표계에 면을 옮김. 현재 상판 법선에서 roll/pitch를 구하고 저장된 camera yaw·실측 planar lever는 유지. 좌우 추정의 최종 mm 정확도를 검증한 것은 아님.
 - 정지 원본 `~/jdamr_data/analysis_20261102/live_tape_scene/`: RGB/depth 촬영차43.68ms, 테이프 상단이 책상 앞 모서리에 닿는 배치 확인. 같은 영상 old left8.14mm/front-28.60mm vs live left11.11mm/front-15.63mm. 실물 정답 값이 아니며 새 계산 정확도 성공으로 해석하지 않음.
 - 관련233건 통과, diff 검사 통과. 운영7모듈 Pi SHA256 대조, observer·executor 재시작20:41 완료. 백업 `~/jdamr_deploy/backups/live_depth_tape_20261102_204048/`. 앞선 조기 조향 lookahead는 오전 law로 복원한 상태 유지. 실제 첫 회차 결과는 아래 후속 기록에 남김.
+- 수정 후 1회차 `water_station_20261102_204153_75e6a405`: 20cm 후진 후 주차 완료20:42:37. 추가 재접근0회·입력대기0회·목표재기준0회. 실제 입력 quality의 `projection_basis=live_depth_table_plane` 확인. 내부 앞간격8.90/9.04mm·좌우1.31mm. 최종 깊이 재측정은 없으며 고정면·odom 정지 판정. 사용자가 실물 중앙 정렬 성공으로 확인. 실물 앞간격은 미측정. 근거 `~/jdamr_data/analysis_20261102/live_depth_tape_trial1/`.
+- 사용자 피드백 후 2회차는30cm 후진 후 재주차로 요청. 한 회씩 수행하며 다음 회차 자동 연속 실행하지 않음.
 
 ## 2026-11-02 | 급수대 후진·정밀주차 3회와 오전 코드 대조
 
