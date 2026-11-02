@@ -4,8 +4,9 @@ from dataclasses import asdict, replace
 import hashlib
 import json
 import math
-from pathlib import Path
+import threading
 import time
+from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from jdamr_cube_navigation.box_top_detection import (
@@ -215,6 +216,14 @@ class DepthBoxParkingNode(Node):
         self._minimum_period_s = 1.0 / processing_hz
         self._last_processed_s = -math.inf
         self._last_depth_callback_s = time.monotonic()
+        self._depth_work = threading.Condition()
+        self._pending_depth = None
+        self._depth_worker_stop = False
+        self._depth_callback_active = False
+        self._processing_state_lock = threading.RLock()
+        self._processing_generation = 0
+        self._processing_context = threading.local()
+        self._camera_info_lock = threading.Lock()
         self._camera_info_history = CameraInfoHistory()
         self._camera_geometry = None
         self._status = self.create_publisher(
@@ -224,6 +233,10 @@ class DepthBoxParkingNode(Node):
             self._max_image_age_s,
             self._recover_silent_depth_subscriptions)
         self.add_on_set_parameters_callback(self._on_parameters)
+        self._depth_worker = threading.Thread(
+            target=self._depth_worker_loop,
+            name='jdamr_depth_box_parking_worker')
+        self._depth_worker.start()
         self.get_logger().info(
             'depth box parking perception started; '
             'velocity output is disabled')
@@ -238,13 +251,58 @@ class DepthBoxParkingNode(Node):
             self._on_depth_with_watchdog_activity, LATEST_SENSOR_QOS)
 
     def _on_depth_with_watchdog_activity(self, message: Image) -> None:
-        """Keep a long-running callback from looking like a silent DDS reader."""
-        self._depth_callback_active = True
-        try:
-            self._on_depth(message)
-        finally:
-            self._last_depth_callback_s = time.monotonic()
-            self._depth_callback_active = False
+        """Replace the pending image without doing point-cloud work in ROS spin."""
+        with self._processing_state_lock:
+            generation = self._processing_generation
+            with self._depth_work:
+                self._pending_depth = (generation, message)
+                self._last_depth_callback_s = time.monotonic()
+                self._depth_work.notify()
+
+    def _depth_worker_loop(self) -> None:
+        """Process one image at a time and always take the newest pending image."""
+        while True:
+            with self._depth_work:
+                self._depth_work.wait_for(
+                    lambda: self._depth_worker_stop or self._pending_depth is not None)
+                if self._depth_worker_stop:
+                    return
+                generation, message = self._pending_depth
+                self._pending_depth = None
+                self._depth_callback_active = True
+            try:
+                if not self._generation_is_current(generation):
+                    continue
+                self._processing_context.generation = generation
+                self._on_depth(message)
+            except Exception as error:  # keep the worker alive for the next frame
+                self.get_logger().error(
+                    'depth parking worker failed: '
+                    f'{type(error).__name__}: {error}')
+                if self._generation_is_current(generation):
+                    try:
+                        self._reject(
+                            'depth_worker_failure',
+                            error_type=type(error).__name__)
+                    except Exception as publish_error:
+                        self.get_logger().error(
+                            'depth parking worker failure status was not published: '
+                            f'{type(publish_error).__name__}: {publish_error}')
+            finally:
+                self._processing_context.generation = None
+                with self._depth_work:
+                    self._depth_callback_active = False
+
+    def _generation_is_current(self, generation=None) -> bool:
+        """Reject results whose camera/config generation was replaced."""
+        if generation is None:
+            generation = getattr(
+                getattr(self, '_processing_context', None), 'generation', None)
+        lock = getattr(self, '_processing_state_lock', None)
+        if generation is None or lock is None:
+            return True
+        with lock:
+            return generation == self._processing_generation
 
     def _recover_silent_depth_subscriptions(self) -> None:
         """Rematch a stalled local DDS reader while a depth writer is present."""
@@ -252,21 +310,58 @@ class DepthBoxParkingNode(Node):
         if (depth_subscription is None
                 or depth_subscription.get_publisher_count() == 0):
             return
-        if getattr(self, '_depth_callback_active', False):
+        state_lock = getattr(self, '_processing_state_lock', None)
+        if state_lock is None:
+            self._recover_silent_depth_subscriptions_locked(depth_subscription)
             return
+        with state_lock:
+            self._recover_silent_depth_subscriptions_locked(depth_subscription)
+
+    def _recover_silent_depth_subscriptions_locked(
+            self, depth_subscription) -> None:
+        """Invalidate one silent input generation before rematching readers."""
+        work = getattr(self, '_depth_work', None)
         now_s = time.monotonic()
-        if now_s - self._last_depth_callback_s <= 4.0 * self._max_image_age_s:
+        if work is not None:
+            with work:
+                if (self._depth_callback_active
+                        or now_s - self._last_depth_callback_s
+                        <= 4.0 * self._max_image_age_s):
+                    return
+                self._pending_depth = None
+                self._processing_generation = (
+                    getattr(self, '_processing_generation', 0) + 1)
+        elif getattr(self, '_depth_callback_active', False):
             return
+        elif now_s - self._last_depth_callback_s <= 4.0 * self._max_image_age_s:
+            return
+        else:
+            self._processing_generation = (
+                getattr(self, '_processing_generation', 0) + 1)
         self.destroy_subscription(self._camera_info_subscription)
         self.destroy_subscription(depth_subscription)
-        self._camera_info_history = CameraInfoHistory()
+        info_lock = getattr(self, '_camera_info_lock', None)
+        if info_lock is None:
+            self._camera_info_history = CameraInfoHistory()
+        else:
+            with info_lock:
+                self._camera_info_history = CameraInfoHistory()
         self._camera_geometry = None
         self._last_depth_callback_s = now_s
         self._create_depth_subscriptions()
         self._reject('depth_subscription_recreated_after_silence')
 
     def destroy_node(self):
-        """Stop the dedicated TF thread before destroying this node."""
+        """Join perception workers before destroying their ROS dependencies."""
+        worker = getattr(self, '_depth_worker', None)
+        work = getattr(self, '_depth_work', None)
+        if worker is not None and work is not None:
+            with work:
+                self._depth_worker_stop = True
+                self._pending_depth = None
+                work.notify_all()
+            worker.join()
+            self._depth_worker = None
         listener = getattr(self, '_table_tf_listener', None)
         if listener is not None:
             self._table_tf_listener = None
@@ -274,6 +369,14 @@ class DepthBoxParkingNode(Node):
         return super().destroy_node()
 
     def _on_parameters(self, parameters) -> SetParametersResult:
+        """Apply changes without waiting for a running point-cloud fit."""
+        state_lock = getattr(self, '_processing_state_lock', None)
+        if state_lock is None:
+            return self._apply_parameters(parameters)
+        with state_lock:
+            return self._apply_parameters(parameters)
+
+    def _apply_parameters(self, parameters) -> SetParametersResult:
         """Apply a bounded depth window or a complete camera/surface update."""
         updates = {}
         mode = getattr(self, '_surface_mode', 'front')
@@ -370,9 +473,17 @@ class DepthBoxParkingNode(Node):
             if reference_changed:
                 self._table_region_odom = None
             if changed:
+                self._processing_generation = (
+                    getattr(self, '_processing_generation', 0) + 1)
                 self._stability.update(None)
                 if getattr(self, '_table_tracker', None) is not None:
                     self._table_tracker.reset()
+                work = getattr(self, '_depth_work', None)
+                if work is not None:
+                    # A frame captured under the old mount/window must not be
+                    # processed after the parameter update returns.
+                    with work:
+                        self._pending_depth = None
         return SetParametersResult(successful=True)
 
     @staticmethod
@@ -392,13 +503,60 @@ class DepthBoxParkingNode(Node):
     def _on_camera_info(self, message: CameraInfo) -> None:
         if not hasattr(self, '_camera_info_history'):
             self._camera_info_history = CameraInfoHistory()
-        try:
-            self._camera_info_history.add(message)
-        except ValueError as error:
-            self._reject(str(error))
+        rejection = None
+
+        def add_camera_info():
+            info_lock = getattr(self, '_camera_info_lock', None)
+            if info_lock is None:
+                self._camera_info_history.add(message)
+            else:
+                with info_lock:
+                    self._camera_info_history.add(message)
+
+        def invalidate_camera_generation():
+            self._camera_geometry = None
+            stability = getattr(self, '_stability', None)
+            if stability is not None:
+                stability.update(None)
+            tracker = getattr(self, '_table_tracker', None)
+            if tracker is not None:
+                tracker.reset()
+
+        state_lock = getattr(self, '_processing_state_lock', None)
+        if state_lock is None:
+            try:
+                add_camera_info()
+            except ValueError as error:
+                rejection = str(error)
+                invalidate_camera_generation()
+        else:
+            with state_lock:
+                try:
+                    add_camera_info()
+                except ValueError as error:
+                    rejection = str(error)
+                    self._processing_generation += 1
+                    invalidate_camera_generation()
+                    work = getattr(self, '_depth_work', None)
+                    if work is not None:
+                        with work:
+                            self._pending_depth = None
+        if rejection is not None:
+            # The next depth frame reports the unavailable calibration. Reset
+            # continuity here in case valid CameraInfo arrives before that frame.
+            get_logger = getattr(self, 'get_logger', None)
+            if get_logger is not None:
+                try:
+                    get_logger().warning(f'camera info rejected: {rejection}')
+                except AttributeError:
+                    pass
 
     def _publish(self, document: dict, *, timing_markers=None) -> None:
         """Publish status and retain output costs for the following sample."""
+        generation = getattr(
+            getattr(self, '_processing_context', None), 'generation', None)
+        if not self._generation_is_current(generation):
+            return
         if timing_markers is not None:
             callback_started_s, calculation_started_s, calculation_finished_s = timing_markers
             publish_boundary_s = time.monotonic()
@@ -418,8 +576,22 @@ class DepthBoxParkingNode(Node):
         serialization_started_s = time.monotonic()
         message.data = json.dumps(
             document, ensure_ascii=False, separators=(',', ':'))
-        self._last_status_serialization_duration_s = (
-            time.monotonic() - serialization_started_s)
+        serialization_duration_s = time.monotonic() - serialization_started_s
+        state_lock = getattr(self, '_processing_state_lock', None)
+        if state_lock is None:
+            self._publish_current_generation(
+                message, generation, serialization_duration_s)
+            return
+        with state_lock:
+            self._publish_current_generation(
+                message, generation, serialization_duration_s)
+
+    def _publish_current_generation(
+            self, message, generation, serialization_duration_s) -> None:
+        """Publish atomically with the final generation check."""
+        if not self._generation_is_current(generation):
+            return
+        self._last_status_serialization_duration_s = serialization_duration_s
         publish_started_s = time.monotonic()
         try:
             self._status.publish(message)
@@ -432,6 +604,8 @@ class DepthBoxParkingNode(Node):
 
     def _reject(self, reason: str, **details) -> None:
         """Clear consecutive stability after any unusable observation."""
+        if not self._generation_is_current():
+            return
         self._reset_measurements()
         self._publish({
             'detected': False,
@@ -443,12 +617,25 @@ class DepthBoxParkingNode(Node):
 
     def _reset_measurements(self) -> None:
         """Discard accumulated observations after input geometry or time changes."""
-        self._stability.update(None)
-        if getattr(self, '_table_tracker', None) is not None:
-            self._table_tracker.reset()
+        if not self._generation_is_current():
+            return
+        lock = getattr(self, '_processing_state_lock', None)
+        if lock is None:
+            self._stability.update(None)
+            if getattr(self, '_table_tracker', None) is not None:
+                self._table_tracker.reset()
+            return
+        with lock:
+            if not self._generation_is_current():
+                return
+            self._stability.update(None)
+            if getattr(self, '_table_tracker', None) is not None:
+                self._table_tracker.reset()
 
     def _table_observation(self, depth_mm, intrinsics, stamp_s, frame_id):
         """Adapt optional component/tracking output to the existing observer contract."""
+        generation = getattr(
+            getattr(self, '_processing_context', None), 'generation', None)
         if (not getattr(self, '_table_components', False)
                 or not getattr(self, '_table_request_enabled', False)):
             return detect_table_edge(depth_mm, intrinsics, self._table_config), {}, None
@@ -465,7 +652,14 @@ class DepthBoxParkingNode(Node):
                         'odom', 'map', Time(seconds=stamp_s), timeout=Duration(seconds=.05))
                     map_to_odom = transform_matrix(map_tf.transform)
                     center = map_to_odom @ np.array([*region_map[:2], 0., 1.])
-                    self._table_region_odom = TargetRegion(tuple(center[:2]), region_map[2])
+                    region_odom = TargetRegion(tuple(center[:2]), region_map[2])
+                    lock = getattr(self, '_processing_state_lock', None)
+                    if lock is None:
+                        self._table_region_odom = region_odom
+                    else:
+                        with lock:
+                            if self._generation_is_current(generation):
+                                self._table_region_odom = region_odom
             except (TransformException, ValueError) as error:
                 transform_error = error
         region = getattr(self, '_table_region_odom', None)
@@ -487,7 +681,14 @@ class DepthBoxParkingNode(Node):
         if transform_error is not None:
             # Keep the completed detector evidence even when tracking cannot run.
             if self._table_tracker is not None:
-                self._table_tracker.reset()
+                lock = getattr(self, '_processing_state_lock', None)
+                if lock is None:
+                    self._table_tracker.reset()
+                else:
+                    with lock:
+                        if not self._generation_is_current(generation):
+                            return None, fields, False
+                        self._table_tracker.reset()
             fields.update({
                 'table_track_state': 'transform_unavailable',
                 'table_track_frame_count': 0,
@@ -504,8 +705,16 @@ class DepthBoxParkingNode(Node):
             'intrinsics': asdict(intrinsics), 'frame_id': frame_id,
             'mount_revision': getattr(self, '_table_calibration_id', ''),
         }, sort_keys=True).encode()).hexdigest()
-        track = self._table_tracker.update(
-            scene.candidates, stamp_s, transform, calibration_id, region)
+        lock = getattr(self, '_processing_state_lock', None)
+        if lock is None:
+            track = self._table_tracker.update(
+                scene.candidates, stamp_s, transform, calibration_id, region)
+        else:
+            with lock:
+                if not self._generation_is_current(generation):
+                    return None, fields, False
+                track = self._table_tracker.update(
+                    scene.candidates, stamp_s, transform, calibration_id, region)
         fields.update({
             'table_track_state': track.state,
             'table_track_id': track.track_id,
@@ -521,16 +730,24 @@ class DepthBoxParkingNode(Node):
 
     def _on_depth(self, message: Image) -> None:
         now_s = time.monotonic()
-        self._last_depth_callback_s = now_s
         if now_s - self._last_processed_s < self._minimum_period_s:
             return
         self._last_processed_s = now_s
         try:
             table_fields, table_stable = {}, None
             ros_now_s = self.get_clock().now().nanoseconds * 1e-9
-            info = self._camera_info_history.select(
-                stamp_nanoseconds(message.header.stamp),
-                maximum_lag_ns=round(self._max_image_age_s * 1e9))
+            info_lock = getattr(self, '_camera_info_lock', None)
+            if info_lock is None:
+                info = self._camera_info_history.select(
+                    stamp_nanoseconds(message.header.stamp),
+                    maximum_lag_ns=round(self._max_image_age_s * 1e9))
+                camera_info_rewound = self._camera_info_history.rewound
+            else:
+                with info_lock:
+                    info = self._camera_info_history.select(
+                        stamp_nanoseconds(message.header.stamp),
+                        maximum_lag_ns=round(self._max_image_age_s * 1e9))
+                    camera_info_rewound = self._camera_info_history.rewound
             if info is None:
                 self._reject('camera_info_unavailable_for_depth_stamp')
                 return
@@ -540,7 +757,7 @@ class DepthBoxParkingNode(Node):
                 self._max_image_age_s)
             geometry = (intrinsics, message.header.frame_id, self._calibration_model)
             previous_geometry = getattr(self, '_camera_geometry', None)
-            if (self._camera_info_history.rewound
+            if (camera_info_rewound
                     or (previous_geometry is not None and geometry != previous_geometry)):
                 self._reset_measurements()
             self._camera_geometry = geometry
@@ -552,6 +769,8 @@ class DepthBoxParkingNode(Node):
                 detector = detect_box_front if self._surface_mode == 'front' else detect_box_top
                 detection = detector(depth_mm, intrinsics, self._config)
             calculation_finished_s = time.monotonic()
+            if not self._generation_is_current():
+                return
         except (AttributeError, ValueError, TypeError,
                 OverflowError, IndexError) as error:
             self._reject(str(error) or type(error).__name__)
@@ -571,11 +790,22 @@ class DepthBoxParkingNode(Node):
             'camera_info_age_s': stamp_s - info_stamp_s if info_stamp_s else None,
             'camera_info_mode': 'stamped' if info_stamp_s else 'static',
         }
-        stable = self._stability.update(detection)
-        if table_stable is not None:
-            stable = table_stable
-        stable_frame_count = table_fields.get(
-            'table_track_frame_count', self._stability.frame_count)
+        lock = getattr(self, '_processing_state_lock', None)
+        if lock is None:
+            stable = self._stability.update(detection)
+            if table_stable is not None:
+                stable = table_stable
+            stable_frame_count = table_fields.get(
+                'table_track_frame_count', self._stability.frame_count)
+        else:
+            with lock:
+                if not self._generation_is_current():
+                    return
+                stable = self._stability.update(detection)
+                if table_stable is not None:
+                    stable = table_stable
+                stable_frame_count = table_fields.get(
+                    'table_track_frame_count', self._stability.frame_count)
         if detection is None:
             self._publish({
                 'stamp_s': stamp_s,
