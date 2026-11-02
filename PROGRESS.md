@@ -6,6 +6,8 @@
 
 ## 2026-11-02 | 목표 고정 수정 후 팔 포함 전체 시나리오 완료
 
+- 사용자 실물 평가: 전체 주행이 좋았고 급수대 주차도 잘됐다고 확인. 이번 팔 포함 전체 성공 회차를 이후 비교 기준으로 보존. 구체적인 줄자 실측은 받지 않았으며 내부 거리 추정과 사용자 정성 평가는 구분.
+- 테이블 재정렬의 확인된 실행 원인: `table_lateral_restage`의 lateral_offset_m=0.0611818(내부 약6.12cm)이 `SURFACE_ONLY_RESTAGE_LATERAL_M=0.05`를 넘어 기존 surface_only 분기가 후진 후 face_alignment를 실행. 테이블 교시에는 `lateral_control_enabled=false`, `lateral_reference=disabled_operator_requested_face_alignment_only`이나 이 중간 재정렬 분기는 남아 있음. 급수대 테이프 목표 수정 미반영으로 발생한 재접근은 아님. 최초 관측부터 재관측까지 약7.25초 추가, 이후 앞간격 내부9.74/8.80mm로 접근 완료. 좌우 오차 자체가 생긴 물리 원인은 이 근거만으로 확정하지 않음. 성공한 급수대 설정과 실행 코드는 이번 기록 요청에서 변경하지 않음.
 - 미션 `20261102_213031_7ec652f5`, 주문 `261102009`: 도크 위치초기화 후 급수대→물따르기→테이블1→컵배치→후면 도크 복귀까지 `state=succeeded`, `phase=complete`, error=null 확인. 21:30:31 시작, 복귀 helper21:37:36 종료.
 - 급수대 `water_station_20261102_213052_7c463668`: 30cm 진입 후 live feedback 갱신, 정렬된 뒤 terminal goal 고정. 후진 재접근 없이 완료. 깊이 입력 지연 정지1회와 입력 복구가 있었으므로 무정지 주행으로 표현하지 않음.
 - Windows 물따르기 ok=true/auto_done, run94.71초·시작자세6.49초·오른팔접기ok. 테이블 `table_01_20261102_213358_94cf3196`은 surface_only_lateral_offset_exceeds_alignment_tolerance에 따른 후진 측면 재정렬1회 후 주차. 컵배치 ok=true/auto_done, run38.99초.
