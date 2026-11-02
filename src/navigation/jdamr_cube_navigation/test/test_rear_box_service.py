@@ -224,15 +224,22 @@ def test_center_curve_residual_never_starts_another_forward_clearance(
         elif interruption == 'deadline':
             node.run_deadline_s = time.monotonic() - 1.
         return True
-    node._center_rear_box = Mock(side_effect=center)
+    def align(found, *_a):
+        center()
+        return found
+    node._align_rear_face_before_clearance = Mock(side_effect=align)
+    node._center_rear_box = Mock()
     node._park_rear_face = Mock(return_value=True)
     node.emit = Mock()
     monkeypatch.setattr(module, '_rear_center_curve_available', lambda *_a: True)
-    assert not node.park_rear_box(
-        GEOMETRY, 'return-route', execute=True, timeout_s=90, target_gap_m=.01)
+    assert node.park_rear_box(
+        GEOMETRY, 'return-route', execute=True, timeout_s=90, target_gap_m=.01) is (interruption is None)
     node._center_rear_box.assert_not_called()
     node._clear_rear_dock_straight.assert_not_called()
-    node._park_rear_face.assert_not_called()
+    if interruption is None:
+        node._park_rear_face.assert_called_once()
+    else:
+        node._park_rear_face.assert_not_called()
 
 
 @pytest.mark.parametrize('interrupted', [False, True])
@@ -1141,9 +1148,10 @@ def test_small_lateral_offset_at_57cm_skips_curve():
 
 
 @pytest.mark.parametrize('lateral,accepted', [
-    (-.02, True), (.02, True), (-.020001, False), (.020001, False),
+    (-.02, True), (.02, True), (-.020001, True), (.020001, True),
+    (-.0321746744, True), (.0321746744, True), (-.23, False), (.23, False),
 ])
-def test_one_pass_centering_enforces_two_centimetre_lateral_boundary(
+def test_straight_docking_reports_precision_miss_but_requires_face_overlap(
         monkeypatch, lateral, accepted):
     node = route_node()
     observed = face(.57)
@@ -1170,6 +1178,9 @@ def test_one_pass_centering_enforces_two_centimetre_lateral_boundary(
         node._center_rear_box.assert_not_called()
         node._park_rear_face.assert_not_called()
     node._clear_rear_dock_straight.assert_not_called()
+    if abs(lateral) > .02:
+        assert any(call.args == ('rear_dock_lateral_precision_unmet',)
+                   for call in node.emit.call_args_list)
 
 
 @pytest.mark.parametrize('lateral', [-.058358623, .058358623])
@@ -1186,11 +1197,11 @@ def test_five_cm_lateral_offset_never_starts_curve_or_forward(lateral):
     node._observe_rear_box_recovering = Mock(return_value=observed)
     node._clear_rear_dock_straight = Mock(side_effect=AssertionError('unnecessary forward'))
     node._park_rear_face = Mock(return_value=True)
-    assert not node.park_rear_box(
+    assert node.park_rear_box(
         GEOMETRY, 'route', execute=True, timeout_s=90, target_gap_m=.01)
     node._clear_rear_dock_straight.assert_not_called()
     node._center_rear_box.assert_not_called()
-    node._park_rear_face.assert_not_called()
+    node._park_rear_face.assert_called_once()
 
 
 def test_far_corner_only_miss_gets_reverse_trim():

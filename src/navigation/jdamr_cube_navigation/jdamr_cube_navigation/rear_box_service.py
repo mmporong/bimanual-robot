@@ -989,9 +989,13 @@ class RearBoxParkingMixin:
         self.emit('rear_dock_straight_entry_ready', lateral_error_m=lateral,
                   center_inside_face=center_inside_face,
                   angle_rad=initial['normal_yaw_error_rad'])
-        if abs(lateral) > REAR_CENTER_TOLERANCE_M or not center_inside_face:
+        if abs(lateral) > REAR_CENTER_TOLERANCE_M:
+            self.emit('rear_dock_lateral_precision_unmet', lateral_error_m=lateral,
+                      tolerance_m=REAR_CENTER_TOLERANCE_M,
+                      continued_with_live_face=center_inside_face)
+        if not center_inside_face:
             self.emit('failed', phase='rear_box_centering',
-                      reason='registered dock approach is outside straight entry tolerance',
+                      reason='registered dock approach is outside observed face',
                       lateral_error_m=lateral, forward_retry_requested=False)
             return False
         if abs(initial['normal_yaw_error_rad']) > math.radians(3.):
