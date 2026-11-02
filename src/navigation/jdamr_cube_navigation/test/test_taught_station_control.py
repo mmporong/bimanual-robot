@@ -1216,3 +1216,25 @@ def test_tape_worker_always_forwards_matched_live_surface():
     node._station_reference_loop()
     node.station_reference.observe.assert_called_once_with(
         None, info, (0.,0.,0.), 10., surface=surface)
+
+
+@pytest.mark.parametrize('stamp,available', [(9.8, True), (9.4, False), (10.1, False)])
+def test_tape_initial_goal_keeps_only_still_fresh_measured_samples(stamp, available):
+    node = _node()
+    node.station_reference = _rgbd_model(observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_goal = None
+    node.station_reference_control_goal = None
+    node.station_reference_goal_frozen = False
+    node._station_reference_goal_samples = deque([
+        {'valid': True, 'stamp_s': stamp, 'goal_odom': [.5, .014, 0.]}])
+    latest = {'valid': False, 'reason': 'station_reference_runtime:ValueError',
+              'detail': 'tape live depth table plane unavailable'}
+    node._fresh_station_reference = Mock(return_value=latest)
+    goal, reference = node._station_goal_reference(freeze=True)
+    assert (goal is not None) is available
+    if available:
+        assert goal['goal_odom'] == [.5, .014, 0.]
+    assert reference is latest and reference['valid'] is False
+    assert not node.station_reference_goal_frozen

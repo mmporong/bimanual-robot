@@ -4766,3 +4766,25 @@ def test_coherent_rebase_checks_forward_path_before_reversing(monkeypatch, block
         assert not node._table_rebase_requires_restage
     assert validator.call_args.kwargs['lateral_goal_odom'] == tuple(goal['goal_odom'])
     assert validator.call_args.args[0] == (.2, 0., 0.)
+
+
+def test_tape_acquisition_does_not_steer_to_opposite_map_lateral_goal(monkeypatch):
+    node, _clock, update, _lookup = _moving_table_route(monkeypatch)
+    node.parking_contract['yaw_tolerance_rad'] = .03
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    # Recorded 40 cm failure: map fallback asks for the opposite-side correction.
+    node.station_reference_taught_map_pose = (.5, -.028, 0.)
+    node.station_reference_goal = None
+    node._station_goal_reference = Mock(return_value=(None, {
+        'valid': False, 'reason': 'station_reference_not_observed'}))
+    control = update((.2, 0., 0.))
+    assert control['lateral_error_m'] == pytest.approx(0.)
+    assert node._continuous_table_stop['lateral_reference_valid'] is False
+    assert getattr(node, '_station_terminal_goal', None) is None
+    node._station_goal_reference.return_value = (
+        {'valid': True, 'goal_odom': [.5,.014,0.], 'stamp_s': 10.2},
+        {'valid': True, 'stamp_s': 10.2})
+    control = update((.21,0.,0.))
+    assert control['lateral_error_m'] == pytest.approx(.014)

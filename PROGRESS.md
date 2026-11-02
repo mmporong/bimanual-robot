@@ -5,6 +5,15 @@
 ---
 
 
+## 2026-11-02 | 20·30cm 중앙 성공과 40cm 목표 확보 지연 구분
+
+- 현재 깊이 평면 수정 후 1회차20cm와2회차30cm 모두 추가 재접근0회·입력대기0회·목표재기준0회로 주차 완료. 사용자도 두 회차 실물 중앙 정렬 확인. 30cm run `water_station_20261102_204405_244ae0c3`: 내부 앞간격9.32/9.43mm, odom 좌우0.67mm. 최종 영상 좌우12.86mm는 실물 중앙 확인과 구분. 최종 깊이 실측은 없음.
+- 사용자 피드백 후 3회차40cm `water_station_20261102_204511_22edc413`: 첫 접근·자동 후진 재접근 모두 `table lateral alignment requires more clearance`로 실패20:46:15. 40cm 단독 두 회차가 아니라 한 회차 안의 두 접근 실패. 팔·추가 물리 이동 없음.
+- 확인된 차이: 첫 tape control feedback 시각이20/30cm는 연속접근 시작 전0.425/0.449초, 40cm는 시작 후3.182초. 초기 lateral20/30cm +13.29/+13.74mm 대40cm -28.01mm. 코드상 tape goal없을 때 지도 fallback을 사용해 반대쪽으로 초기 보정한 뒤 테이프 목표로 전환. 첫 preview거부 때 목표잔차11.45mm, 복구 후 새 목표잔차21.26mm. 거리40cm 자체 한계로 단정하지 않음.
+- 프레임 간 depth join 실패가 최신 reference를 invalid로 덮어도0.5초 이내·valid·비미래인 기존 tape 표본으로 초기 control goal을 유지. 최신 invalid 자체는 그대로 두며 정렬 완료 근거로 승격하지 않음. fresh 목표가 전혀 없을 때 tape 경로만 현재 lateral·관측면 normal로 접근하고 지도 목표로 측면 조향하지 않음. 다른 reference mode는 기존 처리 유지.
+- 표적20건 통과·diff 검사 통과. Pi box_service SHA256 `77b4bf7dfb028a3c594d56a9dd3d2eecb5fe35f306915c6512d9ae2195140b8c` 일치, 실행기20:52:43 active. 백업 `~/jdamr_deploy/backups/tape_acquisition_20261102_205233/`. 이 후속 수정 뒤40cm 실차 재시험은 아직 없음. 새 실행 요청 없이 추가 이동하지 않음.
+- 근거 세 회차 전체 로그: `~/jdamr_data/analysis_20261102/live_depth_tape_comparison/`.
+
 ## 2026-11-02 | 현재 깊이 상판 평면으로 테이프 위치 계산
 
 - 사용자 요청: 현재 깊이 책상 면+RGB테이프 중앙 방식 적용. 완료 후 후진·재주차를 한 회씩 수행하고 실물 피드백을 받아 다음 회차 진행. 3회 자동 연속 실행하지 않음. 현재 급수대 앞 위치를 유지하며 도크 초기화·팔 동작 없음.

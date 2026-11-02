@@ -882,6 +882,30 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         A carried destination is never fresh obstacle or sensor evidence.
         """
         reference = self._fresh_station_reference()
+        tape = (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape')
+        if (tape and getattr(self, 'station_reference_goal', None) is None
+                and not getattr(self, 'station_reference_goal_frozen', False)
+                and not (reference and reference.get('valid') is True)):
+            # A fresh RGB may fall between depth fits. Do not discard an
+            # already measured, still-fresh goal just because that join failed.
+            now_s = self.get_clock().now().nanoseconds * 1e-9
+            with self._station_reference_lock:
+                samples = [dict(item) for item in getattr(
+                    self, '_station_reference_goal_samples', ())
+                    if item.get('valid') is True
+                    and isinstance(item.get('stamp_s'), (int, float))
+                    and not isinstance(item.get('stamp_s'), bool)
+                    and 0. <= now_s - item['stamp_s'] <= STATION_REFERENCE_MAX_AGE_S]
+            if samples:
+                seeded = filter_station_goal_observations(
+                    samples, STATION_REFERENCE_MAX_AGE_S)
+                self.station_reference_goal = dict(seeded)
+                self.station_reference_control_goal = dict(seeded)
+                self.emit('table_station_goal_seeded_from_fresh_observations',
+                          goal_odom=list(seeded['goal_odom']),
+                          observation_stamp_s=seeded['stamp_s'],
+                          sample_count=seeded['goal_filter_sample_count'])
         rebased = None
         continuous_correction = False
         with self._station_reference_lock:
@@ -3722,6 +3746,21 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                           basis='coherent_tape_goal_and_forward_swept_footprint')
             if goal is not None:
                 return tuple(goal['goal_odom']), reference
+            if (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape'):
+                # Acquire the tape along the observed face normal. A map pose
+                # is not evidence that the tape lies to either side of the base.
+                acquisition = state.get('tape_acquisition_goal')
+                if acquisition is None:
+                    pose = actual if actual is not None else state['start']
+                    face_heading = (heading if heading is not None else math.atan2(
+                        -state['normal'][1], -state['normal'][0]))
+                    acquisition = (pose[0], pose[1], face_heading)
+                    state['tape_acquisition_goal'] = acquisition
+                    self.emit('table_tape_acquisition_lateral_held',
+                              goal_odom=list(acquisition),
+                              final_parking_confirmed=False)
+                return acquisition, reference
             # Before the taught objects become matchable, steer toward the
             # registered lateral position using this approach's map/odom
             # anchor. Never silently approach without a lateral destination.
