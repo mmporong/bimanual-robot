@@ -2697,17 +2697,19 @@ def test_blocked_leg_is_held_then_retried(monkeypatch):
     """A person in the aisle: hold PATH_BLOCKED_WAIT_S, then retry the same leg."""
     _fast_clock(monkeypatch)
     node = route()
+    node._front_clear = Mock(return_value=True)
     tries, attempt = _blocked_attempts(node, blocked_tries=2)
     assert node._run_with_input_recovery(attempt) is True
     assert len(tries) == 3
     waits = [e for e in _events(node) if e['event'] == 'path_blocked_wait']
     assert [e['wait'] for e in waits] == [1, 2]
-    assert waits[0]['wait_s'] == corridor_route.PATH_BLOCKED_WAIT_S
+    assert waits[0]['wait_s'] is None
 
 
 def test_blocked_leg_gives_up_after_the_retry_budget(monkeypatch):
     _fast_clock(monkeypatch)
     node = route()
+    node._front_clear = Mock(return_value=True)
     tries, attempt = _blocked_attempts(node, blocked_tries=99)
     assert node._run_with_input_recovery(attempt) is False
     assert len(tries) == corridor_route.PATH_BLOCKED_RETRIES + 1
@@ -2789,15 +2791,15 @@ def test_no_path_hold_ends_as_soon_as_a_plan_exists(monkeypatch):
     assert len(cleared) == 1 and cleared[0]['held_s'] < corridor_route.PATH_BLOCKED_WAIT_S
 
 
-def test_controller_stop_backs_away_before_each_hold(monkeypatch):
+def test_controller_stop_waits_without_backing_away(monkeypatch):
     _fast_clock(monkeypatch)
     node = route()
     node._path_open = Mock(return_value=True)
-    node._front_clear = Mock(return_value=False)
+    node._front_clear = Mock(side_effect=[False, True, True, False, True, True])
     node._escape_blocked = Mock(return_value=True)
     tries, attempt = _blocked_attempts(node, blocked_tries=2, code=105)
     assert node._run_with_input_recovery(attempt) is True
-    assert node._escape_blocked.call_count == 2
+    node._escape_blocked.assert_not_called()
     node._path_open.assert_not_called()           # a 105 hold runs its full time
 
 
@@ -3577,7 +3579,7 @@ def test_controller_block_retries_the_leg_on_the_same_rpp_trees(monkeypatch):
 
     assert node._run_with_input_recovery(recording_attempt) is True
     assert trees == ['staging_rpp.xml', 'staging_rpp.xml']
-    assert node._escape_blocked.call_args.args == (1,)
+    node._escape_blocked.assert_not_called()
     assert not any(e['event'] == 'recovery_controller' for e in _events(node))
 
 
@@ -4519,3 +4521,16 @@ def test_rotation_without_valid_scan_never_starts_motion(monkeypatch):
     assert node._rotate_in_place(.3) is None
     node._direct_motion.assert_not_called()
     assert node._last_direct_motion_failure == 'rotation scan unavailable'
+
+
+def test_obstacle_wait_does_not_restart_when_old_wait_duration_expires(monkeypatch):
+    _fast_clock(monkeypatch, step_s=5)
+    node = route()
+    node._front_clear = Mock(side_effect=[False] * 12 + [True, True])
+    node._escape_blocked = Mock()
+    tries, attempt = _blocked_attempts(node, blocked_tries=1, code=105)
+    assert node._run_with_input_recovery(attempt) is True
+    assert len(tries) == 2
+    node._escape_blocked.assert_not_called()
+    cleared = [e for e in _events(node) if e['event'] == 'path_blocked_cleared']
+    assert cleared[0]['held_s'] > corridor_route.PATH_BLOCKED_WAIT_S

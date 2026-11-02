@@ -1299,7 +1299,7 @@ def test_mppi_must_keep_the_speed_limit_and_footprint_costs(tmp_path, mutate):
 
 
 def test_transit_and_staging_default_to_lattice_and_mppi_with_rpp_copies():
-    """2026-10-05: Lattice (NavFn when it finds nothing) + MPPI; RPP kept as _rpp copies."""
+    """Keep RPP selection while its stop-wait recovery diverges from MPPI."""
     document = yaml.safe_load(PARAMS.read_text(encoding='utf-8'))
     assert 'MPPI' in document['controller_server']['ros__parameters']['controller_plugins']
     trees = ROOT / 'jdamr_cube_navigation/behavior_trees'
@@ -1327,19 +1327,25 @@ def test_transit_and_staging_default_to_lattice_and_mppi_with_rpp_copies():
         assert lattice[:start] in body(f'{name}_navfn_mppi.xml')
     for name in ('navigate_through_poses_transit_rpp.xml', 'navigate_to_pose_staging_rpp.xml'):
         assert 'controller_id="FollowPath"' in (trees / name).read_text()
-    # The RPP staging copy plans with NavFn only (2026-10-06 16:21: Lattice looped past
-    # the dock) and differs from the NavFn + MPPI one only in the controller.
+    # RPP plans with NavFn only and now keeps a successful path while the
+    # controller stops and waits; MPPI retains its periodic replan contract.
     assert planners('navigate_to_pose_staging_rpp.xml') == ['GridBased']
     rpp = body('navigate_to_pose_staging_rpp.xml')
-    assert rpp.replace('controller_id="FollowPath"', 'controller_id="MPPI"') == body(
-        'navigate_to_pose_staging_navfn_mppi.xml')
+    assert 'number_of_retries="60"' in rpp
+    assert '<Wait wait_duration="1.0"/>' in rpp
+    assert 'ClearEntireCostmap' not in rpp
+    assert 'PathExpiringTimer' not in rpp
+    mppi_staging = body('navigate_to_pose_staging_navfn_mppi.xml')
+    assert rpp.replace(
+        'controller_id="FollowPath"', 'controller_id="MPPI"') != mppi_staging
 
 
-@pytest.mark.parametrize('name', ['navigate_through_poses_transit.xml',
-                                  'navigate_through_poses_transit_navfn_mppi.xml',
-                                  'navigate_through_poses_transit_rpp.xml'])
+@pytest.mark.parametrize('name', [
+    'navigate_through_poses_transit.xml',
+    'navigate_through_poses_transit_navfn_mppi.xml',
+])
 def test_transit_drops_a_passed_waypoint_on_every_tick(name):
-    """2026-10-06 16:48: dropped only at a replan, a passed waypoint pulled the base back."""
+    """Replanning transit trees drop passed goals before planning again."""
     from xml.etree import ElementTree as ET
     root = ET.parse(ROOT / 'jdamr_cube_navigation/behavior_trees' / name).getroot()
     rate = next(root.iter('RateController'))

@@ -712,7 +712,7 @@ class CorridorRoute(Node):
         Keep completed waypoints across retries of the current one.
 
         At most one retry after a fresh-input recovery, and up to
-        PATH_BLOCKED_RETRIES after holding PATH_BLOCKED_WAIT_S on a blocked path.
+        PATH_BLOCKED_RETRIES after confirmed clearance on a blocked path.
         """
         self._resume_waypoint_index = 0
         return self._retry_loop(attempt)
@@ -735,12 +735,8 @@ class CorridorRoute(Node):
                     return False
                 blocked_waits += 1
                 code = self._retry_blocked_code
-                if code not in PATH_BLOCKED_PLANNER_CODES:
-                    # The retry stays on the configured controller with a new plan:
-                    # the Lattice + MPPI retry ran four times on 2026-10-02, none
-                    # finished, and the escapes since then take the base off what
-                    # blocked it (operator 2026-10-06: drop MPPI).
-                    self._escape_blocked(blocked_waits)
+                # Obstacle recovery holds position; it never backs away or
+                # advances to manufacture clearance before waiting.
                 if not self._wait_for_path_clear(blocked, blocked_waits, code):
                     return False
                 continue
@@ -750,7 +746,7 @@ class CorridorRoute(Node):
 
     def _wait_for_path_clear(self, reason, wait, code=None):
         """
-        Hold still for PATH_BLOCKED_WAIT_S; stop early on an unrecoverable guard.
+        Hold still until clearance, cancellation, or an unrecoverable guard.
 
         Every PATH_BLOCKED_PROBE_S the hold checks whether it may end: without
         any path (PATH_BLOCKED_PLANNER_CODES) once a fresh plan exists, after a
@@ -758,11 +754,11 @@ class CorridorRoute(Node):
         times in a row.
         """
         self._report('path_blocked_wait', reason=reason, wait=wait,
-                     wait_s=PATH_BLOCKED_WAIT_S)
+                     wait_s=None)
         started_s = time.monotonic()
         probed_s = started_s
         clear_probes = 0
-        while time.monotonic() - started_s < PATH_BLOCKED_WAIT_S:
+        while not self.stop_requested:
             spin_node(self, timeout_sec=0.05)
             if self.stop_requested:
                 return False
@@ -782,7 +778,7 @@ class CorridorRoute(Node):
                 self._report('path_blocked_cleared', wait=wait,
                              held_s=round(probed_s - started_s, 1))
                 return True
-        return True
+        return False
 
     def _path_open(self):
         """Whether a fresh plan to the remaining goal exists (see ServiceRoute)."""

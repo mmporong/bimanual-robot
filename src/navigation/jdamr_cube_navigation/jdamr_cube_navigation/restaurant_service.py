@@ -98,7 +98,7 @@ OPERATOR_LINK_TIMEOUT_S = 30.0
 # the hold, as Nav2's default tree backs up before it retries.
 PATH_BLOCKED_BACKOFF_M = 0.10
 # The band in front of the chassis front edge that counts as "blocked ahead".
-PATH_BLOCKED_AHEAD_BAND_M = 0.30
+PATH_BLOCKED_AHEAD_BAND_M = 0.40
 # An in-place turn sweeps the rear about the axle near the front. Something beside
 # the rear inside the 0.43 m rotation StopZone (+2 cm) blocks every turn, and an
 # arc swings the rear toward it (2026-10-02 11:09: a left arc put a desk leg inside
