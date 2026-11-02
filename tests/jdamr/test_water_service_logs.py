@@ -118,3 +118,21 @@ def test_record_uses_submission_instead_of_later_manual_run(controller):
     node._log_path.write_text(f'SUBMITTED hold, log /pi/{own.name}/cycle_events.jsonl\n')
     node._record_navigation_run(['go', 'water_station'], 100.)
     assert node.status()['navigation_run'] == str(own)
+
+
+def test_long_running_mission_keeps_submission_after_display_tail(controller, monkeypatch):
+    node, runs = controller
+    own = make_run(runs, 'water_station_own')
+    make_run(runs, 'water_station_manual', stamp=150.)
+    node._state['state'] = 'running'
+    node._log_path.write_text(
+        f'SUBMITTED hold, log /pi/{own.name}/cycle_events.jsonl\n'
+        + ('waiting for input ' + 'x' * 200 + '\n') * 600)
+    command = Mock(return_value=SimpleNamespace(returncode=0, stdout='{"event":"waiting"}\n', stderr=''))
+    monkeypatch.setattr('water_service.subprocess.run', command)
+    result = node.logs()
+    assert len(result['controller_lines']) == 160
+    assert result['navigation_run'] == str(own)
+    assert result['navigation_events'] == [{'event': 'waiting'}]
+    node._record_navigation_run(['go', 'water_station'], 100.)
+    assert node.status()['navigation_run'] == str(own)

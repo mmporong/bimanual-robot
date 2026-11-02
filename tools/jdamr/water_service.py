@@ -168,16 +168,27 @@ class WaterServiceController:
             stream.seek(max(0, stream.tell() - maximum_bytes))
             return stream.read(maximum_bytes).decode("utf-8", errors="replace")
 
+    @staticmethod
+    def _last_navigation_submission(path: Path) -> str | None:
+        """Find the latest submitted run even after its line leaves the display tail."""
+        latest = None
+        with path.open(encoding="utf-8", errors="replace") as stream:
+            for line in stream:
+                match = re.search(r"\bSUBMITTED[^\n]*\blog (\S+)/cycle_events\.jsonl", line)
+                if match:
+                    latest = Path(match.group(1)).name
+        return latest
+
     def _record_navigation_run(self, arguments: list[str], started_s: float) -> None:
         """Associate failed and successful helpers with this request, never an older run."""
         try:
             expected = (self._session_directory() / "runtime/runs").resolve()
             if self._log_path is None or not self._log_path.is_file():
                 return
-            submitted = re.findall(r"\bSUBMITTED[^\n]*\blog (\S+)/cycle_events\.jsonl", self._tail_text(self._log_path))
+            submitted = self._last_navigation_submission(self._log_path)
             if not submitted:
                 return
-            run = (expected / Path(submitted[-1]).name).resolve()
+            run = (expected / submitted).resolve()
             command = run / "command.txt"
             if run.parent != expected or not command.is_file():
                 return
@@ -223,10 +234,10 @@ class WaterServiceController:
             if view.get("state") != "running" and view.get("navigation_run"):
                 candidate = Path(view["navigation_run"]).resolve()
             else:
-                submitted = re.findall(r"\bSUBMITTED[^\n]*\blog (\S+)/cycle_events\.jsonl", "\n".join(result["controller_lines"]))
+                submitted = self._last_navigation_submission(log_path) if log_path.is_file() else None
                 if not submitted:
                     return result
-                candidate = (expected / Path(submitted[-1]).name).resolve()
+                candidate = (expected / submitted).resolve()
             command = candidate / "command.txt"
             if (candidate.parent != expected or not command.is_file()
                     or command.stat().st_mtime < float(view.get("started_unix_s") or float("inf")) - 1.0):

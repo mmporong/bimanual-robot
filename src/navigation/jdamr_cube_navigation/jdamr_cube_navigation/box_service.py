@@ -280,6 +280,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_rebase_samples = []
         self._station_reference_rebase_goal = None
         self._station_reference_goal_challenged = False
+        self._station_reference_challenged_goal = None
         self._table_rebase_requires_restage = False
         self.station_reference_image_subscription = None
         self.station_reference_info_subscription = None
@@ -381,7 +382,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 or isinstance(center[0], bool)
                 or not isinstance(center[0], (int, float))
                 or not math.isfinite(center[0])
-                or not .05 <= center[0] <= front_extent + FACE_ALIGNMENT_FRONT_GAP_M):
+                or not 0. <= center[0] <= front_extent + FACE_ALIGNMENT_FRONT_GAP_M):
             self._station_reference_rebase_samples = []
             return None
         candidates = getattr(self, '_station_reference_rebase_samples', [])
@@ -513,7 +514,13 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     tape = reference.observation_method == 'table_front_tape'
                     terminal_lateral_jump = 0.
                     terminal_yaw_jump = 0.
-                    terminal_goal = getattr(self, '_station_terminal_goal', None)
+                    terminal_goal = (getattr(self, '_station_terminal_goal', None)
+                                     or getattr(
+                                         self, '_station_reference_challenged_goal', None))
+                    held_goal = terminal_goal
+                    if (tape and held_goal is None
+                            and getattr(self, 'station_reference_goal_frozen', False)):
+                        held_goal = getattr(self, 'station_reference_goal', None)
                     if tape and isinstance(terminal_goal, dict):
                         terminal = terminal_goal.get('goal_odom')
                         if isinstance(terminal, (list, tuple)) and len(terminal) >= 3:
@@ -524,16 +531,32 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                             terminal_yaw_jump = math.atan2(
                                 math.sin(candidate[2] - terminal_heading),
                                 math.cos(candidate[2] - terminal_heading))
+                    held_lateral_jump = 0.
+                    held_yaw_jump = 0.
+                    if tape and isinstance(held_goal, dict):
+                        held = held_goal.get('goal_odom')
+                        if isinstance(held, (list, tuple)) and len(held) >= 3:
+                            held_heading = held[2]
+                            held_lateral_jump = (
+                                (candidate[0] - held[0]) * -math.sin(held_heading)
+                                + (candidate[1] - held[1]) * math.cos(held_heading))
+                            held_yaw_jump = math.atan2(
+                                math.sin(candidate[2] - held_heading),
+                                math.cos(candidate[2] - held_heading))
                     result['quality'].update(
                         static_goal_lateral_jump_m=lateral_jump,
                         static_goal_yaw_jump_rad=yaw_jump,
                         terminal_goal_lateral_jump_m=terminal_lateral_jump,
-                        terminal_goal_yaw_jump_rad=terminal_yaw_jump)
+                        terminal_goal_yaw_jump_rad=terminal_yaw_jump,
+                        held_goal_lateral_jump_m=held_lateral_jump,
+                        held_goal_yaw_jump_rad=held_yaw_jump)
                     inconsistent = (
                         abs(lateral_jump) > lateral_limit
                         or abs(yaw_jump) > yaw_limit
                         or abs(terminal_lateral_jump) > lateral_limit
-                        or abs(terminal_yaw_jump) > yaw_limit)
+                        or abs(terminal_yaw_jump) > yaw_limit
+                        or abs(held_lateral_jump) > lateral_limit
+                        or abs(held_yaw_jump) > yaw_limit)
                     if inconsistent or (tape and getattr(
                             self, '_station_reference_goal_challenged', False)):
                         # The taught cup/bottle pair is static in this run.
@@ -541,6 +564,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         # move the next frame's tracking window.
                         rebased = self._consider_tape_rebase(result)
                         if tape:
+                            if (not getattr(self, '_station_reference_goal_challenged', False)
+                                    and isinstance(held_goal, dict)):
+                                self._station_reference_challenged_goal = dict(
+                                    held_goal,
+                                    goal_odom=list(held_goal['goal_odom']))
                             self._station_reference_goal_challenged = True
                         if rebased is not None:
                             self._station_reference_rebase_goal = rebased
@@ -554,8 +582,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     elif getattr(self, '_station_reference_rebase_goal', None) is None:
                         self._station_reference_rebase_samples = []
                         self._station_reference_goal_challenged = False
-                elif result.get('valid') is not True:
-                    self._station_reference_rebase_samples = []
+                        self._station_reference_challenged_goal = None
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
                 if result.get('valid') is True:
@@ -646,6 +673,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_rebase_samples = []
         self._station_reference_rebase_goal = None
         self._station_reference_goal_challenged = False
+        self._station_reference_challenged_goal = None
         self._table_rebase_requires_restage = False
         self.station_reference = reference
         self.station_reference_mode = mode
@@ -780,6 +808,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     rebased = self._station_reference_rebase_goal
                     self._station_reference_rebase_goal = None
                     self._station_reference_goal_challenged = False
+                    self._station_reference_challenged_goal = None
         if getattr(self, '_station_reference_goal_challenged', False):
             self._station_terminal_goal = None
         if rebased is not None:
@@ -2381,6 +2410,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_rebase_samples = []
         self._station_reference_rebase_goal = None
         self._station_reference_goal_challenged = False
+        self._station_reference_challenged_goal = None
         self._table_rebase_requires_restage = False
         self._station_face_heading_odom_rad = None
         if reapproach_m is not None:
