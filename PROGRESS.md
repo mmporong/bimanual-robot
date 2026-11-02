@@ -5,6 +5,13 @@
 ---
 
 
+## 2026-11-02 | 전체 출발261102006 — 급수대 재접근 후 미완료
+
+- 사용자 출발 요청으로 STOP reset, 도크 init --keep-home 완료(AMCL 대조3mm/0.9도), 주문261102006 시작. 미션20261102_192956_dac49049.
+- 첫 접근은 좌우목표 보정 후 잔차15.35mm의 forward preview가 불가해 후진 재접근. 두번째 접근에서 gap98.999mm/lateral2.574mm일 때 terminal goal hold 성립했으나 이후 soft rebase가 그 terminal goal을 다시 교체함. 잔차11.56mm에서 preview 불가, 기존 재접근 횟수 소진으로 종료. 물따르기·테이블·도크 미실행. 현재급수대정지.
+- 이번 확인된 후속 결함: terminal hold 이후에도 soft rebase가 목표를 변경해, 마지막 직진 구간에 새 측면 목표가 들어옴. 수정 전이며 다음 수정에서 terminal hold와 soft correction의 우선순위를 구분해야 함. 단순 입력대기 문제와 별개.
+- 근거 `~/jdamr_data/analysis_20261102/mission_20261102_192956_dac49049/kitchen_events.jsonl`, controller.log. 주행중 코드변경 없음. 읽기전용 watch PID4056412 종료.
+
 ## 2026-11-02 | 급수대 재정렬·근접 테이프 소실의 상태 처리 수정
 
 - 주문261102005, 미션20261102_191252_65d8accb는 급수대 후진재정렬 후 앞 간격 내부 추정9.07/9.16mm까지 접근했으나 `station_lateral_arrival_unconfirmed`로 종료. 물따르기·테이블·복귀 미실행. 사용자 STOP에 따라 관제 emergency_stop 활성화·팔 stop 전송·Pi executor stop 전달. 이후 실물 이동 없음.
