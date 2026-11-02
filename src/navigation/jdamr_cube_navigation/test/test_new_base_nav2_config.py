@@ -156,8 +156,8 @@ def test_stop_zone_has_requested_geometric_margin():
         max(abs(point[1]) for point in stop)
         - max(abs(point[1]) for point in footprint),
     )
-    # Front clearance is 0.20 m from the physical body; padding is 0.005 m.
-    assert margins == pytest.approx((0.195, 0.0, 0.0))
+    # Front clearance is 0.40 m from the physical body; padding is 0.005 m.
+    assert margins == pytest.approx((0.395, 0.0, 0.0))
     assert stop_zone['type'] == 'velocity_polygon'
     assert stop_zone['velocity_polygons'] == [
         'rotation', 'rotation_clockwise', 'translation_forward_straight',
@@ -182,7 +182,7 @@ def test_stop_zone_has_requested_geometric_margin():
     assert _inside(rotation, (-0.27, -0.243), False)     # 11:09 leg in the padding
     forward = yaml.safe_load(stop_zone['translation_forward']['points'])
     assert max(point[0] for point in forward) == pytest.approx(
-        max(point[0] for point in footprint) + 0.195)
+        max(point[0] for point in footprint) + 0.395)
     assert max(abs(point[1]) for point in forward) == pytest.approx(
         max(abs(point[1]) for point in footprint))
     backward = yaml.safe_load(stop_zone['translation_backward']['points'])
@@ -1384,7 +1384,7 @@ def _points(zone, name, transform):
                           lambda x, y: [-0.053 if x == 0.0 else x, y]), 'end at the axle'),
     # A shorter leading edge than the general forward polygon.
     (lambda zone: _points(zone, 'translation_forward_straight',
-                          lambda x, y: [0.10 if x == 0.265 else x, y]), 'end at the axle'),
+                          lambda x, y: [0.10 if x == 0.465 else x, y]), 'end at the axle'),
     # Narrower than the wheels: misses part of the footprint half ahead of the axle.
     (lambda zone: _points(zone, 'translation_forward_straight',
                           lambda x, y: [x, math.copysign(0.26, y) if abs(y) == 0.275 else y]),
@@ -1422,15 +1422,15 @@ def test_a_groove_between_perimeter_samples_is_rejected(tmp_path):
 
 def test_a_narrowed_front_band_is_rejected(tmp_path):
     """Review 2026-10-06: the band x 0.07-0.12 cut to |y| <= 0.05 passed the front-X check."""
-    general = [[0.265, 0.05], [0.07, 0.05], [0.07, 0.23], [0.038, 0.23], [0.038, 0.275],
+    general = [[0.465, 0.05], [0.07, 0.05], [0.07, 0.23], [0.038, 0.23], [0.038, 0.275],
                [-0.038, 0.275], [-0.038, 0.23], [-0.172, 0.23], [-0.172, 0.275],
                [-0.248, 0.275], [-0.248, 0.23], [-0.28, 0.23], [-0.28, -0.23],
                [-0.248, -0.23], [-0.248, -0.275], [-0.172, -0.275], [-0.172, -0.23],
                [-0.038, -0.23], [-0.038, -0.275], [0.038, -0.275], [0.038, -0.23],
-               [0.07, -0.23], [0.07, -0.05], [0.265, -0.05]]
-    straight = [[0.265, 0.05], [0.07, 0.05], [0.07, 0.23], [0.038, 0.23], [0.038, 0.275],
+               [0.07, -0.23], [0.07, -0.05], [0.465, -0.05]]
+    straight = [[0.465, 0.05], [0.07, 0.05], [0.07, 0.23], [0.038, 0.23], [0.038, 0.275],
                 [0.0, 0.275], [0.0, -0.275], [0.038, -0.275], [0.038, -0.23],
-                [0.07, -0.23], [0.07, -0.05], [0.265, -0.05]]
+                [0.07, -0.23], [0.07, -0.05], [0.465, -0.05]]
     path = _write_stop_zones(tmp_path, {
         'stopped': general, 'translation_forward': general,
         'translation_forward_straight': straight}, 'narrow_band.yaml')

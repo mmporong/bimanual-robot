@@ -51,7 +51,7 @@ def test_only_stopzone_front_and_slowdown_switch_change_and_input_is_untouched()
     assert changed_paths(nav2, output) == {
         ('collision_monitor', 'ros__parameters', 'SlowdownZone', 'enabled'),
     }
-    assert USER_APPROVED_CLEARANCE_M == pytest.approx(0.20)
+    assert USER_APPROVED_CLEARANCE_M == pytest.approx(0.40)
 
 
 
@@ -117,7 +117,7 @@ def test_target_remains_ahead_of_padded_footprint_by_required_margin():
                 [-0.295, 0.29]]), 'footprint fronts differ'),
         (lambda nav, _geometry: [
             nav[name][name]['ros__parameters'].update(footprint=[
-                [0.25, 0.29], [0.25, -0.29], [-0.295, -0.29],
+                [0.45, 0.29], [0.45, -0.29], [-0.295, -0.29],
                 [-0.295, 0.29]])
             for name in ('local_costmap', 'global_costmap')],
          'lacks padded footprint margin'),
@@ -207,7 +207,7 @@ def test_standard_session_rejects_legacy_front_margin():
     for name in ('translation_forward', 'translation_forward_straight', 'stopped'):
         polygon = points(nav2['collision_monitor']['ros__parameters']['StopZone'][name]['points'])
         for point in polygon:
-            if point[0] == 0.265:
+            if point[0] == 0.465:
                 point[0] = 0.12
         nav2['collision_monitor']['ros__parameters']['StopZone'][name]['points'] = json.dumps(polygon)
     with pytest.raises(RuntimeError, match='margin'):

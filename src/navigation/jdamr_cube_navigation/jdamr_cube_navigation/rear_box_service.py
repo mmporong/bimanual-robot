@@ -25,7 +25,7 @@ from jdamr_cube_navigation.restaurant_service import (
 )
 from jdamr_cube_navigation.reverse_parking import (
     CachedStaticCorridorValidator, MAX_REVERSE_DISTANCE_M, reverse_curve_waypoints,
-    reverse_waypoints,
+    reverse_waypoints, static_corridor_clear,
 )
 from jdamr_cube_navigation.surface_approach import (
     FACE_APPROACH_TIME_S, FACE_HEADING_FILTER_S, filtered_face_heading,
@@ -404,7 +404,15 @@ class RearBoxParkingMixin:
             Path(self.registry['map']['yaml_path']),
             Path(self.registry['keepout']['yaml_path']), self._footprint_outline())
         if not check(points):
-            raise RuntimeError('rear dock centering static corridor blocked')
+            exact_clear = static_corridor_clear(
+                Path(self.registry['map']['yaml_path']),
+                Path(self.registry['keepout']['yaml_path']),
+                points, self._footprint_outline())
+            self.emit('rear_dock_center_static_check',
+                      conservative_blockage=getattr(check, 'last_blockage', None),
+                      exact_corridor_clear=exact_clear, path_points=points)
+            if not exact_clear:
+                raise RuntimeError('rear dock centering static corridor blocked')
         frozen = self._odom_path([to_odom(*point) for point in points])
         self.waypoints = [{'id': 'rear_box_center', 'x': target[0], 'y': target[1],
                            'yaw': target[2]}]

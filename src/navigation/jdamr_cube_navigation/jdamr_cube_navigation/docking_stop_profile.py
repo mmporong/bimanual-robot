@@ -6,7 +6,7 @@ import math
 
 
 # This is a user-approved target clearance, not an externally measured result.
-USER_APPROVED_CLEARANCE_M = 0.20
+USER_APPROVED_CLEARANCE_M = 0.40
 MINIMUM_PADDED_STOP_MARGIN_M = 0.02
 
 
