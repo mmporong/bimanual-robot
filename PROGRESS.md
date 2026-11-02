@@ -5,6 +5,17 @@
 ---
 
 
+## 2026-11-02 | 시연 중 회복 가능한 입력 공백은 미션 유지
+
+- 사용자 요청: 회전 LiDAR 지연 등 일시 문제로 시연 미션을 종료하지 않고 현재 단계에서 회복·재개. 사람/장애물 예상 충돌·센서 무효 시 차체 정지, 사용자 정지·비상정지·저전압·조작 연결 상실 보호는 유지. 모든 예외/전원 상실에도 무조건 동작한다는 계약으로 확대하지 않음.
+- 후면 회전 scan unavailable/stale의 1회 복구 제한을 제거. 기존 staging 위치 action은 한 번만 수행하고 새 정지 자세에서 동일 yaw 목표의 잔차만 이어감. 같은 후면 면 확인, 누적 실제 회전량 제한 유지. 대기 뒤 새 scan 수신 시각·stamp 확인.
+- 정밀 접근의 rear/face/tape/obstacle 입력 공백을 0속도 대기로 유지하고 대기 시간을 motion/task 예산에서 제외. 유효 입력·같은 목표·충돌 없음 확인 후 같은 odom 기준에서 재개. 연결 상실·비입력 guard는 최신 사유로 안전 종료하며 일반 Nav 실패 정책은 변경하지 않음.
+- 제한시간 직전 입력 지연에서 zero/settle 도중 deadline timer가 operator_stop을 걸던 경계 race 수정. 회복 가능한 실패 감지부터 정지 확인·대기까지 pause하고 대기 시간만 보전. 예외에서도 pause flag를 복원해 타이머 영구 무력화를 방지.
+
+- 검증: 올바른 ROS overlay에서 restaurant/rear/drive-stop 관련 556건 PASS, py_compile·diff-check PASS. 별도 검토에서 첫 회전 predicate 누락과 중첩 pause 복원 지적을 수정하고 미해결 코드 차단 없음 확인. 검토 환경은 ament share 부재로 전체 묶음 1건 환경 실패, 올바른 overlay 결과로 보완; LSP/ast-grep 미사용.
+- Pi 두 모듈 SHA 대조·py_compile 후 jdamr-box-executor 재시작, executor/observer active 확인. 백업 ~/jdamr_deploy/backups/input_recovery_hold_20261102_144412/. restaurant SHA fd3c6af1b4571846caaed5b7574074611b13db6afa7169514ee85a7446467d60, rear SHA 9f7754a324c4696da72a0f3d63bedb199e6b7e5cd51563072a448b7f83ae9d71.
+- 물리 주행·위치초기화·팔 실행 없음. 실제 왕복 재현은 미확인. 센서가 계속 회복되지 않으면 정지 대기를 유지하며, 일반 Nav 실패·프로세스 종료·전원 상실까지 자동 복구하는 변경은 아님. 팀원 water_service 두 파일 보존, 원격 push 없음.
+
 ## 2026-11-02 | 구간별 영상 계산 중단과 라이다 지연 복구
 
 - 사용자 요청: 급수대 깊이 지연·도크 복귀 중 영상 처리·회전 scan 지연을 구분하여 수정, 물리 주행 없이 반영.

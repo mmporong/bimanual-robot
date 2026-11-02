@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from jdamr_cube_navigation import rear_box_service as module
+from jdamr_cube_navigation import restaurant_service as restaurant_module
 from jdamr_cube_navigation.box_service import BoxServiceRoute
 from jdamr_cube_navigation.restaurant_service import ServiceRoute
 import pytest
@@ -147,7 +148,7 @@ def test_heading_is_aligned_before_straight_reverse_entry():
     node._center_rear_box.assert_not_called()
 
 
-def test_rear_staging_rotation_resumes_residual_without_reissuing_position(monkeypatch):
+def test_rear_staging_rotation_repeats_residual_without_reissuing_position(monkeypatch):
     node = route_node()
     node.run_deadline_s = time.monotonic() + 10.
     node.registry = {'home': {'rear_parking_reference': 'lidar_box'}}
@@ -155,14 +156,27 @@ def test_rear_staging_rotation_resumes_residual_without_reissuing_position(monke
     node.home_contract = {'yaw_tolerance_rad': math.radians(3.)}
     node._rear_wait_for_input = Mock(return_value=True)
     node.capture_stationary_pose = Mock(side_effect=[
-        ((.7, 0., .1), {}), ((.7, 0., .29), {}),
+        ((.7, 0., .1), {}), ((.7, 0., .16), {}),
+        ((.7, 0., .2), {}), ((.7, 0., .29), {}),
     ])
-    node._rotate_in_place = Mock(return_value=.19)
+    rotations = []
+
+    def rotate(residual, **_kwargs):
+        rotations.append(residual)
+        if len(rotations) < 3:
+            node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+            return None
+        node._last_direct_motion_failure = None
+        return .09
+
+    node._rotate_in_place = Mock(side_effect=rotate)
     node.execute = Mock(return_value=True)
     node.emit = Mock()
     attempts = []
 
-    def reach_staging(_self, stage):
+    def reach_staging(_self, stage, *, pause_on_rotation_failure=None):
+        assert pause_on_rotation_failure('rotation scan unavailable')
+        assert not pause_on_rotation_failure('rotation swept footprint occupied')
         attempts.append(stage)
         node.execute(final_parking=False, staging=True)
         node._last_direct_motion_failure = 'rotation scan stale or future-dated'
@@ -174,24 +188,108 @@ def test_rear_staging_rotation_resumes_residual_without_reissuing_position(monke
     assert node._reach_staging(stage) == pytest.approx((.7, 0., .29))
     assert attempts == [stage]
     node.execute.assert_called_once_with(final_parking=False, staging=True)
-    node._rear_wait_for_input.assert_called_once_with(
-        'rotation scan stale or future-dated')
-    node._rotate_in_place.assert_called_once_with(pytest.approx(.2))
-    assert node.capture_stationary_pose.call_count == 2
+    assert node._rear_wait_for_input.call_count == 3
+    assert all(item.args == ('rotation scan stale or future-dated',)
+               and item.kwargs == {'preserve_motion_deadline': True}
+               for item in node._rear_wait_for_input.call_args_list)
+    assert rotations == pytest.approx([.2, .14, .1])
+    for call in node._rotate_in_place.call_args_list:
+        predicate = call.kwargs['pause_on_failure']
+        assert predicate('rotation scan unavailable')
+        assert predicate('rotation scan stale or future-dated')
+        assert not predicate('rotation swept footprint occupied')
+    assert node.capture_stationary_pose.call_count == 4
     assert all(not item.args and item.kwargs == {'intermediate': True}
                for item in node.capture_stationary_pose.call_args_list)
+
+
+def test_rear_staging_rotation_rejects_unbounded_fresh_pose_travel(monkeypatch):
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node.home_contract = {'yaw_tolerance_rad': math.radians(3.)}
+    node._rear_wait_for_input = Mock(return_value=True)
+    node.capture_stationary_pose = Mock(side_effect=[
+        ((.7, 0., .1), {}), ((.7, 0., 1.0), {}),
+    ])
+
+    def stale_rotation(_residual, **_kwargs):
+        node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+        return None
+
+    node._rotate_in_place = Mock(side_effect=stale_rotation)
+    node.emit = Mock()
+
+    def reach_staging(_self, _stage, **_kwargs):
+        node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+        return None
+
+    monkeypatch.setattr(ServiceRoute, '_reach_staging', reach_staging)
+    stage = {'id': 'home_dock_approach', 'x': .7, 'y': 0., 'yaw': .3}
+
+    assert node._reach_staging(stage) is None
+    call = node._rotate_in_place.call_args
+    assert call.args == (pytest.approx(.2),)
+    assert call.kwargs['pause_on_failure']('rotation scan unavailable')
+    assert node._last_direct_motion_failure == (
+        'rear staging residual rotation exceeded bounded travel')
+
+
+def test_initial_rear_staging_scan_gap_pauses_deadline_during_rotation_settle(monkeypatch):
+    node = route_node()
+    clock = [10.0]
+    node.run_deadline_s = 10.01
+    node._input_recovery_paused = False
+    node.home_contract = {'yaw_tolerance_rad': math.radians(3.)}
+    node.parking_contract = {
+        'robot_base_frame': 'base_link',
+        'stopped_linear_mps': .01,
+        'stopped_angular_radps': .01,
+    }
+    rotation = SimpleNamespace(x=0., y=0., z=0., w=1.)
+    node.parking_tf = SimpleNamespace(lookup_transform=Mock(return_value=SimpleNamespace(
+        transform=SimpleNamespace(rotation=rotation))))
+    node.latest_motion = None
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node._escape_publisher = Mock(return_value=Mock())
+    node.request_stop = Mock()
+    node.emit = Mock()
+    node.execute = Mock(return_value=True)
+    node.capture_stationary_pose = Mock(return_value=((.7, 0., .1), {}))
+    node._rear_wait_for_input = Mock(return_value=False)
+
+    def spin(*_args, **_kwargs):
+        clock[0] += .02
+        node.latest_motion = (clock[0], 0., 0.)
+        node._deadline_tick()
+
+    monkeypatch.setattr(restaurant_module.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_module, 'spin_node', spin)
+    monkeypatch.setattr(
+        restaurant_module, 'rotation_collision_watch',
+        lambda _node: lambda _command: 'rotation scan stale or future-dated')
+
+    stage = {'id': 'home_dock_approach', 'x': .7, 'y': 0., 'yaw': .3}
+    assert node._reach_staging(stage) is None
+    node.request_stop.assert_not_called()
+    assert node.run_deadline_s > 10.01
+    assert node._input_recovery_paused is False
+    assert node._last_direct_motion_failure == 'rotation scan stale or future-dated'
 
 
 def test_rear_face_rotation_waits_for_fresh_scan_then_reobserves_same_target():
     node = route_node()
     initial = face(.2, math.radians(6.4), stamp=1.)
     aligned = face(.2, math.radians(1.), stamp=2.)
-    aligned.update(face_odom=initial['face_odom'], midpoint_odom=initial['midpoint_odom'])
+    aligned.update(
+        face_odom=initial['face_odom'], midpoint_odom=initial['midpoint_odom'],
+        normal_odom=initial['normal_odom'],
+        base_pose_odom=(0., 0., math.radians(5.4)))
     node.stop_requested = False
     node._operator_link_ready = Mock(return_value=True)
     node._guard_failure = Mock(return_value=None)
 
-    def stale_rotation(_correction):
+    def stale_rotation(_correction, **_kwargs):
         node._last_direct_motion_failure = 'rotation scan stale or future-dated'
         return None
 
@@ -202,38 +300,259 @@ def test_rear_face_rotation_waits_for_fresh_scan_then_reobserves_same_target():
 
     assert module.RearBoxParkingMixin._align_rear_face_before_clearance(
         node, initial, GEOMETRY, .275, .225) is aligned
+    predicate = node._rotate_in_place.call_args.kwargs['pause_on_failure']
+    assert predicate('rotation scan stale or future-dated')
+    assert not predicate('rotation swept footprint occupied')
     node._rear_wait_for_input.assert_called_once_with(
-        'rotation scan stale or future-dated')
+        'rotation scan stale or future-dated', preserve_motion_deadline=True)
     node._observe_rear_box_recovering.assert_called_once_with(
         GEOMETRY, .275, .225, allow_range_reapproach=True)
 
 
-def test_rear_face_rotation_recovers_one_scan_gap_but_preserves_next_stop():
+def test_rear_face_rotation_recovers_repeated_scan_gaps_against_same_target():
     node = route_node()
     initial = face(.2, math.radians(6.4), stamp=1.)
-    reobserved = face(.2, math.radians(6.4), stamp=2.)
-    reobserved.update(
-        face_odom=initial['face_odom'], midpoint_odom=initial['midpoint_odom'])
+    observations = [
+        face(.2, math.radians(5.), stamp=2.),
+        face(.2, math.radians(4.), stamp=3.),
+        face(.2, math.radians(1.), stamp=4.),
+    ]
+    for reobserved in observations:
+        reobserved.update(
+            face_odom=initial['face_odom'], midpoint_odom=initial['midpoint_odom'],
+            normal_odom=initial['normal_odom'],
+            base_pose_odom=(
+                0., 0., initial['normal_yaw_error_rad']
+                - reobserved['normal_yaw_error_rad']))
     node.stop_requested = False
     node._operator_link_ready = Mock(return_value=True)
     node._guard_failure = Mock(return_value=None)
 
-    def stale_rotation(_correction):
+    def stale_rotation(_correction, **_kwargs):
         node._last_direct_motion_failure = 'rotation scan stale or future-dated'
         return None
 
     node._rotate_in_place = Mock(side_effect=stale_rotation)
     node._rear_wait_for_input = Mock(return_value=True)
-    node._observe_rear_box_recovering = Mock(return_value=reobserved)
+    node._observe_rear_box_recovering = Mock(side_effect=observations)
     node.emit = Mock()
 
-    with pytest.raises(RuntimeError, match='rotation scan stale or future-dated'):
+    assert module.RearBoxParkingMixin._align_rear_face_before_clearance(
+        node, initial, GEOMETRY, .275, .225) is observations[-1]
+    assert node._rear_wait_for_input.call_count == 3
+    assert all(item.kwargs == {'preserve_motion_deadline': True}
+               for item in node._rear_wait_for_input.call_args_list)
+    assert node._observe_rear_box_recovering.call_count == 3
+    assert node._rotate_in_place.call_count == 3
+
+
+def test_rotation_scan_wait_preserves_motion_deadline(monkeypatch):
+    node = route_node()
+    clock = [10.0]
+    node.run_deadline_s = 10.01
+    node._input_recovery_paused = False
+    node.samples = {'scan': 9.0}
+    node.last_scan = SimpleNamespace(
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=1, nanosec=0)))
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node._rear_box_scan = Mock(side_effect=[
+        RuntimeError('rear box scan stale or future-dated'), (object(), 2.0)])
+    publisher = Mock()
+    node._escape_publisher = Mock(return_value=publisher)
+    node.request_stop = Mock()
+    node.emit = Mock()
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+
+    def spin(*_args, **_kwargs):
+        assert node._input_recovery_paused is True
+        clock[0] += .05
+        node.samples['scan'] = clock[0]
+        node._deadline_tick()
+
+    monkeypatch.setattr(module, 'spin_node', spin)
+
+    assert node._rear_wait_for_input(
+        'rotation scan stale or future-dated', preserve_motion_deadline=True)
+    assert node.run_deadline_s == pytest.approx(10.11)
+    assert node._input_recovery_paused is False
+    node.request_stop.assert_not_called()
+    assert publisher.publish.call_count == 2
+    assert all(call.args[0].linear.x == 0.0 and call.args[0].angular.z == 0.0
+               for call in publisher.publish.call_args_list)
+    recovered = node.emit.call_args
+    assert recovered.args == ('rear_box_input_recovered',)
+    assert recovered.kwargs['paused_s'] == pytest.approx(.1)
+    assert recovered.kwargs['motion_deadline_preserved'] is True
+
+
+def test_rotation_scan_wait_checks_operator_stop_before_freshness(monkeypatch):
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node.samples = {}
+    node._input_recovery_paused = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node._rear_box_scan = Mock()
+    node._escape_publisher = Mock(return_value=Mock())
+    node.emit = Mock()
+
+    def stop_during_wait(*_args, **_kwargs):
+        node.stop_requested = True
+
+    monkeypatch.setattr(module, 'spin_node', stop_during_wait)
+    assert not node._rear_wait_for_input(
+        'rotation scan stale or future-dated', preserve_motion_deadline=True)
+    assert node._last_direct_motion_failure == 'operator_stop'
+    assert node._input_recovery_paused is False
+    node._rear_box_scan.assert_not_called()
+
+
+def test_rotation_scan_wait_requires_a_new_received_scan_and_stamp(monkeypatch):
+    node = route_node()
+    clock = [10.0]
+    node.run_deadline_s = 11.0
+    node.samples = {'scan': 9.0}
+    node.last_scan = SimpleNamespace(
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=1, nanosec=0)))
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node._rear_box_scan = Mock(side_effect=[
+        (object(), 2.0), (object(), 1.0), (object(), 2.0)])
+    node._escape_publisher = Mock(return_value=Mock())
+    node.emit = Mock()
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+
+    def spin(*_args, **_kwargs):
+        clock[0] += .05
+        if clock[0] > 10.05:
+            node.samples['scan'] = clock[0]
+
+    monkeypatch.setattr(module, 'spin_node', spin)
+
+    assert node._rear_wait_for_input(
+        'rotation scan stale or future-dated', preserve_motion_deadline=True)
+    assert node._rear_box_scan.call_count == 3
+
+
+def test_rotation_scan_wait_stops_on_nonrecoverable_guard_failure(monkeypatch):
+    node = route_node()
+    clock = [10.0]
+    node.run_deadline_s = 11.0
+    node.samples = {}
+    node._input_recovery_paused = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value='battery voltage below running minimum')
+    node._rear_box_scan = Mock()
+    node._escape_publisher = Mock(return_value=Mock())
+    node.emit = Mock()
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(
+        module, 'spin_node', lambda *_a, **_k: clock.__setitem__(0, clock[0] + .05))
+
+    assert not node._rear_wait_for_input(
+        'rotation scan stale or future-dated', preserve_motion_deadline=True)
+    assert node._last_direct_motion_failure == 'battery voltage below running minimum'
+    assert node._input_recovery_paused is False
+    node._rear_box_scan.assert_not_called()
+
+
+def test_rotation_scan_wait_preserves_nested_pause_and_none_deadline(monkeypatch):
+    node = route_node()
+    clock = [10.0]
+    node.run_deadline_s = None
+    node.samples = {'scan': 9.0}
+    node.last_scan = SimpleNamespace(
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=1, nanosec=0)))
+    node._input_recovery_paused = True
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node._rear_box_scan = Mock(return_value=(object(), 2.0))
+    node._escape_publisher = Mock(return_value=Mock())
+    node.emit = Mock()
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+
+    def spin(*_args, **_kwargs):
+        clock[0] += .05
+        node.samples['scan'] = clock[0]
+
+    monkeypatch.setattr(module, 'spin_node', spin)
+
+    assert node._rear_wait_for_input(
+        'rotation scan unavailable', preserve_motion_deadline=True)
+    assert node.run_deadline_s is None
+    assert node._input_recovery_paused is True
+
+
+def test_rotation_scan_wait_does_not_resume_after_operator_link_loss(monkeypatch):
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node.samples = {}
+    node._input_recovery_paused = False
+    node._operator_link_ready = Mock(return_value=False)
+    node._guard_failure = Mock()
+    node._rear_box_scan = Mock()
+    node._escape_publisher = Mock(return_value=Mock())
+    node.emit = Mock()
+    monkeypatch.setattr(module, 'spin_node', lambda *_a, **_k: None)
+
+    assert not node._rear_wait_for_input(
+        'rotation scan unavailable', preserve_motion_deadline=True)
+    assert node._last_direct_motion_failure == 'operator_link_lost'
+    assert node._input_recovery_paused is False
+    node._guard_failure.assert_not_called()
+    node._rear_box_scan.assert_not_called()
+
+
+@pytest.mark.parametrize('abort', ['operator_stop', 'operator_link_lost'])
+def test_repeated_rotation_scan_wait_preserves_abort_priority(abort):
+    node = route_node()
+    initial = face(.2, math.radians(6.4), stamp=1.)
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+
+    def stale_rotation(_correction, **_kwargs):
+        node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+        return None
+
+    def stopped_wait(*_args, **_kwargs):
+        if abort == 'operator_stop':
+            node.stop_requested = True
+        else:
+            node._operator_link_ready.return_value = False
+        return False
+
+    node._rotate_in_place = Mock(side_effect=stale_rotation)
+    node._rear_wait_for_input = Mock(side_effect=stopped_wait)
+    node.emit = Mock()
+    with pytest.raises(RuntimeError, match=abort):
         module.RearBoxParkingMixin._align_rear_face_before_clearance(
             node, initial, GEOMETRY, .275, .225)
-    node._rear_wait_for_input.assert_called_once_with(
-        'rotation scan stale or future-dated')
-    node._observe_rear_box_recovering.assert_called_once()
-    assert node._rotate_in_place.call_count == 2
+
+
+def test_rear_face_rotation_reports_nonrecoverable_failure_found_while_waiting():
+    node = route_node()
+    initial = face(.2, math.radians(6.4), stamp=1.)
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+
+    def stale_rotation(_correction, **_kwargs):
+        node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+        return None
+
+    def failed_wait(*_args, **_kwargs):
+        node._last_direct_motion_failure = 'battery voltage below running minimum'
+        return False
+
+    node._rotate_in_place = Mock(side_effect=stale_rotation)
+    node._rear_wait_for_input = Mock(side_effect=failed_wait)
+    node.emit = Mock()
+
+    with pytest.raises(RuntimeError, match='battery voltage below running minimum'):
+        module.RearBoxParkingMixin._align_rear_face_before_clearance(
+            node, initial, GEOMETRY, .275, .225)
 
 
 def test_rear_face_rotation_does_not_retry_a_collision_stop():
@@ -243,7 +562,7 @@ def test_rear_face_rotation_does_not_retry_a_collision_stop():
     node._operator_link_ready = Mock(return_value=True)
     node._guard_failure = Mock(return_value=None)
 
-    def collision_stop(_correction):
+    def collision_stop(_correction, **_kwargs):
         node._last_direct_motion_failure = 'rotation swept footprint occupied'
         return None
 
@@ -376,7 +695,9 @@ def test_face_heading_is_corrected_before_a_large_straight_clearance(interrupted
     else:
         assert module.RearBoxParkingMixin._align_rear_face_before_clearance(
             node, initial, GEOMETRY, .275, .225) is aligned
-        node._rotate_in_place.assert_called_once_with(math.radians(35.))
+        call = node._rotate_in_place.call_args
+        assert call.args == (math.radians(35.),)
+        assert call.kwargs['pause_on_failure']('rotation scan unavailable')
         node._observe_rear_box_recovering.assert_called_once_with(
             GEOMETRY, .275, .225, allow_range_reapproach=True)
     node._clear_rear_dock_straight.assert_not_called()

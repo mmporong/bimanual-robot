@@ -44,6 +44,10 @@ REAR_STRAIGHT_HANDOFF_M = 0.58
 REAR_CENTER_TOLERANCE_M = 0.02
 REAR_COARSE_SEGMENT_M = 0.5
 REAR_FACE_REOBSERVE_GAP_M = 0.2
+ROTATION_SCAN_INPUT_GAPS = frozenset({
+    'rotation scan unavailable',
+    'rotation scan stale or future-dated',
+})
 # Planning candidates, not measured calibration: retain at least 10 cm for a
 # stopped same-face observation before the final live-gap controller.
 REAR_CENTER_REOBSERVE_GAPS_M = (REAR_FACE_REOBSERVE_GAP_M, 0.15, 0.1)
@@ -200,33 +204,64 @@ class RearBoxParkingMixin:
     """Observe a rear box without starting the depth camera or a transit task."""
 
     def _reach_staging(self, stage):
-        """Resume one stopped dock turn after its rear scan becomes fresh again."""
-        staged = super()._reach_staging(stage)
+        """Keep a completed staging position while transient scan gaps stop its turn."""
+        staged = super()._reach_staging(
+            stage,
+            pause_on_rotation_failure=lambda failure:
+            failure in ROTATION_SCAN_INPUT_GAPS)
         if staged is not None:
             return staged
         reason = getattr(self, '_last_direct_motion_failure', None)
-        if reason not in {
-                'rotation scan unavailable',
-                'rotation scan stale or future-dated',
-        } or not self._rear_wait_for_input(reason):
+        if reason not in ROTATION_SCAN_INPUT_GAPS:
             return None
-        # The position action already reached staging.  Reissuing it here can
-        # move the base after a sensor-only pause, so remeasure at rest and
-        # command only one residual yaw correction.
-        actual, _ = self.capture_stationary_pose(intermediate=True)
-        residual = _angle(stage['yaw'] - actual[2])
-        self.emit('rear_staging_rotation_resuming', reason=reason,
-                  target_preserved=True, delta_yaw_rad=residual)
-        if abs(residual) <= self.home_contract['yaw_tolerance_rad']:
-            return actual
-        turned = self._rotate_in_place(residual)
-        self.emit('staging_turn_observed', requested_yaw_rad=residual,
-                  observed_yaw_rad=turned, observation_frame='odom',
-                  controller='damped')
-        if turned is None:
-            return None
-        actual, _ = self.capture_stationary_pose(intermediate=True)
-        return actual
+        goal_yaw = float(stage['yaw'])
+        previous_yaw = None
+        rotation_travel_rad = 0.0
+        rotation_limit_rad = None
+        while reason in ROTATION_SCAN_INPUT_GAPS:
+            if not self._rear_wait_for_input(
+                    reason, preserve_motion_deadline=True):
+                return None
+            # The position action already reached staging.  Reissuing it here
+            # can move the base after a sensor-only pause, so use only fresh
+            # stopped odometry against the unchanged stage yaw.
+            actual, _ = self.capture_stationary_pose(intermediate=True)
+            current_yaw = actual[2]
+            residual = _angle(goal_yaw - current_yaw)
+            if previous_yaw is None:
+                rotation_limit_rad = (
+                    2.0 * abs(residual) + self.home_contract['yaw_tolerance_rad'])
+            else:
+                rotation_travel_rad += abs(_angle(current_yaw - previous_yaw))
+                if rotation_travel_rad > rotation_limit_rad:
+                    self._last_direct_motion_failure = (
+                        'rear staging residual rotation exceeded bounded travel')
+                    return None
+            previous_yaw = current_yaw
+            self.emit('rear_staging_rotation_resuming', reason=reason,
+                      target_preserved=True, delta_yaw_rad=residual,
+                      rotation_travel_rad=rotation_travel_rad,
+                      rotation_limit_rad=rotation_limit_rad)
+            if abs(residual) <= self.home_contract['yaw_tolerance_rad']:
+                return actual
+            if self.stop_requested or not self._operator_link_ready():
+                return None
+            turned = self._rotate_in_place(
+                residual,
+                pause_on_failure=lambda failure: failure in ROTATION_SCAN_INPUT_GAPS)
+            self.emit('staging_turn_observed', requested_yaw_rad=residual,
+                      observed_yaw_rad=turned, observation_frame='odom',
+                      controller='damped')
+            if turned is not None:
+                actual, _ = self.capture_stationary_pose(intermediate=True)
+                rotation_travel_rad += abs(_angle(actual[2] - previous_yaw))
+                if rotation_travel_rad > rotation_limit_rad:
+                    self._last_direct_motion_failure = (
+                        'rear staging residual rotation exceeded bounded travel')
+                    return None
+                return actual
+            reason = getattr(self, '_last_direct_motion_failure', None)
+        return None
 
     def _execute_service_once(self, *, final_parking, alignment, staging=False, face=False):
         normal_departure = (
@@ -518,10 +553,15 @@ class RearBoxParkingMixin:
         if observed['gap_m'] < 0.05:
             return observed
         gain = 1.0
-        input_recovery_used = False
+        previous_yaw = observed['base_pose_odom'][2]
+        rotation_travel_rad = 0.0
+        rotation_limit_rad = (
+            2.0 * abs(observed['normal_yaw_error_rad']) + math.radians(3.))
+        completed_attempts = 0
         # Bound stationary heading correction to a primary command and one
-        # measured residual command; do not repeat left/right corrections.
-        for _attempt in range(2):
+        # measured residual command. Sensor pauses do not consume an attempt,
+        # but fresh odometry still bounds total physical rotation.
+        while completed_attempts < 2:
             error = observed['normal_yaw_error_rad']
             if abs(error) <= math.radians(3.):
                 return observed
@@ -533,24 +573,46 @@ class RearBoxParkingMixin:
             correction = gain * error
             self.emit('rear_dock_face_heading_alignment', angle_rad=error,
                       correction_rad=correction, gain=gain, translation_requested=False)
-            if self._rotate_in_place(correction) is None:
+            if self._rotate_in_place(
+                    correction,
+                    pause_on_failure=lambda failure:
+                    failure in ROTATION_SCAN_INPUT_GAPS) is None:
                 reason = (getattr(self, '_last_direct_motion_failure', None)
                           or 'rear dock heading alignment incomplete')
-                if (reason not in {
-                        'rotation scan unavailable',
-                        'rotation scan stale or future-dated',
-                } or input_recovery_used or not self._rear_wait_for_input(reason)):
+                if reason not in ROTATION_SCAN_INPUT_GAPS:
                     raise RuntimeError(reason)
-                input_recovery_used = True
+                if not self._rear_wait_for_input(
+                        reason, preserve_motion_deadline=True):
+                    latest_failure = getattr(
+                        self, '_last_direct_motion_failure', None)
+                    raise RuntimeError(
+                        'operator_stop' if self.stop_requested else
+                        'operator_link_lost' if not self._operator_link_ready() else
+                        latest_failure or reason)
                 observed = self._observe_rear_box_recovering(
                     geometry, extent, half_width, allow_range_reapproach=True)
                 _same_target(initial, observed)
+                current_yaw = observed['base_pose_odom'][2]
+                rotation_travel_rad += abs(_angle(current_yaw - previous_yaw))
+                previous_yaw = current_yaw
+                if rotation_travel_rad > rotation_limit_rad:
+                    raise RuntimeError(
+                        'rear dock face rotation exceeded bounded residual travel')
                 self.emit('rear_dock_face_heading_alignment_resuming',
-                          reason=reason, target_preserved=True)
+                          reason=reason, target_preserved=True,
+                          rotation_travel_rad=rotation_travel_rad,
+                          rotation_limit_rad=rotation_limit_rad)
                 continue
+            completed_attempts += 1
             observed = self._observe_rear_box_recovering(
                 geometry, extent, half_width, allow_range_reapproach=True)
             _same_target(initial, observed)
+            current_yaw = observed['base_pose_odom'][2]
+            rotation_travel_rad += abs(_angle(current_yaw - previous_yaw))
+            previous_yaw = current_yaw
+            if rotation_travel_rad > rotation_limit_rad:
+                raise RuntimeError(
+                    'rear dock face rotation exceeded bounded residual travel')
             residual = observed['normal_yaw_error_rad']
             # A sign reversal measures overshoot against the same stationary face.
             # Reduce the next command; never amplify it or accept a bad heading.
@@ -756,32 +818,98 @@ class RearBoxParkingMixin:
                     return False
         return False
 
-    def _rear_wait_for_input(self, reason, command_watch=None):
+    def _rear_wait_for_input(self, reason, command_watch=None, *,
+                             preserve_motion_deadline=False):
         recoverable = {
             'rear box scan unavailable', 'rear box scan stale or future-dated',
             'rear box corridor unavailable', 'rear docking swept footprint occupied',
-            'rotation scan unavailable', 'rotation scan stale or future-dated',
+            *ROTATION_SCAN_INPUT_GAPS,
         }
         if reason not in recoverable and not self._input_gap_recoverable(reason):
             return False
+        started_s = time.monotonic()
+        initial_received_s = self.samples.get('scan')
+        initial_scan = getattr(self, 'last_scan', None)
+        initial_stamp_s = None
+        try:
+            initial_stamp_s = (initial_scan.header.stamp.sec
+                               + initial_scan.header.stamp.nanosec * 1e-9)
+        except (AttributeError, TypeError, ValueError):
+            pass
         self.emit('rear_box_waiting_for_input', reason=reason, phase='coarse')
         expected = Twist()
         expected.linear.x = -0.05
-        while not self.stop_requested and time.monotonic() < self.run_deadline_s:
-            spin_node(self, timeout_sec=0.05)
-            if not self._operator_link_ready():
-                return False
-            if self._guard_failure(False):
-                continue
-            try:
-                self._rear_box_scan()
-            except RuntimeError:
-                continue
-            if command_watch is not None and command_watch(expected):
-                continue
-            self.emit('rear_box_input_recovered', phase='coarse', target_preserved=True)
-            return True
-        return False
+        previous_pause = getattr(self, '_input_recovery_paused', False)
+        recovered = False
+        paused_s = 0.0
+        if preserve_motion_deadline:
+            self._input_recovery_paused = True
+        try:
+            while not self.stop_requested:
+                deadline_s = getattr(self, 'run_deadline_s', None)
+                if (not preserve_motion_deadline and deadline_s is not None
+                        and time.monotonic() >= deadline_s):
+                    break
+                if preserve_motion_deadline:
+                    self._escape_publisher().publish(Twist())
+                spin_node(self, timeout_sec=0.05)
+                if self.stop_requested:
+                    self._last_direct_motion_failure = 'operator_stop'
+                    break
+                if not self._operator_link_ready():
+                    self._last_direct_motion_failure = 'operator_link_lost'
+                    break
+                guard_failure = self._guard_failure(False)
+                if guard_failure:
+                    if self._input_gap_recoverable(guard_failure):
+                        continue
+                    self._last_direct_motion_failure = guard_failure
+                    break
+                try:
+                    _scan, stamp_s = self._rear_box_scan()
+                except RuntimeError as error:
+                    scan_failure = str(error)
+                    if scan_failure in {
+                            'rear box scan unavailable',
+                            'rear box scan stale or future-dated',
+                    }:
+                        continue
+                    self._last_direct_motion_failure = scan_failure
+                    break
+                received_s = self.samples.get('scan')
+                # Recovery must observe a scan callback from this stopped wait,
+                # not merely revalidate the sample which caused the pause.
+                if (received_s is None or received_s < started_s
+                        or (initial_received_s is not None
+                            and received_s <= initial_received_s)
+                        or (initial_stamp_s is not None
+                            and stamp_s == initial_stamp_s)):
+                    continue
+                watch_failure = command_watch(expected) if command_watch is not None else None
+                if watch_failure:
+                    if (watch_failure in recoverable
+                            or self._input_gap_recoverable(watch_failure)):
+                        continue
+                    self._last_direct_motion_failure = watch_failure
+                    break
+                recovered = True
+                break
+        finally:
+            paused_s = max(0.0, time.monotonic() - started_s)
+            if preserve_motion_deadline and recovered:
+                deadline_s = getattr(self, 'run_deadline_s', None)
+                if (isinstance(deadline_s, (int, float))
+                        and not isinstance(deadline_s, bool)
+                        and math.isfinite(deadline_s)):
+                    self.run_deadline_s = deadline_s + paused_s
+            if preserve_motion_deadline:
+                self._input_recovery_paused = previous_pause
+        if not recovered:
+            return False
+        self.emit('rear_box_input_recovered', phase='coarse', target_preserved=True,
+                  paused_s=paused_s,
+                  motion_deadline_preserved=preserve_motion_deadline)
+        return True
 
     def _observe_rear_box(self, geometry, extent, half_width, *, timeout_s=5.0):
         tracker = RearBoxFaceTracker(required_frames=8, max_missing_frames=2)
