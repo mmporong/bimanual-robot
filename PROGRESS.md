@@ -5,6 +5,18 @@
 ---
 
 
+## 2026-11-02 | 주행 PC에서 Windows 서비스 통합 준비·종료
+
+- 사용자 요청: Windows 화면을 거치지 않고 이 PC에서 Astra·관제·팔 실행기를 모두 관리. tools/jdamr/scenario_runtime.py prepare/status/stop과 Windows SSH 관리 스크립트 windows_runtime.ps1 추가. 기존 jdamr_depart init은 도크 위치초기화 계약을 유지하며 전체 준비는 새 prepare 진입점 사용.
+- Windows 기준 bat의 COM·카메라·모델 인자를 재사용, 그리퍼 startup pre_relax만 --grip.skip_pre로 생략. WMI로 python.exe/AboveNormal 기동, pythonw·예약 작업 사용 없음. source path/명령/PID identity와 생성시각으로 관리하고 역할 중복은 거부. 준비는 주문/팔접기/정책실행/베이스 이동을 보내지 않으며 모델 예열만 실행.
+- 실기 기동: Astra 기존 Python27572/launcher2640 유지, 관제 Python20888/launcher32940, 팔 Python34724/launcher31160. Windows 로그 %USERPROFILE%/jdamr_remote/logs/{order,arms}.{stdout,stderr}.log. 기존 camera 로그는 %USERPROFILE%/jdamr_logs/astra_20261102_085929.log. 기존 관제 PID38960/9688은 이 작업이 띄운 identity와 IDLE 확인 뒤 새 관리자로 교체.
+- 팔 ready_total84.2초: pour load/connect38.1초, place load30.9초, warm infer pour0.41초/place0.40초. idle_read_failures0, current=null, arms=unknown(아직 주문 팔접기 없음). 새 서비스 관리로 실제 물따르기/컵배치 성공까지 확인한 결과는 아님.
+- 초기에 상태조회45초 초과 재현. WinPS5 Get-Content 로그 문자열의 확장 파일 속성이 ConvertTo-Json 단계에서 과도하게 확장되는 경로를 trace로 확인. 로그 tail을 ToString 순수 문자열로 바꾼 뒤 status exit0. 역할 관련 Python/cmd 프로세스만 CIM 조회. 구버전으로 남은 이 작업의 상태조회·trace PID는 exact encoded command 또는 확인한 부모 PID로 종료, 다른 세션 보존.
+- 최종 prepare exit0/prepared=true. 웹 fresh init ID834bcbfa가16:39:55 succeeded, drive connected=true, 세 Windows 역할 PID+HTTP 응답 및 팔ready 확인. 이전 succeeded를 새 init 성공으로 재사용하지 않음. 앞선 init 거부/구버전 상태조회 timeout은 기록하며 최종 성공과 구분. 원본 준비 출력 /tmp/amr_scenario_prepare_final.log, 정지 상태 출력 /tmp/amr_scenario_status_fixed.json.
+- stop all은 기존 미션 stop을 먼저 호출하며 API가 없으면 기존 depart stop 성공 뒤 Windows 정리. 팔 busy/queued/hold/carrying_cup/unknown은 종료가 그리퍼를 이완할 수 있어 자동 shutdown 보류, 강제 종료하지 않음. 준비 실패한 서비스도 불확실한 팔을 자동 강제 종료하지 않고 PID·로그로 남김. 이 운영 제한을 README에 명시. 서비스 종료·토크 해제를 동일한 뜻으로 보고하지 않음.
+- 로컬 user unit jdamr-water-service-api.service와30-scenario-runtime.conf는 시연 대기를 위해 유지. Windows 관리 스크립트는 %USERPROFILE%/jdamr_remote/windows_runtime.ps1에 설치. 다음준비중복프로세스생성없음 확인. 종료명령 python3 ~/bimanual-robot/tools/jdamr/scenario_runtime.py stop; 팔상태보류시종료사유를확인하고토크해제별도지시.
+- 최소 회귀6건/py_compile/diff-check PASS, 코드 확인 잔여차단없음. Windows PS 실제 status/start·정상중복adopt·HTTPready 확인. 실제 stop/팔접기/서빙주행은 실행하지 않음. 원격 push 없음.
+
 ## 2026-11-02 | 원격 관제 웹 통합과 시나리오 서버 준비
 
 - origin/main 7aabc61의 #97 관제 수락·START·STOP, #98 주행 초기화 버튼을 현재 주행 브랜치에 병합. #95 navigation tree는 로컬 원본7b347f1과 byte-for-byte 동일하고 #97/#98 navigation 변경은0이라 충돌11개는 최신 로컬04eda57 내용을 보존. README 현재주행설명과 양쪽 PROGRESS 이력 보존.

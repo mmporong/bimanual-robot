@@ -56,6 +56,10 @@
 유지한다. 이미 측정한 정지 상태는 새 입력으로 이어 확인하고, 정지 중 일시적인 주문 서버
 조회 실패는 같은 단계에서 재조회한다. 실제 충돌·센서/통신 소실·팔 과부하 보호는 유지한다.
 
+Windows SSH 연결을 설정한 주행 PC에서는 `python3 tools/jdamr/scenario_runtime.py prepare`로
+카메라 송신·관제·팔 모델·주행 연동을 함께 준비한다. `status`와 `stop`으로 같은 구성의
+상태 확인과 종료를 관리하며, 주문 START는 준비와 분리한다.
+
 ## 실행 진입점
 
 실차 코드는 [src/navigation](src/navigation/README.md), 운영 명령은
