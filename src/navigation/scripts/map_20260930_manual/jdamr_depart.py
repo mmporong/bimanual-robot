@@ -1269,7 +1269,8 @@ def execution_failure_cause(events):
         if (event.get('event') == 'precision_straight_finished'
                 and event.get('target_failure')):
             return str(event['target_failure'])
-        if (event.get('event') in ('straight_drive_stopped', 'rear_box_coarse_paused')
+        if (event.get('event') in ('straight_drive_stopped', 'rear_box_coarse_paused',
+                                   'trim_rotation_stopped')
                 and event.get('reason') not in (None, 'rear box coarse handoff ready')):
             return str(event['reason'])
     return None

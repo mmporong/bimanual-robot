@@ -31,6 +31,7 @@ def route_node():
     node._center_rear_box = Mock(return_value=True)
     node._align_rear_face_before_clearance = Mock(side_effect=lambda observed, *_args: observed)
     node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._set_observer_perception = Mock(return_value=True)
     return node
 
 
@@ -144,6 +145,118 @@ def test_heading_is_aligned_before_straight_reverse_entry():
     node._align_rear_face_before_clearance.assert_called_once_with(
         initial, GEOMETRY, pytest.approx(.275), pytest.approx(.225))
     node._center_rear_box.assert_not_called()
+
+
+def test_rear_staging_rotation_resumes_residual_without_reissuing_position(monkeypatch):
+    node = route_node()
+    node.run_deadline_s = time.monotonic() + 10.
+    node.registry = {'home': {'rear_parking_reference': 'lidar_box'}}
+    node.home_rear_geometry = GEOMETRY
+    node.home_contract = {'yaw_tolerance_rad': math.radians(3.)}
+    node._rear_wait_for_input = Mock(return_value=True)
+    node.capture_stationary_pose = Mock(side_effect=[
+        ((.7, 0., .1), {}), ((.7, 0., .29), {}),
+    ])
+    node._rotate_in_place = Mock(return_value=.19)
+    node.execute = Mock(return_value=True)
+    node.emit = Mock()
+    attempts = []
+
+    def reach_staging(_self, stage):
+        attempts.append(stage)
+        node.execute(final_parking=False, staging=True)
+        node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+        return None
+
+    monkeypatch.setattr(ServiceRoute, '_reach_staging', reach_staging)
+    stage = {'id': 'home_dock_approach', 'x': .7, 'y': 0., 'yaw': .3}
+
+    assert node._reach_staging(stage) == pytest.approx((.7, 0., .29))
+    assert attempts == [stage]
+    node.execute.assert_called_once_with(final_parking=False, staging=True)
+    node._rear_wait_for_input.assert_called_once_with(
+        'rotation scan stale or future-dated')
+    node._rotate_in_place.assert_called_once_with(pytest.approx(.2))
+    assert node.capture_stationary_pose.call_count == 2
+    assert all(not item.args and item.kwargs == {'intermediate': True}
+               for item in node.capture_stationary_pose.call_args_list)
+
+
+def test_rear_face_rotation_waits_for_fresh_scan_then_reobserves_same_target():
+    node = route_node()
+    initial = face(.2, math.radians(6.4), stamp=1.)
+    aligned = face(.2, math.radians(1.), stamp=2.)
+    aligned.update(face_odom=initial['face_odom'], midpoint_odom=initial['midpoint_odom'])
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+
+    def stale_rotation(_correction):
+        node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+        return None
+
+    node._rotate_in_place = Mock(side_effect=stale_rotation)
+    node._rear_wait_for_input = Mock(return_value=True)
+    node._observe_rear_box_recovering = Mock(return_value=aligned)
+    node.emit = Mock()
+
+    assert module.RearBoxParkingMixin._align_rear_face_before_clearance(
+        node, initial, GEOMETRY, .275, .225) is aligned
+    node._rear_wait_for_input.assert_called_once_with(
+        'rotation scan stale or future-dated')
+    node._observe_rear_box_recovering.assert_called_once_with(
+        GEOMETRY, .275, .225, allow_range_reapproach=True)
+
+
+def test_rear_face_rotation_recovers_one_scan_gap_but_preserves_next_stop():
+    node = route_node()
+    initial = face(.2, math.radians(6.4), stamp=1.)
+    reobserved = face(.2, math.radians(6.4), stamp=2.)
+    reobserved.update(
+        face_odom=initial['face_odom'], midpoint_odom=initial['midpoint_odom'])
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+
+    def stale_rotation(_correction):
+        node._last_direct_motion_failure = 'rotation scan stale or future-dated'
+        return None
+
+    node._rotate_in_place = Mock(side_effect=stale_rotation)
+    node._rear_wait_for_input = Mock(return_value=True)
+    node._observe_rear_box_recovering = Mock(return_value=reobserved)
+    node.emit = Mock()
+
+    with pytest.raises(RuntimeError, match='rotation scan stale or future-dated'):
+        module.RearBoxParkingMixin._align_rear_face_before_clearance(
+            node, initial, GEOMETRY, .275, .225)
+    node._rear_wait_for_input.assert_called_once_with(
+        'rotation scan stale or future-dated')
+    node._observe_rear_box_recovering.assert_called_once()
+    assert node._rotate_in_place.call_count == 2
+
+
+def test_rear_face_rotation_does_not_retry_a_collision_stop():
+    node = route_node()
+    initial = face(.2, math.radians(6.4), stamp=1.)
+    node.stop_requested = False
+    node._operator_link_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+
+    def collision_stop(_correction):
+        node._last_direct_motion_failure = 'rotation swept footprint occupied'
+        return None
+
+    node._rotate_in_place = Mock(side_effect=collision_stop)
+    node._rear_wait_for_input = Mock(return_value=True)
+    node._observe_rear_box_recovering = Mock()
+    node.emit = Mock()
+
+    with pytest.raises(RuntimeError, match='rotation swept footprint occupied'):
+        module.RearBoxParkingMixin._align_rear_face_before_clearance(
+            node, initial, GEOMETRY, .275, .225)
+    node._rear_wait_for_input.assert_not_called()
+    node._observe_rear_box_recovering.assert_not_called()
 
 
 @pytest.mark.parametrize('invalid', [math.nan, 3.])

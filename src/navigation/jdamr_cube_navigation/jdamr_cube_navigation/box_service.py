@@ -281,6 +281,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_wake = threading.Event()
         self._station_reference_stop = threading.Event()
         self._station_reference_thread = None
+        self._station_reference_perception_active = False
+        self._observer_perception_enabled = None
         # The same observer configuration decides how many frames make a
         # stable face; an unreadable value leaves every latency verdict limited.
         try:
@@ -335,7 +337,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
 
     def _station_image_callback(self, message):
         """Replace the pending frame; the subscription callback never runs ORB."""
-        if getattr(self, 'station_reference', None) is None:
+        if (getattr(self, 'station_reference', None) is None
+                or not getattr(self, '_station_reference_perception_active', True)):
             return
         try:
             image = self._station_image_array(message)
@@ -435,6 +438,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     tracking_checkpoint = contact_reference.tracking_checkpoint()
                 result = self.station_reference.observe(
                     image, info, odom_pose, stamp_s)
+                if (self._station_reference_stop.is_set()
+                        or not getattr(self, '_station_reference_perception_active', True)):
+                    if contact_reference is not None:
+                        contact_reference.restore_tracking(tracking_checkpoint)
+                    continue
                 if result.get('valid') is True:
                     # The correction is measured in odom at image time. Map is
                     # its current presentation frame, not a second image-time
@@ -468,6 +476,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 # consistency baseline, even when their image match succeeded.
                 result = dict(result, valid=False,
                               reason='processing_exceeded_image_age')
+            if (self._station_reference_stop.is_set()
+                    or not getattr(self, '_station_reference_perception_active', True)):
+                if contact_reference is not None:
+                    contact_reference.restore_tracking(tracking_checkpoint)
+                continue
             with self._station_reference_lock:
                 reference = self.station_reference
                 if (result.get('valid') is True
@@ -613,16 +626,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if not visual_reference and rgbd is not None:
             raise ValueError('non-visual station must not carry an RGB-D reference')
         reference = TaughtStationReference(rgbd) if visual_reference else None
-        self._station_reference_stop.set()
-        self._station_reference_wake.set()
-        worker = getattr(self, '_station_reference_thread', None)
-        if worker is not None and worker is not threading.current_thread():
-            worker.join(timeout=2.0)
-            if worker.is_alive():
-                raise RuntimeError('previous station reference worker did not stop')
-        self._station_reference_thread = None
+        if not self._stop_station_reference_perception():
+            raise RuntimeError('previous station reference worker did not stop')
         with self._station_reference_lock:
-            self._station_reference_pending = None
             self.station_reference_result = None
             self.station_reference_result_received_s = None
         self.station_reference_goal = None
@@ -648,12 +654,6 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 self.station_reference_image_subscription = self.create_subscription(
                     Image, '/camera/color/image_raw',
                     self._station_image_callback, STATION_REFERENCE_QOS)
-            self._station_reference_stop.clear()
-            self._station_reference_wake.clear()
-            self._station_reference_thread = threading.Thread(
-                target=self._station_reference_loop,
-                name='station-rgbd-reference', daemon=True)
-            self._station_reference_thread.start()
         self.emit(
             'station_reference_configured', table_id=table_id,
             target_role='operator_taught_map_pose_and_heading',
@@ -666,6 +666,38 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
     def _station_reference_enabled(self):
         return (getattr(self, 'station_reference', None) is not None
                 or getattr(self, 'station_reference_mode', None) == 'map_pose_only')
+
+    def _stop_station_reference_perception(self):
+        """Stop station-only RGB processing and discard its queued frame."""
+        self._station_reference_perception_active = False
+        self._station_reference_stop.set()
+        self._station_reference_wake.set()
+        worker = getattr(self, '_station_reference_thread', None)
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=2.0)
+            if worker.is_alive():
+                self.emit('station_reference_worker_stop_timeout', timeout_s=2.0)
+            else:
+                self._station_reference_thread = None
+        with self._station_reference_lock:
+            self._station_reference_pending = None
+        return worker is None or not worker.is_alive()
+
+    def _start_station_reference_perception(self):
+        """Start RGB processing after transit reaches the station observation phase."""
+        if getattr(self, 'station_reference', None) is None:
+            return
+        worker = getattr(self, '_station_reference_thread', None)
+        if worker is not None and worker.is_alive():
+            self._station_reference_perception_active = True
+            return
+        self._station_reference_stop.clear()
+        self._station_reference_wake.clear()
+        self._station_reference_perception_active = True
+        self._station_reference_thread = threading.Thread(
+            target=self._station_reference_loop,
+            name='station-rgbd-reference', daemon=True)
+        self._station_reference_thread.start()
 
     def _map_station_reference(self):
         """Project the taught map pose into odom using the current localization."""
@@ -1111,18 +1143,20 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
 
     def destroy_node(self):
         """Stop the station reference worker before destroying ROS entities."""
-        stop = getattr(self, '_station_reference_stop', None)
-        wake = getattr(self, '_station_reference_wake', None)
-        if stop is not None:
-            stop.set()
-        if wake is not None:
-            wake.set()
-        worker = getattr(self, '_station_reference_thread', None)
-        if worker is not None and worker is not threading.current_thread():
-            worker.join(timeout=2.0)
-            if worker.is_alive():
-                raise RuntimeError('station reference worker did not stop')
+        self._stop_station_reference_perception()
+        self._set_observer_perception(False)
         return super().destroy_node()
+
+    def go_home(self, execute=False, timeout_s=180.0):
+        """Disable station-only RGB work before entering the dock-return phase."""
+        self._stop_station_reference_perception()
+        self._set_observer_perception(False)
+        return super().go_home(execute=execute, timeout_s=timeout_s)
+
+    def park_rear_box(self, *args, **kwargs):
+        """Keep the front depth plane detector off during lidar-only rear parking."""
+        self._set_observer_perception(False)
+        return super().park_rear_box(*args, **kwargs)
 
     def _go_home_reverse(self, pose, execute, _map_reapproach=False):
         """Use the registered staging pose, then the configured rear reference."""
@@ -1199,6 +1233,37 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return None
         return value
 
+    def _set_observer_perception(self, enabled):
+        """Gate only heavy depth perception while leaving the camera transport up."""
+        enabled = bool(enabled)
+        if getattr(self, '_observer_perception_enabled', None) is enabled:
+            return True
+        client = getattr(self, 'observer_parameters', None)
+        if client is None:
+            client = AsyncParameterClient(self, 'jdamr_depth_box_parking')
+            self.observer_parameters = client
+        reason = None
+        try:
+            if not client.wait_for_services(timeout_sec=1.0):
+                raise RuntimeError('observer parameter service unavailable')
+            response = self._wait(client.set_parameters_atomically([
+                Parameter('perception_enabled', value=enabled)]), 2.0).result
+            if response.successful is not True:
+                raise RuntimeError(response.reason or 'observer perception gate rejected')
+        except Exception as error:
+            reason = str(error) or type(error).__name__
+        if reason is None:
+            self._observer_perception_enabled = enabled
+        if reason is None or not enabled:
+            self.box_status = None
+            self.box_status_received_s = None
+            history = getattr(self, 'box_status_history', None)
+            if history is not None:
+                history.clear()
+        self.emit('box_observer_perception', enabled=enabled,
+                  applied=reason is None, reason=reason)
+        return reason is None
+
     def _camera(self, on):
         """
         Start or stop the box camera and observer when they run on demand.
@@ -1257,6 +1322,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._remember_scan(message)
 
     def _box_callback(self, message):
+        if getattr(self, '_observer_perception_enabled', True) is False:
+            return
+        try:
+            reason = json.loads(message.data).get('reason')
+        except (AttributeError, TypeError, json.JSONDecodeError):
+            reason = None
+        if reason in ('perception_disabled', 'perception_enabled_waiting_for_depth'):
+            return
         super()._box_callback(message)
         # Recent statuses are failure evidence only, never an observation.
         history = getattr(self, 'box_status_history', None)
@@ -2175,6 +2248,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if not execute:
             self.emit('transit_planned_only', box_target='requires_observation_on_arrival')
             return True
+        # The camera stream remains available, but the depth plane detector is
+        # unnecessary during transit and competes with navigation control.
+        self._set_observer_perception(False)
         # Setup time must not consume the motion/search budget.
         self.run_deadline_s = time.monotonic() + task_timeout_s
         # The camera starts with the transit: its 11 s start-up runs while driving.
@@ -2187,9 +2263,13 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         elif not self.execute(final_parking=False):
             self.emit('failed', phase='table_region_transit')
             return False
+        if not self._set_observer_perception(True):
+            self.emit('failed', phase='box_observer_perception_enable')
+            return False
         if not self._camera_ready():
             self.emit('failed', phase='box_camera_ready')
             return False
+        self._start_station_reference_perception()
         search_budget = BoxSearchBudget(target_directed=surface_mode == 'table_edge')
         if (reapproach_m is not None
                 and (reapproach_from_log is None or station_left_correction_m)

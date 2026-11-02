@@ -199,6 +199,35 @@ def _stationary_face(observations, extent, half_width):
 class RearBoxParkingMixin:
     """Observe a rear box without starting the depth camera or a transit task."""
 
+    def _reach_staging(self, stage):
+        """Resume one stopped dock turn after its rear scan becomes fresh again."""
+        staged = super()._reach_staging(stage)
+        if staged is not None:
+            return staged
+        reason = getattr(self, '_last_direct_motion_failure', None)
+        if reason not in {
+                'rotation scan unavailable',
+                'rotation scan stale or future-dated',
+        } or not self._rear_wait_for_input(reason):
+            return None
+        # The position action already reached staging.  Reissuing it here can
+        # move the base after a sensor-only pause, so remeasure at rest and
+        # command only one residual yaw correction.
+        actual, _ = self.capture_stationary_pose(intermediate=True)
+        residual = _angle(stage['yaw'] - actual[2])
+        self.emit('rear_staging_rotation_resuming', reason=reason,
+                  target_preserved=True, delta_yaw_rad=residual)
+        if abs(residual) <= self.home_contract['yaw_tolerance_rad']:
+            return actual
+        turned = self._rotate_in_place(residual)
+        self.emit('staging_turn_observed', requested_yaw_rad=residual,
+                  observed_yaw_rad=turned, observation_frame='odom',
+                  controller='damped')
+        if turned is None:
+            return None
+        actual, _ = self.capture_stationary_pose(intermediate=True)
+        return actual
+
     def _execute_service_once(self, *, final_parking, alignment, staging=False, face=False):
         normal_departure = (
             not (final_parking or alignment or staging)
@@ -489,6 +518,7 @@ class RearBoxParkingMixin:
         if observed['gap_m'] < 0.05:
             return observed
         gain = 1.0
+        input_recovery_used = False
         # Bound stationary heading correction to a primary command and one
         # measured residual command; do not repeat left/right corrections.
         for _attempt in range(2):
@@ -504,8 +534,20 @@ class RearBoxParkingMixin:
             self.emit('rear_dock_face_heading_alignment', angle_rad=error,
                       correction_rad=correction, gain=gain, translation_requested=False)
             if self._rotate_in_place(correction) is None:
-                raise RuntimeError(getattr(self, '_last_direct_motion_failure', None)
-                                   or 'rear dock heading alignment incomplete')
+                reason = (getattr(self, '_last_direct_motion_failure', None)
+                          or 'rear dock heading alignment incomplete')
+                if (reason not in {
+                        'rotation scan unavailable',
+                        'rotation scan stale or future-dated',
+                } or input_recovery_used or not self._rear_wait_for_input(reason)):
+                    raise RuntimeError(reason)
+                input_recovery_used = True
+                observed = self._observe_rear_box_recovering(
+                    geometry, extent, half_width, allow_range_reapproach=True)
+                _same_target(initial, observed)
+                self.emit('rear_dock_face_heading_alignment_resuming',
+                          reason=reason, target_preserved=True)
+                continue
             observed = self._observe_rear_box_recovering(
                 geometry, extent, half_width, allow_range_reapproach=True)
             _same_target(initial, observed)
@@ -718,6 +760,7 @@ class RearBoxParkingMixin:
         recoverable = {
             'rear box scan unavailable', 'rear box scan stale or future-dated',
             'rear box corridor unavailable', 'rear docking swept footprint occupied',
+            'rotation scan unavailable', 'rotation scan stale or future-dated',
         }
         if reason not in recoverable and not self._input_gap_recoverable(reason):
             return False

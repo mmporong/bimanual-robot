@@ -1,6 +1,7 @@
 """Verify bounded table transit and face-based parking without hardware."""
 
 import contextlib
+from collections import deque
 from copy import deepcopy
 import inspect
 import json
@@ -77,6 +78,7 @@ def mission(monkeypatch):
     target = {'x_m': 0.885, 'y_m': 0.0, 'yaw_rad': 0.0,
               'face_center_map_xy_m': (1.0, 0.0), 'outward_normal_map_xy': (-1.0, 0.0)}
     node.observe_target = Mock(return_value=target)
+    node._set_observer_perception = Mock(return_value=True)
     return node
 
 
@@ -87,6 +89,21 @@ def invoke(node, execute=True, *, search=False):
                       'wheel_outer_width': {'value': 0.540}},
         'table_01', (1, 0), 0.6, execute=execute,
         candidate_trial=execute, search=search)
+
+
+def test_visit_enables_depth_perception_only_after_transit(mission):
+    assert invoke(mission)
+
+    assert mission._set_observer_perception.call_args_list == [
+        ((False,), {}), ((True,), {})]
+
+
+def test_visit_keeps_transit_when_unneeded_depth_perception_cannot_disable(mission):
+    mission._set_observer_perception.side_effect = [False, True]
+
+    assert invoke(mission)
+
+    assert mission.execute.called
 
 
 @pytest.mark.parametrize('entrypoint', ['visit', 'observation'])
@@ -2180,6 +2197,62 @@ class _ParameterClientStub:
         self.requests.append([(p.name, p.value) for p in parameters])
         return SetParametersAtomically.Response(result=SetParametersResult(
             successful=self.successful, reason='' if self.successful else 'rejected'))
+
+
+def test_observer_perception_gate_changes_only_once_and_clears_cached_status():
+    node = object.__new__(BoxServiceRoute)
+    node.emit = Mock()
+    node._wait = lambda future, timeout_s: future
+    node.observer_parameters = _ParameterClientStub()
+    node._observer_perception_enabled = None
+    node.box_status = {'detected': True, 'stamp_s': 10.}
+    node.box_status_received_s = 10.
+    node.box_status_history = deque([(10., node.box_status)], maxlen=16)
+
+    assert node._set_observer_perception(False)
+    assert node._set_observer_perception(False)
+
+    assert len(node.observer_parameters.requests) == 1
+    assert dict(node.observer_parameters.requests[0]) == {'perception_enabled': False}
+    assert node.box_status is None
+    assert node.box_status_received_s is None
+    assert list(node.box_status_history) == []
+
+
+def test_observer_perception_enable_discards_gate_status_until_fresh_depth():
+    node = object.__new__(BoxServiceRoute)
+    node.emit = Mock()
+    node._wait = lambda future, timeout_s: future
+    node.observer_parameters = _ParameterClientStub()
+    node._observer_perception_enabled = False
+    node.box_status = None
+    node.box_status_received_s = None
+    node.box_status_history = deque(maxlen=16)
+
+    assert node._set_observer_perception(True)
+    node._box_callback(SimpleNamespace(data=json.dumps({
+        'reason': 'perception_enabled_waiting_for_depth', 'stamp_s': 11.})))
+    assert node.box_status is None
+    node._box_callback(SimpleNamespace(data=json.dumps({
+        'reason': 'stable_detection', 'detected': True, 'stamp_s': 11.1})))
+    assert node.box_status['stamp_s'] == 11.1
+
+
+def test_failed_observer_disable_still_invalidates_local_cached_status():
+    node = object.__new__(BoxServiceRoute)
+    node.emit = Mock()
+    node._wait = lambda future, timeout_s: future
+    node.observer_parameters = _ParameterClientStub(successful=False)
+    node._observer_perception_enabled = None
+    node.box_status = {'detected': True, 'stamp_s': 10.}
+    node.box_status_received_s = 10.
+    node.box_status_history = deque([(10., node.box_status)], maxlen=16)
+
+    assert not node._set_observer_perception(False)
+
+    assert node.box_status is None
+    assert node.box_status_received_s is None
+    assert list(node.box_status_history) == []
 
 
 def test_pointcloud_mode_passes_the_selected_region_and_complete_mount_revision():

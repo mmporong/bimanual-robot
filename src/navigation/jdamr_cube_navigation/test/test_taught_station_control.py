@@ -52,6 +52,8 @@ def _node():
     node._station_reference_wake = threading.Event()
     node._station_reference_stop = threading.Event()
     node._station_reference_thread = None
+    node._station_reference_perception_active = True
+    node._observer_perception_enabled = False
     node.stop_requested = False
     node.parking_motion_revision = 0
     node.run_deadline_s = None
@@ -158,11 +160,11 @@ def test_profile_loads_hash_bound_registered_pose_and_one_rgb_pair(
     assert node.create_subscription.call_count == 2
     topics = [call.args[1] for call in node.create_subscription.call_args_list]
     assert topics == ['/camera/color/camera_info', '/camera/color/image_raw']
+    assert node._station_reference_perception_active is False
+    assert node._station_reference_thread is None
+    node._start_station_reference_perception()
     assert node._station_reference_thread.is_alive()
-    node._station_reference_stop.set()
-    node._station_reference_wake.set()
-    node._station_reference_thread.join(timeout=1.)
-    assert not node._station_reference_thread.is_alive()
+    node._stop_station_reference_perception()
 
 
 def test_profile_rejects_different_map_before_subscribing(tmp_path, monkeypatch):
@@ -201,6 +203,7 @@ def test_switch_from_water_rgbd_to_featureless_table_clears_the_old_reference(
     constructor = Mock(return_value=Mock())
     monkeypatch.setattr(box_service, 'TaughtStationReference', constructor)
     node.configure_station_reference(profile_path, 'water_station')
+    node._start_station_reference_perception()
     worker = node._station_reference_thread
     node.station_reference_goal = {'valid': True, 'goal_odom': [8., 8., 0.]}
     node.station_reference_goal_frozen = True
@@ -323,6 +326,7 @@ def test_worker_uses_image_stamp_tf_and_keeps_only_registered_pose_correction(mo
         'goal_odom': [1., .25, .2], 'stamp_s': 10., 'goal_left_offset_m': 0.,
     }
     node.station_reference = model
+    node._station_reference_perception_active = True
     node.parking_tf = Mock()
 
     def lookup(target, source, stamp, **kwargs):
@@ -419,6 +423,7 @@ def test_rgb_callback_is_nonblocking_and_replaces_pending_frame():
     node = _node()
     model = Mock()
     node.station_reference = model
+    node._station_reference_perception_active = True
     node.station_reference_rgb_info = SimpleNamespace(
         header=SimpleNamespace(frame_id='camera_color_optical_frame'))
 
@@ -665,6 +670,111 @@ def test_destroy_stops_worker_before_ros_node(monkeypatch):
 
     assert not worker.is_alive()
     destroyed.assert_called_once_with()
+
+
+def test_go_home_stops_station_rgb_worker_before_dock_return(monkeypatch):
+    node = _node()
+    node.station_reference = _rgbd_model()
+    node._station_reference_perception_active = True
+    node._station_reference_pending = ('queued-rgb', 'info', 10.)
+    node._set_observer_perception = Mock(return_value=True)
+    worker = threading.Thread(target=node._station_reference_loop)
+    node._station_reference_thread = worker
+    worker.start()
+    inherited = Mock(return_value='home')
+    monkeypatch.setattr(ServiceRoute, 'go_home', inherited)
+
+    assert node.go_home(execute=True, timeout_s=500.) == 'home'
+
+    assert node._station_reference_perception_active is False
+    assert node._station_reference_thread is None
+    assert node._station_reference_pending is None
+    assert not worker.is_alive()
+    inherited.assert_called_once_with(execute=True, timeout_s=500.)
+    node._set_observer_perception.assert_called_once_with(False)
+
+
+def test_go_home_keeps_lidar_route_when_depth_perception_cannot_disable(monkeypatch):
+    node = _node()
+    node._set_observer_perception = Mock(return_value=False)
+    inherited = Mock(return_value=True)
+    monkeypatch.setattr(ServiceRoute, 'go_home', inherited)
+
+    assert node.go_home(execute=True, timeout_s=500.) is True
+
+    inherited.assert_called_once_with(execute=True, timeout_s=500.)
+
+
+def test_go_home_keeps_lidar_route_when_station_worker_stop_times_out(monkeypatch):
+    node = _node()
+    node._stop_station_reference_perception = Mock(return_value=False)
+    node._set_observer_perception = Mock(return_value=True)
+    inherited = Mock(return_value=True)
+    monkeypatch.setattr(ServiceRoute, 'go_home', inherited)
+
+    assert node.go_home(execute=True, timeout_s=500.) is True
+
+    inherited.assert_called_once_with(execute=True, timeout_s=500.)
+
+
+def test_rear_box_parking_disables_front_depth_perception(monkeypatch):
+    node = _node()
+    node._set_observer_perception = Mock(return_value=True)
+    inherited = Mock(return_value='parked')
+    monkeypatch.setattr(box_service.RearBoxParkingMixin, 'park_rear_box', inherited)
+
+    assert node.park_rear_box('geometry', 'route', execute=True) == 'parked'
+
+    node._set_observer_perception.assert_called_once_with(False)
+    inherited.assert_called_once_with('geometry', 'route', execute=True)
+
+
+def test_station_rgb_callback_does_no_decode_after_perception_stops(monkeypatch):
+    node = _node()
+    node.station_reference = _rgbd_model()
+    node._station_reference_perception_active = False
+    decode = Mock(side_effect=AssertionError('RGB decode must stay off at the dock'))
+    monkeypatch.setattr(node, '_station_image_array', decode)
+
+    node._station_image_callback(object())
+
+    decode.assert_not_called()
+    assert node._station_reference_pending is None
+
+
+def test_station_worker_drops_inflight_result_when_perception_stops():
+    node = _node()
+    entered = threading.Event()
+    release = threading.Event()
+    model = _rgbd_model(contact_reference=None)
+
+    def observe(*_args):
+        entered.set()
+        assert release.wait(timeout=1.)
+        return {'valid': False, 'reason': 'late_result', 'stamp_s': 10.}
+
+    model.observe.side_effect = observe
+    node.station_reference = model
+    node._station_reference_perception_active = True
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(transform=_pose())
+    node.get_clock.return_value = _clock(10.1)
+    node._station_reference_pending = (None, None, 10.)
+    worker = threading.Thread(target=node._station_reference_loop)
+    node._station_reference_thread = worker
+    worker.start()
+    node._station_reference_wake.set()
+    assert entered.wait(timeout=1.)
+    stopped = threading.Thread(target=node._stop_station_reference_perception)
+    stopped.start()
+    release.set()
+    stopped.join(timeout=1.)
+
+    assert not stopped.is_alive()
+    assert not worker.is_alive()
+    assert node.station_reference_result is None
+    assert not any(call.args and call.args[0] == 'station_reference_input_status'
+                   for call in node.emit.call_args_list)
 
 
 def test_three_consistent_near_tape_views_replace_challenged_goal_without_arrival():

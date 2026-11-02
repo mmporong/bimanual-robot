@@ -58,6 +58,7 @@ class TableTapeReference:
         full_mask = (gray < 65).astype(np.uint8)
         contours = list(contours) + list(cv2.findContours(
             full_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0])
+        seen_top_edges = set()
         for contour in contours:
             _, y, component_width, _ = cv2.boundingRect(contour)
             # The upper edge cannot be wider than its bounding box. Reject
@@ -69,6 +70,13 @@ class TableTapeReference:
             x = int(upper[:, 0].min())
             w = int(upper[:, 0].max()) - x + 1
             h = 2
+            top_edge = (x, y, w)
+            if top_edge in seen_top_edges:
+                continue
+            # Transition and full-dark masks can describe the same strip top.
+            # Every remaining test depends only on this geometry and source
+            # pixels, so the duplicate would repeat the same work and outcome.
+            seen_top_edges.add(top_edge)
             # Reject clipped components, arm silhouettes and isolated pixels.
             if not (4 <= w <= 90
                     and x >= w and x + 2 * w < gray.shape[1] and y >= 3
@@ -80,9 +88,7 @@ class TableTapeReference:
                                     gray[y:y+h, x+w:x+2*w].ravel()))
             if np.median(above) < 100 or np.median(sides) < 95:
                 continue
-            top = contour[:, 0, :]
-            top = top[top[:, 1] <= y + 1]
-            u = float((top[:, 0].min() + top[:, 0].max()) / 2)
+            u = float(x + (w - 1) / 2)
             point = self._point(u, float(y))
             ends = [self._point(x, y), self._point(x+w, y)]
             if point is None or any(p is None for p in ends):

@@ -117,6 +117,7 @@ class DepthBoxParkingNode(Node):
             ('random_seed', defaults.random_seed),
             ('processing_hz', 5.0),
             ('max_image_age_s', 0.5),
+            ('perception_enabled', True),
             ('optical_frame', 'camera_color_optical_frame'),
             ('calibration_model', 'rectified_projection'),
             ('stable_frames', 8),
@@ -203,6 +204,8 @@ class DepthBoxParkingNode(Node):
         processing_hz = float(self.get_parameter('processing_hz').value)
         self._max_image_age_s = float(
             self.get_parameter('max_image_age_s').value)
+        self._perception_enabled = bool(
+            self.get_parameter('perception_enabled').value)
         if not math.isfinite(processing_hz) or processing_hz <= 0.0:
             raise ValueError('processing_hz must be finite and positive')
         if (not math.isfinite(self._max_image_age_s)
@@ -280,9 +283,16 @@ class DepthBoxParkingNode(Node):
         region = getattr(self, '_table_region_map', None)
         calibration_id = getattr(self, '_table_calibration_id', '')
         request_enabled = getattr(self, '_table_request_enabled', False)
+        perception_enabled = getattr(self, '_perception_enabled', True)
         for parameter in parameters:
             value = parameter.value
             name = parameter.name
+            if name == 'perception_enabled':
+                if not isinstance(value, bool):
+                    return SetParametersResult(
+                        successful=False, reason='perception flag must be bool')
+                perception_enabled = value
+                continue
             if name == 'table_request_enabled':
                 if not isinstance(value, bool):
                     return SetParametersResult(
@@ -356,14 +366,18 @@ class DepthBoxParkingNode(Node):
             mode != getattr(self, '_surface_mode', 'front')
             or region != getattr(self, '_table_region_map', None)
             or request_enabled != getattr(self, '_table_request_enabled', False)
+            or perception_enabled != getattr(self, '_perception_enabled', True)
             or calibration_id != getattr(self, '_table_calibration_id', '')
             or any(getattr(candidate_table, name) != getattr(table_config, name)
                    for name in ('camera_height_m', 'camera_roll_rad', 'camera_pitch_rad')))
         changed = candidate_table != table_config or reference_changed
+        perception_changed = (
+            perception_enabled != getattr(self, '_perception_enabled', True))
         if parameters:
             self._config = replace(self._config, **common_updates)
             self._table_config = candidate_table
             self._surface_mode = mode
+            self._perception_enabled = perception_enabled
             self._table_region_map = region
             self._table_request_enabled = request_enabled
             self._table_calibration_id = calibration_id
@@ -373,6 +387,14 @@ class DepthBoxParkingNode(Node):
                 self._stability.update(None)
                 if getattr(self, '_table_tracker', None) is not None:
                     self._table_tracker.reset()
+            if perception_changed and hasattr(self, '_status'):
+                self._publish({
+                    'detected': False,
+                    'stable': False,
+                    'stable_frame_count': 0,
+                    'reason': ('perception_enabled_waiting_for_depth'
+                               if perception_enabled else 'perception_disabled'),
+                })
         return SetParametersResult(successful=True)
 
     @staticmethod
@@ -520,6 +542,8 @@ class DepthBoxParkingNode(Node):
         return track.detection, fields, stable
 
     def _on_depth(self, message: Image) -> None:
+        if not getattr(self, '_perception_enabled', True):
+            return
         now_s = time.monotonic()
         self._last_depth_callback_s = now_s
         if now_s - self._last_processed_s < self._minimum_period_s:

@@ -5,6 +5,19 @@
 ---
 
 
+## 2026-11-02 | 구간별 영상 계산 중단과 라이다 지연 복구
+
+- 사용자 요청: 급수대 깊이 지연·도크 복귀 중 영상 처리·회전 scan 지연을 구분하여 수정, 물리 주행 없이 반영.
+- 관측근거: 135750 run 깊이 지연 breakdown 41건. 예시 입력나이197ms+검출447ms+상태콜백 대기253ms로 총902ms, fresh_depth_available=true. 카메라 완전 단절이 아니라 계산/처리 대기 누적. Pi 높은 CPU 부하가 기여할 가능성이 크나 타기기 고정입력 속도만으로 스케줄링을 단독 원인으로 확정하지 않음. 도크 복귀 중 station RGB 처리 지속, table_request_enabled=false여도 legacy 면 검출 실행을 코드에서 확인.
+- box_service/depth: 이동·도크·후면 주차에서는 station RGB worker와 depth 디코드/면 검출을 중단, 관측 지점 이후 재활성화. 카메라 AST1 송신·depth/scan 구독·watchdog 유지. 새 perception_enabled 파라미터 전환 시 stability/tracker/status/history 초기화, 새 관측 요구. 비활성화 실패는 기록하고 라이다/Nav 경로 계속; 깊이가 필요한 관측 단계에서 활성화 실패만 차단. RGB worker 늦은 완료가 이전 목표를 덮지 않도록 차단.
+- rear: 회전 scan stale/unavailable 정지 후 기존 deadline 내 fresh scan 대기, 현재 정지 자세를 재측정해 남은 회전 1회 재개. staging 위치 action 재발행 없음. 면 방향 정렬도 새 면 관측/동일 목표 확인 후 재개. 센서 0.5초 유효성·충돌·사용자 정지 유지.
+- 오류표시: helper execution_failure_cause가 trim_rotation_stopped를 놓쳐 급수대의 이전 depth 오류를 도크 종료 원인으로 표시하던 버그 수정. 최신 회전 scan 오류를 표시.
+- tape: 같은 top edge의 중복 픽셀 검사·투영 제거. 고정 RGB16프레임에서 processing_s 제외 결과 전체 동등, 로컬 중앙값2.072→1.922ms. 주행 중 지연 완전 해결 수치가 아님. RANSAC 최적화 후보는 성능 악화로 폐기, 깊이 검출 수학/카메라 보정/동기 callback/계산 후 만료 차단 유지.
+- 검증: 올바른 ROS overlay에서 관련447건 PASS, 후면96건 PASS, 출발 helper169건 PASS(묶음 간 중복 가능). 별도 검토의 staging 위치 재실행 지적 수정 완료, 남은 코드 차단 이슈 없음. LSP 도구는 없어 AST/py_compile와 실행검사로 확인.
+- Pi 4모듈 반영 및 SHA 대조, 관측기·실행기 active. 백업 ~/jdamr_deploy/backups/perception_phase_latency_20261102_141602/. 마지막 rear SHA 4d3ce81514876c8b5d5681d01ce79dea4678fad0d6835d869fa207364d56a207. runtime 보정·component/tracking startup 값 보존, 정지 후 perception_enabled=false.
+- 정지 확인: disabled 3초 depth30/scan30/status0; enabled 5초 depth50/scan48/status20, 계산max87.7ms, 도크 장면 no_table_edge_candidate. 원본 ~/jdamr_data/analysis_20261102/full_route_failure/phase_gate_deployed.jsonl. 물리 재주행 없음. 급수대 접근 중 .5초 초과와 실물 정확도의 재발 방지는 다음 주행 확인 필요.
+- 후면 remembered point는 목표면에서 약66.9mm 떨어져 있어 박스점으로 확정할 근거 없음. footprint 내부 투영만으로 장애물 무효화하지 않았으며 이 원인의 도킹 차단은 미해결. 진단이 생성한 Pi ROS daemon PID87911/88212 종료 확인. 팀원 water_service 두 파일 보존, 원격 push 없음.
+
 ## 2026-11-02 | 동기 검출 복원 후 급수대 왕복과 도크 미완료
 
 - 사용자 급수대·도크 왕복 요청으로 water_station_20261102_135750_abb962d1 실행. 급수대 재정렬과 depth stale 대기 반복 후 접근·이탈 완료. 내부 앞간격10.33/10.47mm, 면각도0.018도, 고정목표 좌우0.78mm이나 RGB 관측 좌우14.48mm. 최종depth실측false이고 실물 정확도 미확인. 동기 원복만으로 끊김이 해결되지는 않음.

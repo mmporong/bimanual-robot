@@ -56,6 +56,28 @@ def test_long_depth_callback_does_not_trigger_silent_subscription_recovery(
     assert node._depth_callback_active is False
 
 
+def test_disabled_perception_keeps_watchdog_active_without_running_detection(monkeypatch):
+    """The executor can pause point-cloud work without making DDS look silent."""
+    node = object.__new__(DepthBoxParkingNode)
+    node._perception_enabled = False
+    node._last_processed_s = 7.0
+    node._last_depth_callback_s = 10.0
+    node._depth_callback_active = False
+    monotonic = iter((20.0,))
+    monkeypatch.setattr(
+        'jdamr_cube_navigation.depth_box_parking.time.monotonic',
+        lambda: next(monotonic))
+    monkeypatch.setattr(
+        'jdamr_cube_navigation.depth_box_parking.decode_depth_observation',
+        lambda *_a, **_kw: pytest.fail('disabled perception decoded depth'))
+
+    node._on_depth_with_watchdog_activity(SimpleNamespace())
+
+    assert node._last_processed_s == 7.0
+    assert node._last_depth_callback_s == 20.0
+    assert node._depth_callback_active is False
+
+
 def test_silent_matched_depth_subscription_is_recreated(monkeypatch):
     """A matched writer with no callbacks rematches without widening freshness."""
     node = object.__new__(DepthBoxParkingNode)
@@ -521,6 +543,26 @@ def test_unchanged_observer_parameters_preserve_accumulated_stability():
     assert not node.resets
     assert node._on_parameters(_parameters(camera_pitch_rad=.91)).successful
     assert node.resets == [None]
+
+
+def test_perception_gate_is_boolean_and_resets_accumulated_stability():
+    node = _surface_parameter_node()
+    messages = []
+    node._status = SimpleNamespace(publish=messages.append)
+
+    assert not node._on_parameters(_parameters(perception_enabled=0)).successful
+    assert node._on_parameters(_parameters(perception_enabled=False)).successful
+    assert node._perception_enabled is False
+    assert node.resets == [None]
+    assert json.loads(messages[-1].data)['reason'] == 'perception_disabled'
+
+    node.resets.clear()
+    assert node._on_parameters(_parameters(perception_enabled=False)).successful
+    assert not node.resets
+    assert node._on_parameters(_parameters(perception_enabled=True)).successful
+    assert node._perception_enabled is True
+    assert node.resets == [None]
+    assert json.loads(messages[-1].data)['reason'] == 'perception_enabled_waiting_for_depth'
 
 
 def test_table_mode_requires_height_and_updates_geometry_as_one_configuration():
