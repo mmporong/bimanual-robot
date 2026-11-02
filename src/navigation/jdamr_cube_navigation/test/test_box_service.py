@@ -3713,6 +3713,7 @@ def test_recovered_depth_history_does_not_block_fresh_table_occlusion():
 
 def _moving_table_route(monkeypatch):
     node = object.__new__(BoxServiceRoute)
+    node._station_reference_lock = Lock()
     monkeypatch.setattr(box_service, 'spin_node', Mock())
     clock = [10.0]
     mount = {'camera_mount': {
@@ -4788,6 +4789,8 @@ def test_tape_acquisition_does_not_steer_to_opposite_map_lateral_goal(monkeypatc
         {'valid': True, 'stamp_s': 10.2})
     control = update((.21,0.,0.))
     assert control['lateral_error_m'] == pytest.approx(.014)
+    node._station_goal_reference.assert_called_with(freeze=False, continuous_rebase=True)
+    assert node.station_reference_goal_frozen is False
 
 
 def test_far_tape_goal_is_ignored_and_reset_once_at_thirty_cm(monkeypatch):

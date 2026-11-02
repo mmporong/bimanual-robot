@@ -3774,8 +3774,16 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         self.emit('table_tape_close_alignment_started',
                                   gap_m=gap, minimum_rgb_stamp_s=cutoff,
                                   far_goal_discarded=True)
+            if (tape and getattr(self, '_station_terminal_goal', None) is None
+                    and not getattr(self, '_station_reference_goal_challenged', False)
+                    and not getattr(self, '_table_rebase_requires_restage', False)):
+                # Before alignment, follow the filtered visual destination on
+                # every frame instead of holding one frame until a late rebase.
+                # The aligned terminal band below owns the final fixed goal.
+                with self._station_reference_lock:
+                    self.station_reference_goal_frozen = False
             goal, reference = self._station_goal_reference(
-                freeze=True, continuous_rebase=True)
+                freeze=not tape, continuous_rebase=True)
             if getattr(self, '_station_reference_goal_challenged', False):
                 raise RuntimeError('table approach tape reference pending')
             if (actual is not None

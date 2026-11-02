@@ -343,7 +343,10 @@ class WaterServiceController:
         if dry_run:
             return self._announce_once(request_id, f"would_start {order_id}")
         with self._lock:
-            if request_id in self._state.setdefault("requests", {}):
+            requests = self._state.setdefault("requests", {})
+            if (request_id in requests or self._state.get("order_id") == order_id
+                    or any(item.get("order_id") == order_id
+                           for item in requests.values())):
                 return None
         self.start(request_id)
         return f"start {order_id}"
@@ -659,6 +662,10 @@ class WaterServiceController:
             raise RuntimeError("order server did not return an order_id")
         with self._lock:
             self._state["order_id"] = order_id
+            request_id = self._state.get("request_id")
+            if request_id:
+                self._state.setdefault("requests", {}).setdefault(request_id, {})[
+                    "order_id"] = order_id
             self._save_state()
 
     def _drive_ready(self, state: dict[str, Any], destination: str) -> bool:
@@ -762,6 +769,7 @@ class WaterServiceController:
             "phase": self._state.get("phase"),
             "mode": self._state.get("mode"),
             "error": self._state.get("error"),
+            "order_id": self._state.get("order_id"),
         }
 
     def _load_state(self) -> dict[str, Any]:
