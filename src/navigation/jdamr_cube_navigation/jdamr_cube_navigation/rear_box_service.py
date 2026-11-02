@@ -44,6 +44,9 @@ REAR_CENTER_TOLERANCE_M = 0.05
 REAR_COARSE_SEGMENT_M = 0.5
 REAR_REOBSERVE_SEGMENT_M = 0.2
 REAR_FACE_REOBSERVE_GAP_M = 0.2
+# Planning candidates, not measured calibration: retain at least 10 cm for a
+# stopped same-face observation before the final live-gap controller.
+REAR_CENTER_REOBSERVE_GAPS_M = (REAR_FACE_REOBSERVE_GAP_M, 0.15, 0.1)
 REAR_FINAL_TRIM_MAX_M = 0.01
 # Observation only: the swept footprint and gap calculation retain the chassis width.
 REAR_FACE_OBSERVATION_HALF_WIDTH_M = 1.2
@@ -60,23 +63,31 @@ def _rear_gap_confirmed(gap_m, error_rad, half_width_m, target_gap_m):
             and target_gap_m - .003 <= far_gap_m <= target_gap_m + .003)
 
 
-def _rear_center_target(observed, extent):
+def _rear_center_target(observed, extent, gap_m=REAR_FACE_REOBSERVE_GAP_M):
     normal, midpoint = observed['normal_odom'], observed['midpoint_odom']
-    return (*(midpoint[i] + (extent + REAR_FACE_REOBSERVE_GAP_M) * normal[i]
+    return (*(midpoint[i] + (extent + gap_m) * normal[i]
               for i in (0, 1)), math.atan2(normal[1], normal[0]))
 
 
+def _rear_center_curve_gap(observed, extent):
+    """Prefer the farther handoff, then use a longer feasible reverse curve."""
+    for gap_m in REAR_CENTER_REOBSERVE_GAPS_M:
+        try:
+            reverse_curve_waypoints(
+                observed['base_pose_odom'], _rear_center_target(observed, extent, gap_m))
+        except ValueError as error:
+            if str(error) == 'already at goal':
+                return gap_m
+            if str(error) in ('reverse curve is tighter than min_radius_m',
+                              'start_pose must be in front of target_pose'):
+                continue
+            raise
+        return gap_m
+    return None
+
+
 def _rear_center_curve_available(observed, extent):
-    try:
-        reverse_curve_waypoints(observed['base_pose_odom'], _rear_center_target(observed, extent))
-    except ValueError as error:
-        if str(error) == 'already at goal':
-            return True
-        if str(error) in ('reverse curve is tighter than min_radius_m',
-                          'start_pose must be in front of target_pose'):
-            return False
-        raise
-    return True
+    return _rear_center_curve_gap(observed, extent) is not None
 
 
 def _observe_rear_face_roi(scan, geometry, extent, half_width, expected_span_m=None):
@@ -369,7 +380,12 @@ class RearBoxParkingMixin:
                 and observed['gap_m'] <= REAR_STRAIGHT_HANDOFF_M):
             self._rear_center_skipped = True
             return True
-        target_odom = _rear_center_target(observed, extent)
+        # Re-evaluate from the current pose: a guarded clearance can have moved
+        # the base since this fixed-in-odom face was observed.
+        curve_gap = _rear_center_curve_gap(dict(observed, base_pose_odom=odom), extent)
+        if curve_gap is None:
+            raise RuntimeError('rear dock centering reverse curve unavailable')
+        target_odom = _rear_center_target(observed, extent, curve_gap)
         _path, to_odom = self._frozen_in_odom(RosPath())
         anchor = to_odom(0., 0., 0.)
         cosine, sine = math.cos(anchor[2]), math.sin(anchor[2])
@@ -393,7 +409,7 @@ class RearBoxParkingMixin:
         self.waypoints = [{'id': 'rear_box_center', 'x': target[0], 'y': target[1],
                            'yaw': target[2]}]
         self.emit('rear_dock_centering_started', target_odom=list(target_odom),
-                  lateral_error_m=lateral, target_gap_m=REAR_FACE_REOBSERVE_GAP_M)
+                  lateral_error_m=lateral, target_gap_m=curve_gap)
         # This is an observation waypoint, not the final dock pose.
         # Reobserve the same face and finish heading before terminal approach.
         completed = self._execute_reverse_once(

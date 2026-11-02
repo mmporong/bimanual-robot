@@ -1083,3 +1083,37 @@ def test_small_lateral_offset_at_57cm_skips_curve():
     node._make_reverse_path = Mock(side_effect=AssertionError('unnecessary curve'))
     assert module.RearBoxParkingMixin._center_rear_box(node,observed,.275)
     assert node._rear_center_skipped and not node._rear_center_moved
+
+
+@pytest.mark.parametrize('angle', [-.0466, 0., .0466])
+@pytest.mark.parametrize('sign', [-1., 1.])
+def test_longer_reverse_curve_avoids_forward_clearance_at_five_cm_offset(angle, sign):
+    # Nov 2 log: gap=1-.507577504, lateral=-.058358623. The initial
+    # orientation was not logged; bracket it with explicit synthetic +/-2.67deg.
+    normal = math.cos(angle), math.sin(angle)
+    tangent = -normal[1], normal[0]
+    gap, lateral, extent = .492422496, sign*.058358623, .275
+    midpoint = tuple(-(gap+extent)*normal[i]-lateral*tangent[i] for i in (0,1))
+    observed = face(gap, angle)
+    observed.update(normal_odom=normal, midpoint_odom=midpoint, face_odom=midpoint,
+                    base_pose_odom=(0.,0.,0.), observation_roi_clipped=False)
+    with pytest.raises(ValueError, match='tighter than min_radius_m'):
+        module.reverse_curve_waypoints((0.,0.,0.), module._rear_center_target(observed,extent))
+    selected = module._rear_center_curve_gap(observed,extent)
+    assert selected in (.15,.1)
+    path = module.reverse_curve_waypoints(
+        (0.,0.,0.), module._rear_center_target(observed,extent,selected))
+    assert path[-1] == pytest.approx(module._rear_center_target(observed,extent,selected))
+    node = route_node()
+    for name in ('verify_live_maps','_confirm_collision_monitor_on'):
+        setattr(node,name,Mock())
+    for name in ('wait_until_ready','_reverse_smoother_ready','_parking_parameters_ready'):
+        setattr(node,name,Mock(return_value=True))
+    node.emit = Mock()
+    node._observe_rear_box_recovering = Mock(return_value=observed)
+    node._clear_rear_dock_straight = Mock(side_effect=AssertionError('unnecessary forward'))
+    node._align_rear_face_before_clearance = Mock(side_effect=AssertionError('unnecessary rotation'))
+    node._park_rear_face = Mock(return_value=True)
+    assert node.park_rear_box(GEOMETRY,'route',execute=True,timeout_s=90,target_gap_m=.01)
+    node._clear_rear_dock_straight.assert_not_called()
+    node._center_rear_box.assert_called_once_with(observed, pytest.approx(extent))

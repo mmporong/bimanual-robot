@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-11-02 | 급수대·도크 실차 확인 및 후면 불필요한 전진 수정
+
+- 원격 main fetch/pull 결과 f7edff8로 최신,11/1 팀원 신규 원격 커밋/PR 없음. 기존 팀원 water_service.py/water_service_api.py 미커밋 변경 보존.
+- Pi 새 세션 기동·등록 도크 스캔 기반 init 완료. inlier0.43, AMCL 대조6mm. 배터리12.452V. Collision Monitor lifecycle active, StopZone=true/min_points3, FootprintApproach=true, SlowdownZone=false 확인. cmd_vel_smoothed→collision_monitor→cmd_vel→base_driver 연결 확인.
+- Windows Astra USB 장치는 OK였지만 Python 송신기가 없었음. 현재 기준 저장소의 카메라 브리지만 기동, Pi 수신 약10fps/깊이 영상 나이약0.10초/시계 RTT약2.2ms 확인. 팔 실행기·주문·추론은 기동하지 않음.
+- 사용자 요청 급수대→도크 시험 run `water_station_20261102_090031_4ea5b452`: 급수대 box_approach_finished 후 도크 복귀 도중 사용자가 사람 접근에도 정지되지 않는다고 보고. 에이전트 긴급정지 개입. 이 실행을 전체 왕복 성공으로 기록하지 않는다. 사용자 후속 복귀 지시로 정지·명령 종료 확인→reset→dock-only 실행.
+- dock-only `water_station_20261102_090322_6f0efc17`: home_arrived confirmed=true. 후면 라이다 내부 nearest7.911mm/farthest9.423mm/yaw-0.1925도, 외부 실측 미확인. 근처 gap0.492422496m/lateral-0.058358623m에서20cm 관측 목표의 곡선 반경 부족으로0.507577504m 전진 후 중앙 곡선→후면 주차. 고정20cm 목표 때문에 불필요한 전후진 발생 확인.
+- 수정: 곡선 인계 후보20/15/10cm를 순서대로 계산해 기존 최소 회전반경을 만족하는 가장 먼 인계점 선택. 중심 이동 직전 현재 odom으로 다시 계산. 기존 static swept corridor/실시간 충돌/동일 면 재관측/최종1cm 조건 유지. 관련83개 실행 확인 통과, 위 거리/좌우와 명시적 합성각±2.67도에서 전진 없이 곡선 가능 확인. 수정 후 실차 재시험은 하지 않음.
+- Pi 원본 해시 HEAD 일치·spool 비어 있음 확인 후 백업 `~/jdamr_deploy/backups/rear_continuous_20261102_090822`, rear_box_service.py 교체. SHA256730f9cda4a9e8e2cb94ba5ae6fe2e0ba921d8959fbf542b84f60b79f1708cfc2. 실행기 재시작 PID5338→10429 active/running.
+- CM 기록 `~/jdamr_data/collision_trials/20261102_090034.jsonl`: StopZone 판정2구간, 이 중1표본은 nonzero 입력에서 output0. 사용자가 접근한 시점/위치와 동기화한 근거가 없어 사람 끼어들기 정지시험 통과로 판정하지 않음. 넓은 감속영역 OFF/차체 근접 정지영역이라는 현재 정책을 설명했으며 범위 수정은 아직 하지 않음. 원본 사본은 PC `~/jdamr_data/handoffs/parking_20261102/`. 임시 기록기 PID6696 종료 확인.
+- 다음 실차 확인을 위해 Nav2·실행기·Pi AST1 수신기와 Windows 카메라 송신기는 유지. Windows 카메라 Python PID27572(launcher2640), 로그 `%USERPROFILE%\jdamr_logs\astra_20261102_085929.log`; 종료는 PowerShell `Stop-Process -Id 27572`, 짝 수신기는 Pi `systemctl --user stop jdamr-astra-tcp.service`. 이동 세션 종료는 PC `python3 ~/bimanual-robot/tools/jdamr/jdamr_depart.py session-stop`. 새 물리 이동 없음.
+
 ## 2026-11-01 | 14회차 주방 근접 테이프 재기준·13회차 도크 기억점 근거 보존
 
 - 팀원 보고: 12회차 전체 성공, 13회차 도크 실패, 14회차 주방 실패. 주방 `water_station_20261101_184228_239cc532`에서 근접 테이프 관측이 기존 고정 목표와 약7cm 차이나 `station_reference_inconsistent_static_goal`로 폐기됨을 로그로 확인. 기존 static 비교가 새 관측끼리의 합의를 고려하지 않은 것은 코드로 확인했으며, 고정 목표 편향의 원인이 바퀴 미끄러짐인지는 미확정.
