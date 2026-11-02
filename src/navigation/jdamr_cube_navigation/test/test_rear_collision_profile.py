@@ -318,6 +318,42 @@ def test_only_source_verified_goal_face_is_removed_from_blind_range_memory(
         assert watch(command(-.05)) is None
 
 
+def test_source_verified_memory_reuses_provenance_without_recomputing(monkeypatch):
+    target_point = (-.2725, 0.0)
+    obstacle = (-.2725, .10)
+    source_scan = scan()
+    sources = (
+        ((0., 0., 0.), source_scan, target_point, (0., 0., 0.)),
+        ((0., 0., 0.), source_scan, obstacle, (0., 0., 0.)),
+    )
+    route, _monitor, _clock = node(
+        monkeypatch, memory=(target_point, obstacle))
+    route._blind_point_sources = list(sources)
+    route._remembered_blind_points.side_effect = None
+    route._remembered_blind_points.return_value = [target_point, obstacle]
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(
+            *target_face(),
+            lambda _pose, _scan, point: point == target_point)
+        assert watch(command(-.05)) == (
+            'rear docking swept footprint occupied')
+        route._remembered_blind_points.assert_not_called()
+        assert watch._state['filtered_memory'] == (obstacle,)
+        assert watch._state['filtered_sources'] == (sources[1],)
+
+
+def test_missing_memory_provenance_falls_back_to_filtered_recompute(monkeypatch):
+    remembered = (-.2725, 0.0)
+    route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
+    route._remembered_blind_points.side_effect = (
+        lambda _laser, _scan, source_point_filter=None:
+        [remembered] if source_point_filter is None else [])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(), lambda _pose, _scan, _point: True)
+        assert watch(command(-.05)) is None
+        route._remembered_blind_points.assert_called_once()
+
+
 def test_unverified_or_different_source_memory_still_blocks(monkeypatch):
     remembered = (-.2725, 0.0)
     route, _monitor, _clock = node(monkeypatch, memory=(remembered,))
@@ -431,6 +467,23 @@ def test_zero_command_can_stop_with_a_stale_scan(monkeypatch):
     with module.rear_collision_profile(route) as watch:
         clock['mono'] = clock['ros'] = 20.0
         assert watch(command()) is None
+
+
+def test_stale_scan_emits_throttled_latency_breakdown(monkeypatch):
+    route, _monitor, clock = node(monkeypatch)
+    route.scan_input_timing = {'receive_gap_s': .12, 'stamp_age_s': .61}
+    with module.rear_collision_profile(route) as watch:
+        clock['mono'] = clock['ros'] = 10.7
+        assert watch(command(-.05)) == 'rear box scan stale or future-dated'
+        assert watch(command(-.05)) == 'rear box scan stale or future-dated'
+        route.emit.assert_called_once()
+        event, = route.emit.call_args.args
+        values = route.emit.call_args.kwargs
+        assert event == 'rear_scan_latency_breakdown'
+        assert values['receive_age_s'] == pytest.approx(.7)
+        assert values['ros_age_s'] == pytest.approx(.7)
+        assert values['scan_input_timing'] == {
+            'receive_gap_s': .12, 'stamp_age_s': .61}
 
 
 def test_new_scan_refreshes_blind_range_memory(monkeypatch):

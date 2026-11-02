@@ -5,6 +5,17 @@
 ---
 
 
+## 2026-11-02 | 직선 도킹 완료와 센서 처리 지연 분리
+
+- `water_station_20261102_112813_f44b90ff`: 급수대 접근→도크 복귀 실행기 exit0. 사용자도 도킹 완료 수용. 급수대 내부9.23/9.17mm이나 마지막 depth 실측·tape쌍 누락으로 외부 정밀 성공은 별도. 도크 live LiDAR10.77/11.80mm,각도0.131도 confirmed=true. 곡선/전진 재도킹 없이 종료했으나 매끄러운 주행 성공은 아님.
+- 해당 회차 급수대 depth stale4회,후면 scan stale15회/unavailable1회,후면 swept occupied1회 정지·복구. 후면 fine31.195초,wait/recover17구간 합계5.171초. 후면 면 갱신 간격 median0.209/p950.504/max0.898초.
+- 이동 없는 별도 Pi subscriber12초: scan116장9.69Hz,max 수신간격0.125초,stamp age median0.109/max0.137초. depth121장10.07Hz,max간격0.130초,age median0.106/max0.147초. 현재 정지 상태 전송은 정상이며 주행 당시 네트워크 지연까지 배제한 것은 아님.
+- `_watch`가 같은 스캔의 기억점을 두 번 계산하는 경로 확인. 첫 결과와 원본 provenance를 재사용해 목표면 제외만 수행하도록 수정. provenance 불일치는 기존 계산 fallback으로 보호. PC에서 witness scan931 rays/K20 재현한 두 번째 순회 median5.153ms→zip-filter0.004ms,출력140점 동일. 전체0.5초 지연의 단독 원인으로 확정하지 않음.
+- 실행기 scan QoS를 최신1장 best-effort로 변경해 계산 중 누적된 과거스캔 처리를 줄임. 입력 수신 간격·촬영시각나이와 stale판정 시 수신나이를 분리 기록. 센서 freshness0.5초·충돌영역·속도값은 변경하지 않음. 무거운 작업의 별도 스레드 분리는 아직 적용하지 않음.
+- 동일 PC source face-fit cold 포함 전체 경로 최초56.757→54.065ms, warm median5.345→0.018ms. Pi 실주행 계산시간 개선 실측은 아님.
+- Pi 2모듈 SHA256 일치,11:38 실행기 재시작 active 확인. 백업 `~/jdamr_deploy/backups/input_latency_20261102/`.
+- 관련 입력복구/후면충돌206개 및 scan callback1개 통과. 이번 수정 후 물리 주행은 하지 않음. 별도12초 수신기는 종료됨.
+
 ## 2026-11-02 | 곡선 도킹 폐기와 등록 접근점 복원
 
 - 급수대 왕복 `water_station_20261102_111334_57ef1aab`: 급수대 내부 앞 간격9.22/8.42mm, 최종 depth 실측 없음. 영상 기준 좌우 약27mm와 고정 목표 기준 약0.24mm가 달라 외부 정밀 성공을 주장하지 않음. 깊이 지연 대기 후 복귀했으나 rear range 재관측에서 scan stale로 종료.

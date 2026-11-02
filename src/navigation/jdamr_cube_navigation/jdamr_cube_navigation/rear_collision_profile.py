@@ -266,6 +266,17 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
     if (not all(math.isfinite(value) for value in (receive_age_s, ros_age_s))
             or not 0.0 <= receive_age_s <= SCAN_MAX_AGE_S
             or not 0.0 <= ros_age_s <= SCAN_MAX_AGE_S):
+        last_emit_s = state.get('last_scan_latency_emit_s', -math.inf)
+        if now_s - last_emit_s >= 1.0:
+            try:
+                node.emit(
+                    'rear_scan_latency_breakdown',
+                    receive_age_s=receive_age_s, ros_age_s=ros_age_s,
+                    scan_input_timing=dict(
+                        getattr(node, 'scan_input_timing', None) or {}))
+                state['last_scan_latency_emit_s'] = now_s
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                pass
         return f'{scan_context} scan stale or future-dated'
     if scan.header.frame_id != state['frame_id']:
         return f'{collision_context} scan frame changed'
@@ -300,11 +311,24 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
                 filtered_memory = remembered_points
                 filtered_sources = remembered_sources
                 if callable(source_filter):
-                    filtered_memory = tuple(node._remembered_blind_points(
-                        state['laser'], scan,
-                        source_point_filter=lambda pose, source_scan, point: not
-                        source_filter(pose, source_scan, point)))
-                    filtered_sources = tuple(getattr(node, '_blind_point_sources', ()))
+                    if len(remembered_sources) == len(remembered_points):
+                        kept = []
+                        for point, source in zip(remembered_points, remembered_sources):
+                            pose, source_scan, source_point, _current_pose = source
+                            if not source_filter(pose, source_scan, source_point):
+                                kept.append((point, source))
+                        filtered_memory = tuple(point for point, _source in kept)
+                        filtered_sources = tuple(source for _point, source in kept)
+                    else:
+                        # Older/custom providers may not expose provenance. Preserve
+                        # fail-closed behavior by recomputing instead of dropping an
+                        # unverified remembered obstacle.
+                        filtered_memory = tuple(node._remembered_blind_points(
+                            state['laser'], scan,
+                            source_point_filter=lambda pose, source_scan, point: not
+                            source_filter(pose, source_scan, point)))
+                        filtered_sources = tuple(
+                            getattr(node, '_blind_point_sources', ()))
                 state['filtered_memory'] = filtered_memory
                 state['filtered_sources'] = filtered_sources
                 state['filtered_memory_key'] = filtered_memory_key
