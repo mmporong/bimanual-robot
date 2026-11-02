@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-11-02 | 목표 고정 수정 후 팔 포함 전체 시나리오 완료
+
+- 미션 `20261102_213031_7ec652f5`, 주문 `261102009`: 도크 위치초기화 후 급수대→물따르기→테이블1→컵배치→후면 도크 복귀까지 `state=succeeded`, `phase=complete`, error=null 확인. 21:30:31 시작, 복귀 helper21:37:36 종료.
+- 급수대 `water_station_20261102_213052_7c463668`: 30cm 진입 후 live feedback 갱신, 정렬된 뒤 terminal goal 고정. 후진 재접근 없이 완료. 깊이 입력 지연 정지1회와 입력 복구가 있었으므로 무정지 주행으로 표현하지 않음.
+- Windows 물따르기 ok=true/auto_done, run94.71초·시작자세6.49초·오른팔접기ok. 테이블 `table_01_20261102_213358_94cf3196`은 surface_only_lateral_offset_exceeds_alignment_tolerance에 따른 후진 측면 재정렬1회 후 주차. 컵배치 ok=true/auto_done, run38.99초.
+- 후면 복귀 rear_box_parking_finished·home_arrived 확인. rear_dock_lateral_precision_unmet, scan unavailable 대기·복구, 마지막 swept footprint occupied 대기·복구가 남아 있음. 미션 완주와 도크 중앙 정밀도·무정지 조건은 구분. 사용자 실측은 이번 회차에 없음.
+- 원본 PC 기록 `/home/lim/.local/state/bimanual-robot/water-service/runs/20261102_213031_7ec652f5/controller.log`. 임시 watch PID96217 종료. 기존 관제 API·Pi 센서·실행기는 다음 사용자 조작을 위해 유지. 추가 이동·팔 실행 없음.
+
 ## 2026-11-02 | 시나리오 접근 중 목표 조기 고정과 동일 주문 중복 실행 수정
 
 - 실패 run `water_station_20261102_211737_7629cd71`: 30cm 진입 조건은 실제 적용돼 있었으나 정렬 전에 첫 영상 목표를 고정. 이후 접근 41.36초에13.47mm, 재접근76.47초에40.44mm 목표 재기준이 발생했고 근접 상태의 측면 경로가 clearance 부족으로 거부됨. 바퀴 미끄러짐·테이프 오검출은 이 로그만으로 확정하지 않음.
