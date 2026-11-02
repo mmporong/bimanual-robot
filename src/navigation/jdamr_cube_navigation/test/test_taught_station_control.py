@@ -1238,3 +1238,14 @@ def test_tape_initial_goal_keeps_only_still_fresh_measured_samples(stamp, availa
         assert goal['goal_odom'] == [.5, .014, 0.]
     assert reference is latest and reference['valid'] is False
     assert not node.station_reference_goal_frozen
+
+
+def test_profile_accepts_operator_ten_mm_lateral_tolerance(tmp_path, monkeypatch):
+    node = _node()
+    path = _profiles(tmp_path)
+    document = json.loads(path.read_text())
+    document['stations']['water_station']['lateral_tolerance_m'] = .01
+    path.write_text(json.dumps(document))
+    monkeypatch.setattr(box_service, 'TaughtStationReference', Mock(return_value=_rgbd_model()))
+    node.configure_station_reference(path, 'water_station')
+    assert node.station_reference_profile['lateral_tolerance_m'] == .01

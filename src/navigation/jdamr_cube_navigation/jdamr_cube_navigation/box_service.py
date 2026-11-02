@@ -35,6 +35,7 @@ from jdamr_cube_navigation.restaurant_service import (
     ServiceRoute, TRANSIT_VARIANTS)
 from jdamr_cube_navigation.reverse_parking import CachedStaticCorridorValidator
 from jdamr_cube_navigation.service_destinations import load_registry, route_config, verify_identity
+from jdamr_cube_navigation.map_session_assets import ALLOWED_LATERAL_TOLERANCES_M
 from jdamr_cube_navigation.station_parking_reference import (
     anchor_face_to_taught_lateral,
     CAPTURE_EQUALS_GOAL,
@@ -78,6 +79,8 @@ FINAL_PLAN_END_TOLERANCE_M = 0.06
 FINAL_PLAN_GAP_M = 0.05
 # The face-alignment leg squares the base this far in front of the observed face.
 FACE_ALIGNMENT_FRONT_GAP_M = 0.45
+# User-selected band for tape lateral alignment; farther travel uses face normal.
+TABLE_TAPE_ALIGNMENT_ENTRY_GAP_M = 0.30
 # The Parking straight stops inside its 1 cm goal checker before the goal: 38 parks
 # at a 5 cm target (09-30 to 10-02) ended at 5.51 cm on average (sd 0.10 cm, internal
 # estimate), so the Parking straight runs this much further (no record for Graceful).
@@ -289,6 +292,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.station_reference_image_subscription = None
         self.station_reference_info_subscription = None
         self._station_reference_pending = None
+        self._station_reference_min_stamp_s = 0.0
         self._station_reference_lock = threading.Lock()
         self._station_reference_wake = threading.Event()
         self._station_reference_stop = threading.Event()
@@ -534,6 +538,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     contact_reference.restore_tracking(tracking_checkpoint)
                 continue
             with self._station_reference_lock:
+                if stamp_s < getattr(self, '_station_reference_min_stamp_s', 0.0):
+                    # A far-view calculation may finish after close alignment
+                    # reset its input boundary. It cannot seed that new stage.
+                    continue
                 reference = self.station_reference
                 if (result.get('valid') is True
                         and result.get('goal_left_offset_m')
@@ -714,8 +722,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 or isinstance(tolerance, bool)
                 or not isinstance(tolerance, (int, float))
                 or not math.isfinite(tolerance)
-                or not math.isclose(tolerance, 0.005, abs_tol=1e-12)):
-            raise ValueError('station lateral target must remain 0.005 m NOT_VALIDATED')
+                or not any(math.isclose(tolerance, allowed, abs_tol=1e-12)
+                           for allowed in ALLOWED_LATERAL_TOLERANCES_M)):
+            raise ValueError('station lateral target must be 0.005 or 0.01 m NOT_VALIDATED')
         table = next((item for item in self.registry.get('tables', ())
                       if item.get('table_id') == table_id), None)
         if table is None:
@@ -756,6 +765,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self._station_reference_challenged_goal = None
         self._station_reference_goal_correction_pending = False
         self._table_rebase_requires_restage = False
+        self._station_reference_min_stamp_s = 0.0
         self.station_reference = reference
         self.station_reference_mode = mode
         self.station_reference_profile = profile
@@ -775,7 +785,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             target_role='operator_taught_map_pose_and_heading',
             reference_mode=mode,
             lateral_control_enabled=self._station_reference_enabled(),
-            lateral_tolerance_m=0.005,
+            lateral_tolerance_m=tolerance,
             lateral_precision_status=LATERAL_PRECISION_STATUS,
             millimeter_accuracy_validated=False)
 
@@ -1206,7 +1216,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             'lateral_reference_reason': (
                 reference.get('reason') if reference
                 else 'station_reference_not_observed'),
-            'lateral_tolerance_m': 0.005,
+            'lateral_tolerance_m': (getattr(self, 'station_reference_profile', None) or {}).get(
+                'lateral_tolerance_m', ALLOWED_LATERAL_TOLERANCES_M[0]),
             'lateral_precision_status': LATERAL_PRECISION_STATUS,
             'millimeter_accuracy_validated': False,
             'internal_lateral_error_m': None,
@@ -1287,7 +1298,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             status['lateral_reference_reason'] = 'station_reference_final_pose_unavailable'
             return status
         status['internal_lateral_error_m'] = error_m
-        status['internal_lateral_within_tolerance'] = abs(error_m) <= 0.005
+        status['internal_lateral_within_tolerance'] = abs(error_m) <= status['lateral_tolerance_m']
         return status
 
     def _retry_station_lateral_reference(self, status, motion_revision):
@@ -3718,9 +3729,51 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                  'span_m': target.get('observed_face_span_m')}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
-        def station_goal_odom(actual=None, heading=None):
+        def tape_acquisition_goal(actual, heading):
+            acquisition = state.get('tape_acquisition_goal')
+            if acquisition is None:
+                pose = actual if actual is not None else state['start']
+                face_heading = (heading if heading is not None else math.atan2(
+                    -state['normal'][1], -state['normal'][0]))
+                acquisition = (pose[0], pose[1], face_heading)
+                state['tape_acquisition_goal'] = acquisition
+                self.emit('table_tape_acquisition_lateral_held',
+                          goal_odom=list(acquisition), final_parking_confirmed=False)
+            return acquisition
+
+        def station_goal_odom(actual=None, heading=None, gap=None):
             if not self._station_reference_enabled():
                 return None, None
+            tape = (getattr(getattr(self, 'station_reference', None),
+                            'observation_method', None) == 'table_front_tape')
+            if tape and gap is not None:
+                if (not state.get('tape_close_started', False)
+                        and gap > TABLE_TAPE_ALIGNMENT_ENTRY_GAP_M):
+                    state['tape_far_stage_seen'] = True
+                    return tape_acquisition_goal(actual, heading), None
+                if not state.get('tape_close_started', False):
+                    state['tape_close_started'] = True
+                    if state.get('tape_far_stage_seen', False):
+                        cutoff = self.get_clock().now().nanoseconds * 1e-9
+                        with self._station_reference_lock:
+                            self._station_reference_min_stamp_s = cutoff
+                            self._station_reference_pending = None
+                            self.station_reference_result = None
+                            self.station_reference_result_received_s = None
+                            self.station_reference_goal = None
+                            self.station_reference_control_goal = None
+                            self.station_reference_goal_frozen = False
+                            self._station_terminal_goal = None
+                            self._station_reference_goal_samples.clear()
+                            self._station_reference_rebase_samples = []
+                            self._station_reference_rebase_goal = None
+                            self._station_reference_goal_challenged = False
+                            self._station_reference_challenged_goal = None
+                            self._station_reference_goal_correction_pending = False
+                            self._table_rebase_requires_restage = False
+                        self.emit('table_tape_close_alignment_started',
+                                  gap_m=gap, minimum_rgb_stamp_s=cutoff,
+                                  far_goal_discarded=True)
             goal, reference = self._station_goal_reference(
                 freeze=True, continuous_rebase=True)
             if getattr(self, '_station_reference_goal_challenged', False):
@@ -3746,21 +3799,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                           basis='coherent_tape_goal_and_forward_swept_footprint')
             if goal is not None:
                 return tuple(goal['goal_odom']), reference
-            if (getattr(getattr(self, 'station_reference', None),
-                        'observation_method', None) == 'table_front_tape'):
+            if tape:
                 # Acquire the tape along the observed face normal. A map pose
                 # is not evidence that the tape lies to either side of the base.
-                acquisition = state.get('tape_acquisition_goal')
-                if acquisition is None:
-                    pose = actual if actual is not None else state['start']
-                    face_heading = (heading if heading is not None else math.atan2(
-                        -state['normal'][1], -state['normal'][0]))
-                    acquisition = (pose[0], pose[1], face_heading)
-                    state['tape_acquisition_goal'] = acquisition
-                    self.emit('table_tape_acquisition_lateral_held',
-                              goal_odom=list(acquisition),
-                              final_parking_confirmed=False)
-                return acquisition, reference
+                return tape_acquisition_goal(actual, heading), reference
             # Before the taught objects become matchable, steer toward the
             # registered lateral position using this approach's map/odom
             # anchor. Never silently approach without a lateral destination.
@@ -3956,7 +3998,18 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                          'yaw_rad': yaw}, requested_gap_m=self._final_gap_m(),
                         front_extent_m=front_extent_m, now_s=now_s,
                         require_stable=False)
-                    goal_odom, station_observation = station_goal_odom()
+                    measured_normal = measured['outward_normal_map_xy']
+                    measured_heading = math.atan2(-measured_normal[1], -measured_normal[0])
+                    measured_residual = math.atan2(
+                        math.sin(measured_heading - actual[2]),
+                        math.cos(measured_heading - actual[2]))
+                    measured_gap = (sum(
+                        (actual[i] - measured['face_center_map_xy_m'][i]) * measured_normal[i]
+                        for i in (0, 1))
+                        - front_extent_m * math.cos(measured_residual)
+                        - self.box_front_half_width_m * abs(math.sin(measured_residual)))
+                    goal_odom, station_observation = station_goal_odom(
+                        actual, measured_heading, measured_gap)
                     if goal_odom is not None:
                         measured = anchor_face_to_taught_lateral(
                             measured, goal_odom[:2])
@@ -4024,7 +4077,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                               for i in (0, 1)) - front_extent_m * math.cos(residual))
             gap = center_gap - self.box_front_half_width_m * abs(math.sin(residual))
             remaining = (center_gap - self._final_gap_m()) / math.cos(residual)
-            goal_odom, station_observation = station_goal_odom(actual, heading)
+            goal_odom, station_observation = station_goal_odom(actual, heading, gap)
             state['control_goal'] = goal_odom
             lateral_ready = not self._station_reference_enabled()
             lateral_error = None
@@ -4034,6 +4087,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     (goal_odom[i] - actual[i]) * left[i] for i in (0, 1))
                 lateral_ready = (
                     getattr(self, 'station_reference_goal', None) is not None
+                    and (getattr(getattr(self, 'station_reference', None),
+                                 'observation_method', None) != 'table_front_tape'
+                         or state.get('tape_close_started', False))
                     and abs(lateral_error) <= self.station_reference_profile[
                         'lateral_tolerance_m'])
             if (gap <= FINAL_PLAN_GAP_M + 0.0005
@@ -4748,11 +4804,11 @@ def parse_args(argv=None):
                      or args.rear_box_only or args.resume_parked_from_log)):
         parser.error('--station-capture-retreat-m requires one executed step of at most 0.05 m')
     if args.reapproach_m is not None and not (
-            math.isfinite(args.reapproach_m) and 0.2 <= args.reapproach_m <= 0.45
+            math.isfinite(args.reapproach_m) and 0.2 <= args.reapproach_m <= 0.50
             and args.execute and args.surface_mode == 'table_edge'
             and not (args.return_home or args.via_id or args.home_only
                      or args.rear_box_only or args.resume_parked_from_log)):
-        parser.error('--reapproach-m requires a standalone executed table_edge task, 0.2–0.45 m')
+        parser.error('--reapproach-m requires a standalone executed table_edge task, 0.2–0.50 m')
     if (not math.isfinite(args.station_left_correction_m)
             or abs(args.station_left_correction_m) > 0.05
             or (args.station_left_correction_m and args.reapproach_m is None)):

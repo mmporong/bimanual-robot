@@ -4788,3 +4788,34 @@ def test_tape_acquisition_does_not_steer_to_opposite_map_lateral_goal(monkeypatc
         {'valid': True, 'stamp_s': 10.2})
     control = update((.21,0.,0.))
     assert control['lateral_error_m'] == pytest.approx(.014)
+
+
+def test_far_tape_goal_is_ignored_and_reset_once_at_thirty_cm(monkeypatch):
+    from collections import deque
+    node, clock, update, _lookup = _moving_table_route(monkeypatch)
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .01}
+    node.parking_contract['yaw_tolerance_rad'] = .03
+    node._station_reference_lock = Lock()
+    far = {'valid': True, 'goal_odom': [.5, -.028, 0.], 'stamp_s': 10.1,
+           'goal_filter_sample_count': 3}
+    node.station_reference_goal = far
+    node.station_reference_goal_frozen = True
+    node._station_terminal_goal = dict(far)
+    node._station_reference_goal_samples = deque([far])
+    node._station_goal_reference = Mock(return_value=(far,far))
+    far_control = update((.1,0.,0.))  # beyond the 30 cm alignment band
+    assert far_control['lateral_error_m'] == pytest.approx(0.)
+    node._station_goal_reference.assert_not_called()
+    node._station_goal_reference.return_value = (None, {'valid': False})
+    close_control = update((.2,0.,0.))
+    assert close_control['lateral_error_m'] == pytest.approx(0.)
+    assert node.station_reference_goal is None
+    assert node._station_terminal_goal is None
+    assert not node._station_reference_goal_samples
+    assert node._station_reference_min_stamp_s == pytest.approx(10.2)
+    accepted = {'valid': True, 'goal_odom': [.5,.004,0.], 'stamp_s': 10.21}
+    node.station_reference_goal = accepted
+    node._station_goal_reference.return_value = (accepted,accepted)
+    update((.21,0.,0.))
+    assert node.station_reference_goal is accepted  # no per-tick clearing
