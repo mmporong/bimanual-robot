@@ -601,6 +601,24 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         self._station_reference_goal_challenged = False
                         self._station_reference_challenged_goal = None
                         self._station_reference_goal_correction_pending = False
+                if (result.get('reason') == 'tape_pair_missing'
+                        and 0. <= result['image_age_at_completion_s'] <= STATION_REFERENCE_MAX_AGE_S
+                        and getattr(self, '_station_reference_goal_correction_pending', False)
+                        and not getattr(self, '_station_reference_goal_challenged', False)
+                        and not getattr(self, '_table_rebase_requires_restage', False)
+                        and getattr(self, '_station_reference_rebase_goal', None) is None):
+                    anchor = getattr(self, 'station_reference_goal', None)
+                    if (getattr(self, 'station_reference_goal_frozen', False)
+                            and anchor and anchor.get('valid') is True
+                            and anchor.get('goal_filter_sample_count', 0) >= 3):
+                        # A disappearing pair cannot complete a new correction.
+                        # Discard only the unconfirmed soft candidate, retaining
+                        # the previously coherent destination, never a hard drift.
+                        self._station_reference_goal_correction_pending = False
+                        self._station_reference_rebase_samples = []
+                        self.emit('table_unconfirmed_tape_correction_discarded',
+                                  reason='tape_pair_left_view',
+                                  goal_odom=list(anchor['goal_odom']))
                 self.station_reference_result = result
                 self.station_reference_result_received_s = time.monotonic()
                 if result.get('valid') is True:
@@ -3619,15 +3637,32 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                  'span_m': target.get('observed_face_span_m')}
         quorum = getattr(self, 'observer_stable_frames', None) or 8
 
-        def station_goal_odom():
+        def station_goal_odom(actual=None, heading=None):
             if not self._station_reference_enabled():
                 return None, None
             goal, reference = self._station_goal_reference(
                 freeze=True, continuous_rebase=True)
             if getattr(self, '_station_reference_goal_challenged', False):
                 raise RuntimeError('table approach tape reference pending')
-            if getattr(self, '_table_rebase_requires_restage', False):
-                raise RuntimeError('table lateral alignment requires more clearance')
+            if (actual is not None
+                    and getattr(self, '_table_rebase_requires_restage', False)):
+                # A coherent new endpoint is not itself proof that reversing
+                # is necessary. Test the same footprint/curvature constrained
+                # forward approach used by the controller before restaging.
+                if goal is None or goal.get('goal_filter_sample_count', 0) < 3:
+                    raise RuntimeError('table lateral alignment requires more clearance')
+                candidate = tuple(goal['goal_odom'])
+                validate(actual, state['face'], state['normal'], heading,
+                         state['span_m'], support_endpoints=state['surface_support'],
+                         lateral_goal_odom=candidate)
+                with self._station_reference_lock:
+                    if (getattr(self, '_station_reference_goal_challenged', False)
+                            or getattr(self, '_station_reference_rebase_goal', None) is not None):
+                        raise RuntimeError('table approach tape reference pending')
+                    self._table_rebase_requires_restage = False
+                self.emit('table_rebased_forward_path_confirmed',
+                          goal_odom=list(candidate), start_pose_odom=list(actual),
+                          basis='coherent_tape_goal_and_forward_swept_footprint')
             if goal is not None:
                 return tuple(goal['goal_odom']), reference
             # Before the taught objects become matchable, steer toward the
@@ -3893,7 +3928,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                               for i in (0, 1)) - front_extent_m * math.cos(residual))
             gap = center_gap - self.box_front_half_width_m * abs(math.sin(residual))
             remaining = (center_gap - self._final_gap_m()) / math.cos(residual)
-            goal_odom, station_observation = station_goal_odom()
+            goal_odom, station_observation = station_goal_odom(actual, heading)
             state['control_goal'] = goal_odom
             lateral_ready = not self._station_reference_enabled()
             lateral_error = None

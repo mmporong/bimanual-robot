@@ -5,6 +5,15 @@
 ---
 
 
+## 2026-11-02 | 급수대 재정렬·근접 테이프 소실의 상태 처리 수정
+
+- 주문261102005, 미션20261102_191252_65d8accb는 급수대 후진재정렬 후 앞 간격 내부 추정9.07/9.16mm까지 접근했으나 `station_lateral_arrival_unconfirmed`로 종료. 물따르기·테이블·복귀 미실행. 사용자 STOP에 따라 관제 emergency_stop 활성화·팔 stop 전송·Pi executor stop 전달. 이후 실물 이동 없음.
+- 확정한 코드 원인: coherent 3관측으로 목표가 갱신돼도 좌우 잔차5mm초과만으로 restage latch가 켜져 전진 경로 가능성을 확인하기 전에 후진. 이제 연속 접근 안에서는 기존 면·차체 swept footprint·곡률 경로 검사를 통과한 목표만 latch 해제하며, 불가능한 경로는 기존 복구 유지.
+- 마지막 테이프 관측의 held lateral 변화5.2873mm가 soft pending을 만들고 곧 `tape_pair_missing`이 되어 pending이 해제되지 않음. 기존3관측 confirmed/frozen 목표가 있고 현재 missing 영상이 신선하며 hard challenge·확정 대기 rebase·restage가 없을 때만 미확정 soft 후보를 폐기. 확인한 목표는 유지하며 새 관측을 확인한 것으로 간주하지 않음. 센서 지연·큰 목표 불일치·최종 거리/좌우 기준 유지.
+- 근거: `~/jdamr_data/analysis_20261102/mission_20261102_191252_65d8accb/kitchen_events.jsonl`. 목표가 시점마다 달라지는 물리 원인(영상투영·장착·odom)은 아직 확정되지 않음. 수정 뒤 한 번 접근 성공은 실차 재확인 전.
+
+- 최소 회귀 확인13건·컴파일·diff 검사 통과. Pi box_service.py SHA256 일치(`d17dfea884a76…`), 19:26:24 executor active 확인. 백업 `~/jdamr_deploy/backups/kitchen_restage_20261102_192617/`. 관제 STOP 유지, 물리 재시험 미실행.
+
 ## 2026-11-02 | 첫 테이프 접근의 조기 보정·후면 회전 기억점 대기 개선
 
 - 주문261102003에서 급수대 초기 remaining315.9mm/lateral53.2mm/yaw-6.69도로 연속 접근했으나, 목표 누적 변화가 커진 뒤 rebase residual20.52mm가 후진재정렬을 유발. frozen 목표 대비5mm초과~20mm이하 변화는 신선하고 서로 다른 일치3관측으로 조기 보정하고 기존 continuous curve preview로 연결. 관측 하나마다 목표를 변경하지 않음. pending 상태의 terminal/최종 좌우 성공 판정은 차단. 큰 불일치나 기구적으로 불가능한 preview의 복구는 유지.

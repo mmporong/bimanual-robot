@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import time
+from threading import Lock
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -4739,3 +4740,29 @@ def test_oblique_restage_reverse_reaches_projected_clearance(angle_deg):
     assert target[1] == pytest.approx(-(.565-.45)*math.tan(angle))
     node._reverse_path_valid.assert_called_once()
     assert node.emit.call_args.kwargs['reason'] == 'box_escape_blocked'
+
+
+@pytest.mark.parametrize('blocked', [False, True])
+def test_coherent_rebase_checks_forward_path_before_reversing(monkeypatch, blocked):
+    node, _clock, update, _lookup = _moving_table_route(monkeypatch)
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.parking_contract['yaw_tolerance_rad'] = .03
+    node._station_reference_lock = Lock()
+    goal = {'valid': True, 'goal_odom': [.455, .027, 0.], 'stamp_s': 10.1,
+            'goal_filter_sample_count': 3}
+    node.station_reference_goal = goal
+    node._station_goal_reference = Mock(return_value=(goal, goal))
+    node._table_rebase_requires_restage = True
+    validator = node._table_approach_validator.return_value
+    if blocked:
+        validator.side_effect = RuntimeError('table lateral alignment requires more clearance')
+        with pytest.raises(RuntimeError, match='requires more clearance'):
+            update((.2, 0., 0.))
+        assert node._table_rebase_requires_restage
+    else:
+        result = update((.2, 0., 0.))
+        assert result['lateral_error_m'] == pytest.approx(.027)
+        assert not node._table_rebase_requires_restage
+    assert validator.call_args.kwargs['lateral_goal_odom'] == tuple(goal['goal_odom'])
+    assert validator.call_args.args[0] == (.2, 0., 0.)

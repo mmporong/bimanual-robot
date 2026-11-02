@@ -1083,3 +1083,37 @@ def test_tape_rebase_does_not_accept_unconfirmed_frames(bad):
     if bad == 'outlier': third['goal_odom'][1] = -.07
     if bad == 'not_tape': node.station_reference.observation_method = 'cup_bottle'
     assert node._consider_tape_rebase(third) is None
+
+
+@pytest.mark.parametrize('hard,age,discard', [
+    (False, .1, True), (True, .1, False), (False, 3., False),
+])
+def test_missing_pair_discards_only_unconfirmed_soft_goal_candidate(hard, age, discard):
+    node = _node()
+    contact = Mock()
+    node.station_reference = _rgbd_model(contact_reference=contact,
+                                        observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_goal = {
+        'valid': True, 'stamp_s': 9.9, 'goal_odom': [.4, 0., 0.],
+        'goal_filter_sample_count': 3}
+    node.station_reference_goal_frozen = True
+    node._station_reference_goal_correction_pending = True
+    node._station_reference_goal_challenged = hard
+    node._station_reference_rebase_samples = [{'goal_odom': [.4, .0052873, 0.]}]
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(transform=_pose())
+    node.get_clock.return_value = _clock(10. + age)
+    node.station_reference.observe.return_value = {
+        'valid': False, 'stamp_s': 10., 'reason': 'tape_pair_missing', 'quality': {}}
+    node._station_reference_pending = (None, None, 10.)
+    node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
+    node._station_reference_wake.set()
+    node._station_reference_loop()
+    assert node._station_reference_goal_correction_pending is (not discard)
+    assert node._station_reference_goal_challenged is hard
+    if discard:
+        assert node._station_reference_rebase_samples == []
+        assert node._table_terminal_reference_ready(node.station_reference_result)
+        assert node.station_reference_goal['goal_odom'] == [.4, 0., 0.]
