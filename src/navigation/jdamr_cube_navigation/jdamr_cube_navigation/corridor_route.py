@@ -32,6 +32,7 @@ from rclpy.signals import SignalHandlerOptions
 from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import BatteryState, JointState, LaserScan
 from std_msgs.msg import Bool
+from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
 import yaml
 
@@ -819,13 +820,28 @@ class CorridorRoute(Node):
         self.last_readiness_failure = None
         deadline = time.monotonic() + timeout
         protection_failure = None
+        missing_amcl_refresh_attempted = False
+        missing_amcl_refresh_required = False
         while time.monotonic() < deadline and not self.stop_requested:
             spin_node(self, timeout_sec=0.1)
             protection_failure = (
                 self._revisit_protection_ready()
                 if self.navigation_profile == 'new_base_revisit_candidate'
                 else None)
-            if self._navigation_ready() and protection_failure is None:
+            failure = self._guard_failure()
+            if failure == 'AMCL pose missing':
+                missing_amcl_refresh_required = True
+            if (missing_amcl_refresh_required
+                    and not missing_amcl_refresh_attempted
+                    and failure in (None, 'AMCL pose missing')):
+                attempted, confirmed = self._refresh_missing_amcl_at_rest(
+                    deadline)
+                missing_amcl_refresh_attempted = attempted
+                if confirmed:
+                    missing_amcl_refresh_required = False
+            if (not missing_amcl_refresh_required
+                    and self._navigation_ready()
+                    and protection_failure is None):
                 self.start_check_pending = False
                 if self.travel_pose_status is not None:
                     maximum_error_rad = self.travel_pose_status[
@@ -840,6 +856,59 @@ class CorridorRoute(Node):
         self.get_logger().error(
             'navigation readiness timeout: ' + self.last_readiness_failure)
         return False
+
+    def _refresh_missing_amcl_at_rest(self, readiness_deadline_s):
+        """Return whether a refresh was attempted and confirmed while at rest."""
+        def stationary_odometry_is_fresh():
+            motion = getattr(self, 'latest_motion', None)
+            now_s = time.monotonic()
+            return (motion is not None and now_s - motion[0] <= 0.5
+                    and all(math.isfinite(value) for value in motion)
+                    and abs(motion[1]) < 0.01 and abs(motion[2]) < 0.01)
+
+        if self.stop_requested:
+            return True, False
+        if not stationary_odometry_is_fresh():
+            return False, False
+        operator_link_ready = getattr(self, '_operator_link_ready', None)
+        if operator_link_ready is not None and not operator_link_ready():
+            return True, False
+        client = None
+        future = None
+        try:
+            client = self.create_client(Empty, '/request_nomotion_update')
+            remaining_s = readiness_deadline_s - time.monotonic()
+            if remaining_s <= 0.0 or not client.wait_for_service(
+                    timeout_sec=min(0.2, remaining_s)):
+                return True, False
+            requested_s = time.monotonic()
+            future = client.call_async(Empty.Request())
+            while (not future.done() and not self.stop_requested
+                   and time.monotonic() < readiness_deadline_s):
+                if not stationary_odometry_is_fresh():
+                    return False, False
+                spin_node(self, timeout_sec=0.05)
+            if (not future.done() or future.exception() is not None
+                    or future.result() is None):
+                return True, False
+            while (not self.stop_requested
+                   and time.monotonic() < readiness_deadline_s):
+                if not stationary_odometry_is_fresh():
+                    return False, False
+                if (getattr(self, 'amcl_seen', None) or 0.0) > requested_s:
+                    self.get_logger().info(
+                        'AMCL pose recovered by stationary no-motion update')
+                    return True, True
+                spin_node(self, timeout_sec=0.05)
+        except (AttributeError, RuntimeError):
+            return True, False
+        finally:
+            if (client is not None and future is not None
+                    and not future.done()):
+                client.remove_pending_request(future)
+            if client is not None:
+                self.destroy_client(client)
+        return True, False
 
     def readiness_failure_reason(self):
         """Retain the failed readiness attempt's cause for the caller's result log."""
