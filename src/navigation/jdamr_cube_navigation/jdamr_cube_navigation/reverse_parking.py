@@ -32,6 +32,9 @@ REVERSE_CURVE_MIN_RADIUS_M = 0.3
 # contract speeds.
 SERVICE_TRANSIT_MAX_MPS = 0.12
 CACHED_CORRIDOR_SUPPORT_DIRECTIONS = 16
+# Inspect a point shortly before it reaches range_min. This matches the 5 cm
+# spatial keyframe interval while leaving room for the 2 cm free-ray margin.
+BLIND_CLEARANCE_LOOKAHEAD_M = 0.05
 RPP_PLUGIN = (
     'nav2_regulated_pure_pursuit_controller::'
     'RegulatedPurePursuitController')
@@ -307,8 +310,36 @@ def _later_scan_clears_point(point_odom, pose, scan, laser_pose):
     return False
 
 
+def _scan_stamp_s(scan):
+    """Return a finite LaserScan header stamp, or None for incomplete evidence."""
+    try:
+        stamp = scan.header.stamp
+        value = float(stamp.sec) + float(stamp.nanosec) * 1e-9
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _newer_same_frame_scan(source_scan, current_scan):
+    """Accept an explicit clearing scan only when its ordering and frame are proven."""
+    if current_scan is None:
+        return False
+    try:
+        source_frame = source_scan.header.frame_id
+        current_frame = current_scan.header.frame_id
+    except AttributeError:
+        return False
+    source_stamp = _scan_stamp_s(source_scan)
+    current_stamp = _scan_stamp_s(current_scan)
+    return (bool(source_frame) and current_frame == source_frame
+            and source_stamp is not None and current_stamp is not None
+            and current_stamp > source_stamp)
+
+
 def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m,
-                            source_point_filter=None, source_records=None):
+                            source_point_filter=None, source_records=None,
+                            current_scan=None, current_scan_pose=None,
+                            cleared_sources=None):
     """
     Return remembered returns that now lie inside the LiDAR blind range, base frame.
 
@@ -318,17 +349,34 @@ def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m,
     vanishes from the live scan; outside it the live scan decides.  An optional
     source_point_filter(pose, scan, point) selects points using the scan and pose
     that acquired them, before odometry drift changes their current projection.
+    current_scan and its stamped odom pose may contribute newer same-frame
+    free-space evidence. When a mutable cleared_sources set is supplied, that
+    evidence is retained by source scan and return index so a point cleared while
+    still visible cannot reappear after it enters the blind range. Entries are
+    pruned with their bounded keyframe source.
     """
     lx, ly, _lyaw = laser_pose
     found = []
     keyframes = list(keyframes)
+    active_scan_keys = {(id(frame), _scan_stamp_s(frame))
+                        for _pose, frame in keyframes}
+    if cleared_sources is not None:
+        cleared_sources.intersection_update(
+            key for key in cleared_sources if key[:2] in active_scan_keys)
     for frame_index, (pose, scan) in enumerate(keyframes):
         moved_m = math.dist(pose[:2], current_pose[:2])
         relative = to_base_frame(current_pose, pose)
         cos_yaw, sin_yaw = math.cos(relative[2]), math.sin(relative[2])
         # The laser itself moved at most moved_m plus its offset swung about the axle.
-        limit_m = blind_radius_m + moved_m + 2.0 * math.hypot(lx, ly)
-        for x_m, y_m in _base_points(scan, laser_pose):
+        limit_m = (blind_radius_m + BLIND_CLEARANCE_LOOKAHEAD_M + moved_m
+                   + 2.0 * math.hypot(lx, ly))
+        explicit_evidence = ((current_scan_pose, current_scan),) if (
+            current_scan_pose is not None
+            and _newer_same_frame_scan(scan, current_scan)) else ()
+        for point_index, (x_m, y_m) in enumerate(_base_points(scan, laser_pose)):
+            source_key = (id(scan), _scan_stamp_s(scan), point_index)
+            if cleared_sources is not None and source_key in cleared_sources:
+                continue
             if math.hypot(x_m - lx, y_m - ly) > limit_m:
                 continue
             if (source_point_filter is not None
@@ -336,13 +384,24 @@ def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m,
                 continue
             bx = relative[0] + cos_yaw * x_m - sin_yaw * y_m
             by = relative[1] + sin_yaw * x_m + cos_yaw * y_m
-            if math.hypot(bx - lx, by - ly) < blind_radius_m:
-                cosine, sine = math.cos(pose[2]), math.sin(pose[2])
-                point_odom = (pose[0] + cosine * x_m - sine * y_m,
-                              pose[1] + sine * x_m + cosine * y_m)
-                if any(_later_scan_clears_point(point_odom, later_pose, later_scan, laser_pose)
-                       for later_pose, later_scan in keyframes[frame_index + 1:]):
-                    continue
+            cosine, sine = math.cos(pose[2]), math.sin(pose[2])
+            point_odom = (pose[0] + cosine * x_m - sine * y_m,
+                          pose[1] + sine * x_m + cosine * y_m)
+            current_distance_m = math.hypot(bx - lx, by - ly)
+            inside_blind_range = current_distance_m < blind_radius_m
+            clearance_window = current_distance_m < (
+                blind_radius_m + BLIND_CLEARANCE_LOOKAHEAD_M)
+            explicitly_cleared = clearance_window and any(
+                _later_scan_clears_point(point_odom, evidence_pose, evidence_scan, laser_pose)
+                for evidence_pose, evidence_scan in explicit_evidence)
+            historically_cleared = inside_blind_range and any(
+                _later_scan_clears_point(point_odom, later_pose, later_scan, laser_pose)
+                for later_pose, later_scan in keyframes[frame_index + 1:])
+            if explicitly_cleared or historically_cleared:
+                if explicitly_cleared and cleared_sources is not None:
+                    cleared_sources.add(source_key)
+                continue
+            if inside_blind_range:
                 found.append((bx, by))
                 if source_records is not None:
                     source_records.append((tuple(pose), scan, (x_m, y_m), tuple(current_pose)))

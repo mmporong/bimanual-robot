@@ -613,12 +613,210 @@ def test_search_does_not_rotate_for_sensor_or_geometry_failure(mission):
     mission.observe_target.side_effect = (
         box_service.BoxObservationUnavailable(
             'LiDAR scan is stale or future-dated', retryable=False))
-    with pytest.raises(RuntimeError, match='LiDAR scan is stale'):
+    mission._wait_for_observation_input = Mock(return_value=(False, 'operator_link_lost'))
+    with pytest.raises(RuntimeError, match='operator_link_lost'):
         invoke(mission, search=True)
     mission.search_rotation.assert_not_called()
     failure = [call for call in mission.emit.call_args_list
                if call.args == ('box_observation_failed',)][0]
     assert failure.kwargs['retryable'] is False
+
+
+def test_temporary_observation_input_waits_without_search_then_reobserves(mission):
+    target = mission.observe_target.return_value
+    error = box_service.BoxObservationUnavailable(
+        'no_stable_box', retryable=False, latency_limited=True,
+        latency_reasons={'observer_silent'})
+    mission.observe_target.side_effect = [error, target, target]
+    mission._wait_for_observation_input = Mock(return_value=(True, None))
+
+    assert invoke(mission, search=True)
+
+    assert mission._wait_for_observation_input.call_args.args[0] is error
+    mission.search_rotation.assert_not_called()
+    assert any(call.args == ('box_observation_input_recovered',)
+               for call in mission.emit.call_args_list)
+
+
+@pytest.mark.parametrize('reason', [
+    'stale_or_future_depth',
+    'camera_info_missing',
+    'LiDAR scan is stale or future-dated',
+    'fresh LiDAR scan is required for box witness',
+])
+def test_depth_and_scan_input_gaps_are_temporary(mission, reason):
+    error = box_service.BoxObservationUnavailable(reason, retryable=False)
+
+    assert mission._temporary_observation_input_gap(error) is True
+
+
+def test_temporary_tf_input_waits_without_search_then_reobserves(mission):
+    target = mission.observe_target.return_value
+    error = RuntimeError(
+        'stationary teaching unavailable: need fresh TF, odometry and localization')
+    mission.observe_target.side_effect = [error, target, target]
+    mission._input_gap_recoverable = Mock(return_value=True)
+    mission._wait_for_observation_input = Mock(return_value=(True, None))
+
+    assert invoke(mission, search=True)
+
+    assert mission._wait_for_observation_input.call_args.args[0] is error
+    mission.search_rotation.assert_not_called()
+
+
+@pytest.mark.parametrize('reason', [
+    'LiDAR and depth face normals disagree',
+    'LiDAR scan frame must be measured laser_link',
+    'observed_box_outside_selected_table_region',
+])
+def test_geometry_and_calibration_observation_failures_never_wait(mission, reason):
+    error = box_service.BoxObservationUnavailable(reason, retryable=True)
+    mission.observe_target.side_effect = error
+    mission._wait_for_observation_input = Mock(
+        side_effect=AssertionError('non-input failure waited'))
+
+    with pytest.raises(box_service.BoxObservationUnavailable):
+        invoke(mission)
+
+    mission._wait_for_observation_input.assert_not_called()
+
+
+def _observation_wait_node():
+    node = object.__new__(BoxServiceRoute)
+    node.stop_requested = False
+    node._input_recovery_paused = False
+    node.run_deadline_s = 20.0
+    node.box_status_received_s = None
+    node.samples = {}
+    node.depth_camera_info_received_s = None
+    node.depth_camera_info = None
+    node.box_status = None
+    node.last_scan = None
+    node.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(nanoseconds=10_000_000_000))
+    node._operator_link_ready = Mock(return_value=True)
+    node._departure_battery_ready = Mock(return_value=True)
+    node._guard_failure = Mock(return_value=None)
+    node.readiness_failure_reason = Mock(return_value='battery_guard')
+    node._input_gap_recoverable = Mock(return_value=False)
+    node._escape_publisher = Mock(return_value=Mock())
+    return node
+
+
+def test_observation_input_wait_holds_zero_and_preserves_global_deadline(monkeypatch):
+    node = _observation_wait_node()
+    clock = [10.0]
+
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+
+    def deliver(_node, timeout_sec):
+        clock[0] += timeout_sec
+        node.depth_camera_info_received_s = clock[0]
+        node.depth_camera_info = SimpleNamespace(
+            header=SimpleNamespace(stamp=_stamp(10.0)))
+
+    monkeypatch.setattr(box_service, 'spin_node', deliver)
+    error = box_service.BoxObservationUnavailable(
+        'no_stable_box', retryable=False, latency_limited=True,
+        latency_reasons={'camera_info_missing'})
+
+    baseline = node._observation_input_snapshot()
+    assert node._wait_for_observation_input(error, baseline) == (True, None)
+    assert node.run_deadline_s == pytest.approx(20.05)
+    assert node._input_recovery_paused is False
+    command = node._escape_publisher.return_value.publish.call_args.args[0]
+    assert command.linear.x == 0.0 and command.angular.z == 0.0
+
+
+def test_camera_gap_ignores_unrelated_scan_updates_until_fresh_camera_info(monkeypatch):
+    node = _observation_wait_node()
+    clock = [10.0]
+    spins = [0]
+    baseline = node._observation_input_snapshot()
+
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+
+    def deliver(_node, timeout_sec):
+        spins[0] += 1
+        clock[0] += timeout_sec
+        node.samples['scan'] = clock[0]
+        if spins[0] == 4:
+            node.depth_camera_info_received_s = clock[0]
+            node.depth_camera_info = SimpleNamespace(
+                header=SimpleNamespace(stamp=_stamp(10.0)))
+
+    monkeypatch.setattr(box_service, 'spin_node', deliver)
+    error = box_service.BoxObservationUnavailable(
+        'no_stable_box', retryable=False, latency_limited=True,
+        latency_reasons={'camera_info_missing'})
+
+    assert node._wait_for_observation_input(error, baseline) == (True, None)
+    assert spins[0] == 4
+    assert node.run_deadline_s == pytest.approx(20.2)
+
+
+def test_observation_wait_sees_input_delivered_after_attempt_before_wait(monkeypatch):
+    node = _observation_wait_node()
+    clock = [10.0]
+    baseline = node._observation_input_snapshot()
+    node.depth_camera_info_received_s = 10.01
+    node.depth_camera_info = SimpleNamespace(
+        header=SimpleNamespace(stamp=_stamp(10.0)))
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+    spin = Mock(side_effect=AssertionError('fresh one-shot input was missed'))
+    monkeypatch.setattr(box_service, 'spin_node', spin)
+    error = box_service.BoxObservationUnavailable(
+        'no_stable_box', retryable=False, latency_limited=True,
+        latency_reasons={'camera_info_missing'})
+
+    assert node._wait_for_observation_input(error, baseline) == (True, None)
+    spin.assert_not_called()
+    node._escape_publisher.return_value.publish.assert_called_once()
+
+
+def test_mixed_guard_and_observer_gap_recovers_after_fresh_observer(monkeypatch):
+    node = _observation_wait_node()
+    clock = [10.0]
+    baseline = node._observation_input_snapshot()
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+
+    def deliver(_node, timeout_sec):
+        clock[0] += timeout_sec
+        node.box_status_received_s = clock[0]
+        node.box_status = {'stamp_s': 10.0, 'reason': 'no_box_surface_candidate'}
+
+    monkeypatch.setattr(box_service, 'spin_node', deliver)
+    error = box_service.BoxObservationUnavailable(
+        'no_stable_box', retryable=False, latency_limited=True,
+        latency_reasons={'input_gap', 'observer_silent'})
+
+    assert node._wait_for_observation_input(error, baseline) == (True, None)
+    assert node.run_deadline_s == pytest.approx(20.05)
+
+
+@pytest.mark.parametrize('failure_kind, expected', [
+    ('stop', 'operator_stop'),
+    ('link', 'operator_link_lost'),
+    ('battery', 'battery_guard'),
+    ('guard', 'AMCL covariance high'),
+])
+def test_observation_input_wait_keeps_safety_stops_terminal(failure_kind, expected):
+    node = _observation_wait_node()
+    if failure_kind == 'stop':
+        node.stop_requested = True
+    elif failure_kind == 'link':
+        node._operator_link_ready.return_value = False
+    elif failure_kind == 'battery':
+        node._departure_battery_ready.return_value = False
+    else:
+        node._guard_failure.return_value = expected
+    error = box_service.BoxObservationUnavailable(
+        'LiDAR scan is stale or future-dated', retryable=False)
+
+    baseline = node._observation_input_snapshot()
+    assert node._wait_for_observation_input(error, baseline) == (False, expected)
+    assert node.run_deadline_s == 20.0
+    assert node._input_recovery_paused is False
 
 
 def test_final_approach_observation_loss_never_rotates_near_box(mission):
@@ -1038,6 +1236,36 @@ def _observer_node(monkeypatch, *, scan=True, observation_stamp=10.1):
             'provenance': 'LIDAR_DEPTH_FACE_AGREEMENT_NOT_EXTERNAL_ACCURACY',
         }))
     return node
+
+
+def test_observe_target_preserves_global_deadline_during_initial_input_recovery(
+        monkeypatch):
+    node = _observer_node(monkeypatch)
+    clock = [20.0]
+    node.run_deadline_s = 21.0
+    node._input_recovery_paused = False
+    node._navigation_ready.side_effect = [False] + [True] * 10
+    node._guard_failure.return_value = 'scan stale: age=1.000s limit=0.500s'
+    node._input_gap_recoverable = Mock(return_value=True)
+
+    def recover(_reason):
+        assert node._input_recovery_paused is True
+        clock[0] += 2.0
+        node.box_status['stamp_s'] = 12.1
+        node.last_scan.header.stamp = _stamp(12.1)
+        return True
+
+    node._wait_for_input_recovery = Mock(side_effect=recover)
+    ros_clock = iter((10.0, 12.2))
+    node.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(nanoseconds=int(next(ros_clock) * 1e9)))
+    monkeypatch.setattr(box_service.time, 'monotonic', lambda: clock[0])
+
+    target = node.observe_target({}, 0.065, 0.05, (0.5, 0.0), 0.6)
+
+    assert target['candidate_trial'] is True
+    assert node.run_deadline_s == pytest.approx(23.0)
+    assert node._input_recovery_paused is False
 
 
 def test_lidar_witness_rejection_records_replayable_scan_once(monkeypatch):
@@ -1568,6 +1796,7 @@ def _search(node):
 def test_t20_latency_reobserve(mission, case):
     """Re-observe one latency-limited window in place; never after a stop."""
     target = mission.observe_target.return_value
+    mission._temporary_observation_input_gap = Mock(return_value=False)
     if case == 'ok':
         mission.observe_target.side_effect = [_latency_limited(), target]
         try:
@@ -4106,6 +4335,44 @@ def test_infeasible_lateral_reapproach_restages_sideways_before_approaching_agai
     assert node._restage_table_face_alignment.call_args.args[1:] == (.065, reason, .2)
 
 
+def test_rebased_goal_latch_is_cleared_only_after_fresh_restage_preview():
+    reason = 'rebased_station_goal_requires_restage'
+    node, target, order = _fine_approach_node(restage=(reason, .002))
+    node._table_rebase_requires_restage = True
+    node._table_lateral_restage_reason.side_effect = [
+        (reason, .002), (None, .001)]
+    results = iter([(False, None), (True, 'to_odom')])
+
+    def approach(*_args, **_kwargs):
+        order.append('approach')
+        result = next(results)
+        node._last_direct_motion_failure = (
+            None if result[0] else 'table lateral alignment requires more clearance')
+        return result
+
+    node._zero_turn_final_approach.side_effect = approach
+    assert node._table_fine_approach(dict(target), .065) == (True, 'to_odom')
+    assert order == ['approach', 'reverse', 'observe', 'restage', 'observe', 'approach']
+    assert node._table_lateral_restage_reason.call_args_list[-1].kwargs == {
+        'honor_rebase_latch': False}
+    assert node._table_rebase_requires_restage is False
+    assert any(call.args[0] == 'table_lateral_restage_confirmed'
+               for call in node.emit.call_args_list)
+
+
+def test_rebased_goal_latch_remains_when_fresh_restage_preview_fails():
+    reason = 'rebased_station_goal_requires_restage'
+    node, target, order = _fine_approach_node(restage=(reason, .002))
+    node._table_rebase_requires_restage = True
+    node._table_lateral_restage_reason.side_effect = [
+        (reason, .002), ('table approach preview heading out of range', .003)]
+
+    assert node._table_fine_approach(dict(target), .065) == (False, None)
+    assert order == ['approach', 'reverse', 'observe', 'restage', 'observe']
+    assert node._table_rebase_requires_restage is True
+    assert node.emit.call_args.kwargs['reason'] == 'table_lateral_restage_not_confirmed'
+
+
 def test_lateral_restage_is_bounded_per_visit():
     node, target, order = _fine_approach_node(restage=('surface_only_lateral_offset', .2))
     node._table_lateral_restages = box_service.TABLE_LATERAL_RESTAGE_LIMIT
@@ -4232,6 +4499,25 @@ def test_lateral_restage_reason_uses_the_live_controller_preview(lateral_m, feas
     reason, offset_m = node._table_lateral_restage_reason(target, .065)
     assert offset_m == pytest.approx(lateral_m)
     assert (reason is None) is feasible
+
+
+def test_lateral_restage_reason_honors_a_rebased_goal_latch():
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = Mock()
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.box_front_half_width_m = .225
+    node._final_gap_m = Mock(return_value=.01)
+    node._table_restage_tape_goal = None
+    node._table_rebase_requires_restage = True
+    target = {'x_m': .925, 'y_m': .002, 'yaw_rad': 0.,
+              'face_center_map_xy_m': (1., 0.), 'outward_normal_map_xy': (-1., 0.),
+              'observation_robot_pose_map': [.5, 0., 0.]}
+
+    reason, offset_m = node._table_lateral_restage_reason(target, .065)
+
+    assert reason == 'rebased_station_goal_requires_restage'
+    assert offset_m == pytest.approx(.002)
 
 
 def test_surface_only_face_target_uses_the_registered_lateral_position():

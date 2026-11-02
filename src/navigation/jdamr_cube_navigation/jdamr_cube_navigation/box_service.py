@@ -47,6 +47,7 @@ from jdamr_cube_navigation.surface_approach import (
     FACE_APPROACH_TIME_S, face_approach_waypoints,
 )
 from jdamr_cube_navigation.table_edge_target import compute_table_edge_docking_target
+from geometry_msgs.msg import Twist
 from nav2_msgs.action import Spin
 from nav_msgs.msg import Path as RosPath
 import numpy as np
@@ -136,6 +137,12 @@ BOX_INPUT_LATENCY_FAILURES = frozenset({
     'box observation is stale or future-dated',
     'LiDAR scan is stale or future-dated',
     'fresh LiDAR scan is required for box witness',
+})
+OBSERVATION_TEMPORARY_INPUT_REASONS = frozenset({
+    *OBSERVER_LATENCY_REASONS,
+    *BOX_INPUT_LATENCY_FAILURES,
+    'observer_silent',
+    'input_gap',
 })
 # Face-to-base_link distance at which an in-place turn clears the face: the
 # collision monitor rotation polygon radius plus margin (pinned by test_t29).
@@ -1721,9 +1728,25 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             spin_node(self, timeout_sec=0.05)
             if not self._navigation_ready(require_fresh_amcl=False):
                 reason = self._guard_failure(False)
+                recovery_started_s = time.monotonic()
+                previous_pause = getattr(self, '_input_recovery_paused', False)
+                input_recovered_now = False
+                if (not input_recovered and not self.stop_requested
+                        and self._input_gap_recoverable(reason)):
+                    self._input_recovery_paused = True
+                    try:
+                        input_recovered_now = self._wait_for_input_recovery(reason)
+                    finally:
+                        paused_s = max(0.0, time.monotonic() - recovery_started_s)
+                        run_deadline_s = getattr(self, 'run_deadline_s', None)
+                        if (isinstance(run_deadline_s, (int, float))
+                                and not isinstance(run_deadline_s, bool)
+                                and math.isfinite(run_deadline_s)):
+                            self.run_deadline_s = run_deadline_s + paused_s
+                        self._input_recovery_paused = previous_pause
                 if (not input_recovered and not self.stop_requested
                         and self._input_gap_recoverable(reason)
-                        and self._wait_for_input_recovery(reason)):
+                        and input_recovered_now):
                     # Nothing observed before the gap may form the verdict.
                     input_recovered = True
                     latency_reasons.add('input_gap')
@@ -2053,11 +2076,35 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 and not self._advance_to_table_view()):
             raise RuntimeError('mapped table observation approach unavailable')
         while True:
+            attempt_input = self._observation_input_snapshot()
             try:
                 return self.observe_target(
                     camera_mount, front_extent_m, gap_m,
                     region_xy, region_radius_m)
-            except BoxObservationUnavailable as error:
+            except (BoxObservationUnavailable, RuntimeError) as error:
+                temporary_input = self._temporary_observation_input_gap(error)
+                if not isinstance(error, BoxObservationUnavailable):
+                    if not temporary_input:
+                        raise
+                    self.emit('box_observation_failed', phase=phase,
+                              reason=str(error), retryable=False,
+                              latency_limited=True, stop_requested=self.stop_requested,
+                              search_enabled=search_enabled,
+                              search_steps_used=search_budget.steps_used,
+                              search_cumulative_yaw_rad=search_budget.cumulative_yaw_rad)
+                    if self.stop_requested:
+                        raise
+                    self.emit('box_observation_waiting_for_input', phase=phase,
+                              reason=str(error), target_preserved=False)
+                    recovered, failure = self._wait_for_observation_input(
+                        error, attempt_input)
+                    if not recovered:
+                        if failure == 'operator_stop':
+                            raise
+                        raise RuntimeError(failure) from error
+                    self.emit('box_observation_input_recovered', phase=phase,
+                              reason=str(error), target_preserved=False)
+                    continue
                 latency_limited = getattr(error, 'latency_limited', False) is True
                 self.emit(
                     'box_observation_failed', phase=phase,
@@ -2071,6 +2118,18 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 # An operator stop or deadline never rotates or observes again.
                 if self.stop_requested:
                     raise
+                if temporary_input:
+                    self.emit('box_observation_waiting_for_input', phase=phase,
+                              reason=error.reason, target_preserved=False)
+                    recovered, failure = self._wait_for_observation_input(
+                        error, attempt_input)
+                    if not recovered:
+                        if failure == 'operator_stop':
+                            raise
+                        raise RuntimeError(failure) from error
+                    self.emit('box_observation_input_recovered', phase=phase,
+                              reason=error.reason, target_preserved=False)
+                    continue
                 # A late-input verdict is observed once more without moving.
                 if latency_limited and not latency_reobserved:
                     latency_reobserved = True
@@ -2127,6 +2186,126 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     search_step=search_budget.steps_used,
                     search_cumulative_yaw_rad=(
                         search_budget.cumulative_yaw_rad))
+
+    def _temporary_observation_input_gap(self, error):
+        """Accept only missing or late observation transport as a stopped wait."""
+        if isinstance(error, BoxObservationUnavailable):
+            reasons = {error.reason, *error.latency_reasons}
+            return bool(reasons & OBSERVATION_TEMPORARY_INPUT_REASONS)
+        return isinstance(error, RuntimeError) and self._input_gap_recoverable(str(error))
+
+    def _observation_input_snapshot(self):
+        samples = getattr(self, 'samples', None) or {}
+        return {
+            'observer': getattr(self, 'box_status_received_s', None),
+            'scan': samples.get('scan'),
+            'camera_info': getattr(self, 'depth_camera_info_received_s', None),
+        }
+
+    @staticmethod
+    def _observation_input_sources(error):
+        if not isinstance(error, BoxObservationUnavailable):
+            return frozenset({'guard'})
+        reasons = {error.reason, *error.latency_reasons}
+        sources = set()
+        if reasons & {'camera_info_missing'}:
+            sources.add('camera_info')
+        if reasons & {
+                'stale_or_future_depth', 'observer_silent',
+                'box observation is stale or future-dated'}:
+            sources.add('observer')
+        if reasons & {
+                'LiDAR scan is stale or future-dated',
+                'fresh LiDAR scan is required for box witness'}:
+            sources.add('scan')
+        if reasons & {'input_gap'}:
+            sources.add('guard')
+        return frozenset(sources)
+
+    @staticmethod
+    def _newer_input(current, baseline):
+        return (isinstance(current, (int, float))
+                and not isinstance(current, bool) and math.isfinite(current)
+                and (not isinstance(baseline, (int, float))
+                     or isinstance(baseline, bool) or not math.isfinite(baseline)
+                     or current > baseline))
+
+    def _observation_source_ready(self, source, baseline):
+        snapshot = self._observation_input_snapshot()
+        if not self._newer_input(snapshot[source], baseline.get(source)):
+            return False
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+        if source == 'observer':
+            status = getattr(self, 'box_status', None)
+            if not isinstance(status, dict):
+                return False
+            reason = status.get('reason')
+            if reason in OBSERVER_LATENCY_REASONS:
+                return False
+            stamp_s = status.get('stamp_s')
+            return (not isinstance(stamp_s, bool)
+                    and isinstance(stamp_s, (int, float)) and math.isfinite(stamp_s)
+                    and 0.0 <= now_s - stamp_s <= 0.5)
+        if source == 'scan':
+            scan = getattr(self, 'last_scan', None)
+            if scan is None:
+                return False
+            stamp = scan.header.stamp
+            stamp_s = stamp.sec + stamp.nanosec * 1e-9
+            return (math.isfinite(stamp_s) and 0.0 <= now_s - stamp_s <= 0.5)
+        if source == 'camera_info':
+            info = getattr(self, 'depth_camera_info', None)
+            if info is None:
+                return False
+            stamp = info.header.stamp
+            stamp_s = stamp.sec + stamp.nanosec * 1e-9
+            return (math.isfinite(stamp_s) and 0.0 <= now_s - stamp_s <= 0.5)
+        return False
+
+    def _wait_for_observation_input(self, error, attempt_input):
+        """Hold zero until a new observation input arrives or a safety guard ends the wait."""
+        started_s = time.monotonic()
+        previous_pause = getattr(self, '_input_recovery_paused', False)
+        sources = self._observation_input_sources(error)
+        payload_sources = sources - {'guard'}
+        recovered = False
+        failure = None
+        self._input_recovery_paused = True
+        try:
+            while True:
+                if self.stop_requested:
+                    failure = 'operator_stop'
+                    break
+                if not self._operator_link_ready():
+                    failure = 'operator_link_lost'
+                    break
+                if not self._departure_battery_ready():
+                    failure = self.readiness_failure_reason()
+                    break
+                guard_failure = self._guard_failure(False)
+                if guard_failure:
+                    if self._input_gap_recoverable(guard_failure):
+                        self._escape_publisher().publish(Twist())
+                        spin_node(self, timeout_sec=0.05)
+                        continue
+                    failure = guard_failure
+                    break
+                self._escape_publisher().publish(Twist())
+                if not payload_sources or all(
+                        self._observation_source_ready(source, attempt_input)
+                        for source in payload_sources):
+                    recovered = True
+                    break
+                spin_node(self, timeout_sec=0.05)
+        finally:
+            paused_s = max(0.0, time.monotonic() - started_s)
+            if recovered:
+                deadline_s = getattr(self, 'run_deadline_s', None)
+                if (isinstance(deadline_s, (int, float))
+                        and not isinstance(deadline_s, bool) and math.isfinite(deadline_s)):
+                    self.run_deadline_s = deadline_s + paused_s
+            self._input_recovery_paused = previous_pause
+        return recovered, failure
 
     def at_observation(self, route_path):
         """Return True when the stationary robot stands in a route's observation region."""
@@ -3012,6 +3191,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         restage_reason, lateral_offset_m = self._table_lateral_restage_reason(
             target, front_extent_m)
         if restage_reason is not None:
+            confirm_rebased_goal = getattr(
+                self, '_table_rebase_requires_restage', False)
             # A straight reverse keeps the lateral offset; repeating the same
             # curve from here would fail the same way. Move sideways once.
             if getattr(self, '_table_lateral_restages', 0) >= TABLE_LATERAL_RESTAGE_LIMIT:
@@ -3027,6 +3208,18 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             except (BoxObservationUnavailable, RuntimeError, ValueError) as error:
                 self._fail_final('table_restage_reobserve_failed', detail=str(error))
                 return False, None
+            if confirm_rebased_goal:
+                remaining_reason, lateral_offset_m = self._table_lateral_restage_reason(
+                    target, front_extent_m, honor_rebase_latch=False)
+                if remaining_reason is not None:
+                    self._fail_final(
+                        'table_lateral_restage_not_confirmed', detail=remaining_reason,
+                        lateral_offset_m=lateral_offset_m)
+                    return False, None
+                self._table_rebase_requires_restage = False
+                self.emit('table_lateral_restage_confirmed',
+                          lateral_offset_m=lateral_offset_m,
+                          fresh_observation=True, preview_valid=True)
         return self._zero_turn_final_approach(
             target, front_extent_m, allow_trim=False, continuous_table=True)
 
@@ -3057,7 +3250,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         anchored['rgbd_reference_valid'] = False
         return anchored
 
-    def _table_lateral_restage_reason(self, target, front_extent_m):
+    def _table_lateral_restage_reason(self, target, front_extent_m, *,
+                                      honor_rebase_latch=True):
         """Say why the continuous approach cannot absorb the observed lateral offset.
 
         Returns ``(reason or None, lateral offset to the anchored target)``. The
@@ -3076,6 +3270,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         left = (-math.sin(heading), math.cos(heading))
         goal = (target['x_m'], target['y_m'], target['yaw_rad'])
         lateral_m = sum((goal[i] - pose[i]) * left[i] for i in (0, 1))
+        if (honor_rebase_latch
+                and getattr(self, '_table_rebase_requires_restage', False)):
+            return 'rebased_station_goal_requires_restage', lateral_m
         if mode == 'surface_only':
             if abs(lateral_m) > SURFACE_ONLY_RESTAGE_LATERAL_M:
                 return 'surface_only_lateral_offset_exceeds_alignment_tolerance', lateral_m
@@ -3162,7 +3359,6 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         finally:
             # Later events and legs of this final approach keep their own pose.
             self.config, self.waypoints, self.pose_id = saved
-        self._table_rebase_requires_restage = False
         return True
 
     def _leave_for_table_reobservation(self):

@@ -3928,6 +3928,33 @@ def test_scan_memory_keeps_one_scan_per_5_cm_or_10_deg():
         (0.0, 0.0, 0.0), (0.05, 0.0, 0.0), (0.05, 0.0, 0.2)]
 
 
+def test_scan_memory_stores_pose_at_scan_stamp_and_fails_closed_without_it():
+    from collections import deque
+    node = route()
+    node.scan_memory = deque(maxlen=restaurant_service.SCAN_MEMORY_KEYFRAMES)
+    node.odom_last_pose = (9., 9., 1.)
+    node.parking_contract = {'robot_base_frame': 'base_link'}
+    scan = SimpleNamespace(header=SimpleNamespace(
+        stamp=SimpleNamespace(sec=12, nanosec=250_000_000)))
+    yaw = .3
+    transform = SimpleNamespace(transform=SimpleNamespace(
+        translation=SimpleNamespace(x=1., y=2.),
+        rotation=SimpleNamespace(x=0., y=0., z=math.sin(yaw / 2.),
+                                 w=math.cos(yaw / 2.))))
+    node.parking_tf = SimpleNamespace(lookup_transform=Mock(return_value=transform))
+
+    node._remember_scan(scan)
+
+    assert node.scan_memory[0][1] == pytest.approx((1., 2., yaw))
+    node.scan_memory.clear()
+    node.parking_tf.lookup_transform.side_effect = [
+        TransformException('missing'), transform]
+    node._remember_scan(scan)
+    assert not node.scan_memory
+    node._remember_scan(scan)
+    assert node.scan_memory[0][1] == pytest.approx((1., 2., yaw))
+
+
 def test_something_in_the_front_blind_range_backs_off_instead_of_driving_forward():
     """Review 2026-10-06: the forward escape could not see 0.08-0.20 m ahead of the front."""
     node = route()
@@ -4647,3 +4674,41 @@ def test_obstacle_wait_does_not_restart_when_old_wait_duration_expires(monkeypat
     node._escape_blocked.assert_not_called()
     cleared = [e for e in _events(node) if e['event'] == 'path_blocked_cleared']
     assert cleared[0]['held_s'] > corridor_route.PATH_BLOCKED_WAIT_S
+
+
+def test_repeated_input_gaps_do_not_recount_previous_wait(monkeypatch):
+    node = route()
+    clock, position, velocity = [10.0], [0.0], [0.0]
+    node.run_deadline_s = 100.0
+    node._operator_link_ready = lambda: True
+    node.latest_motion = (clock[0], 0.0, 0.0)
+
+    def publish(message):
+        velocity[0] = message.linear.x
+
+    def spin(*_a, **_k):
+        clock[0] += .02
+        position[0] += velocity[0] * .02
+        node.latest_motion = (clock[0], velocity[0], 0.0)
+
+    def update(actual):
+        if ((actual[0] > .01 and clock[0] < 15.0)
+                or (actual[0] > .025 and clock[0] < 17.0)):
+            raise RuntimeError('rear box face unavailable')
+        return {'remaining_m': .06 - actual[0]}
+
+    node.escape_velocity = SimpleNamespace(publish=publish)
+    node.parking_tf = SimpleNamespace(lookup_transform=lambda *_a, **_k:
+        SimpleNamespace(transform=SimpleNamespace(
+            translation=SimpleNamespace(x=position[0], y=0.),
+            rotation=SimpleNamespace(x=0., y=0., z=0., w=1.))))
+    monkeypatch.setattr(restaurant_service.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(restaurant_service.rclpy, 'spin_once', spin)
+    result = node._drive_zero_turn(.06, precision=True, hold_heading=True,
+                                   target_update=update)
+    recovered = [e for e in _events(node) if e['event'] == 'rear_box_input_recovered']
+    assert result == pytest.approx(.06, abs=.003)
+    assert len(recovered) == 2
+    assert recovered[1]['paused_s'] <= 2.0
+    assert node.run_deadline_s - 100.0 <= clock[0] - 10.0
+    assert not node._input_recovery_paused

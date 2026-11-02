@@ -5,6 +5,22 @@
 ---
 
 
+## 2026-11-02 | 급수대 재개 후 테이블·도크 완료와 실행 종료 경로 감사
+
+- 주행 전용 요청. 첫 table_01_20261102_144927_f7b56d66은 급수대 tape rebase(좌우7.657mm) 후 재접근에서도 `table lateral alignment requires more clearance`로 종료. 후진·재관측 뒤 geometric preview가 통과해도 rebase restage latch가 남아, 두 번째 접근 이동량8.08e-08m에서 같은 실패가 발생하는 코드 경로 확인.
+- 현재 급수대에서 --resume-at-observation으로 table_01_20261102_145120_94dc0f4c 재개. 급수대→테이블1→도크 home_arrived, exit0, parked/dwell/escape/home=True. 처음부터 무중단 왕복 성공은 아님. 팔 실행 없음.
+- 내부 추정: 급수대 앞8.574/8.587mm·좌우1.836mm, 테이블1 앞9.117/9.273mm. 두 앞주차는 frozen_table_edge_odom_stop이고 final_depth_measurement=false. 도크 live LiDAR 양쪽10.823/10.901mm·각도0.0099도 confirmed=true. 실물 외부 정확도 확인 없음.
+- 도크 약5.3cm 앞에서 remembered_blind_point 1점 때문에 약99.075초 대기. 입력 회복 후 실행기를 종료하지 않고 도킹 완료. 두 번째 실제 짧은 대기가77.041초로 표시된 것은 첫 wait 내부 measure가 recovery_paused_s를 다시 남겨 다음 pause에 재사용한 오류이며 wait finally에서 해당 timestamp를 제거해 수정. 기억점은 고정 도크 좌표와 다른 충돌 입력이며 제거된 상태가 아니었음.
+- 종료 감사: lower observation input timeout, initial odom TF gap, generic input recovery 8초/1회 소진, clearance/lateral restage 상한, fine gap·heading 보정 소진, global deadline→operator stop 혼합, Nav2 reject/abort, rear coarse/stationary input 대기가 실패로 전파되는 경로 확인. 전체 안전·형상 실패를 무조건 재시도하도록 바꾸지 않음.
+- 상위 감사(이번 주행 전용 실행과 별도, 아직 수정 안 함): water_service 단일 /api/state 실패·300초 handoff timeout·confirm POST 응답 미확정·child nonzero가 mission failed. controller 재시작 시 child 재부착/소유권 문제, 주문/팔 결과의 durable idempotency 부재, 신규 follow-web heartbeat/emergency 필드 상대 API 불일치, SSH600초 만료·orphan running request·camera child 종료도 확인. 현재 팀원 미커밋 water_service 두 파일은 보존하며 이번 Pi 배포에 포함하지 않음. 기존 주문 cancel stop은 유지됨.
+
+- 반영: 급수대 rebase latch는 bounded restage와 새 관측·live preview 통과 뒤 해제. 관측 temporary input은 원인별 observer/CameraInfo/scan의 새 generation·stamp freshness를 기다리고 0속도 유지. 무관한 라이다 갱신으로 깊이 복구를 판정하지 않으며 attempt 전 baseline으로 one-shot callback 유실 방지. 초기 input-gap·후속 wait 예산 보전, geometry/잘못된 frame/영역 불일치·operator/link/battery guard는 확대하지 않음.
+- 후면 coarse/stationary의 실제 scan unavailable/stale은 deadline 보전 대기로 연결. stationary bounded read 중 timer를 보호하고 실제 scan gap일 때만 pre-spin 감지 시간과 대기 시간을 보전. 정상 관측 시간은 환급하지 않음. 정지 확인·형상·거리 제한을 제거하지 않음.
+- memory: source와 현재 free-space 증거는 scan header 시각 odom TF 사용. 더 새로운 동일 frame scan의 유효 ray 3개가 과거 점보다2cm 뒤를 관측할 때 source별 clear를 보존. range_min 밖5cm 후보창에서만 추가 검사, active keyframe과 함께 cache prune. 가림/invalid/minrange/과거stamp/다른frame/TF없음은 clear 금지. 기존 callback 시점 pose 사용에 따른 투영 오차 가능성 제거; 실차의 전체 오차량을 따로 측정한 것은 아님.
+- 검증: 최종 관련1049건 PASS, 4모듈 py_compile·diff-check PASS, 별도 코드 검토 차단0. 실제 witness 좌표 투영 재현과 합성 pre-blind free-space→blind 회귀 PASS. 전체 실제 scan/TF 시계열을 재생한 검증은 아님. 로컬20keyframe×1080ray 기준10.028→10.528ms, warm10.396ms; Pi 실시간 지연 개선 수치가 아님.
+- Pi 4모듈 SHA 일치·py_compile 후 executor 재시작, executor/observer active. 백업 ~/jdamr_deploy/backups/mission_recovery_dock_memory_20261102_151404/. reverse 7c27deb7bc8e5d3a63072ca7d4dc75cd2980d545b183137b4cf8c0a338a821ec, restaurant c250f9e046a56d55f5407ea16a811fb12772a756eee89545015f47448e1e886d, rear ac14afb83e715516794004369eef243003e85d4e0217ef380a4d7e45cae9ba07, box 23da160322e5bbbff393d3040c81e3df2e1d765202b84b8b71c1978761280a7d.
+- 수정 후 실차 이동/팔 실행/위치초기화 없음. 99초 대기 제거와 무중단 급수대 성공은 다음 실차에서 확인 필요. source가 사각지대 진입 전 free-space로 확인되지 않으면 memory 보호는 남음. 상위 주문·팔/프로세스 복구 항목과 일반 Nav2/형상불일치/보정소진 종료는 아직 모두 수정한 상태가 아님. 원격 push 없음.
+
 ## 2026-11-02 | 시연 중 회복 가능한 입력 공백은 미션 유지
 
 - 사용자 요청: 회전 LiDAR 지연 등 일시 문제로 시연 미션을 종료하지 않고 현재 단계에서 회복·재개. 사람/장애물 예상 충돌·센서 무효 시 차체 정지, 사용자 정지·비상정지·저전압·조작 연결 상실 보호는 유지. 모든 예외/전원 상실에도 무조건 동작한다는 계약으로 확대하지 않음.

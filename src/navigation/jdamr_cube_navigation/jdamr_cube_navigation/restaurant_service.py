@@ -904,28 +904,79 @@ class ServiceRoute(CorridorRoute):
         keyframes = [(pose, frame) for stamp_s, pose, frame
                      in getattr(self, 'scan_memory', None) or ()
                      if now_s - stamp_s <= SCAN_MEMORY_MAX_AGE_S]
+        cleared_sources = getattr(self, '_blind_point_clearances', None)
+        if cleared_sources is None:
+            cleared_sources = self._blind_point_clearances = set()
         self._blind_point_sources = []
         if not keyframes:
+            cleared_sources.clear()
             return []
         current_pose = self._odom_pose()
+        current_scan_pose = None
+        try:
+            stamp_s = scan.header.stamp.sec + scan.header.stamp.nanosec * 1e-9
+            ros_now_s = self.get_clock().now().nanoseconds * 1e-9
+            if not 0.0 <= ros_now_s - stamp_s <= ESCAPE_SCAN_MAX_AGE_S:
+                raise ValueError('scan timestamp is not fresh')
+            base = self.parking_contract['robot_base_frame']
+            scan_transform = self.parking_tf.lookup_transform(
+                'odom', base, rclpy.time.Time(seconds=stamp_s)).transform
+            current_scan_pose = (
+                scan_transform.translation.x, scan_transform.translation.y,
+                _quaternion_yaw(scan_transform.rotation))
+        except (AttributeError, TypeError, ValueError, OverflowError,
+                TransformException):
+            # A missing stamped pose can never establish clearance. Existing
+            # memory still uses the current pose and remains fail-closed.
+            pass
         return remembered_blind_points(
             keyframes, current_pose, laser, scan.range_min,
-            source_point_filter=source_point_filter, source_records=self._blind_point_sources)
+            source_point_filter=source_point_filter, source_records=self._blind_point_sources,
+            current_scan=scan, current_scan_pose=current_scan_pose,
+            cleared_sources=cleared_sources)
 
     def _remember_scan(self, scan):
         """Keep a scan whenever the base moved SCAN_MEMORY_STEP_M or turned STEP_RAD."""
         memory = getattr(self, 'scan_memory', None)
-        pose = getattr(self, 'odom_last_pose', None)
-        if memory is None or pose is None:
+        latest_pose = getattr(self, 'odom_last_pose', None)
+        if memory is None or latest_pose is None:
             return
-        if memory and math.dist(pose[:2], memory[-1][1][:2]) > SCAN_MEMORY_RESET_M:
+        if memory and math.dist(latest_pose[:2], memory[-1][1][:2]) > SCAN_MEMORY_RESET_M:
             memory.clear()
         if memory:
             _stamp_s, last, _scan = memory[-1]
-            turned = abs(math.atan2(math.sin(pose[2] - last[2]), math.cos(pose[2] - last[2])))
-            if (math.dist(pose[:2], last[:2]) < SCAN_MEMORY_STEP_M
+            turned = abs(math.atan2(
+                math.sin(latest_pose[2] - last[2]),
+                math.cos(latest_pose[2] - last[2])))
+            if (math.dist(latest_pose[:2], last[:2]) < SCAN_MEMORY_STEP_M
                     and turned < SCAN_MEMORY_STEP_RAD):
                 return
+        pose = latest_pose
+        try:
+            header = scan.header
+        except AttributeError:
+            # Headerless test/custom scans cannot establish persistent clearance.
+            header = None
+        if header is not None:
+            try:
+                stamp_s = float(header.stamp.sec) + float(header.stamp.nanosec) * 1e-9
+                if not math.isfinite(stamp_s):
+                    return
+                transform = self.parking_tf.lookup_transform(
+                    'odom', self.parking_contract['robot_base_frame'],
+                    rclpy.time.Time(seconds=stamp_s)).transform
+            except (AttributeError, TypeError, ValueError, OverflowError,
+                    TransformException):
+                return
+            pose = (transform.translation.x, transform.translation.y,
+                    _quaternion_yaw(transform.rotation))
+            if memory:
+                _stored_s, last, _stored_scan = memory[-1]
+                turned = abs(math.atan2(
+                    math.sin(pose[2] - last[2]), math.cos(pose[2] - last[2])))
+                if (math.dist(pose[:2], last[:2]) < SCAN_MEMORY_STEP_M
+                        and turned < SCAN_MEMORY_STEP_RAD):
+                    return
         memory.append((time.monotonic(), pose, scan))
 
     def _blocked_ahead(self, band_m=PATH_BLOCKED_AHEAD_BAND_M, found=None):
@@ -1793,6 +1844,9 @@ class ServiceRoute(CorridorRoute):
                     if state['target_failure'] not in recoverable_target_failures:
                         break
             finally:
+                # measure() may see further gaps while already waiting. They
+                # belong to this pause, not to the next recovery interval.
+                state.pop('recovery_paused_s', None)
                 self._input_recovery_paused = previous_pause
             if self.stop_requested or state['tf_failure'] or state['target_failure']:
                 command.linear.x = command.angular.z = 0.0

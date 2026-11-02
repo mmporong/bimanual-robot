@@ -819,7 +819,11 @@ class RearBoxParkingMixin:
         return False
 
     def _rear_wait_for_input(self, reason, command_watch=None, *,
-                             preserve_motion_deadline=False):
+                             preserve_motion_deadline=None):
+        if preserve_motion_deadline is None:
+            preserve_motion_deadline = reason in {
+                'rear box scan unavailable', 'rear box scan stale or future-dated',
+            }
         recoverable = {
             'rear box scan unavailable', 'rear box scan stale or future-dated',
             'rear box corridor unavailable', 'rear docking swept footprint occupied',
@@ -918,41 +922,64 @@ class RearBoxParkingMixin:
         failure = 'rear box unstable'
         deadline = min(self.run_deadline_s, time.monotonic() + timeout_s)
         while not self.stop_requested and time.monotonic() < deadline:
-            spin_node(self, timeout_sec=0.02)
-            if not self._operator_link_ready():
-                raise RuntimeError('operator_link_lost')
-            motion = getattr(self, 'latest_motion', None)
-            if (motion is None or not 0.0 <= time.monotonic() - motion[0] <= 0.5
-                    or abs(motion[1]) >= 0.01 or abs(motion[2]) >= 0.02):
-                tracker.reset()
-                observations.clear()
-                failure = 'rear box waiting for stopped odometry'
-                continue
+            iteration_started_s = time.monotonic()
+            previous_pause = getattr(self, '_input_recovery_paused', False)
+            # Classify this bounded read before the timer can convert a scan
+            # gap into operator_stop. Only an actual input gap refunds time.
+            self._input_recovery_paused = True
             try:
-                observation = self._rear_box_observation(geometry, extent, half_width)
-                if observation['stamp_s'] == last_stamp:
-                    continue
-                last_stamp = observation['stamp_s']
-                observations.append(observation)
-                observations = observations[-8:]
-                if tracker.update(observation):
-                    return _stationary_face(observations, extent, half_width)
-                failure = 'rear box unstable'
-                observations = observations[-tracker.frame_count:] if tracker.frame_count else []
-            except (ValueError, RuntimeError) as error:
-                failed = getattr(self, '_rear_box_detection_failure', None)
-                if str(error) == 'rear box face unavailable' and failed is not None:
-                    # Count a missing frame once, not once per polling tick.
-                    if failed[0] == last_stamp:
-                        continue
-                    last_stamp = failed[0]
-                    tracker.update(None)
-                    observations = (observations[-tracker.frame_count:]
-                                    if tracker.frame_count else [])
-                else:
+                spin_node(self, timeout_sec=0.02)
+                if not self._operator_link_ready():
+                    raise RuntimeError('operator_link_lost')
+                motion = getattr(self, 'latest_motion', None)
+                if (motion is None or not 0.0 <= time.monotonic() - motion[0] <= 0.5
+                        or abs(motion[1]) >= 0.01 or abs(motion[2]) >= 0.02):
                     tracker.reset()
                     observations.clear()
-                failure = str(error)
+                    failure = 'rear box waiting for stopped odometry'
+                    continue
+                try:
+                    observation = self._rear_box_observation(geometry, extent, half_width)
+                    if observation['stamp_s'] == last_stamp:
+                        continue
+                    last_stamp = observation['stamp_s']
+                    observations.append(observation)
+                    observations = observations[-8:]
+                    if tracker.update(observation):
+                        return _stationary_face(observations, extent, half_width)
+                    failure = 'rear box unstable'
+                    observations = observations[-tracker.frame_count:] if tracker.frame_count else []
+                except (ValueError, RuntimeError) as error:
+                    if str(error) in {
+                            'rear box scan unavailable',
+                            'rear box scan stale or future-dated'}:
+                        paused_s = time.monotonic()
+                        detection_s = max(0.0, paused_s - iteration_started_s)
+                        self.run_deadline_s += detection_s
+                        deadline += detection_s
+                        if not self._rear_wait_for_input(str(error)):
+                            raise RuntimeError(
+                                getattr(self, '_last_direct_motion_failure', None)
+                                or str(error)) from error
+                        deadline += max(0.0, time.monotonic() - paused_s)
+                        tracker.reset()
+                        observations.clear()
+                        continue
+                    failed = getattr(self, '_rear_box_detection_failure', None)
+                    if str(error) == 'rear box face unavailable' and failed is not None:
+                        # Count a missing frame once, not once per polling tick.
+                        if failed[0] == last_stamp:
+                            continue
+                        last_stamp = failed[0]
+                        tracker.update(None)
+                        observations = (observations[-tracker.frame_count:]
+                                        if tracker.frame_count else [])
+                    else:
+                        tracker.reset()
+                        observations.clear()
+                    failure = str(error)
+            finally:
+                self._input_recovery_paused = previous_pause
         raise RuntimeError(f'rear box observation unavailable: {failure}')
 
     def _observe_rear_box_recovering(self, geometry, extent, half_width, command_watch=None,

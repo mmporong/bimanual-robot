@@ -346,7 +346,12 @@ def test_rear_face_rotation_recovers_repeated_scan_gaps_against_same_target():
     assert node._rotate_in_place.call_count == 3
 
 
-def test_rotation_scan_wait_preserves_motion_deadline(monkeypatch):
+@pytest.mark.parametrize('reason, options', [
+    ('rotation scan stale or future-dated', {'preserve_motion_deadline': True}),
+    ('rear box scan unavailable', {}),
+    ('rear box scan stale or future-dated', {}),
+])
+def test_rotation_scan_wait_preserves_motion_deadline(monkeypatch, reason, options):
     node = route_node()
     clock = [10.0]
     node.run_deadline_s = 10.01
@@ -373,7 +378,7 @@ def test_rotation_scan_wait_preserves_motion_deadline(monkeypatch):
     monkeypatch.setattr(module, 'spin_node', spin)
 
     assert node._rear_wait_for_input(
-        'rotation scan stale or future-dated', preserve_motion_deadline=True)
+        reason, **options)
     assert node.run_deadline_s == pytest.approx(10.11)
     assert node._input_recovery_paused is False
     node.request_stop.assert_not_called()
@@ -1692,3 +1697,65 @@ def test_dock_static_disagreement_requires_live_swept_clearance(monkeypatch, mod
         with pytest.raises(RuntimeError, match='live (scan unavailable|corridor occupied)'):
             module.RearBoxParkingMixin._center_rear_box(node, face(.65), .275)
         node._execute_reverse_once.assert_not_called()
+
+
+def test_stationary_rear_observation_keeps_window_after_scan_gap(monkeypatch):
+    node = route_node()
+    clock = [10.0]
+    node.run_deadline_s = 10.2
+    node._operator_link_ready = Mock(return_value=True)
+    node.latest_motion = (10.0, 0.0, 0.0)
+    observations = [face(.2, stamp=20.0 + index * .01) for index in range(8)]
+    node._rear_box_observation = Mock(side_effect=[
+        RuntimeError('rear box scan unavailable'), *observations])
+    def spin(*_a, **_k):
+        clock[0] += .01
+        node.latest_motion = (clock[0], 0.0, 0.0)
+    def wait(reason):
+        assert reason == 'rear box scan unavailable'
+        clock[0] += 2.0
+        node.run_deadline_s += 2.0
+        return True
+    node._rear_wait_for_input = Mock(side_effect=wait)
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(module, 'spin_node', spin)
+    monkeypatch.setattr(module, '_stationary_face', lambda rows, *_a: rows[-1])
+    result = node._observe_rear_box(GEOMETRY, .275, .225, timeout_s=.2)
+    assert result is observations[-1]
+    node._rear_wait_for_input.assert_called_once_with('rear box scan unavailable')
+    assert clock[0] > 12.0
+    assert not node.stop_requested
+
+
+@pytest.mark.parametrize('previous_pause', [False, True])
+def test_stationary_scan_gap_at_deadline_does_not_become_operator_stop(
+        monkeypatch, previous_pause):
+    node = route_node()
+    clock = [10.0]
+    node.run_deadline_s = 10.015
+    node._input_recovery_paused = previous_pause
+    node._operator_link_ready = Mock(return_value=True)
+    node.latest_motion = (10.0, 0.0, 0.0)
+    node.request_stop = Mock()
+    observed = face(.2, stamp=20.0)
+    node._rear_box_observation = Mock(side_effect=[
+        RuntimeError('rear box scan unavailable'), observed])
+    def spin(*_a, **_k):
+        clock[0] += .02
+        node.latest_motion = (clock[0], 0.0, 0.0)
+        node._deadline_tick()
+    def wait(_reason):
+        clock[0] += 2.0
+        node.run_deadline_s += 2.0
+        return True
+    node._rear_wait_for_input = Mock(side_effect=wait)
+    tracker = Mock()
+    tracker.update.return_value = True
+    monkeypatch.setattr(module, 'RearBoxFaceTracker', Mock(return_value=tracker))
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(module, 'spin_node', spin)
+    monkeypatch.setattr(module, '_stationary_face', lambda rows, *_a: rows[-1])
+    assert node._observe_rear_box(GEOMETRY, .275, .225) is observed
+    node.request_stop.assert_not_called()
+    assert node._input_recovery_paused is previous_pause
+    assert node.run_deadline_s == pytest.approx(12.035)
