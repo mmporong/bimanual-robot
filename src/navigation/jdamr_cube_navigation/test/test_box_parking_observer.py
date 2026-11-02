@@ -2,7 +2,6 @@
 
 import json
 import math
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -37,152 +36,24 @@ def test_depth_inputs_keep_only_latest_best_effort_sample():
         'self._on_depth_with_watchdog_activity, LATEST_SENSOR_QOS') == 1
 
 
-def test_depth_callback_only_replaces_latest_pending_image(monkeypatch):
-    """ROS input remains short while a worker owns the expensive detector."""
+def test_long_depth_callback_does_not_trigger_silent_subscription_recovery(
+        monkeypatch):
+    """Detector runtime is reader activity, without changing image freshness."""
     node = object.__new__(DepthBoxParkingNode)
-    node._depth_work = threading.Condition()
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 0
-    node._pending_depth = None
+    node._depth_subscription = SimpleNamespace(get_publisher_count=lambda: 1)
+    node._max_image_age_s = .5
     node._last_depth_callback_s = 10.
+    node.destroy_subscription = lambda subscription: pytest.fail(
+        'active callback must not recreate subscriptions')
+    node._on_depth = lambda message: node._recover_silent_depth_subscriptions()
     monkeypatch.setattr(
         'jdamr_cube_navigation.depth_box_parking.time.monotonic',
         lambda: 20.1)
 
-    first, latest = SimpleNamespace(name='first'), SimpleNamespace(name='latest')
-    node._on_depth_with_watchdog_activity(first)
-    node._on_depth_with_watchdog_activity(latest)
+    node._on_depth_with_watchdog_activity(SimpleNamespace())
 
     assert node._last_depth_callback_s == 20.1
-    assert node._pending_depth == (0, latest)
-
-
-def test_depth_worker_processes_latest_pending_image_and_joins():
-    node = object.__new__(DepthBoxParkingNode)
-    node._depth_work = threading.Condition()
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 0
-    node._processing_context = threading.local()
-    node._pending_depth = None
-    node._depth_worker_stop = False
-    node._depth_callback_active = False
-    node._last_depth_callback_s = 0.
-    processed = []
-    done = threading.Event()
-    node._on_depth = lambda message: (processed.append(message), done.set())
-    node.get_logger = lambda: SimpleNamespace(error=lambda message: None)
-    node._depth_worker = threading.Thread(target=node._depth_worker_loop)
-    node._depth_worker.start()
-    first, latest = SimpleNamespace(name='first'), SimpleNamespace(name='latest')
-    with node._depth_work:
-        node._pending_depth = (0, first)
-        node._pending_depth = (0, latest)
-        node._depth_work.notify()
-    assert done.wait(1.)
-    with node._depth_work:
-        node._depth_worker_stop = True
-        node._depth_work.notify_all()
-    node._depth_worker.join(1.)
-    assert not node._depth_worker.is_alive()
-    assert processed == [latest]
-
-
-def test_depth_worker_drops_pending_image_from_replaced_generation():
-    node = object.__new__(DepthBoxParkingNode)
-    node._depth_work = threading.Condition()
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 1
-    node._processing_context = threading.local()
-    stale = SimpleNamespace(name='stale')
-    node._pending_depth = (0, stale)
-    node._depth_worker_stop = False
-    node._depth_callback_active = False
-    processed = []
-    node._on_depth = processed.append
-    node.get_logger = lambda: SimpleNamespace(error=lambda message: None)
-    worker = threading.Thread(target=node._depth_worker_loop)
-    worker.start()
-    with node._depth_work:
-        node._depth_work.notify()
-    for _ in range(100):
-        with node._depth_work:
-            if node._pending_depth is None and not node._depth_callback_active:
-                node._depth_worker_stop = True
-                node._depth_work.notify_all()
-                break
-        threading.Event().wait(.001)
-    worker.join(1.)
-    assert not worker.is_alive()
-    assert processed == []
-
-
-def test_depth_worker_failure_resets_current_generation_only():
-    node = object.__new__(DepthBoxParkingNode)
-    node._depth_work = threading.Condition()
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 0
-    node._processing_context = threading.local()
-    node._pending_depth = (0, SimpleNamespace(name='broken'))
-    node._depth_worker_stop = False
-    node._depth_callback_active = False
-    rejected, errors = [], []
-    node._on_depth = lambda message: (_ for _ in ()).throw(RuntimeError('boom'))
-    node._reject = lambda reason, **details: rejected.append((reason, details))
-    node.get_logger = lambda: SimpleNamespace(error=errors.append)
-    worker = threading.Thread(target=node._depth_worker_loop)
-    worker.start()
-    for _ in range(100):
-        if rejected:
-            break
-        threading.Event().wait(.001)
-    with node._depth_work:
-        node._depth_worker_stop = True
-        node._depth_work.notify_all()
-    worker.join(1.)
-    assert rejected == [('depth_worker_failure', {'error_type': 'RuntimeError'})]
-    assert any('RuntimeError: boom' in message for message in errors)
-
-
-def test_depth_worker_failure_from_replaced_generation_does_not_reset_new_state():
-    node = object.__new__(DepthBoxParkingNode)
-    node._depth_work = threading.Condition()
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 0
-    node._processing_context = threading.local()
-    node._pending_depth = (0, SimpleNamespace(name='old-frame'))
-    node._depth_worker_stop = False
-    node._depth_callback_active = False
-    entered = threading.Event()
-    release = threading.Event()
-    rejected = []
-    errors = []
-
-    def fail_after_parameter_change(message):
-        entered.set()
-        assert release.wait(1.)
-        raise RuntimeError('old generation failed')
-
-    node._on_depth = fail_after_parameter_change
-    node._reject = lambda reason, **details: rejected.append((reason, details))
-    node.get_logger = lambda: SimpleNamespace(error=errors.append)
-    worker = threading.Thread(target=node._depth_worker_loop)
-    worker.start()
-    assert entered.wait(1.)
-    with node._processing_state_lock:
-        node._processing_generation = 1
-    release.set()
-    for _ in range(100):
-        with node._depth_work:
-            if not node._depth_callback_active:
-                break
-        threading.Event().wait(.001)
-    with node._depth_work:
-        node._depth_worker_stop = True
-        node._depth_work.notify_all()
-    worker.join(1.)
-
-    assert rejected == []
-    assert any('old generation failed' in message for message in errors)
+    assert node._depth_callback_active is False
 
 
 def test_silent_matched_depth_subscription_is_recreated(monkeypatch):
@@ -192,11 +63,6 @@ def test_silent_matched_depth_subscription_is_recreated(monkeypatch):
     old_depth = SimpleNamespace(get_publisher_count=lambda: 1, name='old_depth')
     node._camera_info_subscription = old_info
     node._depth_subscription = old_depth
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 3
-    node._depth_work = threading.Condition()
-    node._depth_callback_active = False
-    node._pending_depth = (3, SimpleNamespace(name='pending'))
     node._max_image_age_s = .5
     node._last_depth_callback_s = 10.
     node._camera_info_history = SimpleNamespace(name='old_history')
@@ -215,8 +81,6 @@ def test_silent_matched_depth_subscription_is_recreated(monkeypatch):
     assert rejected == ['depth_subscription_recreated_after_silence']
     assert node._camera_geometry is None
     assert node._last_depth_callback_s == 12.1
-    assert node._processing_generation == 4
-    assert node._pending_depth is None
 
 
 def test_silent_depth_subscription_waits_without_a_matched_writer(monkeypatch):
@@ -229,45 +93,6 @@ def test_silent_depth_subscription_waits_without_a_matched_writer(monkeypatch):
         'jdamr_cube_navigation.depth_box_parking.time.monotonic', lambda: 20.)
 
     node._recover_silent_depth_subscriptions()
-
-
-def test_watchdog_keeps_pending_depth_while_callbacks_are_recent(monkeypatch):
-    node = object.__new__(DepthBoxParkingNode)
-    pending = (0, SimpleNamespace(name='pending'))
-    node._depth_work = threading.Condition()
-    node._pending_depth = pending
-    node._depth_callback_active = False
-    node._depth_subscription = SimpleNamespace(get_publisher_count=lambda: 1)
-    node._max_image_age_s = .5
-    node._last_depth_callback_s = 10.
-    node.destroy_subscription = lambda subscription: pytest.fail('unexpected recovery')
-    monkeypatch.setattr(
-        'jdamr_cube_navigation.depth_box_parking.time.monotonic', lambda: 11.9)
-
-    node._recover_silent_depth_subscriptions()
-
-    assert node._pending_depth is pending
-
-
-def test_watchdog_does_not_invalidate_an_active_worker(monkeypatch):
-    node = object.__new__(DepthBoxParkingNode)
-    pending = (2, SimpleNamespace(name='next'))
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 2
-    node._depth_work = threading.Condition()
-    node._pending_depth = pending
-    node._depth_callback_active = True
-    node._depth_subscription = SimpleNamespace(get_publisher_count=lambda: 1)
-    node._max_image_age_s = .5
-    node._last_depth_callback_s = 10.
-    node.destroy_subscription = lambda subscription: pytest.fail('unexpected recovery')
-    monkeypatch.setattr(
-        'jdamr_cube_navigation.depth_box_parking.time.monotonic', lambda: 20.)
-
-    node._recover_silent_depth_subscriptions()
-
-    assert node._processing_generation == 2
-    assert node._pending_depth is pending
 
 
 def _messages(depth, *, stamp_s=10.0, step=None, bigendian=False):
@@ -424,52 +249,6 @@ def test_invalid_info_cannot_be_bypassed_by_cached_valid_calibration(monkeypatch
     assert result['reason'] == 'camera_info_unavailable_for_depth_stamp'
     assert not result['detected']
     assert frame(10.25)['stable_frame_count'] == 1
-
-
-def test_valid_info_after_invalid_info_starts_new_stability_sequence(monkeypatch):
-    node, frame = _camera_sequence_node(monkeypatch)
-    frame(10.)
-    assert frame(10.125)['stable']
-    bad, _ = _messages(np.ones((2, 2), dtype='<u2'))
-    bad.header.stamp.sec = -1
-
-    node._on_camera_info(bad)
-    valid, _ = _messages(np.ones((2, 2), dtype='<u2'), stamp_s=10.25)
-    valid.header.stamp.sec = 10
-    valid.header.stamp.nanosec = 250_000_000
-    node._on_camera_info(valid)
-
-    assert node._stability.frame_count == 0
-    result = frame(10.25, publish_info=False)
-    assert result['detected']
-    assert not result['stable']
-    assert result['stable_frame_count'] == 1
-
-
-def test_invalid_camera_info_invalidates_pending_and_running_old_generation():
-    from jdamr_cube_navigation.camera_info_history import CameraInfoHistory
-
-    node = object.__new__(DepthBoxParkingNode)
-    node._camera_info_history = CameraInfoHistory()
-    node._camera_info_lock = threading.Lock()
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 0
-    node._processing_context = threading.local()
-    node._processing_context.generation = 0
-    node._depth_work = threading.Condition()
-    node._pending_depth = (0, SimpleNamespace(name='pending'))
-    node.get_logger = lambda: SimpleNamespace(warning=lambda message: None)
-    messages = []
-    node._status = SimpleNamespace(publish=messages.append)
-    bad, _ = _messages(np.ones((2, 2), dtype='<u2'))
-    bad.header.stamp.sec = -1
-
-    node._on_camera_info(bad)
-    node._publish({'detected': True})
-
-    assert node._processing_generation == 1
-    assert node._pending_depth is None
-    assert messages == []
 
 
 def test_honors_big_endian_rows_with_padding():
@@ -632,46 +411,6 @@ def test_result_expiring_during_detection_is_rejected_with_latency_details(monke
     assert document['control_ready'] is False
 
 
-def test_expired_result_from_replaced_generation_does_not_reset_or_publish(
-        monkeypatch):
-    info, image = _messages(np.ones((2, 2), dtype='<u2') * 1000)
-    node = object.__new__(DepthBoxParkingNode)
-    node._minimum_period_s, node._last_processed_s = 0.0, -math.inf
-    node._on_camera_info(info)
-    node._optical_frame = OPTICAL_FRAME
-    node._calibration_model, node._max_image_age_s = 'rectified_projection', .5
-    node._surface_mode, node._config = 'front', BoxTopConfig()
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 0
-    node._processing_context = threading.local()
-    node._processing_context.generation = 0
-    stability_updates = []
-    node._stability = SimpleNamespace(
-        update=lambda detection: stability_updates.append(detection) or False,
-        frame_count=7)
-    clock_calls = 0
-
-    def now():
-        nonlocal clock_calls
-        clock_calls += 1
-        if clock_calls == 2:
-            node._processing_generation = 1
-            return SimpleNamespace(nanoseconds=10_700_000_000)
-        return SimpleNamespace(nanoseconds=10_100_000_000)
-
-    node.get_clock = lambda: SimpleNamespace(now=now)
-    monkeypatch.setattr(
-        'jdamr_cube_navigation.depth_box_parking.detect_box_front',
-        lambda *_: SimpleNamespace(surface_kind='front'))
-    messages = []
-    node._status = SimpleNamespace(publish=messages.append)
-
-    node._on_depth(image)
-
-    assert stability_updates == []
-    assert messages == []
-
-
 def test_publish_reports_previous_output_cost_without_hiding_current_phases(monkeypatch):
     node = object.__new__(DepthBoxParkingNode)
     node._last_status_serialization_duration_s = .004
@@ -694,31 +433,6 @@ def test_publish_reports_previous_output_cost_without_hiding_current_phases(monk
     assert document['previous_status_publish_duration_s'] == .006
     assert node._last_status_serialization_duration_s == pytest.approx(.1)
     assert node._last_status_publish_duration_s == pytest.approx(.1)
-
-
-def test_publish_drops_old_result_if_generation_changes_during_serialization(
-        monkeypatch):
-    node = object.__new__(DepthBoxParkingNode)
-    node._processing_state_lock = threading.RLock()
-    node._processing_generation = 0
-    node._processing_context = threading.local()
-    node._processing_context.generation = 0
-    messages = []
-    node._status = SimpleNamespace(publish=messages.append)
-    original_dumps = json.dumps
-
-    def change_generation(document, **kwargs):
-        with node._processing_state_lock:
-            node._processing_generation = 1
-        return original_dumps(document, **kwargs)
-
-    monkeypatch.setattr(
-        'jdamr_cube_navigation.depth_box_parking.json.dumps',
-        change_generation)
-
-    node._publish({'detected': True})
-
-    assert messages == []
 
 
 def test_front_observation_publishes_optical_vertical_position(monkeypatch):

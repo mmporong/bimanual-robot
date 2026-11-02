@@ -5,6 +5,15 @@
 ---
 
 
+## 2026-11-02 | 깊이 동기 콜백 복원과 이후 개선 유지
+
+- 반영 후 정지 12초: depth 10.017fps, 관측결과 47개, 계산 중앙값63.5ms/최대84.1ms, 결과나이 중앙값189.5ms/최대254.5ms. 도크 통로 영상의 no_table_edge_candidate 47건이며 급수대 주차 정확도 확인은 아님. 원본 ~/jdamr_data/analysis_20261102/full_route_failure/input_sync_restored.json. 별도 코드 검토 변경 요청 없음; LSP 도구 부재로 형식 승인 대신 COMMENT.
+- 사용자 요청으로 깊이 수신·검출 worker 분리(9a0170a)만 이전 동기 콜백 구조로 복원. depth_box_parking.py는 9a0170a 직전 코드 대비 계산 완료 후 expired_during_processing 차단 17줄만 유지한다. 검출 수학·CameraInfo 선택·보정값은 바꾸지 않았다.
+- 987e14e의 테이프 rebase 거리 기준 통일, terminal 고정 목표와 영상 목표 불일치 판정, 기존 후면 직선 도킹·실측 후면 외곽 개선은 유지. 팀원 water_service 두 파일 변경 보존.
+- 직전 table_01_20261102_134135_2ed37185는 급수대 좌우 약16.4cm 재정렬 후 tape_pair_missing 및 depth stale/future-dated로 종료. worker 분리가 원인이라는 동일 조건 비교 근거는 아직 없으며 조건부 원복 비교로 취급한다.
+- 사용자 도크 복귀 지시에 water_station_20261102_134728_6a550f94 실행: 도크 앞 이동→후면 접근→home_arrived, exit0/home=True. 급수대 실패를 전체 시나리오 성공으로 처리하지 않음. 이후 이동·팔 명령 없음.
+- observer 58개, CameraInfo/table edge 74개 기존 변경 검증 통과. Pi depth 모듈 SHA256 04cad98d9b936682463bc08c1bc6c0bba035a68029707be66decdcde80385902 일치, py_compile 통과. 백업 ~/jdamr_deploy/backups/depth_sync_restore_20261102_135055/. 관측기만 재시작하고 실행기 유지, 둘 다 active. 재시작 전 8개 runtime 모드·보정 설정을 읽어 복원.
+
 ## 2026-11-02 | 사용자 수용 왕복 뒤 급수대·테이블1·도크 실행
 
 - 직전 `water_station_20261102_132923_bde34818`은 사용자가 “성공했다”로 실물 결과 수용. 별도 mm 실측값을 받은 것은 아님. 깊이 worker 원복은 하지 않음.
