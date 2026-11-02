@@ -584,7 +584,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                             contact_reference.restore_tracking(tracking_checkpoint)
                             result = dict(result, valid=False,
                                           reason='station_reference_inconsistent_static_goal')
-                    elif held_correction_needed:
+                    elif (held_correction_needed
+                          and getattr(self, '_station_terminal_goal', None) is None):
                         # A small distance-dependent tape correction can be
                         # absorbed by the active continuous curve. Confirm it
                         # without stopping that curve or accepting a terminal
@@ -840,6 +841,18 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         reference = self._fresh_station_reference()
         rebased = None
         continuous_correction = False
+        with self._station_reference_lock:
+            terminal = getattr(self, '_station_terminal_goal', None)
+            if (terminal is not None
+                    and not getattr(self, '_station_reference_goal_challenged', False)
+                    and not getattr(self, '_table_rebase_requires_restage', False)):
+                # The final straight segment owns its accepted endpoint. A
+                # queued soft correction from just before the hold must not
+                # release it; a large coherent contradiction still challenges it.
+                self._station_reference_goal_correction_pending = False
+                self._station_reference_rebase_goal = None
+                self._station_reference_rebase_samples = []
+                return terminal, reference
         if getattr(self, '_station_reference_rebase_goal', None) is not None:
             with self._station_reference_lock:
                 if reference and reference.get('valid') is True:

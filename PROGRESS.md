@@ -5,6 +5,15 @@
 ---
 
 
+## 2026-11-02 | 확정 목표 유지와 좌우 보정 시점 수정
+
+- 사용자 도크 재배치 통보. 실물 이동 없이 수정. 앞선 보정은 restage latch만 다뤄 접근 말기의 목표 변경과 곡률 분배 원인을 남겼음.
+- terminal hold가 성립한 뒤 worker의 작은 테이프 변화(5~20mm)는 진단으로 남기고 새 soft rebase를 만들지 않음. 소비 경로도 같은 lock 안에서 확정 목표를 먼저 반환해 hold 직전 대기 중이던 soft rebase가 목표를 교체하지 못하게 함. 큰 불일치·센서유효성·충돌·최종거리/좌우 기준은 유지.
+- 연속 lateral control과 preview가 공유하는 Hermite lookahead를 단축해 마지막 10cm를 가능한 한 직선 접근에 남김. 10cm는 정렬을 앞당기는 제어 목표이며 모든 초기조건에서 성립하는 보장이나 새 정지 조건이 아님. 최종 목표는 1cm로 유지.
+- 실패 회차의 terminal goal과 후속 soft 목표를 재현해 확정 목표 불변을 확인. 표적 station 확인 48건, 최종 terminal/하드 보정 관련 16건, surface 확인 57건 통과. 두 실패 회차의 초기조건을 사용한 고정 목표·ideal odom preview 통과이며, 실제 영상 목표 변동과 바퀴 미끄러짐을 포함한 실차 성공 근거는 아님.
+- Pi 두 모듈 SHA256 일치: box_service.py `4f08fb2f765b8f1da334ce9fe7ba13aaf91d269ef527b0fc3916163fa5e6420c`, surface_approach.py `f1eebe5e71c4a4592705946a4159b0f433f65d928c177eff4ef4b0792ae17f75`. 백업 `~/jdamr_deploy/backups/terminal_alignment_20261102_194246/`. 19:42:54 jdamr-box-executor active 확인.
+- 도크 재배치 후 `init --keep-home` 19:43:44 완료. 등록 도크 (-2.781, 0.568, -1.0도) 유지, 스캔 정합 대비 AMCL 차이 3mm·0.1도, navigation active. 관제 emergency_stop 유지, 물리 이동·팔 실행 없음. 실제 한 번 접근 성공은 새 출발 후 확인 대상.
+
 ## 2026-11-02 | 전체 출발261102006 — 급수대 재접근 후 미완료
 
 - 사용자 출발 요청으로 STOP reset, 도크 init --keep-home 완료(AMCL 대조3mm/0.9도), 주문261102006 시작. 미션20261102_192956_dac49049.

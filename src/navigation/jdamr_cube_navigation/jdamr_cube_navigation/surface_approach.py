@@ -12,6 +12,7 @@ FACE_APPROACH_TIME_S = 0.5
 TABLE_APPROACH_SPEED_MPS = 0.1
 TABLE_ALIGNMENT_MAX_RADPS = 0.08
 LATERAL_MIN_LOOKAHEAD_M = 0.02
+LATERAL_EARLY_ALIGNMENT_GAP_M = 0.10
 LATERAL_ARRIVAL_STRIP_FRACTION = 0.8
 
 
@@ -133,7 +134,10 @@ def lateral_face_approach_command(remaining_m, face_error_rad, lateral_error_m,
 
     # A Hermite curve with the current heading and a face-parallel end tangent
     # has start curvature 6*offset/L^2 - 4*tan(start_heading)/L.
-    lookahead = max(LATERAL_MIN_LOOKAHEAD_M, remaining_m)
+    # Shorten the curve horizon to favour alignment before the final segment.
+    # This is a steering target, not an added stop/arrival gate.
+    alignment_reserve_m = max(0.0, LATERAL_EARLY_ALIGNMENT_GAP_M - target_gap_m)
+    lookahead = max(LATERAL_MIN_LOOKAHEAD_M, remaining_m - alignment_reserve_m)
     # Keep tracking while the current heading could carry the base outside the
     # arrival strip. Inside it, straighten without an unnecessary tight S-curve.
     # Heading correction below stays active even when the offset is suppressed.

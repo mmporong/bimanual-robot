@@ -1117,3 +1117,63 @@ def test_missing_pair_discards_only_unconfirmed_soft_goal_candidate(hard, age, d
         assert node._station_reference_rebase_samples == []
         assert node._table_terminal_reference_ready(node.station_reference_result)
         assert node.station_reference_goal['goal_odom'] == [.4, 0., 0.]
+
+
+def test_terminal_hold_ignores_queued_soft_rebase_from_recorded_final_approach():
+    node = _node()
+    node.station_reference_mode = 'rgbd'
+    node.station_reference = _rgbd_model(observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    terminal = {'valid': True, 'stamp_s': 10., 'goal_filter_sample_count': 3,
+                'goal_odom': [-.8257655896, 3.9196747358, 2.1776272699]}
+    changed = dict(terminal, stamp_s=10.5,
+                   goal_odom=[-.8336221787, 3.9124874027, 2.1759260628])
+    node.station_reference_goal = dict(terminal)
+    node._station_terminal_goal = dict(terminal)
+    node._station_reference_goal_correction_pending = True
+    node._station_reference_rebase_goal = changed
+    node._fresh_station_reference = Mock(return_value=changed)
+    goal, observed = node._station_goal_reference(freeze=True, continuous_rebase=True)
+    assert goal['goal_odom'] == terminal['goal_odom']
+    assert observed['goal_odom'] == changed['goal_odom']
+    assert node._station_reference_rebase_goal is None
+    assert not node._station_reference_goal_correction_pending
+    assert node._station_terminal_goal['goal_odom'] == terminal['goal_odom']
+
+
+def test_terminal_tape_worker_keeps_small_coherent_change_diagnostic():
+    node = _node()
+    contact = Mock()
+    node.station_reference = _rgbd_model(contact_reference=contact,
+                                        observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .005}
+    node.station_reference_mode = 'rgbd'
+    node.parking_contract['yaw_tolerance_rad'] = .03
+    held = {'valid': True, 'stamp_s': 9., 'goal_odom': [.4, 0., 0.],
+            'goal_filter_sample_count': 3}
+    node._station_reference_goal_samples = deque([
+        dict(held, stamp_s=9.+i*.2) for i in range(3)], maxlen=5)
+    node.station_reference_goal = dict(held)
+    node.station_reference_goal_frozen = True
+    node._station_terminal_goal = dict(held)
+    node.parking_tf = Mock()
+    node.parking_tf.lookup_transform.return_value = SimpleNamespace(transform=_pose())
+    for index, lateral in enumerate((.0104, .0106, .0105)):
+        stamp = 10. + index * .3
+        node.get_clock.return_value = _clock(stamp + .1)
+        node.station_reference.observe.return_value = {
+            'valid': True, 'stamp_s': stamp, 'goal_odom': [.4, lateral, 0.],
+            'goal_left_offset_m': 0.,
+            'quality': {'tape_center_base_xy_m': [.10, lateral]}}
+        node._station_reference_pending = (None, None, stamp)
+        node._station_reference_stop.clear()
+        node._station_reference_reported_status = None
+        node.emit.side_effect = lambda *_a, **_kw: node._station_reference_stop.set()
+        node._station_reference_wake.set()
+        node._station_reference_loop()
+        node._fresh_station_reference = lambda: node.station_reference_result
+        goal, reference = node._station_goal_reference(freeze=True, continuous_rebase=True)
+        assert goal['goal_odom'] == held['goal_odom']
+        assert reference['goal_odom'][1] == lateral
+        assert not getattr(node, '_station_reference_goal_correction_pending', False)
+        assert getattr(node, '_station_reference_rebase_goal', None) is None
