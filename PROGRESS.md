@@ -5,6 +5,12 @@
 ---
 
 
+## 2026-11-02 | 동기 검출 복원 후 급수대 왕복과 도크 미완료
+
+- 사용자 급수대·도크 왕복 요청으로 water_station_20261102_135750_abb962d1 실행. 급수대 재정렬과 depth stale 대기 반복 후 접근·이탈 완료. 내부 앞간격10.33/10.47mm, 면각도0.018도, 고정목표 좌우0.78mm이나 RGB 관측 좌우14.48mm. 최종depth실측false이고 실물 정확도 미확인. 동기 원복만으로 끊김이 해결되지는 않음.
+- 도크 앞 도착 후 회전 중 scan age0.632초로 정지/종료. 현재 위치에서 dock-only water_station_20261102_140045_6fe83d4a 재개, 회전·후진 접근 진행했으나 remembered_blind_point와 면검출 부족 대기가 반복되어 rear_box_input_recovery_deadline/rear_box_parking_not_confirmed로 종료. 마지막 유효 라이다 간격35.42mm/각도0.105도, 도킹 완료 아님.
+- 팔·테이블1 실행 없음. 마지막 실행 exit1로 정지, 충돌 감시 해제나 기억점 강제 삭제 없음. 원본은 활성 지도 runtime/runs의 위 run별 cycle_events.jsonl.
+
 ## 2026-11-02 | 깊이 동기 콜백 복원과 이후 개선 유지
 
 - 반영 후 정지 12초: depth 10.017fps, 관측결과 47개, 계산 중앙값63.5ms/최대84.1ms, 결과나이 중앙값189.5ms/최대254.5ms. 도크 통로 영상의 no_table_edge_candidate 47건이며 급수대 주차 정확도 확인은 아님. 원본 ~/jdamr_data/analysis_20261102/full_route_failure/input_sync_restored.json. 별도 코드 검토 변경 요청 없음; LSP 도구 부재로 형식 승인 대신 COMMENT.
