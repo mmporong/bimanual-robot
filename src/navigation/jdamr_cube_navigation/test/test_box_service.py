@@ -4051,7 +4051,8 @@ def test_lateral_restage_uses_the_face_alignment_leg_from_turning_room():
     node.execute = Mock(side_effect=lambda **k: order.append(('execute', k)) or True)
     target = {**_table_edge_final_target(1.0), 'face_center_map_xy_m': (1.0, .2)}
     assert node._restage_table_face_alignment(target, .065, 'reason', .2)
-    assert order[0] == ('escape', {'clearance_m': box_service.ESCAPE_CLEARANCE_M})
+    assert order[0] == ('escape', {'clearance_m': box_service.ESCAPE_CLEARANCE_M,
+                                  'max_face_angle_rad': box_service.FINAL_TRIM_MAX_RAD})
     planned = order[1][1]
     assert planned['id'] == 'face_alignment'
     assert planned['x_m'] == pytest.approx(1.0 - .065 - box_service.FACE_ALIGNMENT_FRONT_GAP_M)
@@ -4090,7 +4091,8 @@ def test_surface_only_table_restages_a_large_lateral_offset_before_the_straight_
     assert ('table_alignment_transit_skipped' in events) is (not restaged)
     if restaged:
         mission._leave_parked_pose.assert_called_once_with(
-            clearance_m=box_service.ESCAPE_CLEARANCE_M)
+            clearance_m=box_service.ESCAPE_CLEARANCE_M,
+            max_face_angle_rad=box_service.FINAL_TRIM_MAX_RAD)
         mission.execute.assert_called_once_with(
             final_parking=False, alignment=True, face=True)
         assert mission.plan_pose.call_args_list[0].args[0]['y_m'] == 0.0
@@ -4131,14 +4133,16 @@ def test_far_observation_uses_the_normal_alignment_leg_without_a_counted_restage
     assert mission._table_lateral_restages == 0
 
 
-def test_restage_that_its_escape_would_refuse_keeps_the_continuous_approach(mission):
-    # 20 deg off the face normal and inside turning room: the straight escape
-    # refuses this heading, so the earlier continuous approach is kept.
+def test_oblique_table_restage_does_not_skip_required_lateral_alignment(mission):
+    # The approach accepts up to 30 degrees; its clearance escape must accept
+    # that same heading rather than falling back to an infeasible approach.
     events = _surface_only_visit(mission, (.5, .2, math.radians(20.)))
-    assert 'table_lateral_restage_unavailable' in events
-    assert 'table_alignment_transit_skipped' in events
-    mission._leave_parked_pose.assert_not_called()
-    mission.execute.assert_not_called()
+    assert 'table_lateral_restage_unavailable' not in events
+    assert 'table_lateral_restage' in events
+    mission._leave_parked_pose.assert_called_once_with(
+        clearance_m=box_service.ESCAPE_CLEARANCE_M,
+        max_face_angle_rad=box_service.FINAL_TRIM_MAX_RAD)
+    mission.execute.assert_called_once_with(final_parking=False, alignment=True, face=True)
 
 
 @pytest.mark.parametrize('lateral_m, feasible', [(.02, True), (.20, False)])
@@ -4270,3 +4274,30 @@ def test_accepted_tape_goal_latches_in_near_band_when_pair_leaves_view(monkeypat
     update((.44,0.,0.))
     assert node._station_terminal_goal['goal_odom'] == goal['goal_odom']
     assert node._continuous_table_stop['basis'] == 'aligned_face_frozen_for_precision_band'
+
+
+@pytest.mark.parametrize('angle_deg', [15.77, -20.0, 30.0])
+def test_oblique_restage_reverse_reaches_projected_clearance(angle_deg):
+    node = object.__new__(BoxServiceRoute)
+    angle = math.radians(angle_deg)
+    node.last_box_face = {'face_center_map_xy_m': [0.0, 0.0],
+                          'outward_normal_map_xy': [-1.0, 0.0]}
+    node._parking_parameters_ready = Mock(return_value=True)
+    node._reverse_smoother_ready = Mock(return_value=True)
+    node.capture_stationary_pose = Mock(return_value=((-0.45, 0.0, angle), {}))
+    node.emit = Mock()
+    node.config = {'waypoints': []}
+    node.waypoints = []
+    node._make_reverse_path = Mock(return_value=RosPath())
+    node._reverse_path_valid = Mock(return_value=False)
+    # The normal escape retains its 15-degree guard.
+    assert not node._leave_parked_pose()
+    node._make_reverse_path.assert_not_called()
+    # A restage may plan this reverse, but cannot bypass collision validation.
+    assert not node._leave_parked_pose(max_face_angle_rad=box_service.FINAL_TRIM_MAX_RAD)
+    start, target = node._make_reverse_path.call_args.args
+    assert target[0] == pytest.approx(-box_service.ESCAPE_CLEARANCE_M)
+    assert target[2] == angle
+    assert target[1] == pytest.approx(-(.565-.45)*math.tan(angle))
+    node._reverse_path_valid.assert_called_once()
+    assert node.emit.call_args.kwargs['reason'] == 'box_escape_blocked'

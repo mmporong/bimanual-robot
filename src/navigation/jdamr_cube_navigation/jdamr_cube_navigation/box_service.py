@@ -2995,7 +2995,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if distance_m >= ESCAPE_CLEARANCE_M - ESCAPE_PATH_CONTRACT['xy_tolerance_m']:
             return None
         facing = -(math.cos(pose[2]) * outward[0] + math.sin(pose[2]) * outward[1])
-        if facing < math.cos(ESCAPE_MAX_FACE_ANGLE_RAD):
+        if facing < math.cos(FINAL_TRIM_MAX_RAD):
             return 'heading_not_facing_box_face'
         if distance_m <= 0.0:
             return 'face_distance_outside_escape_range'
@@ -3009,7 +3009,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         self.last_box_face = {
             'face_center_map_xy_m': list(target['face_center_map_xy_m']),
             'outward_normal_map_xy': list(target['outward_normal_map_xy'])}
-        return self._leave_parked_pose(clearance_m=ESCAPE_CLEARANCE_M)
+        return self._leave_parked_pose(
+            clearance_m=ESCAPE_CLEARANCE_M, max_face_angle_rad=FINAL_TRIM_MAX_RAD)
 
     def _restage_table_face_alignment(self, target, front_extent_m, reason, lateral_offset_m):
         """Move sideways once with the existing Nav2 face-alignment leg."""
@@ -3929,7 +3930,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 'yaw_rad': math.atan2(-normal_map[1], -normal_map[0]),
                 'reapproach_goal_reference': previous_goal}
 
-    def _leave_parked_pose(self, *, clearance_m=ESCAPE_CLEARANCE_M):
+    def _leave_parked_pose(self, *, clearance_m=ESCAPE_CLEARANCE_M,
+                           max_face_angle_rad=ESCAPE_MAX_FACE_ANGLE_RAD):
         """
         Back straight away from the last box face before any home rotation.
 
@@ -3940,6 +3942,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if (isinstance(clearance_m, bool) or not isinstance(clearance_m, (int, float))
                 or not math.isfinite(clearance_m) or not .2 <= clearance_m <= ESCAPE_CLEARANCE_M):
             raise ValueError('invalid table reobservation clearance')
+        if (isinstance(max_face_angle_rad, bool)
+                or not isinstance(max_face_angle_rad, (int, float))
+                or not math.isfinite(max_face_angle_rad)
+                or not 0.0 < max_face_angle_rad <= FINAL_TRIM_MAX_RAD):
+            raise ValueError('invalid table escape heading range')
         face = getattr(self, 'last_box_face', None)
         if face is None:
             return True
@@ -3978,7 +3985,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         # A straight reverse moves away from the face only from a pose that
         # faces it and is in front of it; refuse any other.
         facing = -(math.cos(actual[2]) * outward[0] + math.sin(actual[2]) * outward[1])
-        aligned = facing >= math.cos(ESCAPE_MAX_FACE_ANGLE_RAD)
+        aligned = facing >= math.cos(max_face_angle_rad)
         if not (aligned and 0.0 < distance_m):
             self.emit('failed', phase='box_escape', reason='box_escape_unavailable',
                       detail=('heading_not_facing_box_face' if not aligned
@@ -3986,7 +3993,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                       face_distance_m=self._json_scalar(distance_m),
                       face_heading_cos=self._json_scalar(facing))
             return False
-        length_m = clearance_m - distance_m
+        # A fixed-heading reverse increases plane clearance by travel * facing.
+        # Table re-staging accepts the same bounded angle as its approach;
+        # ordinary parked escapes retain their narrower default heading range.
+        length_m = (clearance_m - distance_m) / facing
         target_reference = (actual[0] - length_m * math.cos(actual[2]),
                             actual[1] - length_m * math.sin(actual[2]), actual[2])
         if reference_frame == 'odom':
