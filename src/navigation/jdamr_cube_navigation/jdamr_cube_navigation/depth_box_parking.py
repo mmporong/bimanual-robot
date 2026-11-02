@@ -217,11 +217,14 @@ class DepthBoxParkingNode(Node):
             self.get_parameter('calibration_model').value)
         self._minimum_period_s = 1.0 / processing_hz
         self._last_processed_s = -math.inf
+        self._processing_duration_estimate_s = None
+        self._freshness_skip_pending = False
+        self._precalculation_skips = 0
         self._last_depth_callback_s = time.monotonic()
         self._camera_info_history = CameraInfoHistory()
         self._camera_geometry = None
         self._status = self.create_publisher(
-            String, '/box_parking/perception_status', 10)
+            String, '/box_parking/perception_status', 1)
         self._create_depth_subscriptions()
         self.create_timer(
             self._max_image_age_s,
@@ -384,6 +387,8 @@ class DepthBoxParkingNode(Node):
             if reference_changed:
                 self._table_region_odom = None
             if changed:
+                self._processing_duration_estimate_s = None
+                self._freshness_skip_pending = False
                 self._stability.update(None)
                 if getattr(self, '_table_tracker', None) is not None:
                     self._table_tracker.reset()
@@ -424,17 +429,22 @@ class DepthBoxParkingNode(Node):
         if timing_markers is not None:
             callback_started_s, calculation_started_s, calculation_finished_s = timing_markers
             publish_boundary_s = time.monotonic()
+            processing_duration_s = publish_boundary_s - callback_started_s
+            self._processing_duration_estimate_s = processing_duration_s
             document = {
                 **document,
                 'input_decode_duration_s': calculation_started_s - callback_started_s,
                 'calculation_duration_s': calculation_finished_s - calculation_started_s,
                 'postprocess_duration_s': publish_boundary_s - calculation_finished_s,
-                'processing_duration_s': publish_boundary_s - callback_started_s,
+                'processing_duration_s': processing_duration_s,
+                'precalculation_skipped_frames': getattr(
+                    self, '_precalculation_skips', 0),
                 'previous_status_serialization_duration_s': getattr(
                     self, '_last_status_serialization_duration_s', None),
                 'previous_status_publish_duration_s': getattr(
                     self, '_last_status_publish_duration_s', None),
             }
+            self._precalculation_skips = 0
         document = {**document, 'control_ready': False}
         message = String()
         serialization_started_s = time.monotonic()
@@ -465,6 +475,7 @@ class DepthBoxParkingNode(Node):
 
     def _reset_measurements(self) -> None:
         """Discard accumulated observations after input geometry or time changes."""
+        self._freshness_skip_pending = False
         self._stability.update(None)
         if getattr(self, '_table_tracker', None) is not None:
             self._table_tracker.reset()
@@ -541,6 +552,35 @@ class DepthBoxParkingNode(Node):
                   and track.stable_frames >= self._table_tracker.config.required_frames)
         return track.detection, fields, stable
 
+    def _skip_for_fresher_depth(self, stamp_s, now_s):
+        """Yield one predicted-late callback so depth=1 can supply its newest frame."""
+        estimate_s = getattr(self, '_processing_duration_estimate_s', None)
+        if (not isinstance(estimate_s, (int, float))
+                or isinstance(estimate_s, bool) or not math.isfinite(estimate_s)
+                or estimate_s <= 0.0):
+            self._freshness_skip_pending = False
+            return False
+        age_s = now_s - stamp_s
+        if (not math.isfinite(age_s) or not 0.0 <= age_s <= self._max_image_age_s):
+            self._freshness_skip_pending = False
+            return False
+        # Reserve half one configured processing period for JSON publication,
+        # DDS delivery and the control callback to consume the result.
+        delivery_headroom_s = min(
+            self._minimum_period_s / 2.0, self._max_image_age_s / 2.0)
+        completion_budget_s = max(0.0, self._max_image_age_s - delivery_headroom_s)
+        if age_s + estimate_s <= completion_budget_s:
+            self._freshness_skip_pending = False
+            return False
+        if getattr(self, '_freshness_skip_pending', False):
+            # Never starve a slow or remotely delayed stream. One quick return is
+            # enough for KEEP_LAST depth=1 to replace this callback with its newest.
+            self._freshness_skip_pending = False
+            return False
+        self._freshness_skip_pending = True
+        self._precalculation_skips = getattr(self, '_precalculation_skips', 0) + 1
+        return True
+
     def _on_depth(self, message: Image) -> None:
         if not getattr(self, '_perception_enabled', True):
             return
@@ -548,10 +588,14 @@ class DepthBoxParkingNode(Node):
         self._last_depth_callback_s = now_s
         if now_s - self._last_processed_s < self._minimum_period_s:
             return
-        self._last_processed_s = now_s
         try:
             table_fields, table_stable = {}, None
             ros_now_s = self.get_clock().now().nanoseconds * 1e-9
+            stamp_s = (message.header.stamp.sec
+                       + message.header.stamp.nanosec * 1e-9)
+            if self._skip_for_fresher_depth(stamp_s, ros_now_s):
+                return
+            self._last_processed_s = now_s
             info = self._camera_info_history.select(
                 stamp_nanoseconds(message.header.stamp),
                 maximum_lag_ns=round(self._max_image_age_s * 1e9))
@@ -566,6 +610,7 @@ class DepthBoxParkingNode(Node):
             previous_geometry = getattr(self, '_camera_geometry', None)
             if (self._camera_info_history.rewound
                     or (previous_geometry is not None and geometry != previous_geometry)):
+                self._processing_duration_estimate_s = None
                 self._reset_measurements()
             self._camera_geometry = geometry
             calculation_started_s = time.monotonic()

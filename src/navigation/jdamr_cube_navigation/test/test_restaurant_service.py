@@ -3896,6 +3896,8 @@ def test_filtered_blind_memory_uses_one_current_pose_snapshot(monkeypatch):
     assert source_scan is scan
     assert point == pytest.approx((.39, 0.))
     assert current == (.20, 0., 0.)
+    assert node._blind_point_diagnostics[0]['reason'] == (
+        'current_scan_timestamp_invalid')
 
 
 def test_escape_snapshot_needs_a_fresh_scan_and_carries_the_blind_memory(monkeypatch):

@@ -34,6 +34,57 @@ def test_depth_inputs_keep_only_latest_best_effort_sample():
     assert source.count('self._on_camera_info, LATEST_SENSOR_QOS') == 1
     assert source.count(
         'self._on_depth_with_watchdog_activity, LATEST_SENSOR_QOS') == 1
+    assert source.count(
+        "String, '/box_parking/perception_status', 1") == 1
+
+
+def test_predicted_late_depth_yields_once_for_latest_without_starvation():
+    node = object.__new__(DepthBoxParkingNode)
+    node._max_image_age_s = .5
+    node._minimum_period_s = .2
+    node._processing_duration_estimate_s = .18
+    node._freshness_skip_pending = False
+    node._precalculation_skips = 0
+
+    assert node._skip_for_fresher_depth(10.0, 10.25) is True
+    assert node._skip_for_fresher_depth(10.0, 10.25) is False
+    assert node._precalculation_skips == 1
+    assert node._freshness_skip_pending is False
+
+
+def test_predicted_late_depth_skips_before_decode_and_rate_limit():
+    _info, image = _messages(np.ones((2, 2), dtype='<u2'), stamp_s=10.0)
+    node = object.__new__(DepthBoxParkingNode)
+    node._perception_enabled = True
+    node._minimum_period_s, node._last_processed_s = 0.2, -math.inf
+    node._processing_duration_estimate_s = .18
+    node._freshness_skip_pending = False
+    node._precalculation_skips = 0
+    node._max_image_age_s = .5
+    node._camera_info_history = SimpleNamespace(
+        select=lambda *_a, **_k: pytest.fail('predicted-late input was decoded'))
+    node.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(nanoseconds=10_250_000_000))
+
+    node._on_depth(image)
+
+    assert node._last_processed_s == -math.inf
+    assert node._precalculation_skips == 1
+
+
+def test_measurement_reset_keeps_timing_prediction_and_skip_evidence():
+    node = object.__new__(DepthBoxParkingNode)
+    node._processing_duration_estimate_s = .3
+    node._freshness_skip_pending = True
+    node._precalculation_skips = 2
+    node._stability = SimpleNamespace(update=lambda _detection: None)
+    node._table_tracker = SimpleNamespace(reset=lambda: None)
+
+    node._reset_measurements()
+
+    assert node._processing_duration_estimate_s == .3
+    assert node._freshness_skip_pending is False
+    assert node._precalculation_skips == 2
 
 
 def test_long_depth_callback_does_not_trigger_silent_subscription_recovery(
@@ -437,6 +488,7 @@ def test_publish_reports_previous_output_cost_without_hiding_current_phases(monk
     node = object.__new__(DepthBoxParkingNode)
     node._last_status_serialization_duration_s = .004
     node._last_status_publish_duration_s = .006
+    node._precalculation_skips = 2
     messages = []
     node._status = SimpleNamespace(publish=messages.append)
     ticks = iter((4., 5., 5.1, 5.2, 5.3))
@@ -451,10 +503,13 @@ def test_publish_reports_previous_output_cost_without_hiding_current_phases(monk
     assert document['calculation_duration_s'] == 1.
     assert document['postprocess_duration_s'] == 1.
     assert document['processing_duration_s'] == 3.
+    assert document['precalculation_skipped_frames'] == 2
     assert document['previous_status_serialization_duration_s'] == .004
     assert document['previous_status_publish_duration_s'] == .006
     assert node._last_status_serialization_duration_s == pytest.approx(.1)
     assert node._last_status_publish_duration_s == pytest.approx(.1)
+    assert node._processing_duration_estimate_s == 3.
+    assert node._precalculation_skips == 0
 
 
 def test_front_observation_publishes_optical_vertical_position(monkeypatch):
@@ -681,8 +736,12 @@ def test_bad_height_does_not_partially_change_mode_or_camera_angles(height):
 def test_camera_reposition_and_return_to_box_clear_previous_stability():
     """Both mount changes and switching back discard prior evidence."""
     node = _surface_parameter_node()
+    node._processing_duration_estimate_s = .3
+    node._freshness_skip_pending = True
     assert node._on_parameters(_parameters(
         surface_mode='table_edge', camera_height_m=0.95, camera_pitch_rad=0.4)).successful
+    assert node._processing_duration_estimate_s is None
+    assert node._freshness_skip_pending is False
     assert node._on_parameters(_parameters(
         camera_height_m=1.1, camera_pitch_rad=0.6)).successful
     assert node._table_config.camera_height_m == 1.1

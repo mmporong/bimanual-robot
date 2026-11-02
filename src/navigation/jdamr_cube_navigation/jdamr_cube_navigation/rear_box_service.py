@@ -1233,7 +1233,7 @@ class RearBoxParkingMixin:
                 try:
                     observed = _observe_rear_face_roi(
                         self._rear_scan_values(scan), geometry, extent,
-                        half_width, expected_span_m=initial['span_m'])
+                        half_width)
                     cosine, sine = math.cos(pose[2]), math.sin(pose[2])
                     x_m, y_m = observed['face_center_base_xy_m']
                     nx, ny = observed['normal_base_xy']
@@ -1262,8 +1262,37 @@ class RearBoxParkingMixin:
             residual_limit_m = min(
                 4.0 * observed['residual_rms_m'], MAXIMUM_RESIDUAL_RMS_M)
             near_limit_m = min(residual_limit_m, 0.003)
-            return (-residual_limit_m <= residual_m <= near_limit_m
-                    and lower_m <= tangent_m <= upper_m)
+            if not (-residual_limit_m <= residual_m <= near_limit_m
+                    and lower_m <= tangent_m <= upper_m):
+                return False
+            # A partial fit may legitimately see only the near-range portion of
+            # the latched dock face. It is still the target only where its
+            # verified source segment overlaps the original target segment.
+            try:
+                cosine, sine = math.cos(pose[2]), math.sin(pose[2])
+                point_odom = (
+                    pose[0] + cosine * point[0] - sine * point[1],
+                    pose[1] + sine * point[0] + cosine * point[1])
+                reference_point = to_base_frame(
+                    initial['base_pose_odom'], (*point_odom, 0.0))
+                reference_tangent = initial['tangent_base_xy']
+                reference_tangent_m = sum(
+                    reference_point[i] * reference_tangent[i] for i in (0, 1))
+                reference_lower_m, reference_upper_m = initial['tangent_bounds_m']
+                reference_normal = initial['normal_base_xy']
+                reference_residual_m = (
+                    sum(reference_point[i] * reference_normal[i] for i in (0, 1))
+                    - initial['line_offset_m'])
+                reference_residual_limit_m = min(
+                    4.0 * initial['residual_rms_m'], MAXIMUM_RESIDUAL_RMS_M)
+                reference_near_limit_m = min(
+                    reference_residual_limit_m, 0.003)
+            except (KeyError, TypeError, ValueError):
+                return False
+            return (
+                -reference_residual_limit_m <= reference_residual_m
+                <= reference_near_limit_m
+                and reference_lower_m <= reference_tangent_m <= reference_upper_m)
 
         def approach(observation):
             _set_collision_target(

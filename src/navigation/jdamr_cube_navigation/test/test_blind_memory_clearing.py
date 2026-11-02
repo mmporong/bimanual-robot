@@ -92,6 +92,32 @@ def test_unproven_current_scan_does_not_clear_blind_memory():
     assert not cleared
 
 
+def test_last_visible_clearance_failure_survives_entry_into_blind_range():
+    source_pose = (0., 0., 0.)
+    source = _scan([math.nan, math.nan, .5, math.nan, math.nan], stamp_s=1.)
+    blocked = _scan([.34] * 5, stamp_s=2.)
+    laser = (0., 0., 0.)
+    failures = {}
+
+    remembered_blind_points(
+        [(source_pose, source)], (.175, 0., 0.), laser, .28,
+        current_scan=blocked, current_scan_pose=(.175, 0., 0.),
+        clearance_failures=failures)
+    diagnostic = next(iter(failures.values()))
+    assert diagnostic['reason'] == 'three_finite_rays_not_beyond_point'
+    assert diagnostic['projected_distance_m'] == pytest.approx(.325)
+    assert diagnostic['rays_m'] == pytest.approx([.34, .34, .34])
+
+    source_diagnostics = []
+    found = remembered_blind_points(
+        [(source_pose, source)], (.3, 0., 0.), laser, .28,
+        current_scan=_scan([math.nan] * 5, stamp_s=3.),
+        current_scan_pose=(.3, 0., 0.), clearance_failures=failures,
+        source_diagnostics=source_diagnostics)
+    assert found
+    assert source_diagnostics == [diagnostic]
+
+
 def test_completed_run_turn_projection_uses_pre_blind_free_space_evidence():
     """Replay the 2026-11-02 remembered point geometry that paused for 99 s."""
     laser = (-.01, 0., -3.0802057575642006)

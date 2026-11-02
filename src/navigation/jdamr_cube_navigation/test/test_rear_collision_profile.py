@@ -537,6 +537,13 @@ def test_remembered_collision_records_original_scan_and_pose(monkeypatch):
     route, _monitor, _clock = node(monkeypatch, memory=[(-.281, .051)])
     original = scan([(-.5,.05)], stamp_s=9.)
     route._blind_point_sources = [((1.,2.,.1), original, (-.5,.05), (1.2,2.,.1))]
+    diagnostic = {
+        'reason': 'three_finite_rays_not_beyond_point',
+        'projected_distance_m': .325,
+        'ray_index': 42,
+        'rays_m': [.34, .34, .34],
+    }
+    route._blind_point_diagnostics = [diagnostic]
     with module.rear_collision_profile(route) as watch:
         assert watch(command(linear=-.05)) == 'rear docking swept footprint occupied'
     events = [call.kwargs for call in route.emit.call_args_list
@@ -547,6 +554,7 @@ def test_remembered_collision_records_original_scan_and_pose(monkeypatch):
     assert origin['scan_stamp_s'] == 9.
     assert len(origin['ranges']) == len(original.ranges)
     assert None in origin['ranges']  # JSON has no Infinity literals
+    assert events[0]['remembered_clearance_diagnostic'] == diagnostic
 
 
 def test_terminal_reverse_uses_measured_rear_without_masking_returns(monkeypatch):

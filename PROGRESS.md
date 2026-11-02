@@ -5,6 +5,18 @@
 ---
 
 
+## 2026-11-02 | 급수대 최신 깊이 선택과 도크 부분 면 오분류 수정
+
+- 직전 주행 table_01_20261102_151712_248fee59은 급수대→테이블1→도크 home_arrived/exit0. 팔 실행 없음. 급수대 입력 대기0.363/0.826/0.485초, 후면 대기102.252/0.448초가 있어 매끄러운 무정지 성공은 아님.
+- 급수대: 실패 시 관측나이0.71~0.81초는 입력나이0.21~0.31초·계산0.13~0.35초·결과 소비 대기의 누적. Wi-Fi/DDS/로컬 scheduling 비중은 원본 입력 기록 부족으로 분리 못 함. 동기 observer를 유지하면서 이전 처리시간상 완료 시 freshness 예산을 넘길 프레임은 계산 전 최대 한 번 양보해 KEEP_LAST depth=1의 최신 프레임을 받음. status publisher도 depth=1. 장면 reset 시 처리시간 예측 초기화, 연속 skip 방지, 0.5초 유효성 유지. 실제 계산 함수의 실행시간 단축이나 실차 끊김 제거를 입증한 변경은 아님.
+- 도크: 둘째 대기는 같은 박스 면의 부분관측 폭0.1889m가 초기0.3410m와 다르다는 이유로 장애물 분류된 경우. source 면의 normal/plane 일치와 source segment·초기 target segment 안의 점이라는 근거를 모두 유지하며 전체 폭 일치 요구만 제거. 초기 target plane 잔차는 near 최대3mm/far 최대4×RMS로 유지하며, 목표보다1/2/3cm 앞 평행면은 계속 보호. 실제 둘째 source도 초기 면보다5.93mm 앞이어서 이번 수정만으로 제거되지 않음.
+- 첫102.252초 대기는 source age18.45초+대기로 memory TTL120초 만료와 일치. 해당 source는 박스 면보다8.4cm 앞의 연속 반환이며 제거 가능한 박스점으로 확인되지 않음. 이번 변경으로 해결됐다고 판정하지 않음. 새 스캔 ray3개·시각·frame·stamped TF 사유를 collision witness에 보존해 다음 재현에서 미제거 조건을 구분. 사각지대 진입 뒤에는 마지막 관측가능구간 증거를 덮어쓰지 않음. no-return을 빈 공간으로 취급하거나 TTL을 줄이지 않음.
+- 검증: observer+box406건, rear 관련609건 PASS(launch 환경3건 제외), py_compile·fatal flake8·diff-check PASS. 초기 target보다1/2/3cm 앞 평행면을 제외하던 수정 중 오류는 배포 후 이동 전 발견하여 plane residual 보호를 추가하고 재배포. 최종 코드 독립 확인 차단0.
+- Pi 5모듈 SHA 일치·py_compile, 관측기와 실행기 재시작/active 확인. 최종 백업 ~/jdamr_deploy/backups/depth_freshness_rear_target_20261102_160140/. 기존 camera mount/runtime parameters 보존, 후면 구간 depth perception 비활성 유지.
+- 이후 사용자 짧은 앞뒤 주행 승인으로 water_station_20261102_160247_caba4c35 dock-only 실행: 등록 도크 접근점→후면 도킹 home_arrived/exit0. 급수대·테이블·팔 미실행. 내부 라이다 간격11.410/12.667mm·각도0.160도 confirmed=true, 실물 외부 측정 없음. 102초 대기는 재현되지 않았으나 완전 해결 입증 아님. 마지막 memory 정지0.433초 뒤 arrival_reached로 완료. 이 중 약0.413초는 제동·정지확인이고 waiting event 이후 실제 입력 대기는 약33ms. 새 점은 초기 target plane보다11.18mm 앞이어서 target 제외 기준 완화 근거 없음.
+- 새 witness: 마지막 가시 위치거리0.302685m, 세 ray0.31725/0.31700/0.31625m로20mm 뒤의 자유공간 조건을 만족하지 못한 사실 확인. 가림/no-return 추론과 달리 이번 source는 모두 유효 반사였음. 이전102초 source와 다르므로 이전 원인까지 확정하지 않음. 최신 스캔이 없다는 이유로 기억점을 삭제하거나20mm 기준을 임의 축소하지 않음.
+- 팀원 water_service.py·water_service_api.py 변경 보존. 원격 push 없음.
+
 ## 2026-11-02 | 급수대 재개 후 테이블·도크 완료와 실행 종료 경로 감사
 
 - 주행 전용 요청. 첫 table_01_20261102_144927_f7b56d66은 급수대 tape rebase(좌우7.657mm) 후 재접근에서도 `table lateral alignment requires more clearance`로 종료. 후진·재관측 뒤 geometric preview가 통과해도 rebase restage latch가 남아, 두 번째 접근 이동량8.08e-08m에서 같은 실패가 발생하는 코드 경로 확인.

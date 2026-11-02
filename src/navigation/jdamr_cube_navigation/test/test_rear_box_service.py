@@ -741,12 +741,12 @@ def face(gap=0.01, angle=0.0, stamp=5.0):
             'base_pose_odom': (0., 0., 0.), 'observation_roi_clipped': False}
 
 
-def _historical_face_scan(x_m):
+def _historical_face_scan(x_m, lower_m=-.175, upper_m=.175):
     count = 7201
     increment = 2*math.pi/(count-1)
     ranges = [math.inf] * count
     for index in range(101):
-        y_m = -.175 + .35*index/100
+        y_m = lower_m + (upper_m-lower_m)*index/100
         scan_x, scan_y = -(x_m+.01), -y_m
         bearing = math.atan2(scan_y, scan_x)
         beam = round((bearing+math.pi)/increment)
@@ -779,6 +779,24 @@ def test_real_source_face_classifier_preserves_non_target_points():
     assert not classifier((0., 0., 0.), target, (-.475, .3))
     other = _historical_face_scan(-.65)
     assert not classifier((0., 0., 0.), other, (-.65, 0.))
+
+
+def test_source_face_classifier_accepts_only_overlapping_partial_target_segment():
+    classifier = _source_face_classifier()
+    partial_target = _historical_face_scan(-.475, -.09, .095)
+    assert classifier((0., 0., 0.), partial_target, (-.475, -.03))
+
+    # A different coplanar segment must remain collision memory even though its
+    # normal and plane match the target.
+    separate_segment = _historical_face_scan(-.475, .24, .43)
+    assert not classifier((0., 0., 0.), separate_segment, (-.475, .30))
+
+
+@pytest.mark.parametrize('x_m', [-.465, -.455, -.445])
+def test_source_face_classifier_preserves_nearer_parallel_partial_surface(x_m):
+    classifier = _source_face_classifier()
+    nearer_surface = _historical_face_scan(x_m, -.09, .095)
+    assert not classifier((0., 0., 0.), nearer_surface, (x_m, -.03))
 
 
 def test_source_face_cache_checks_scan_identity_and_acquisition_pose(monkeypatch):

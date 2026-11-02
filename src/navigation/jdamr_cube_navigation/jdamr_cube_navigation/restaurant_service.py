@@ -907,33 +907,44 @@ class ServiceRoute(CorridorRoute):
         cleared_sources = getattr(self, '_blind_point_clearances', None)
         if cleared_sources is None:
             cleared_sources = self._blind_point_clearances = set()
+        clearance_failures = getattr(self, '_blind_point_clearance_failures', None)
+        if clearance_failures is None:
+            clearance_failures = self._blind_point_clearance_failures = {}
         self._blind_point_sources = []
+        self._blind_point_diagnostics = []
         if not keyframes:
             cleared_sources.clear()
+            clearance_failures.clear()
             return []
         current_pose = self._odom_pose()
         current_scan_pose = None
+        current_evidence_failure = None
         try:
             stamp_s = scan.header.stamp.sec + scan.header.stamp.nanosec * 1e-9
             ros_now_s = self.get_clock().now().nanoseconds * 1e-9
             if not 0.0 <= ros_now_s - stamp_s <= ESCAPE_SCAN_MAX_AGE_S:
-                raise ValueError('scan timestamp is not fresh')
+                current_evidence_failure = 'current_scan_timestamp_not_fresh'
+                raise ValueError(current_evidence_failure)
             base = self.parking_contract['robot_base_frame']
             scan_transform = self.parking_tf.lookup_transform(
                 'odom', base, rclpy.time.Time(seconds=stamp_s)).transform
             current_scan_pose = (
                 scan_transform.translation.x, scan_transform.translation.y,
                 _quaternion_yaw(scan_transform.rotation))
-        except (AttributeError, TypeError, ValueError, OverflowError,
-                TransformException):
+        except TransformException:
+            current_evidence_failure = 'current_scan_stamped_tf_unavailable'
+        except (AttributeError, TypeError, ValueError, OverflowError):
             # A missing stamped pose can never establish clearance. Existing
             # memory still uses the current pose and remains fail-closed.
-            pass
+            current_evidence_failure = (
+                current_evidence_failure or 'current_scan_timestamp_invalid')
         return remembered_blind_points(
             keyframes, current_pose, laser, scan.range_min,
             source_point_filter=source_point_filter, source_records=self._blind_point_sources,
             current_scan=scan, current_scan_pose=current_scan_pose,
-            cleared_sources=cleared_sources)
+            cleared_sources=cleared_sources, clearance_failures=clearance_failures,
+            source_diagnostics=self._blind_point_diagnostics,
+            current_evidence_failure=current_evidence_failure)
 
     def _remember_scan(self, scan):
         """Keep a scan whenever the base moved SCAN_MEMORY_STEP_M or turned STEP_RAD."""
