@@ -394,9 +394,9 @@ def test_terminal_corner_miss_is_reported_without_forward_or_reapproach():
     node._drive_zero_turn = Mock(return_value=-.19)
     node.emit = Mock()
     assert not node._park_rear_face(initial, GEOMETRY, 'route', .275, .225, .01, Mock())
-    node._drive_zero_turn.assert_called_once()
+    assert node._drive_zero_turn.call_count == 2
     node._clear_rear_dock_straight.assert_not_called()
-    node._observe_rear_box_recovering.assert_called_once()
+    assert node._observe_rear_box_recovering.call_count == 2
     assert node.confirmation['confirmed'] is False
     assert node.confirmation['nearest_gap_m'] == pytest.approx(.01085)
     assert node.confirmation['farthest_gap_m'] > .013
@@ -1117,3 +1117,22 @@ def test_longer_reverse_curve_avoids_forward_clearance_at_five_cm_offset(angle, 
     assert node.park_rear_box(GEOMETRY,'route',execute=True,timeout_s=90,target_gap_m=.01)
     node._clear_rear_dock_straight.assert_not_called()
     node._center_rear_box.assert_called_once_with(observed, pytest.approx(extent))
+
+
+def test_far_corner_only_miss_gets_reverse_trim():
+    node = route_node()
+    initial = face(.08, 0., stamp=1.)
+    missed = face(.012273624984817724, .001772308112680764, stamp=2.)
+    final = face(.01, 0., stamp=3.)
+    missed['face_odom'] = final['face_odom'] = initial['face_odom']
+    node._observe_rear_box_recovering = Mock(side_effect=[missed, final])
+    node._rear_box_update = Mock(side_effect=[
+        Mock(return_value={'remaining_m': .07}),
+        Mock(return_value={'remaining_m': .002672394})])
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node._drive_zero_turn = Mock(return_value=-.00267)
+    node.emit = Mock()
+    assert node._park_rear_face(initial, GEOMETRY, 'route', .275, .225, .01, None)
+    assert node._drive_zero_turn.call_count == 2
+    assert all(call.args[0] < 0. for call in node._drive_zero_turn.call_args_list)
+    assert node.confirmation['confirmed'] is True

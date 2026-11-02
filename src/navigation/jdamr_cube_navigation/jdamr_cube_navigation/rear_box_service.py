@@ -1053,9 +1053,12 @@ class RearBoxParkingMixin:
         trim_m = (center_gap - target_gap) / math.cos(error)
         trim_allowed = (
             not confirmed
-            and gap > target_gap + 0.003
+            and gap > target_gap
+            and far_gap > target_gap + 0.003
             and 0.0 < trim_m <= REAR_FINAL_TRIM_MAX_M
             and far_gap - gap <= 0.006
+            and not self.stop_requested
+            and self._operator_link_ready()
         )
         if trim_allowed:
             self.emit('rear_box_final_trim_started', requested_distance_m=trim_m,

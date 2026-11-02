@@ -281,6 +281,32 @@ def trail_retrace_points(current, trail, distance_m, max_gap_m, max_turn_rad,
     return points, length_m
 
 
+def _later_scan_clears_point(point_odom, pose, scan, laser_pose):
+    """Require three finite rays beyond a formerly occupied, still visible point."""
+    base = to_base_frame(pose, (*point_odom, 0.0))
+    laser_point = to_base_frame(laser_pose, base)
+    distance = math.hypot(*laser_point[:2])
+    # Do not infer free space inside range_min, from absent returns, or along
+    # an occluding surface. Two centimetres separates the old hit from new rays.
+    margin_m = 0.02
+    if not scan.range_min + margin_m < distance < scan.range_max - margin_m:
+        return False
+    increment = scan.angle_increment
+    if not math.isfinite(increment) or increment == 0.0:
+        return False
+    bearing = math.atan2(laser_point[1], laser_point[0])
+    # Cover both [-pi, pi] and [0, 2pi] scan conventions without wrapping
+    # a partial scan across its unobserved boundary.
+    for turn in (-2.0 * math.pi, 0.0, 2.0 * math.pi):
+        index = round((bearing + turn - scan.angle_min) / increment)
+        if 1 <= index < len(scan.ranges) - 1:
+            rays = scan.ranges[index - 1:index + 2]
+            if all(math.isfinite(r) and distance + margin_m < r <= scan.range_max
+                   for r in rays):
+                return True
+    return False
+
+
 def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m,
                             source_point_filter=None, source_records=None):
     """
@@ -295,7 +321,8 @@ def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m,
     """
     lx, ly, _lyaw = laser_pose
     found = []
-    for pose, scan in keyframes:
+    keyframes = list(keyframes)
+    for frame_index, (pose, scan) in enumerate(keyframes):
         moved_m = math.dist(pose[:2], current_pose[:2])
         relative = to_base_frame(current_pose, pose)
         cos_yaw, sin_yaw = math.cos(relative[2]), math.sin(relative[2])
@@ -310,6 +337,12 @@ def remembered_blind_points(keyframes, current_pose, laser_pose, blind_radius_m,
             bx = relative[0] + cos_yaw * x_m - sin_yaw * y_m
             by = relative[1] + sin_yaw * x_m + cos_yaw * y_m
             if math.hypot(bx - lx, by - ly) < blind_radius_m:
+                cosine, sine = math.cos(pose[2]), math.sin(pose[2])
+                point_odom = (pose[0] + cosine * x_m - sine * y_m,
+                              pose[1] + sine * x_m + cosine * y_m)
+                if any(_later_scan_clears_point(point_odom, later_pose, later_scan, laser_pose)
+                       for later_pose, later_scan in keyframes[frame_index + 1:]):
+                    continue
                 found.append((bx, by))
                 if source_records is not None:
                     source_records.append((tuple(pose), scan, (x_m, y_m), tuple(current_pose)))
