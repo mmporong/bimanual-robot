@@ -547,3 +547,36 @@ def test_remembered_collision_records_original_scan_and_pose(monkeypatch):
     assert origin['scan_stamp_s'] == 9.
     assert len(origin['ranges']) == len(original.ranges)
     assert None in origin['ranges']  # JSON has no Infinity literals
+
+
+def test_terminal_reverse_uses_measured_rear_without_masking_returns(monkeypatch):
+    route, _monitor, _clock = node(monkeypatch, points=[(-.28, .196)])
+    with module.rear_collision_profile(route) as watch:
+        watch.set_target(*target_face(current_gap_m=.0145))
+        assert watch(command(-.01)) == 'rear docking swept footprint occupied'
+        watch.set_rear_extent(.275)
+        assert watch(command(-.01)) is None
+        # Higher travel prediction still reaches the same return and stops.
+        assert watch(command(-.05)) == 'rear docking swept footprint occupied'
+        watch.clear_target()
+        assert watch(command(-.01)) == 'rear docking swept footprint occupied'
+
+
+@pytest.mark.parametrize('extent', [.26, .29, float('nan'), True])
+def test_terminal_rear_extent_cannot_remove_more_than_existing_padding(monkeypatch, extent):
+    route, _, _ = node(monkeypatch)
+    with module.rear_collision_profile(route) as watch:
+        with pytest.raises(ValueError): watch.set_rear_extent(extent)
+
+
+@pytest.mark.parametrize('gap,stamp,linear,angular', [
+    (.04,10.,-.01,0.), (.0145,9.9,-.01,0.), (.0145,10.,0.,.1)])
+def test_rear_padding_remains_outside_fresh_terminal_reverse(monkeypatch,gap,stamp,linear,angular):
+    route, _, _ = node(monkeypatch, points=[(-.28,.196)])
+    seen=[]
+    monkeypatch.setattr(module,'path_sweep_hit',lambda points,outline,*a,**k: seen.append(outline) or False)
+    with module.rear_collision_profile(route) as watch:
+        watch.set_rear_extent(.275)
+        watch.set_target(*target_face(stamp_s=stamp,current_gap_m=gap))
+        watch(command(linear,angular))
+    assert seen[-1]==OUTLINE

@@ -232,6 +232,19 @@ class _RearCollisionWatch:
             observation, target_gap_m, current_gap_m, source_point_filter)
         self._state['filtered_memory_key'] = None
 
+    def set_rear_extent(self, rear_extent_m):
+        """Use the measured rear edge only for fresh terminal reverse targets."""
+        outline = self._state['outline']
+        padded_extent = -min(point[0] for point in outline)
+        if (isinstance(rear_extent_m, bool)
+                or not isinstance(rear_extent_m, (int, float))
+                or not math.isfinite(rear_extent_m)
+                or rear_extent_m <= 0.0
+                or not -1e-9 <= padded_extent - rear_extent_m <= .005 + 1e-9):
+            raise ValueError('rear docking footprint differs from measured rear edge')
+        self._state['terminal_outline'] = tuple(
+            (max(x, -rear_extent_m), y) for x, y in outline)
+
     def clear_target(self):
         self._state['target'] = None
         self._state['filtered_memory'] = ()
@@ -302,7 +315,15 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
         remembered_points = state['memory']
         remembered_sources = state.get('memory_sources', ())
         target = state.get('target')
+        outline = state['outline']
         if _may_ignore_target(command, target, stamp_s):
+            # Nav2's polygon embeds 5 mm beyond the measured chassis. At the
+            # final centimetre use its actual rear edge, without deleting any
+            # obstacle returns or changing the wheel/side/front envelope.
+            if (command.linear.x < 0.0
+                    and target['current_gap_m'] <= .03
+                    and 'terminal_outline' in state):
+                outline = state['terminal_outline']
             live_points = [point for point in live_points
                            if not _is_target_face_point(point, target)]
             source_filter = target.get('source_point_filter')
@@ -338,7 +359,7 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
         poses = _prediction_poses(linear_mps, angular_radps, horizon_s)
         witness = {}
         if path_sweep_hit(
-                points, state['outline'], poses, push_tolerance_m=0.0, witness=witness):
+                points, outline, poses, push_tolerance_m=0.0, witness=witness):
             if not state['collision_active']:
                 live_hit = witness['point_index'] < len(live_points)
                 source = 'live_scan' if live_hit else 'remembered_blind_point'
@@ -369,7 +390,7 @@ def _watch(node, command, state, linear_decel_mps2, angular_decel_radps2):
                     inside_initial_outline=witness.get('inside_initial_outline'),
                     collision_pose_base_xyyaw=witness.get('collision_pose_base_xyyaw'),
                     initial_boundary_distance_m=witness.get('initial_boundary_distance_m'),
-                    footprint_base_xy_m=state['outline'],
+                    footprint_base_xy_m=outline,
                     prediction_horizon_s=horizon_s,
                     effective_linear_mps=linear_mps,
                     effective_angular_radps=angular_radps)

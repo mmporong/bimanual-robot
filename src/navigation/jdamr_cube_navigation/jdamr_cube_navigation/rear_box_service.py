@@ -1020,6 +1020,9 @@ class RearBoxParkingMixin:
                         target_gap, command_watch):
         """Keep the fine target fixed after the moving range-only handoff."""
 
+        configure_rear = getattr(command_watch, 'set_rear_extent', None)
+        if callable(configure_rear):
+            configure_rear(extent)
         source_cache = {}
 
         def source_goal_face_point(pose, scan, point):
