@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-11-02 | 팔 포함 전체 시나리오 두 번째 연속 완료
+
+- 미션 `20261102_215003_e374564a`, 주문 `261102010`: 기존 도크 정차 상태에서 새 start, 급수대→물따르기→테이블1→컵배치→도크 복귀 `state=succeeded`, `phase=complete`, error=null 확인. 앞선 주문261102009에 이어 전체 시나리오2회 연속 완료. 이번 회차 사용자 정밀도 평가는 아직 없음.
+- 급수대 `water_station_20261102_215015_e56da3c9`: 30cm 진입 뒤 live 목표로 정렬하고 terminal goal 고정. 후진 재접근 없음. 깊이 지연 대기·복구2회가 관측됨. 물따르기 ok=true/auto_done, run88.34초·시작자세6.40초·오른팔접기ok.
+- 테이블 `table_01_20261102_215308_a9c36b11`: 이번에는 중간 face_alignment 이동을 건너뛰고 연속 최종 접근, 후진 재정렬 없이 주차 완료. 컵배치 ok=true/auto_done, run41.51초.
+- 도크 rear_box_parking_finished·home_arrived 확인. rear_dock_lateral_precision_unmet와 마지막 swept footprint occupied 대기·복구는 다시 관측돼 잔여 항목으로 유지. 미션 성공을 무정지·외부 실측 정밀도 달성으로 표현하지 않음.
+- 원본 `/home/lim/.local/state/bimanual-robot/water-service/runs/20261102_215003_e374564a/controller.log`. 임시 watch 프로세스 종료, 상시 관제·센서·실행기는 다음 사용자 조작을 위해 유지. 주행 중 코드·설정 변경 없음.
+
 ## 2026-11-02 | 목표 고정 수정 후 팔 포함 전체 시나리오 완료
 
 - 사용자 실물 평가: 전체 주행이 좋았고 급수대 주차도 잘됐다고 확인. 이번 팔 포함 전체 성공 회차를 이후 비교 기준으로 보존. 구체적인 줄자 실측은 받지 않았으며 내부 거리 추정과 사용자 정성 평가는 구분.
