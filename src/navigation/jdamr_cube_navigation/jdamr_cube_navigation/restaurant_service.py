@@ -1279,6 +1279,13 @@ class ServiceRoute(CorridorRoute):
         publisher = self._escape_publisher()
         self._last_direct_motion_failure = None
         previous_pause = getattr(self, '_input_recovery_paused', False)
+        # Publisher discovery may have blocked callbacks before the first
+        # measurement. Drain pending inputs before judging their freshness.
+        input_deadline_s = time.monotonic() + 0.02
+        for _ in range(32):
+            if self.stop_requested or time.monotonic() >= input_deadline_s:
+                break
+            spin_node(self, timeout_sec=0.0)
         value = measure()
         # DDS publisher creation precedes motion and can exceed a short move's
         # budget. Keep that budget for motion; the task deadline stays fixed.
@@ -1290,11 +1297,12 @@ class ServiceRoute(CorridorRoute):
         if setup_s >= 0.1:
             self.emit('direct_motion_ready', setup_s=setup_s,
                       motion_budget_s=max(0.0, deadline_s - time.monotonic()))
-        published_s = guarded_s = 0.0
+        published_s, guarded_s = 0.0, -math.inf
         # The velocity smoother ramps to zero after velocity_timeout (0.5 s) without
         # a command, so a gap that long is a stop no event reports.
         max_publish_gap_s = 0.0
         settle_pause_started_s = None
+        input_recovered = False
 
         def finish_settle_pause():
             nonlocal settle_pause_started_s
@@ -1321,6 +1329,21 @@ class ServiceRoute(CorridorRoute):
                                        else 'operator_link_lost')
                                    or (watch() if watch else None))
                         if failure:
+                            if (not input_recovered and self._input_gap_recoverable(failure)
+                                    and self._operator_link_ready()
+                                    and not self.stop_requested):
+                                publisher.publish(Twist())
+                                paused_s = time.monotonic()
+                                if self._wait_for_input_recovery(failure):
+                                    pause_s = time.monotonic() - paused_s
+                                    deadline_s += pause_s
+                                    if getattr(self, 'run_deadline_s', None) is not None:
+                                        self.run_deadline_s += pause_s
+                                    input_recovered = True
+                                    self.emit('direct_motion_input_recovered', reason=failure,
+                                              paused_s=pause_s, target_preserved=True)
+                                    value = measure()
+                                    continue
                             if (pause_on_failure is not None and pause_on_failure(failure)
                                     and not getattr(self, '_input_recovery_paused', False)):
                                 settle_pause_started_s = time.monotonic()
@@ -1776,6 +1799,7 @@ class ServiceRoute(CorridorRoute):
             'table approach depth stale or future-dated',
             'table approach observer latency',
             'table approach tape reference pending',
+            'table approach stable face unavailable',
         }
         recoverable_rear_failures = {
             'rear box scan unavailable', 'rear box scan stale or future-dated',

@@ -886,10 +886,10 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
     def _station_goal_reference(self, *, freeze=False, continuous_rebase=False):
         """Hold the reference anchor while steering on recent visual feedback.
 
-        Both control and arrival use the same filtered goal in raw odom. The
-        frozen anchor remains diagnostic until the aligned terminal band.
-        In that band the accepted goal is held while RGB-D remains diagnostic.
-        A carried destination is never fresh obstacle or sensor evidence.
+        Both control and arrival use the same filtered goal in raw odom.
+        Tape alignment holds a coherent close-view anchor; contradictory fresh
+        views still use the rebase path. The aligned terminal band owns the
+        final endpoint. A carried destination is never fresh sensor evidence.
         """
         reference = self._fresh_station_reference()
         tape = (getattr(getattr(self, 'station_reference', None),
@@ -3453,6 +3453,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 return 'surface_only_lateral_offset_exceeds_alignment_tolerance', lateral_m
             return None, lateral_m
         held = getattr(self, '_table_restage_tape_goal', None)
+        tape = (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape')
+        if tape and held is None:
+            reference = getattr(self, 'station_reference_goal', None)
+            if (not target.get('rgbd_reference_valid') or reference is None
+                    or reference.get('goal_filter_sample_count', 0) < 3):
+                # A coarse map/face midpoint is not the tape's lateral goal.
+                # Acquire the close pair before choosing a sideways correction.
+                return None, lateral_m
         if held is not None:
             held_goal = tuple(held.get('goal_odom', ()))
             arrival = getattr(self, 'station_reference_goal', None)
@@ -3473,7 +3482,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 allow_near_alignment=True, continuous_table=True, lateral_tracking=True,
                 lateral_goal_odom=goal,
                 lateral_tolerance_m=self.station_reference_profile['lateral_tolerance_m'],
-                max_lateral_heading_rad=FINAL_TRIM_MAX_RAD)
+                max_lateral_heading_rad=FINAL_TRIM_MAX_RAD,
+                **({'lateral_entry_gap_m': TABLE_TAPE_ALIGNMENT_ENTRY_GAP_M}
+                   if tape else {}))
         except ValueError as error:
             return str(error), lateral_m
         return None, lateral_m
@@ -3599,14 +3610,14 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         'max_lateral_heading_rad': FINAL_TRIM_MAX_RAD}
                        if lateral_goal_odom is not None else {}))
             except ValueError as error:
-                anchor = getattr(self, 'station_reference_goal', None)
+                anchor = (getattr(self, 'station_reference_control_goal', None)
+                          or getattr(self, 'station_reference_goal', None))
                 if (str(error) in {'table lateral alignment requires more clearance',
                                   'table alignment requires more clearance',
                                   'table approach preview heading out of range'}
                         and getattr(getattr(self, 'station_reference', None),
                                     'observation_method', None) == 'table_front_tape'
                         and anchor and anchor.get('valid') is True
-                        and getattr(self, 'station_reference_goal_frozen', False)
                         and lateral_goal_odom is not None
                         and tuple(anchor['goal_odom']) == tuple(lateral_goal_odom)):
                     heading = math.atan2(-normal[1], -normal[0])
@@ -3774,18 +3785,29 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         self.emit('table_tape_close_alignment_started',
                                   gap_m=gap, minimum_rgb_stamp_s=cutoff,
                                   far_goal_discarded=True)
-            if (tape and getattr(self, '_station_terminal_goal', None) is None
-                    and not getattr(self, '_station_reference_goal_challenged', False)
-                    and not getattr(self, '_table_rebase_requires_restage', False)):
-                # Before alignment, follow the filtered visual destination on
-                # every frame instead of holding one frame until a late rebase.
-                # The aligned terminal band below owns the final fixed goal.
-                with self._station_reference_lock:
-                    self.station_reference_goal_frozen = False
             goal, reference = self._station_goal_reference(
                 freeze=not tape, continuous_rebase=True)
             if getattr(self, '_station_reference_goal_challenged', False):
                 raise RuntimeError('table approach tape reference pending')
+            if tape and not state.get('tape_alignment_goal_held', False):
+                # Do not cross the alignment entry with a missing/single-frame
+                # destination. The existing input pause resumes this same move
+                # as soon as distinct, consistent close views are available.
+                if (goal is None or goal.get('goal_filter_sample_count', 0) < 3
+                        or goal.get('goal_filter_xy_spread_m', math.inf)
+                        > self.station_reference_profile['lateral_tolerance_m']
+                        or not (reference and reference.get('valid') is True)):
+                    raise RuntimeError('table approach tape reference pending')
+                with self._station_reference_lock:
+                    self.station_reference_goal = dict(goal)
+                    self.station_reference_control_goal = dict(goal)
+                    self.station_reference_goal_frozen = True
+                state['tape_alignment_goal_held'] = True
+                self.emit('table_tape_alignment_goal_held',
+                          goal_odom=list(goal['goal_odom']), gap_m=gap,
+                          sample_count=goal['goal_filter_sample_count'],
+                          xy_spread_m=goal['goal_filter_xy_spread_m'],
+                          terminal_goal=False)
             if (actual is not None
                     and getattr(self, '_table_rebase_requires_restage', False)):
                 # A coherent new endpoint is not itself proof that reversing
@@ -4046,28 +4068,35 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                         for i in (0, 1)))
                     same_surface = (angle_change <= MAXIMUM_NORMAL_YAW_DIFFERENCE_RAD
                                     and distance_change <= MAX_CANDIDATE_PLANE_DISTANCE_M)
-                    if observation.get('stable') is False:
-                        if not same_surface:
-                            raise RuntimeError('moving table candidate changed surface')
-                    # Preserve the edge already seen in odom when close-up FOV
-                    # clips it. A lateral goal never moves these observed ends.
-                    support = surface_support(
-                        face, normal, observation.get('width_m'),
-                        measured.get('lateral_shift_m', 0.),
-                        state['surface_support'] if same_surface else None)
-                    state.update(face=face, normal=normal, stamp=stamp,
-                                 surface_support=support,
-                                 span_m=observation.get('width_m'),
-                                 last_valid_s=time.monotonic(), occluded_frames=0,
-                                 occlusion_latched=False,
-                                 basis=('moving_depth_at_stamped_odom'
-                                        if observation.get('stable') is True else
-                                        'moving_candidate_at_stamped_odom'))
-                    self.emit('table_approach_face_updated', observation_stamp_s=stamp,
-                              reference_frame='odom', face_center_xy_m=list(face),
-                              visible_span_m=state['span_m'],
-                              observed_support_endpoints_odom=support,
-                              outward_normal_xy=list(normal))
+                    if observation.get('stable') is False and not same_surface:
+                        # An unstable alternative cannot replace the held
+                        # plane or renew its original freshness deadline.
+                        self.emit('table_approach_candidate_discarded',
+                                  reason='moving table candidate changed surface',
+                                  angle_change_rad=angle_change,
+                                  plane_distance_change_m=distance_change,
+                                  retained_observation_stamp_s=state['stamp'])
+                        if time.monotonic() - state['last_valid_s'] > OBSERVER_SILENT_S:
+                            raise RuntimeError('table approach stable face unavailable')
+                    else:
+                        # Preserve observed edge ends when close-up FOV clips them.
+                        support = surface_support(
+                            face, normal, observation.get('width_m'),
+                            measured.get('lateral_shift_m', 0.),
+                            state['surface_support'] if same_surface else None)
+                        state.update(face=face, normal=normal, stamp=stamp,
+                                     surface_support=support,
+                                     span_m=observation.get('width_m'),
+                                     last_valid_s=time.monotonic(), occluded_frames=0,
+                                     occlusion_latched=False,
+                                     basis=('moving_depth_at_stamped_odom'
+                                            if observation.get('stable') is True else
+                                            'moving_candidate_at_stamped_odom'))
+                        self.emit('table_approach_face_updated', observation_stamp_s=stamp,
+                                  reference_frame='odom', face_center_xy_m=list(face),
+                                  visible_span_m=state['span_m'],
+                                  observed_support_endpoints_odom=support,
+                                  outward_normal_xy=list(normal))
                 elif observation.get('reason') == 'no_table_edge_candidate':
                     state['occluded_frames'] += 1
                     if state['occluded_frames'] >= quorum:
