@@ -1198,15 +1198,22 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             == 'table_front_tape'
             and getattr(self, '_station_terminal_goal', None) is not None
             and goal_reference is not None)
+        tape_alignment_carried = bool(
+            goal_reference is not None
+            and reference and reference.get('reason') == 'tape_pair_missing'
+            and self._table_terminal_reference_ready(reference))
         if (getattr(self, '_station_reference_goal_challenged', False)
                 or getattr(self, '_station_reference_goal_correction_pending', False)
                 or getattr(self, '_table_rebase_requires_restage', False)):
             valid_reference = False
             tape_terminal = False
-        if tape_terminal:
-            # The aligned terminal band already accepted a visual goal in odom.
-            # Tape leaves the downward camera's view near contact; keep that goal,
-            # while final depth, odom and collision checks still govern the move.
+            tape_alignment_carried = False
+        if tape_terminal or tape_alignment_carried:
+            # Keep the visual goal in odom when tape leaves the camera's view;
+            # final depth, odom and collision checks still govern the move.
+            # A coherent alignment goal can reach the stop before the moving
+            # loop latches its terminal flag. Evaluate its actual lateral error
+            # below instead of requiring another visible pair at contact.
             valid_reference = True
         if auxiliary:
             valid_reference = bool(goal_reference is not None
@@ -1266,6 +1273,9 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if tape_terminal:
             status['lateral_reference_reason'] = 'accepted_tape_terminal_goal_in_odom'
             status['lateral_goal_basis'] = 'accepted_tape_terminal_goal_in_odom'
+        elif tape_alignment_carried:
+            status['lateral_reference_reason'] = 'accepted_tape_alignment_goal_in_odom'
+            status['lateral_goal_basis'] = 'accepted_tape_alignment_goal_in_odom'
         if goal_reference is None or not status['lateral_reference_valid']:
             return status
         try:
