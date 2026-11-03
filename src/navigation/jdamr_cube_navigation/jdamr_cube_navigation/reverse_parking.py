@@ -13,7 +13,7 @@ from bisect import bisect_left, bisect_right
 from copy import deepcopy  # noqa: I100
 from itertools import chain
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
 
 from jdamr_cube_navigation.keepout_mask import _map_metadata, _point_in_polygon
 
@@ -862,14 +862,15 @@ def _prepared_polygon_intersects_cell(
     return True
 
 
-def _corridor_blockage(
+def _corridor_blockages(
         source: dict, keepout: dict,
         pieces: Sequence[tuple[Sequence[Sequence[float]], float]],
         ignored_keepout_cells=frozenset(),
         *, skip_clearly_free_cells: bool = False,
         ignored_unknown_cells=frozenset(),
         nonfree_columns_by_row=None,
-) -> dict | None:
+) -> Iterator[dict]:
+    """Yield blockages in scan order while honoring updated ignored-cell sets."""
     resolution = source['resolution']
     origin_x, origin_y, _origin_yaw = source['origin']
     width = source['width']
@@ -915,11 +916,12 @@ def _corridor_blockage(
                         projections, padding, cell_left, cell_bottom, resolution):
                     continue
                 if not inside_grid:
-                    return {
+                    yield {
                         'reason': 'outside_grid',
                         'column': column,
                         'map_row': map_row,
                     }
+                    continue
                 row = height - 1 - map_row
                 for grid_name, metadata in (
                         ('map', source), ('keepout', keepout)):
@@ -932,7 +934,7 @@ def _corridor_blockage(
                         continue
                     if not _clearly_free(metadata, row, column):
                         index = row * width + column
-                        return {
+                        yield {
                             'reason': f'{grid_name}_not_free',
                             'grid': grid_name,
                             'column': column,
@@ -944,7 +946,21 @@ def _corridor_blockage(
                                 cell_left + resolution,
                                 cell_bottom + resolution),
                         }
-    return None
+
+
+def _corridor_blockage(
+        source: dict, keepout: dict,
+        pieces: Sequence[tuple[Sequence[Sequence[float]], float]],
+        ignored_keepout_cells=frozenset(),
+        *, skip_clearly_free_cells: bool = False,
+        ignored_unknown_cells=frozenset(),
+        nonfree_columns_by_row=None,
+) -> dict | None:
+    return next(_corridor_blockages(
+        source, keepout, pieces, ignored_keepout_cells,
+        skip_clearly_free_cells=skip_clearly_free_cells,
+        ignored_unknown_cells=ignored_unknown_cells,
+        nonfree_columns_by_row=nonfree_columns_by_row), None)
 
 
 def _exact_corridor_pieces(poses, footprint):
@@ -1007,13 +1023,14 @@ def _observed_surface_corridor_clear(
         return False
     ignored = set()
     ignored_unknown = set()
-    while True:
-        blocked = _corridor_blockage(source, keepout, pieces, ignored,
-                                     skip_clearly_free_cells=True,
-                                     ignored_unknown_cells=ignored_unknown,
-                                     nonfree_columns_by_row=nonfree_columns_by_row)
-        if blocked is None:
-            return True
+    # The grids, pieces and surface stay fixed during this call. Continue the
+    # same scan after accepting a target fringe cell instead of rescanning all
+    # earlier polygons and cells. The iterator reads the updated ignore sets.
+    for blocked in _corridor_blockages(
+            source, keepout, pieces, ignored,
+            skip_clearly_free_cells=True,
+            ignored_unknown_cells=ignored_unknown,
+            nonfree_columns_by_row=nonfree_columns_by_row):
         target_mask = (blocked.get('grid') == 'keepout'
                        and keepout['negate'] == 0 and blocked.get('pixel') == 0)
         target_unknown = (surface.get('allow_precision_unknown') is True
@@ -1036,6 +1053,7 @@ def _observed_surface_corridor_clear(
             return False
         (ignored_unknown if target_unknown else ignored).add(
             (blocked['column'], blocked['map_row']))
+    return True
 
 
 class CachedStaticCorridorValidator:
