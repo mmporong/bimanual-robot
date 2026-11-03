@@ -118,6 +118,10 @@ def test_sensor_frame_columns_preserve_the_original_empirical_beam_mask():
     right = next(box for box in reframed_boxes if box['name'] == 'rear_right_column_returns')
     right['center_xy_m'] = update['previous_center_xy_m']
     right['size_xy_m'] = update['previous_size_xy_m']
+    left_update = document['provenance']['rear_left_boundary_update']
+    left = next(box for box in reframed_boxes if box['name'] == 'rear_left_column_returns')
+    left['center_xy_m'] = left_update['previous_center_xy_m']
+    left['size_xy_m'] = left_update['previous_size_xy_m']
     reframed = load_boxes(json.dumps(reframed_boxes))
     # A dense set of ray endpoints exercises both near ROI boundaries and
     # distant returns. Frame conversion is exact; the later boundary correction
@@ -142,8 +146,12 @@ def test_sensor_frame_columns_preserve_the_original_empirical_beam_mask():
             changed = np.isinf(new) & np.isfinite(old)
             angles = angle_min + np.arange(len(ranges)) * increment
             x, y = ranges * np.cos(angles), ranges * np.sin(angles)
-            assert np.all((x[changed] >= .256) & (x[changed] <= .290))
-            assert np.all((y[changed] > .217) & (y[changed] <= .220))
+            right_extension = ((x >= .256) & (x <= .290)
+                               & (y > .217) & (y <= .220))
+            left_extension = ((x >= .227) & (x <= .257)
+                              & (y >= -.248) & (y <= -.211)
+                              & ((x > .255) | (y > -.212)))
+            assert np.all((right_extension | left_extension)[changed])
     assert total > 0
 
 
