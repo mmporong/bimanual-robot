@@ -1290,14 +1290,17 @@ class RearBoxParkingMixin:
                     sum(reference_point[i] * reference_normal[i] for i in (0, 1))
                     - initial['line_offset_m'])
                 reference_residual_limit_m = min(
-                    4.0 * initial['residual_rms_m'], MAXIMUM_RESIDUAL_RMS_M)
-                reference_near_limit_m = min(
-                    reference_residual_limit_m, 0.003)
+                    4.0 * (initial['residual_rms_m'] + observed['residual_rms_m']),
+                    MAXIMUM_RESIDUAL_RMS_M)
             except (KeyError, TypeError, ValueError):
                 return False
+            # The source-frame check above already excludes returns in front
+            # of that measured face. Across two fits, add their residual bounds;
+            # applying the final-gap near-side limit again in odom reclassifies
+            # the same box as an obstacle after a small registration difference.
+            # Keep the target identity, overlapping segment and residual cap.
             return (
-                -reference_residual_limit_m <= reference_residual_m
-                <= reference_near_limit_m
+                abs(reference_residual_m) <= reference_residual_limit_m
                 and reference_lower_m <= reference_tangent_m <= reference_upper_m)
 
         def approach(observation):
