@@ -1198,22 +1198,15 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             == 'table_front_tape'
             and getattr(self, '_station_terminal_goal', None) is not None
             and goal_reference is not None)
-        tape_alignment_carried = bool(
-            goal_reference is not None
-            and reference and reference.get('reason') == 'tape_pair_missing'
-            and self._table_terminal_reference_ready(reference))
         if (getattr(self, '_station_reference_goal_challenged', False)
                 or getattr(self, '_station_reference_goal_correction_pending', False)
                 or getattr(self, '_table_rebase_requires_restage', False)):
             valid_reference = False
             tape_terminal = False
-            tape_alignment_carried = False
-        if tape_terminal or tape_alignment_carried:
-            # Keep the visual goal in odom when tape leaves the camera's view;
-            # final depth, odom and collision checks still govern the move.
-            # A coherent alignment goal can reach the stop before the moving
-            # loop latches its terminal flag. Evaluate its actual lateral error
-            # below instead of requiring another visible pair at contact.
+        if tape_terminal:
+            # The aligned terminal band already accepted a visual goal in odom.
+            # Tape leaves the downward camera's view near contact; keep that goal,
+            # while final depth, odom and collision checks still govern the move.
             valid_reference = True
         if auxiliary:
             valid_reference = bool(goal_reference is not None
@@ -1273,9 +1266,6 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if tape_terminal:
             status['lateral_reference_reason'] = 'accepted_tape_terminal_goal_in_odom'
             status['lateral_goal_basis'] = 'accepted_tape_terminal_goal_in_odom'
-        elif tape_alignment_carried:
-            status['lateral_reference_reason'] = 'accepted_tape_alignment_goal_in_odom'
-            status['lateral_goal_basis'] = 'accepted_tape_alignment_goal_in_odom'
         if goal_reference is None or not status['lateral_reference_valid']:
             return status
         try:
@@ -2178,26 +2168,6 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return self.execute(final_parking=False, alignment=True, face=True)
         return False
 
-    def _execute_table_observation_transit(self):
-        """Finish the taught tape observation pose before plane-relative control."""
-        original = self.through_behavior_tree
-        tape = (getattr(getattr(self, 'station_reference', None),
-                        'observation_method', None) == 'table_front_tape')
-        use_observation_checker = (
-            getattr(self, 'surface_mode', None) == 'table_edge' and tape
-            and Path(original).name == 'navigate_through_poses_transit_rpp.xml')
-        if use_observation_checker:
-            self.through_behavior_tree = str(Path(original).with_name(
-                'navigate_through_poses_table_observation_rpp.xml'))
-            self.emit('table_observation_transit_selected',
-                      goal_checker_id='alignment_goal_checker',
-                      waypoints=self.waypoints,
-                      final_parking_confirmed=False)
-        try:
-            return self.execute(final_parking=False)
-        finally:
-            self.through_behavior_tree = original
-
     def _advance_to_table_view(self, *, require_motion=False):
         """Close a transit waypoint's tolerance before waiting for a table face."""
         mount, region, _radius = self._table_observation_context
@@ -2644,7 +2614,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if resume_at_observation:
             self.emit('resume_at_reached_observation', actual_pose=list(actual),
                       transit_skipped=True, final_parking_confirmed=False)
-        elif not self._execute_table_observation_transit():
+        elif not self.execute(final_parking=False):
             self.emit('failed', phase='table_region_transit')
             return False
         if not self._set_observer_perception(True):
