@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-11-03 | 급수대 실패 원인 조회·재주차 성공·도크 복귀
+
+- 최초출발 `water_station_20261103_091500_fd630ce1`은 등록 출발점 위치 불일치로 이동 전 거부. 도크 원본 스캔 정합inlier0.44·yaw8.5도, AMCL 정합차이1mm/-0.1도 확인 후 초기화. 재실행 `water_station_20261103_091607_db77db6c`는30cm 진입에서 테이프 목표 좌우10.96cm, 후진 복구 후10.67cm로 clearance 거부2회. 급수대 완료 전 정지. 사용자 요청 도크 복귀 `water_station_20261103_092121_baf3f3ae`는09:22:37 home=True 완료.
+- 코드 수정 없이 사용자 재주행 요청 `water_station_20261103_092525_69013ab9` 실행. 추가 후진 재접근 없이09:26:29 주차 완료. 내부 앞양모서리9.00/8.98mm·고정목표 좌우-5.83mm, 사용자가 실물 주차가 잘됐다고 확인. 새 도킹 요청으로 parked log를 이어 `water_station_20261103_092945_993cff23` 후진 이탈·복귀,09:31:00 home=True 완료. 마지막 swept footprint occupied 일시대기·복구 기록. 팔 동작 없음.
+- 읽기 전용 원인 조회: 성공21:30 회차와 오늘 실패의 최초 관측 지도XY차이는약7mm이나, 같은 약30cm 구간의 tape pixel center는344.25 대256.75px. 오늘 재성공은333px·tape center base y=-13.47mm, 실패는+106.94mm. 테이프 간격은각각약11.6~11.7cm로 유사. 원본 회차 RGB 이미지·실패 시각 라이다 스냅샷은 보존돼 있지 않아 책상/카메라 이동·오검출·당시 위치추정 오차를 한 원인으로 확정하지 않음. 사용자는 밤사이 밀렸을 가능성을 모르겠다고 응답.
+- 확인된 제어 불일치: `_table_lateral_restage_reason`은 먼 위치부터 lateral 보정하는 preview를 계산하지만 실제 제어는30cm 진입까지 lateral을 유지. `_table_approach_validator`의 실패 목표 보존은station_reference_goal_frozen=True를 요구하는데 최근 live 목표 갱신 변경은terminal 전 이를False로 둠. 이번 실패 로그에는 goal_preserved/lateral_restage각0회. 따라서 목표를 보존해 옆으로 재정렬하는 분기로 연결되지 않고 같은 후진·접근을 반복. 사용자 지시로 구현 수정은 아직 하지 않음. Pi와 로컬 box_service SHA256일치 확인.
+- 정지 상태20회전 라이다·현재map→base_link TF를 저장해 지도와 비교. 지도해상도5cm, 급수대 밖161개 점의 국소 정합 비교는현재 TF 대비x-1cm/y-2cm/yaw-2도. 현재 책상을11cm 옮겨야 한다는 증거로 쓰지 않으며 과거 실패 시각의 위치추정 정확도도 이 결과로 소급 확정하지 않음. 현재 실물 주차 성공 상태를 기준으로 책상 이동 방향은 제시하지 않음.
+- 분석 자산 `/home/lim/jdamr_data/analysis_20261103/table_lidar_comparison/`: `water_station_0926_scan.json`, `map_scan_summary.json`, `map_scan_overlay.png`. 임시 ROS 조회 노드 종료. 저장소 실행 코드·설정 변경, Pi 배포, 서비스 재시작 없음. 현재 도크 정차.
+
 ## 2026-11-02 | 팔 포함 시나리오 재출발 및 완주
 
 - 재출발 요청 시 PC에는 별도 미션 `20261102_220301_d462b55d`·주문261102011의 실패와22:05:54 Windows 긴급정지가 남아 있었음. 기존 로그의 최종 원인은 `table lateral alignment requires more clearance`. 앞선 두 성공과 이번 성공 사이 실패가 존재하므로3회 연속 성공으로 집계하지 않음. 이 별도 회차의 조작 주체·배치 변경은 확인하지 않음.
