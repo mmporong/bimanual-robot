@@ -126,6 +126,9 @@ def filter_station_goal_observations(observations, max_age_s):
     result['goal_filter_xy_spread_m'] = max(
         math.dist(sample['goal_odom'][:2], result['goal_odom'][:2])
         for sample in samples)
+    result['goal_filter_yaw_spread_rad'] = max(
+        abs(_wrapped(sample['goal_odom'][2] - result['goal_odom'][2]))
+        for sample in samples)
     return result
 
 

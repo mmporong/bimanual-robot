@@ -20,9 +20,13 @@ class TableTapeReference:
         self.rays_from_pixels = basis.R_base_from_optical @ np.linalg.inv(self.intrinsics.matrix)
         self.basis = basis
         self.config = dict(config)
+        # Acquisition bounds cover a displaced arrival; final parking accuracy
+        # is enforced by the station controller, not this candidate filter.
+        self.config.setdefault('maximum_lateral_m', .40)
         for key in ('spacing_m', 'width_m', 'goal_front_from_base_m',
-                    'spacing_tolerance_m', 'width_tolerance_m', 'maximum_yaw_rad'):
-            value = config[key]
+                    'spacing_tolerance_m', 'width_tolerance_m', 'maximum_yaw_rad',
+                    'maximum_lateral_m'):
+            value = self.config[key]
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
                 raise ValueError('invalid_tape_' + key)
 
@@ -105,7 +109,9 @@ class TableTapeReference:
     def observe(self, image, *, surface=None, rgb_info=None):
         """Observe tape using either the saved basis or a live table plane."""
         started = time.perf_counter()
-        quality = {'observation_method': 'table_front_tape', 'candidates': []}
+        quality = {'observation_method': 'table_front_tape', 'candidates': [],
+                   'maximum_lateral_m': self.config['maximum_lateral_m'],
+                   'lateral_rejected_candidates': []}
 
         def invalid(reason):
             quality['processing_s'] = time.perf_counter() - started
@@ -199,7 +205,10 @@ class TableTapeReference:
             width = float(np.linalg.norm(ends[1] - ends[0]))
             if abs(width - self.config['width_m']) > self.config['width_tolerance_m']:
                 continue
-            if abs(point[1]) > self.config.get('maximum_lateral_m', .20):
+            if abs(point[1]) > self.config['maximum_lateral_m']:
+                if len(quality['lateral_rejected_candidates']) < 4:
+                    quality['lateral_rejected_candidates'].append({
+                        'pixel': [u, y], 'base_xy_m': point.tolist()})
                 continue
             if any(np.linalg.norm(point-c[2]) < .005 for c in candidates):
                 continue

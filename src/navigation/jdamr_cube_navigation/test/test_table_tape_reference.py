@@ -87,6 +87,38 @@ def _detector():
     return TableTapeReference(old_info, _basis(), _config())
 
 
+@pytest.mark.parametrize('offset_m, valid', [(.30, True), (-.30, True),
+                                            (.05, True), (.47, False)])
+def test_default_tape_acquisition_covers_displaced_arrival(offset_m, valid):
+    config = _config()
+    config.pop('maximum_lateral_m')
+    detector = TableTapeReference(LIVE_INFO, _basis(), config)
+    estimate, quality = detector.observe(
+        _image(), surface=_surface(camera_lever_xy_m=[.4, offset_m]),
+        rgb_info=LIVE_INFO)
+    assert estimate.valid is valid
+    if valid:
+        assert estimate.left_m == pytest.approx(offset_m)
+        assert quality['tape_spacing_m'] == pytest.approx(.12)
+    else:
+        assert quality['lateral_rejected_candidates']
+
+
+def test_explicit_tape_acquisition_limit_still_applies():
+    detector = _detector()
+    estimate, quality = detector.observe(
+        _image(), surface=_surface(camera_lever_xy_m=[.4, .30]),
+        rgb_info=LIVE_INFO)
+    assert not estimate.valid
+    assert len(quality['lateral_rejected_candidates']) == 2
+
+
+@pytest.mark.parametrize('limit', [True, 0., -1., float('nan'), float('inf')])
+def test_invalid_tape_acquisition_limit_is_rejected(limit):
+    with pytest.raises(ValueError, match='invalid_tape_maximum_lateral_m'):
+        TableTapeReference(LIVE_INFO, _basis(), {**_config(), 'maximum_lateral_m': limit})
+
+
 def test_live_plane_and_rgb_intrinsics_override_stale_saved_basis():
     """Live geometry and current RGB K must replace stale calibration."""
     detector = _detector()

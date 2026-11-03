@@ -433,21 +433,20 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return None
         candidates = [item for item in candidates if stamp-item['stamp_s'] <= 2.]
         goal = result['goal_odom']
-        if any(math.dist(goal[:2], item['goal_odom'][:2]) > .01
+        lateral_limit = min(.01, self.station_reference_profile['lateral_tolerance_m'])
+        yaw_limit = min(math.radians(2.), self.parking_contract['yaw_tolerance_rad'])
+        if any(math.dist(goal[:2], item['goal_odom'][:2]) > lateral_limit
                or abs(math.atan2(math.sin(goal[2]-item['goal_odom'][2]),
-                                 math.cos(goal[2]-item['goal_odom'][2]))) > math.radians(2.)
+                                 math.cos(goal[2]-item['goal_odom'][2]))) > yaw_limit
                for item in candidates):
             candidates = []
         candidates.append(dict(result))
         self._station_reference_rebase_samples = candidates[-3:]
         if len(candidates) < 3:
             return None
-        goals = np.asarray([item['goal_odom'] for item in candidates[-3:]])
-        return dict(result, goal_odom=[float(np.median(goals[:,0])),
-                                      float(np.median(goals[:,1])),
-                                      math.atan2(float(np.sin(goals[:,2]).mean()),
-                                                 float(np.cos(goals[:,2]).mean()))],
-                    reason='consistent_near_tape_rebase', goal_filter_sample_count=3)
+        rebased = filter_station_goal_observations(candidates[-3:], max_age_s=2.)
+        rebased['reason'] = 'consistent_near_tape_rebase'
+        return rebased
 
     def _station_reference_loop(self):
         """Process at most the newest RGB frame on one managed worker."""
@@ -2185,6 +2184,66 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return self.execute(final_parking=False, alignment=True, face=True)
         return False
 
+    def _execute_table_observation_transit(self):
+        """Complete the tape observation heading before handing off to depth."""
+        original = self.through_behavior_tree
+        tape = (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape')
+        if (getattr(self, 'surface_mode', None) == 'table_edge' and tape
+                and Path(original).name == 'navigate_through_poses_transit_rpp.xml'):
+            self.through_behavior_tree = str(Path(original).with_name(
+                'navigate_through_poses_table_observation_rpp.xml'))
+            self.emit('table_observation_transit_selected',
+                      goal_checker_id='alignment_goal_checker',
+                      waypoints=self.waypoints, final_parking_confirmed=False)
+        try:
+            return self.execute(final_parking=False)
+        finally:
+            self.through_behavior_tree = original
+
+    def _prepare_table_tape_entry(self, target):
+        """Give the existing coarse alignment a coherent, current tape target.
+
+        A missing pair never becomes a map-derived tape observation. If the
+        pair is not acquired here, the existing guarded acquisition still owns
+        the close approach. Small offsets retain the normal close-entry path.
+        """
+        if (getattr(getattr(self, 'station_reference', None),
+                    'observation_method', None) != 'table_front_tape'):
+            return target
+        deadline = time.monotonic() + 3 * STATION_REFERENCE_MAX_AGE_S
+        if getattr(self, 'run_deadline_s', None) is not None:
+            deadline = min(deadline, self.run_deadline_s)
+        while not self.stop_requested and self._operator_link_ready():
+            goal, reference = self._station_goal_reference(continuous_rebase=True)
+            now_s = self.get_clock().now().nanoseconds * 1e-9
+            if (goal is not None and reference and reference.get('valid') is True
+                    and 0. <= now_s - goal.get('stamp_s', -math.inf)
+                    <= STATION_REFERENCE_MAX_AGE_S
+                    and goal.get('goal_filter_sample_count', 0) >= 3
+                    and goal.get('goal_filter_xy_spread_m', math.inf)
+                    <= self.station_reference_profile['lateral_tolerance_m']
+                    and goal.get('goal_filter_yaw_spread_rad', math.inf)
+                    <= self.parking_contract['yaw_tolerance_rad']
+                    and not getattr(self, '_station_reference_goal_challenged', False)
+                    and not getattr(self, '_station_reference_goal_correction_pending', False)):
+                anchored = self._station_anchor_target(target, read_only_reference=True)
+                self.emit('table_tape_entry_reference_acquired',
+                          goal_odom=list(goal['goal_odom']),
+                          sample_count=goal['goal_filter_sample_count'],
+                          xy_spread_m=goal['goal_filter_xy_spread_m'],
+                          yaw_spread_rad=goal['goal_filter_yaw_spread_rad'],
+                          final_parking_confirmed=False)
+                return anchored
+            if time.monotonic() >= deadline:
+                self.emit('table_tape_entry_reference_pending',
+                          reason=(reference.get('reason') if reference else
+                                  'station_reference_not_observed'),
+                          final_parking_confirmed=False)
+                return target
+            spin_node(self, timeout_sec=.05)
+        raise RuntimeError('operator_stop' if self.stop_requested else 'operator_link_lost')
+
     def _advance_to_table_view(self, *, require_motion=False):
         """Close a transit waypoint's tolerance before waiting for a table face."""
         mount, region, _radius = self._table_observation_context
@@ -2217,6 +2276,17 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                     return True
             except (ValueError, KeyError, TypeError):
                 pass
+        tape = (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape')
+        residual_rad = math.atan2(math.sin(heading_rad - actual[2]),
+                                  math.cos(heading_rad - actual[2]))
+        if (tape and math.radians(MAXIMUM_CONTRACT_VALUES['yaw_tolerance_deg'])
+                < abs(residual_rad) <= FINAL_TRIM_MAX_RAD):
+            self.emit('table_view_heading_alignment', delta_yaw_rad=residual_rad,
+                      final_parking_confirmed=False)
+            if not self.search_rotation(residual_rad):
+                return False
+            actual, _ = self.capture_stationary_pose(intermediate=True)
         forward = (math.cos(heading_rad), math.sin(heading_rad))
         clearance_m = sum((region[i] - actual[i]) * forward[i] for i in (0, 1))
         remaining_m = clearance_m - offset_m
@@ -2268,9 +2338,11 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         while True:
             attempt_input = self._observation_input_snapshot()
             try:
-                return self.observe_target(
+                target = self.observe_target(
                     camera_mount, front_extent_m, gap_m,
                     region_xy, region_radius_m)
+                return (self._prepare_table_tape_entry(target)
+                        if phase == 'face_alignment' else target)
             except (BoxObservationUnavailable, RuntimeError) as error:
                 temporary_input = self._temporary_observation_input_gap(error)
                 if not isinstance(error, BoxObservationUnavailable):
@@ -2631,7 +2703,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if resume_at_observation:
             self.emit('resume_at_reached_observation', actual_pose=list(actual),
                       transit_skipped=True, final_parking_confirmed=False)
-        elif not self.execute(final_parking=False):
+        elif not self._execute_table_observation_transit():
             self.emit('failed', phase='table_region_transit')
             return False
         if not self._set_observer_perception(True):
@@ -3814,6 +3886,8 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                 if (goal is None or goal.get('goal_filter_sample_count', 0) < 3
                         or goal.get('goal_filter_xy_spread_m', math.inf)
                         > self.station_reference_profile['lateral_tolerance_m']
+                        or goal.get('goal_filter_yaw_spread_rad', math.inf)
+                        > self.parking_contract['yaw_tolerance_rad']
                         or not (reference and reference.get('valid') is True)):
                     raise RuntimeError('table approach tape reference pending')
                 with self._station_reference_lock:
@@ -3825,6 +3899,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
                           goal_odom=list(goal['goal_odom']), gap_m=gap,
                           sample_count=goal['goal_filter_sample_count'],
                           xy_spread_m=goal['goal_filter_xy_spread_m'],
+                          yaw_spread_rad=goal['goal_filter_yaw_spread_rad'],
                           terminal_goal=False)
             if (actual is not None
                     and getattr(self, '_table_rebase_requires_restage', False)):

@@ -4070,6 +4070,101 @@ def test_visible_selected_table_does_not_add_a_map_only_approach(monkeypatch, ca
     assert check.called is (case != 'visible')
 
 
+@pytest.mark.parametrize('case', ['ready', 'single', 'missing', 'stale', 'spread',
+                                  'yaw_spread', 'stop'])
+def test_tape_entry_uses_only_coherent_fresh_pair_before_approach(case):
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_profile = {'lateral_tolerance_m': .01}
+    node.parking_contract = {'yaw_tolerance_rad': math.radians(3.)}
+    node.stop_requested = case == 'stop'
+    node.run_deadline_s = 0.
+    node._operator_link_ready = Mock(return_value=True)
+    node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(nanoseconds=10**10))
+    goal = {'valid': True, 'goal_odom': [1., .30, 0.], 'stamp_s': 9.9,
+            'goal_filter_sample_count': 3, 'goal_filter_xy_spread_m': .002,
+            'goal_filter_yaw_spread_rad': .005}
+    if case == 'single':
+        goal['goal_filter_sample_count'] = 1
+    elif case == 'stale':
+        goal['stamp_s'] = 8.
+    elif case == 'spread':
+        goal['goal_filter_xy_spread_m'] = .08
+    elif case == 'yaw_spread':
+        goal['goal_filter_yaw_spread_rad'] = .10
+    node._station_goal_reference = Mock(return_value=(goal, {'valid': case != 'missing'}))
+    anchored = {'tape_anchor': True}
+    node._station_anchor_target = Mock(return_value=anchored)
+    node.emit = Mock()
+    target = {'map_anchor': True}
+    if case == 'stop':
+        with pytest.raises(RuntimeError, match='operator_stop'):
+            node._prepare_table_tape_entry(target)
+    else:
+        assert node._prepare_table_tape_entry(target) is (anchored if case == 'ready' else target)
+        node._station_goal_reference.assert_called_with(continuous_rebase=True)
+    assert node._station_anchor_target.called is (case == 'ready')
+
+
+@pytest.mark.parametrize('offset_m, restage', [(.005, False), (.30, True), (-.30, True)])
+def test_wide_tape_entry_selects_restage_before_close_approach(offset_m, restage):
+    node = object.__new__(BoxServiceRoute)
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_mode = 'rgbd'
+    node.station_reference_profile = {'lateral_tolerance_m': .01}
+    node.station_reference_goal = {'goal_filter_sample_count': 3}
+    node._station_reference_enabled = Mock(return_value=True)
+    node._final_gap_m = Mock(return_value=.01)
+    node.box_front_half_width_m = .225
+    target = {'observation_robot_pose_map': [.435, -offset_m, 0.],
+              'face_center_map_xy_m': [1., 0.], 'outward_normal_map_xy': [-1., 0.],
+              'x_m': .485, 'y_m': 0., 'yaw_rad': 0., 'rgbd_reference_valid': True}
+    reason, lateral = node._table_lateral_restage_reason(target, .065)
+    assert (reason is not None) is restage
+    assert lateral == pytest.approx(offset_m)
+
+
+@pytest.mark.parametrize('tape, raises', [(True, False), (False, False), (True, True)])
+def test_tape_observation_checker_is_scoped_and_restored(tape, raises):
+    node = object.__new__(BoxServiceRoute)
+    node.surface_mode = 'table_edge'
+    node.station_reference = SimpleNamespace(
+        observation_method='table_front_tape' if tape else 'surface_only')
+    original = '/test/behavior_trees/navigate_through_poses_transit_rpp.xml'
+    node.through_behavior_tree = original
+    node.waypoints = []
+    node.emit = Mock()
+    selected = []
+    def execute(**_kwargs):
+        selected.append(Path(node.through_behavior_tree).name)
+        if raises:
+            raise RuntimeError('navigation interrupted')
+        return True
+    node.execute = execute
+    if raises:
+        with pytest.raises(RuntimeError, match='navigation interrupted'):
+            node._execute_table_observation_transit()
+    else:
+        assert node._execute_table_observation_transit()
+    assert selected == [('navigate_through_poses_table_observation_rpp.xml' if tape
+                         else 'navigate_through_poses_transit_rpp.xml')]
+    assert node.through_behavior_tree == original
+
+
+def test_tape_view_corrects_heading_before_advancing(monkeypatch):
+    node, _ = _table_view_node(monkeypatch, (1., -1.817, .2))
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.capture_stationary_pose.side_effect = [((1., -1.817, .2), {}),
+                                                ((1., -1.817, 0.), {})]
+    calls = []
+    node.search_rotation = Mock(side_effect=lambda yaw: calls.append(('turn', yaw)) or True)
+    node._drive_zero_turn.side_effect = lambda distance, **_k: calls.append(('drive', distance)) or distance
+    assert node._advance_to_table_view()
+    assert calls[0][0] == 'turn'
+    assert calls[0][1] == pytest.approx(-.2)
+    assert calls[1][0] == 'drive'
+
+
 def test_moving_table_healthy_occlusion_keeps_same_odom_face(monkeypatch):
     node, clock, update, lookup = _moving_table_route(monkeypatch)
     valid = deepcopy(node.box_status)

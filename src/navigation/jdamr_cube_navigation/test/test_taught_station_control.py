@@ -38,12 +38,13 @@ def _node():
             }],
         }],
     }
-    node.parking_contract = {'robot_base_frame': 'base_link'}
+    node.parking_contract = {'robot_base_frame': 'base_link',
+                             'yaw_tolerance_rad': math.radians(3.)}
     node.box_geometry = {'front_to_wheel_axis': {'value': .065}}
     node.station_reference = None
     # Isolate worker state-machine cases from the separately tested depth join.
     node._station_tape_surface = Mock(return_value={})
-    node.station_reference_profile = None
+    node.station_reference_profile = {'lateral_tolerance_m': .01}
     node.station_reference_rgb_info = None
     node.station_reference_result = None
     node.station_reference_result_received_s = None
@@ -1051,6 +1052,53 @@ def test_tape_rebase_accepts_recorded_center_inside_measured_front_extent():
 
     assert rebased['goal_filter_sample_count'] == 3
     assert rebased['goal_odom'] == pytest.approx([.4, .0395, 0.])
+    assert rebased['goal_filter_xy_spread_m'] == pytest.approx(.0001)
+    assert rebased['goal_filter_yaw_spread_rad'] == 0.
+
+
+def test_tape_rebase_remains_coherent_when_consumed_by_entry():
+    node = _node()
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_mode = 'rgbd'
+    rebased = None
+    for stamp, y in ((10., .0394), (10.2, .0396), (10.4, .0395)):
+        rebased = node._consider_tape_rebase(dict(
+            valid=True, stamp_s=stamp, goal_odom=[.4, y, 0.],
+            image_age_at_completion_s=.1,
+            quality={'tape_center_base_xy_m': [.35, .04]}))
+    node._station_reference_rebase_goal = rebased
+    node._station_reference_goal_correction_pending = True
+    node._fresh_station_reference = Mock(return_value=rebased)
+    node._odom_pose = Mock(return_value=(0., 0., 0.))
+    node.get_clock.return_value = _clock(10.5)
+    node._operator_link_ready = Mock(return_value=True)
+    anchored = {'tape_anchor': True}
+    node._station_anchor_target = Mock(return_value=anchored)
+
+    assert node._prepare_table_tape_entry({'map_anchor': True}) is anchored
+    assert node.station_reference_goal_frozen
+    assert node.station_reference_goal['goal_filter_xy_spread_m'] == pytest.approx(.0001)
+    assert node.station_reference_goal['goal_filter_yaw_spread_rad'] == 0.
+
+
+@pytest.mark.parametrize('dimension', ['lateral', 'yaw'])
+def test_tape_rebase_respects_station_coherence_limits(dimension):
+    node = _node()
+    node.station_reference = SimpleNamespace(observation_method='table_front_tape')
+    node.station_reference_profile['lateral_tolerance_m'] = .005
+    node.parking_contract['yaw_tolerance_rad'] = math.radians(1.)
+    for stamp in (10., 10.2):
+        assert node._consider_tape_rebase(dict(
+            valid=True, stamp_s=stamp, goal_odom=[.4, 0., 0.],
+            image_age_at_completion_s=.1,
+            quality={'tape_center_base_xy_m': [.35, 0.]})) is None
+    third = dict(valid=True, stamp_s=10.4,
+                 goal_odom=[.4, .007 if dimension == 'lateral' else 0.,
+                            math.radians(1.5) if dimension == 'yaw' else 0.],
+                 image_age_at_completion_s=.1,
+                 quality={'tape_center_base_xy_m': [.35, 0.]})
+    assert node._consider_tape_rebase(third) is None
+    assert len(node._station_reference_rebase_samples) == 1
 
 
 @pytest.mark.parametrize('geometry', [None, {},
