@@ -2168,6 +2168,26 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
             return self.execute(final_parking=False, alignment=True, face=True)
         return False
 
+    def _execute_table_observation_transit(self):
+        """Finish the taught tape observation pose before plane-relative control."""
+        original = self.through_behavior_tree
+        tape = (getattr(getattr(self, 'station_reference', None),
+                        'observation_method', None) == 'table_front_tape')
+        use_observation_checker = (
+            getattr(self, 'surface_mode', None) == 'table_edge' and tape
+            and Path(original).name == 'navigate_through_poses_transit_rpp.xml')
+        if use_observation_checker:
+            self.through_behavior_tree = str(Path(original).with_name(
+                'navigate_through_poses_table_observation_rpp.xml'))
+            self.emit('table_observation_transit_selected',
+                      goal_checker_id='alignment_goal_checker',
+                      waypoints=self.waypoints,
+                      final_parking_confirmed=False)
+        try:
+            return self.execute(final_parking=False)
+        finally:
+            self.through_behavior_tree = original
+
     def _advance_to_table_view(self, *, require_motion=False):
         """Close a transit waypoint's tolerance before waiting for a table face."""
         mount, region, _radius = self._table_observation_context
@@ -2614,7 +2634,7 @@ class BoxServiceRoute(RearBoxParkingMixin, ServiceRoute):
         if resume_at_observation:
             self.emit('resume_at_reached_observation', actual_pose=list(actual),
                       transit_skipped=True, final_parking_confirmed=False)
-        elif not self.execute(final_parking=False):
+        elif not self._execute_table_observation_transit():
             self.emit('failed', phase='table_region_transit')
             return False
         if not self._set_observer_perception(True):
